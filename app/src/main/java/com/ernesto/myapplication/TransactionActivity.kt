@@ -1,11 +1,13 @@
 package com.ernesto.myapplication
 
 import android.os.Bundle
-import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.ernesto.myapplication.data.Transaction
 import com.ernesto.myapplication.data.TransactionStore
-import java.text.SimpleDateFormat
-import java.util.*
 
 class TransactionActivity : AppCompatActivity() {
 
@@ -13,29 +15,37 @@ class TransactionActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_transaction)
 
-        val txtTransactions = findViewById<TextView>(R.id.txtTransactions)
+        val recyclerView = findViewById<RecyclerView>(R.id.recyclerTransactions)
 
         val transactions = TransactionStore.getTransactions()
 
-        if (transactions.isEmpty()) {
-            txtTransactions.text = "No transactions yet"
-            return
+        recyclerView.layoutManager = LinearLayoutManager(this)
+
+        recyclerView.adapter = TransactionAdapter(transactions) { transaction ->
+            showTransactionOptions(transaction)
         }
+    }
 
-        val builder = StringBuilder()
+    private fun showTransactionOptions(transaction: Transaction) {
 
-        for (t in transactions) {
-            val amount = t.amountInCents / 100.0
-            val date = SimpleDateFormat("MM/dd/yyyy HH:mm", Locale.getDefault())
-                .format(Date(t.date))
+        AlertDialog.Builder(this)
+            .setTitle("Transaction Options")
+            .setMessage("Choose an action for this transaction")
+            .setPositiveButton("Refund") { _, _ ->
+                processRefund(transaction)
+            }
+            .setNegativeButton("Void") { _, _ ->
+                processVoid(transaction)
+            }
+            .setNeutralButton("Cancel", null)
+            .show()
+    }
 
-            builder.append("Type: ${t.paymentType}\n")
-            builder.append("Amount: $%.2f\n".format(amount))
-            builder.append("Date: $date\n")
-            builder.append("Ref: ${t.referenceId}\n")
-            builder.append("---------------------\n")
-        }
+    private fun processVoid(transaction: Transaction) {
+        Toast.makeText(this, "Transaction Voided", Toast.LENGTH_SHORT).show()
+    }
 
-        txtTransactions.text = builder.toString()
+    private fun processRefund(transaction: Transaction) {
+        Toast.makeText(this, "Refund Processed", Toast.LENGTH_SHORT).show()
     }
 }
