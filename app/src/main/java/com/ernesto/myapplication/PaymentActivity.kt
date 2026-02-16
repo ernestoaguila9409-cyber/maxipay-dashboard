@@ -11,9 +11,11 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
-import com.ernesto.myapplication.data.TransactionStore
+import java.util.Date
 import android.content.Intent
 import com.ernesto.myapplication.data.Transaction
+import com.ernesto.myapplication.data.TransactionStore
+import com.google.firebase.firestore.FirebaseFirestore
 
 class PaymentActivity : AppCompatActivity() {
 
@@ -22,6 +24,7 @@ class PaymentActivity : AppCompatActivity() {
     private lateinit var radioDebit: RadioButton
 
     private var amountInCents: Long = 0
+    private val db = FirebaseFirestore.getInstance()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,7 +94,6 @@ class PaymentActivity : AppCompatActivity() {
 
     private fun sendSpinTransaction(amount: String, paymentType: String) {
 
-        // 🔥 Generate ONE reference ID
         val referenceId = java.util.UUID.randomUUID()
             .toString()
             .replace("-", "")
@@ -158,7 +160,15 @@ class PaymentActivity : AppCompatActivity() {
                             paymentType = paymentType
                         )
 
+                        // 🔹 Save locally
                         TransactionStore.addTransaction(transaction)
+
+                        // 🔥 Save to Firestore (CLOUD)
+                        saveTransactionToFirebase(
+                            referenceId,
+                            amountInCents,
+                            paymentType
+                        )
 
                     } else {
 
@@ -167,8 +177,40 @@ class PaymentActivity : AppCompatActivity() {
                             "DECLINED\n$responseText",
                             Toast.LENGTH_LONG
                         ).show()
-                    }}
+                    }
+                }
             }
         })
+    }
+
+    private fun saveTransactionToFirebase(
+        referenceId: String,
+        amountInCents: Long,
+        paymentType: String
+    ) {
+
+        val transactionMap = hashMapOf(
+            "referenceId" to referenceId,
+            "amount" to amountInCents / 100.0,
+            "paymentType" to paymentType,
+            "timestamp" to Date()
+        )
+
+        db.collection("Transactions")
+            .add(transactionMap)
+            .addOnSuccessListener {
+                Toast.makeText(
+                    this,
+                    "Saved to Cloud",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .addOnFailureListener {
+                Toast.makeText(
+                    this,
+                    "Cloud Save Failed",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
     }
 }
