@@ -91,11 +91,17 @@ class PaymentActivity : AppCompatActivity() {
 
     private fun sendSpinTransaction(amount: String, paymentType: String) {
 
+        // 🔥 Generate ONE reference ID
+        val referenceId = java.util.UUID.randomUUID()
+            .toString()
+            .replace("-", "")
+            .take(12)
+
         val json = """
 {
   "Amount": "$amount",
   "PaymentType": "$paymentType",
-  "ReferenceId": "${System.currentTimeMillis()}",
+  "ReferenceId": "$referenceId",
   "PrintReceipt": "No",
   "GetReceipt": "No",
   "Tpn": "11881706541A",
@@ -133,27 +139,35 @@ class PaymentActivity : AppCompatActivity() {
 
             override fun onResponse(call: Call, response: Response) {
 
-                val responseText = response.body?.string() ?: "No body"
-
-                if (response.isSuccessful) {
-
-                    val transaction = Transaction(
-                        referenceId = System.currentTimeMillis().toString(),
-                        amountInCents = amountInCents,
-                        date = System.currentTimeMillis(),
-                        paymentType = if (radioDebit.isChecked) "Debit" else "Credit"
-                    )
-
-                    TransactionStore.addTransaction(transaction)
-                }
+                val responseText = response.body?.string() ?: ""
 
                 runOnUiThread {
-                    Toast.makeText(
-                        this@PaymentActivity,
-                        "HTTP: ${response.code}\n$responseText",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
+
+                    if (response.isSuccessful && responseText.contains("Approved")) {
+
+                        Toast.makeText(
+                            this@PaymentActivity,
+                            "APPROVED\nReference: $referenceId",
+                            Toast.LENGTH_LONG
+                        ).show()
+
+                        val transaction = Transaction(
+                            referenceId = referenceId,
+                            amountInCents = amountInCents,
+                            date = System.currentTimeMillis(),
+                            paymentType = paymentType
+                        )
+
+                        TransactionStore.addTransaction(transaction)
+
+                    } else {
+
+                        Toast.makeText(
+                            this@PaymentActivity,
+                            "DECLINED\n$responseText",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }}
             }
         })
     }
