@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#F5F5F5"
+    android:padding="16dp">
+
+    <!-- TITLE -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Batch Management"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginBottom="16dp"/>
+
+    <!-- OPEN BATCH SECTION -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Open Batch"
+        android:textStyle="bold"
+        android:textSize="16sp"
+        android:layout_marginTop="8dp"/>
+
+    <TextView
+        android:id="@+id/txtOpenBatch"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Open Transactions: 0"
+        android:layout_marginBottom="8dp"/>
+
+    <!-- 🔥 CLOSE BATCH BUTTON -->
+    <Button
+        android:id="@+id/btnCloseBatch"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="CLOSE OPEN BATCH"
+        android:layout_marginBottom="16dp"
+        android:backgroundTint="#6A4FB3"
+        android:textColor="@android:color/white"/>
+
+    <!-- CLOSED BATCHES TITLE -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Closed Batches"
+        android:textStyle="bold"
+        android:textSize="16sp"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"/>
+
+    <!-- RECYCLER VIEW -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerBatches"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+
+</LinearLayout>

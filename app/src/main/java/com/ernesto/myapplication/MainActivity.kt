@@ -29,16 +29,19 @@ class MainActivity : AppCompatActivity() {
         txtTodayTotal = findViewById(R.id.txtTodayTotal)
         txtTodayCount = findViewById(R.id.txtTodayCount)
 
+        // TAKE PAYMENT
         findViewById<Button>(R.id.btnTakePayment).setOnClickListener {
             startActivity(Intent(this, PaymentActivity::class.java))
         }
 
+        // TRANSACTIONS
         findViewById<Button>(R.id.btnTransactions).setOnClickListener {
             startActivity(Intent(this, TransactionActivity::class.java))
         }
 
+        // OPEN BATCH MANAGEMENT SCREEN
         findViewById<Button>(R.id.btnSettle).setOnClickListener {
-            confirmSettle()
+            startActivity(Intent(this, BatchManagementActivity::class.java))
         }
 
         loadTodayStats()
@@ -49,7 +52,9 @@ class MainActivity : AppCompatActivity() {
         loadTodayStats()
     }
 
-    // ✅ DASHBOARD TOTALS
+    // ===============================
+    // DASHBOARD TOTALS
+    // ===============================
     private fun loadTodayStats() {
 
         val calendar = Calendar.getInstance()
@@ -85,7 +90,9 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-    // ✅ CONFIRM SETTLE
+    // ===============================
+    // CONFIRM SETTLE
+    // ===============================
     private fun confirmSettle() {
         AlertDialog.Builder(this)
             .setTitle("Settle Batch")
@@ -97,7 +104,9 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    // ✅ SETTLE BATCH
+    // ===============================
+    // CALL SPIN SETTLE API
+    // ===============================
     private fun settleBatch() {
 
         val json = """
@@ -149,36 +158,8 @@ class MainActivity : AppCompatActivity() {
 
                         if (resultCode == "0") {
 
-                            // 🔥 Get start of today
-                            val calendar = Calendar.getInstance()
-                            calendar.set(Calendar.HOUR_OF_DAY, 0)
-                            calendar.set(Calendar.MINUTE, 0)
-                            calendar.set(Calendar.SECOND, 0)
-                            calendar.set(Calendar.MILLISECOND, 0)
-
-                            val startOfDay = calendar.time
-
-                            // 🔥 Mark ALL today's transactions as settled
-                            db.collection("Transactions")
-                                .whereGreaterThanOrEqualTo("timestamp", startOfDay)
-                                .get()
-                                .addOnSuccessListener { documents ->
-
-                                    for (doc in documents) {
-                                        db.collection("Transactions")
-                                            .document(doc.id)
-                                            .update("settled", true)
-                                    }
-
-                                    // Refresh totals AFTER update
-                                    loadTodayStats()
-                                }
-
-                            Toast.makeText(
-                                this@MainActivity,
-                                "Batch Settled Successfully",
-                                Toast.LENGTH_LONG
-                            ).show()
+                            // Create batch record in Firestore
+                            createBatchRecord()
 
                         } else {
 
@@ -201,5 +182,66 @@ class MainActivity : AppCompatActivity() {
             }
         })
     }
-}
 
+    // ===============================
+    // CREATE BATCH RECORD + MARK TRANSACTIONS
+    // ===============================
+    private fun createBatchRecord() {
+
+        db.collection("Transactions")
+            .whereEqualTo("voided", false)
+            .whereEqualTo("settled", false)
+            .get()
+            .addOnSuccessListener { documents ->
+
+                var total = 0.0
+                var count = 0
+
+                for (doc in documents) {
+                    total += doc.getDouble("amount") ?: 0.0
+                    count++
+                }
+
+                if (count == 0) {
+                    Toast.makeText(this, "No open transactions", Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+
+                val batchId = "BATCH_${System.currentTimeMillis()}"
+
+                val batchData = hashMapOf(
+                    "batchId" to batchId,
+                    "total" to total,
+                    "count" to count,
+                    "closedAt" to Date()
+                )
+
+                // Save batch
+                db.collection("Batches")
+                    .document(batchId)
+                    .set(batchData)
+                    .addOnSuccessListener {
+
+                        // Mark transactions as settled
+                        for (doc in documents) {
+                            db.collection("Transactions")
+                                .document(doc.id)
+                                .update(
+                                    mapOf(
+                                        "settled" to true,
+                                        "batchId" to batchId
+                                    )
+                                )
+                        }
+
+                        Toast.makeText(
+                            this,
+                            "Batch Closed Successfully",
+                            Toast.LENGTH_LONG
+                        ).show()
+
+                        loadTodayStats()
+                    }
+            }
+    }
+}

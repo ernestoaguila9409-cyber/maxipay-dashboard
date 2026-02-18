@@ -12,10 +12,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.Date
-import android.content.Intent
 import android.util.Log
 import org.json.JSONObject
 import com.google.firebase.firestore.FirebaseFirestore
+import java.util.UUID
 
 class PaymentActivity : AppCompatActivity() {
 
@@ -33,7 +33,6 @@ class PaymentActivity : AppCompatActivity() {
         txtAmount = findViewById(R.id.txtAmount)
         radioCredit = findViewById(R.id.radioCredit)
         radioDebit = findViewById(R.id.radioDebit)
-
 
         val numberButtons = listOf(
             R.id.btn1, R.id.btn2, R.id.btn3,
@@ -83,7 +82,7 @@ class PaymentActivity : AppCompatActivity() {
 
     private fun sendSpinTransaction(amount: String, paymentType: String) {
 
-        val referenceId = java.util.UUID.randomUUID()
+        val referenceId = UUID.randomUUID()
             .toString()
             .replace("-", "")
             .take(12)
@@ -146,8 +145,8 @@ class PaymentActivity : AppCompatActivity() {
                         try {
                             val jsonObject = JSONObject(responseText)
 
-                            // ✅ Payment Type from terminal
-                            paymentTypeFromResponse = jsonObject.optString("PaymentType")
+                            paymentTypeFromResponse =
+                                jsonObject.optString("PaymentType")
 
                             val cardData = jsonObject.optJSONObject("CardData")
 
@@ -175,6 +174,10 @@ class PaymentActivity : AppCompatActivity() {
                             last4,
                             entryType
                         )
+
+                        // Reset amount after success
+                        amountInCents = 0
+                        updateDisplay()
 
                     } else {
 
@@ -205,6 +208,8 @@ class PaymentActivity : AppCompatActivity() {
             "cardBrand" to cardBrand,
             "last4" to last4,
             "entryType" to entryType,
+            "voided" to false,     // ✅ required
+            "settled" to false,    // ✅ REQUIRED FOR BATCH SYSTEM
             "timestamp" to Date()
         )
 
