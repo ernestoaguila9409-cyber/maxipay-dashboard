@@ -98,9 +98,10 @@ class TransactionActivity : AppCompatActivity() {
         """.trimIndent()
 
         sendApiRequest(
-            "https://spinpos.net/v2/Payment/Void",
-            json,
-            "VOID"
+            url = "https://spinpos.net/v2/Payment/Void",
+            json = json,
+            type = "VOID",
+            referenceId = transaction.referenceId
         )
     }
 
@@ -145,13 +146,19 @@ class TransactionActivity : AppCompatActivity() {
         """.trimIndent()
 
         sendApiRequest(
-            "https://spinpos.net/v2/Payment/Return",
-            json,
-            "REFUND"
+            url = "https://spinpos.net/v2/Payment/Return",
+            json = json,
+            type = "REFUND"
         )
     }
 
-    private fun sendApiRequest(url: String, json: String, type: String) {
+    // 🔥 UPDATED FUNCTION
+    private fun sendApiRequest(
+        url: String,
+        json: String,
+        type: String,
+        referenceId: String? = null
+    ) {
 
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -185,13 +192,26 @@ class TransactionActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (response.isSuccessful && responseText.contains("Approved")) {
 
+                        // 🔥 If VOID approved → update Firestore
+                        if (type == "VOID" && referenceId != null) {
+
+                            db.collection("Transactions")
+                                .whereEqualTo("referenceId", referenceId)
+                                .get()
+                                .addOnSuccessListener { documents ->
+                                    for (document in documents) {
+                                        db.collection("Transactions")
+                                            .document(document.id)
+                                            .update("voided", true)
+                                    }
+                                }
+                        }
+
                         Toast.makeText(
                             this@TransactionActivity,
                             "$type APPROVED",
                             Toast.LENGTH_LONG
                         ).show()
-
-                        // 🔥 OPTIONAL: update Firestore voided field here if you want real-time red update
 
                     } else {
 

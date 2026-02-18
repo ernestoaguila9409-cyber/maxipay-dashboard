@@ -3,8 +3,8 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:gravity="center"
+    android:orientation="vertical"
     android:background="#F5F5F5"
     android:padding="24dp">
 
@@ -27,6 +27,13 @@
         android:id="@+id/btnTransactions"
         android:layout_width="220dp"
         android:layout_height="wrap_content"
-        android:text="TRANSACTIONS"/>
+        android:text="TRANSACTIONS"
+        android:layout_marginBottom="16dp"/>
+
+    <Button
+        android:id="@+id/btnSettle"
+        android:layout_width="220dp"
+        android:layout_height="wrap_content"
+        android:text="SETTLE BATCH"/>
 
 </LinearLayout>
