@@ -5,21 +5,28 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:gravity="center"
-    android:background="#F5F5F5">
+    android:background="#F5F5F5"
+    android:padding="24dp">
 
     <TextView
-        android:id="@+id/titleText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="Restaurant POS"
-        android:textSize="26sp"
+        android:textSize="24sp"
         android:textStyle="bold"
         android:layout_marginBottom="40dp"/>
 
     <Button
-        android:id="@+id/btnPayment"
-        android:layout_width="wrap_content"
+        android:id="@+id/btnTakePayment"
+        android:layout_width="220dp"
         android:layout_height="wrap_content"
-        android:text="TAKE PAYMENT" />
+        android:text="TAKE PAYMENT"
+        android:layout_marginBottom="16dp"/>
+
+    <Button
+        android:id="@+id/btnTransactions"
+        android:layout_width="220dp"
+        android:layout_height="wrap_content"
+        android:text="TRANSACTIONS"/>
 
 </LinearLayout>

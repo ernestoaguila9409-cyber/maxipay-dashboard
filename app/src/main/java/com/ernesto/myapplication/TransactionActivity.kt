@@ -52,12 +52,18 @@ class TransactionActivity : AppCompatActivity() {
                 transactionList.clear()
 
                 snapshots?.forEach { doc ->
+
                     val transaction = Transaction(
                         referenceId = doc.getString("referenceId") ?: "",
                         amountInCents = ((doc.getDouble("amount") ?: 0.0) * 100).toLong(),
                         date = doc.getTimestamp("timestamp")?.toDate()?.time ?: 0L,
-                        paymentType = doc.getString("paymentType") ?: ""
+                        paymentType = doc.getString("paymentType") ?: "",
+                        cardBrand = doc.getString("cardBrand") ?: "",
+                        last4 = doc.getString("last4") ?: "",
+                        entryType = doc.getString("entryType") ?: "",
+                        voided = doc.getBoolean("voided") ?: false
                     )
+
                     transactionList.add(transaction)
                 }
 
@@ -75,6 +81,7 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun processVoid(transaction: Transaction) {
+
         val amount = String.format("%.2f", transaction.amountInCents / 100.0)
 
         val json = """
@@ -90,10 +97,15 @@ class TransactionActivity : AppCompatActivity() {
         }
         """.trimIndent()
 
-        sendApiRequest("https://spinpos.net/v2/Payment/Void", json, "VOID")
+        sendApiRequest(
+            "https://spinpos.net/v2/Payment/Void",
+            json,
+            "VOID"
+        )
     }
 
     private fun processRefund(transaction: Transaction) {
+
         val fullAmount = transaction.amountInCents / 100.0
 
         val input = EditText(this)
@@ -132,7 +144,11 @@ class TransactionActivity : AppCompatActivity() {
         }
         """.trimIndent()
 
-        sendApiRequest("https://spinpos.net/v2/Payment/Return", json, "REFUND")
+        sendApiRequest(
+            "https://spinpos.net/v2/Payment/Return",
+            json,
+            "REFUND"
+        )
     }
 
     private fun sendApiRequest(url: String, json: String, type: String) {
@@ -154,24 +170,36 @@ class TransactionActivity : AppCompatActivity() {
 
             override fun onFailure(call: Call, e: IOException) {
                 runOnUiThread {
-                    Toast.makeText(this@TransactionActivity,
+                    Toast.makeText(
+                        this@TransactionActivity,
                         "$type Failed: ${e.message}",
-                        Toast.LENGTH_LONG).show()
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
 
             override fun onResponse(call: Call, response: Response) {
+
                 val responseText = response.body?.string() ?: ""
 
                 runOnUiThread {
                     if (response.isSuccessful && responseText.contains("Approved")) {
-                        Toast.makeText(this@TransactionActivity,
+
+                        Toast.makeText(
+                            this@TransactionActivity,
                             "$type APPROVED",
-                            Toast.LENGTH_LONG).show()
+                            Toast.LENGTH_LONG
+                        ).show()
+
+                        // 🔥 OPTIONAL: update Firestore voided field here if you want real-time red update
+
                     } else {
-                        Toast.makeText(this@TransactionActivity,
+
+                        Toast.makeText(
+                            this@TransactionActivity,
                             "$type DECLINED\n$responseText",
-                            Toast.LENGTH_LONG).show()
+                            Toast.LENGTH_LONG
+                        ).show()
                     }
                 }
             }

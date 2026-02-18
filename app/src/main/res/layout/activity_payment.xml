@@ -63,13 +63,6 @@
         <Button android:id="@+id/btn0" android:text="0" style="@style/KeyButton"/>
         <Button android:id="@+id/btnOK" android:text="OK" style="@style/KeyButton"/>
 
-        <Button
-            android:id="@+id/btnTransactions"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Transactions"
-            android:layout_marginTop="24dp"/>
-
     </GridLayout>
 
 </LinearLayout>
