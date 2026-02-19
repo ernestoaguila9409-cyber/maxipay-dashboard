@@ -1,5 +1,6 @@
 package com.ernesto.myapplication
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Button
 import android.widget.TextView
@@ -14,6 +15,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
+import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
 
@@ -45,30 +47,20 @@ class BatchManagementActivity : AppCompatActivity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        loadOpenBatch()
-        loadClosedBatches()
-    }
-
-    // ✅ LOAD OPEN TRANSACTIONS
+    // 🔹 LOAD OPEN TRANSACTIONS
     private fun loadOpenBatch() {
-
         db.collection("Transactions")
             .whereEqualTo("settled", false)
             .whereEqualTo("voided", false)
             .get()
             .addOnSuccessListener { documents ->
-
                 openTransactionCount = documents.size()
-
                 txtOpenBatch.text = "Open Transactions: $openTransactionCount"
-
                 btnCloseBatch.isEnabled = openTransactionCount > 0
             }
     }
 
-    // ✅ LOAD CLOSED BATCHES
+    // 🔹 LOAD CLOSED BATCHES
     private fun loadClosedBatches() {
 
         db.collection("Batches")
@@ -76,67 +68,80 @@ class BatchManagementActivity : AppCompatActivity() {
             .get()
             .addOnSuccessListener { documents ->
 
-                val batchList = mutableListOf<BatchItem>()
+                val batchList = mutableListOf<HashMap<String, Any>>()
 
                 for (doc in documents) {
 
                     val batchId = doc.getString("batchId") ?: ""
                     val total = doc.getDouble("total") ?: 0.0
                     val count = doc.getLong("transactionCount") ?: 0
-                    val timestamp = doc.getDate("timestamp")
+                    val date = doc.getDate("timestamp")
 
-                    val formattedDate = if (timestamp != null) {
-                        java.text.SimpleDateFormat(
-                            "MM/dd/yyyy HH:mm",
-                            java.util.Locale.getDefault()
-                        ).format(timestamp)
-                    } else {
-                        ""
-                    }
+                    val formattedDate = SimpleDateFormat(
+                        "MM/dd/yyyy HH:mm",
+                        Locale.getDefault()
+                    ).format(date ?: Date())
 
-                    val summary = "Transactions: $count | Total: $%.2f".format(total)
-
-                    batchList.add(
-                        BatchItem(
-                            batchId = batchId.take(8),
-                            date = formattedDate,
-                            summary = summary
-                        )
+                    val batchMap = hashMapOf<String, Any>(
+                        "batchId" to batchId,
+                        "total" to total,
+                        "transactionCount" to count,
+                        "formattedDate" to formattedDate
                     )
+
+                    batchList.add(batchMap)
                 }
 
-                recyclerBatches.adapter = BatchListAdapter(batchList)
+                recyclerBatches.adapter =
+                    BatchListAdapter(batchList) { selectedBatchId ->
+                        val intent = Intent(
+                            this,
+                            BatchDetailsActivity::class.java
+                        )
+                        intent.putExtra("batchId", selectedBatchId)
+                        startActivity(intent)
+                    }
             }
     }
 
-
-    // ✅ CONFIRM CLOSE
+    // 🔹 CONFIRM CLOSE
     private fun confirmCloseBatch() {
         AlertDialog.Builder(this)
             .setTitle("Close Batch")
             .setMessage("Are you sure you want to close the open batch?")
             .setPositiveButton("YES") { _, _ ->
-                settleBatchOnTerminal()
+                sendSettleRequest()
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    // ✅ REAL TERMINAL SETTLE CALL
-    private fun settleBatchOnTerminal() {
+    // 🔥 SEND SETTLEMENT REQUEST TO Z8
+    private fun sendSettleRequest() {
+
+        val referenceId = UUID.randomUUID()
+            .toString()
+            .replace("-", "")
+            .take(12)
 
         val json = """
-        {
-          "Tpn": "11881706541A",
-          "RegisterId": "134909005",
-          "Authkey": "Qt9N7CxhDs"
-        }
-        """.trimIndent()
+{
+  "ReferenceId": "$referenceId",
+  "GetReceipt": false,
+  "SettlementType": "Close",
+  "Tpn": "11881706541A",
+  "RegisterId": "134909005",
+  "Authkey": "Qt9N7CxhDs",
+  "SPInProxyTimeout": null,
+  "CustomFields": {}
+}
+""".trimIndent()
 
         val client = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(60, TimeUnit.SECONDS)
             .readTimeout(180, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
             .build()
 
         val body = json.toRequestBody("application/json".toMediaType())
@@ -153,7 +158,7 @@ class BatchManagementActivity : AppCompatActivity() {
                 runOnUiThread {
                     Toast.makeText(
                         this@BatchManagementActivity,
-                        "Settle Failed: ${e.message}",
+                        "Settlement Failed: ${e.message}",
                         Toast.LENGTH_LONG
                     ).show()
                 }
@@ -174,14 +179,19 @@ class BatchManagementActivity : AppCompatActivity() {
 
                         if (resultCode == "0") {
 
-                            // Only update Firestore if terminal approved
-                            markTransactionsAsSettled()
+                            Toast.makeText(
+                                this@BatchManagementActivity,
+                                "Z8 Batch Closed Successfully",
+                                Toast.LENGTH_LONG
+                            ).show()
+
+                            closeBatchInFirebase()
 
                         } else {
 
                             Toast.makeText(
                                 this@BatchManagementActivity,
-                                "Terminal Rejected Close\n$responseText",
+                                "Settlement Failed\n$responseText",
                                 Toast.LENGTH_LONG
                             ).show()
                         }
@@ -190,7 +200,7 @@ class BatchManagementActivity : AppCompatActivity() {
 
                         Toast.makeText(
                             this@BatchManagementActivity,
-                            "Settle Error\n$responseText",
+                            "Settlement Parse Error\n$responseText",
                             Toast.LENGTH_LONG
                         ).show()
                     }
@@ -199,8 +209,8 @@ class BatchManagementActivity : AppCompatActivity() {
         })
     }
 
-    // ✅ UPDATE FIRESTORE AFTER TERMINAL SUCCESS
-    private fun markTransactionsAsSettled() {
+    // 🔹 CLOSE BATCH IN FIREBASE AFTER Z8 CONFIRMS
+    private fun closeBatchInFirebase() {
 
         db.collection("Transactions")
             .whereEqualTo("settled", false)
@@ -214,9 +224,10 @@ class BatchManagementActivity : AppCompatActivity() {
                 }
 
                 var total = 0.0
-                val batchId = UUID.randomUUID().toString()
+                val batchId = UUID.randomUUID().toString().take(8)
 
                 for (doc in documents) {
+
                     total += doc.getDouble("amount") ?: 0.0
 
                     db.collection("Transactions")
@@ -242,7 +253,7 @@ class BatchManagementActivity : AppCompatActivity() {
 
                         Toast.makeText(
                             this,
-                            "Batch Closed Successfully",
+                            "Batch Saved to Cloud",
                             Toast.LENGTH_LONG
                         ).show()
 

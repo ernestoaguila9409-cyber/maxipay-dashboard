@@ -5,35 +5,42 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-
-data class BatchItem(
-    val batchId: String,
-    val date: String,
-    val summary: String
-)
+import java.util.Locale
 
 class BatchListAdapter(
-    private val batches: List<BatchItem>
-) : RecyclerView.Adapter<BatchListAdapter.BatchViewHolder>() {
+    private val batches: List<Map<String, Any>>,
+    private val onBatchClick: (String) -> Unit
+) : RecyclerView.Adapter<BatchListAdapter.ViewHolder>() {
 
-    class BatchViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+    class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val txtBatchId: TextView = view.findViewById(R.id.txtBatchId)
-        val txtBatchDate: TextView = view.findViewById(R.id.txtBatchDate)
-        val txtBatchSummary: TextView = view.findViewById(R.id.txtBatchSummary)
+        val txtDate: TextView = view.findViewById(R.id.txtBatchDate)
+        val txtSummary: TextView = view.findViewById(R.id.txtBatchSummary)
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): BatchViewHolder {
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val view = LayoutInflater.from(parent.context)
             .inflate(R.layout.item_batch, parent, false)
-        return BatchViewHolder(view)
+        return ViewHolder(view)
     }
 
-    override fun onBindViewHolder(holder: BatchViewHolder, position: Int) {
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+
         val batch = batches[position]
 
-        holder.txtBatchId.text = "Batch ID: ${batch.batchId}"
-        holder.txtBatchDate.text = "Date: ${batch.date}"
-        holder.txtBatchSummary.text = batch.summary
+        val batchId = batch["batchId"] as? String ?: ""
+        val total = (batch["total"] as? Number)?.toDouble() ?: 0.0
+        val count = (batch["transactionCount"] as? Number)?.toLong() ?: 0L
+        val date = batch["formattedDate"] as? String ?: ""
+
+        holder.txtBatchId.text = "Batch ID: $batchId"
+        holder.txtDate.text = "Date: $date"
+        holder.txtSummary.text =
+            "Transactions: $count | Total: $${String.format(Locale.US, "%.2f", total)}"
+
+        holder.itemView.setOnClickListener {
+            onBatchClick(batchId)
+        }
     }
 
     override fun getItemCount(): Int = batches.size

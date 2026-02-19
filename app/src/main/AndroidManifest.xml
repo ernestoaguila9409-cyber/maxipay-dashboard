@@ -11,9 +11,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
         <activity
-            android:name=".BatchManagementActivity"
+            android:name=".BatchDetailsActivity"
             android:exported="false" />
-        <!-- Main Activity -->
+        <activity
+            android:name=".BatchManagementActivity"
+            android:exported="false" /> <!-- Main Activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
