@@ -1,6 +1,7 @@
 package com.ernesto.myapplication
 
 import android.os.Bundle
+import android.util.Log
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -44,8 +45,20 @@ class BatchDetailsActivity : AppCompatActivity() {
             .get()
             .addOnSuccessListener { documents ->
 
+                // 🔥 DEBUG LOGS
+                Log.d("BATCH_DEBUG", "Batch ID: $batchId")
+                Log.d("BATCH_DEBUG", "Documents size: ${documents.size()}")
+
+                for (doc in documents) {
+                    Log.d("BATCH_DEBUG", doc.data.toString())
+                }
+
                 if (documents.isEmpty) {
-                    Toast.makeText(this, "No transactions found", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        this,
+                        "No transactions found",
+                        Toast.LENGTH_SHORT
+                    ).show()
                     return@addOnSuccessListener
                 }
 
@@ -90,7 +103,11 @@ class BatchDetailsActivity : AppCompatActivity() {
                     BatchTransactionAdapter(groupedList)
             }
             .addOnFailureListener {
-                Toast.makeText(this, "Failed to load batch transactions", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this,
+                    "Failed to load batch transactions",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
     }
 }

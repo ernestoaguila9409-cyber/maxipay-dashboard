@@ -24,39 +24,53 @@ class BatchTransactionAdapter(
         return ViewHolder(view)
     }
 
+    override fun getItemCount(): Int = items.size
+
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
 
         val saleWithRefunds = items[position]
         val sale = saleWithRefunds.sale
         val refunds = saleWithRefunds.refunds
 
-        val saleAmount = sale.amountInCents / 100.0
-        val totalRefunded = refunds.sumOf { it.amountInCents } / 100.0
-        val netAmount = saleAmount - totalRefunded
-
-        // Card name
+        // ----------------------------
+        // SALE INFO
+        // ----------------------------
         holder.txtCard.text =
             "${sale.cardBrand} •••• ${sale.last4}"
 
-        // Final amount on right
-        holder.txtFinalAmount.text =
-            String.format(Locale.getDefault(), "$%.2f", netAmount)
+        val saleAmount = sale.amountInCents / 100.0
 
-        // Refund list
+        holder.txtFinalAmount.text =
+            String.format(Locale.US, "$%.2f", saleAmount)
+
+        // ----------------------------
+        // REFUNDS + NET
+        // ----------------------------
         if (refunds.isNotEmpty()) {
-            val refundText = buildString {
-                refunds.forEach {
-                    append("🔵 Refund -$")
-                    append(String.format(Locale.getDefault(), "%.2f", it.amountInCents / 100.0))
-                    append("\n")
-                }
+
+            val totalRefunds =
+                refunds.sumOf { it.amountInCents } / 100.0
+
+            val net = saleAmount - totalRefunds
+
+            val refundLines = refunds.joinToString("\n") {
+                "🔵 Refund -$" +
+                        String.format(
+                            Locale.US,
+                            "%.2f",
+                            it.amountInCents / 100.0
+                        )
             }
-            holder.txtRefunds.text = refundText
+
+            val netLine =
+                "\nNet: $" +
+                        String.format(Locale.US, "%.2f", net)
+
+            holder.txtRefunds.visibility = View.VISIBLE
+            holder.txtRefunds.text = refundLines + netLine
+
         } else {
-            holder.txtRefunds.text = ""
+            holder.txtRefunds.visibility = View.GONE
         }
     }
-
-    override fun getItemCount(): Int = items.size
 }
-
