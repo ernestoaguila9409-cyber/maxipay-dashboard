@@ -6,17 +6,16 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import com.ernesto.myapplication.data.Transaction
+import com.ernesto.myapplication.data.SaleWithRefunds
 import java.text.SimpleDateFormat
 import java.util.*
 
 class TransactionAdapter(
-    private val transactions: List<Transaction>,
-    private val onTransactionClick: (Transaction) -> Unit
+    private val transactions: List<SaleWithRefunds>,
+    private val onTransactionClick: (com.ernesto.myapplication.data.Transaction) -> Unit
 ) : RecyclerView.Adapter<TransactionAdapter.TransactionViewHolder>() {
 
     class TransactionViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-
         val statusDot: View = itemView.findViewById(R.id.statusDot)
         val txtCard: TextView = itemView.findViewById(R.id.txtCard)
         val txtType: TextView = itemView.findViewById(R.id.txtType)
@@ -33,64 +32,62 @@ class TransactionAdapter(
 
     override fun onBindViewHolder(holder: TransactionViewHolder, position: Int) {
 
-        val transaction = transactions[position]
+        val saleWithRefunds = transactions[position]
+        val sale = saleWithRefunds.sale
+        val refunds = saleWithRefunds.refunds
         val context = holder.itemView.context
 
-        val amount = transaction.amountInCents / 100.0
-        val date = SimpleDateFormat("MM/dd/yyyy HH:mm", Locale.getDefault())
-            .format(Date(transaction.date))
+        val saleAmount = sale.amountInCents / 100.0
+        val totalRefunded = refunds.sumOf { it.amountInCents } / 100.0
+        val netAmount = saleAmount - totalRefunded
 
-        // Set normal text
+        val date = SimpleDateFormat("MM/dd/yyyy HH:mm", Locale.getDefault())
+            .format(Date(sale.date))
+
+        // 🟢 Green dot for SALE
+        holder.statusDot.setBackgroundColor(
+            context.getColor(android.R.color.holo_green_dark)
+        )
+
         holder.txtCard.text =
-            "${transaction.cardBrand} •••• ${transaction.last4}"
+            "${sale.cardBrand} •••• ${sale.last4}"
 
         holder.txtType.text =
-            "${transaction.paymentType} • ${transaction.entryType}"
+            "${sale.paymentType} • ${sale.entryType}"
 
         holder.txtAmount.text =
-            String.format("$%.2f", amount)
+            String.format("$%.2f", netAmount)
 
         holder.txtMeta.text =
-            "Date: $date\nRef: ${transaction.referenceId}"
+            buildString {
+                append("Date: $date\nRef: ${sale.referenceId}")
 
-        // 🔥 Status Styling
-        if (transaction.voided) {
+                if (refunds.isNotEmpty()) {
+                    refunds.forEach {
+                        append("\n\n🔵 Refund -$")
+                        append(String.format("%.2f", it.amountInCents / 100.0))
+                    }
+                }
+            }
 
-            // Red dot
+        holder.txtVoidBadge.visibility =
+            if (sale.voided) View.VISIBLE else View.GONE
+
+        if (sale.voided) {
             holder.statusDot.setBackgroundColor(
                 context.getColor(android.R.color.holo_red_dark)
             )
-
-            // Show VOID badge
-            holder.txtVoidBadge.visibility = View.VISIBLE
-
-            // Fade item
             holder.itemView.alpha = 0.6f
-
-            // Strike-through amount
             holder.txtAmount.paintFlags =
                 holder.txtAmount.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
-
         } else {
-
-            // Green dot
-            holder.statusDot.setBackgroundColor(
-                context.getColor(android.R.color.holo_green_dark)
-            )
-
-            // Hide VOID badge
-            holder.txtVoidBadge.visibility = View.GONE
-
-            // Normal opacity
             holder.itemView.alpha = 1.0f
-
-            // Remove strike-through
             holder.txtAmount.paintFlags =
                 holder.txtAmount.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
         }
 
         holder.itemView.setOnClickListener {
-            onTransactionClick(transaction)
+            onTransactionClick(sale)
         }
     }
 

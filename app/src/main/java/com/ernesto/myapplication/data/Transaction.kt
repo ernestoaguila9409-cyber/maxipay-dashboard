@@ -8,6 +8,10 @@ data class Transaction(
     val cardBrand: String,
     val last4: String,
     val entryType: String,
-    val voided: Boolean
+    val voided: Boolean,
+
+    // 🔥 NEW FIELDS
+    val type: String = "SALE",
+    val originalReferenceId: String = ""
 )
 

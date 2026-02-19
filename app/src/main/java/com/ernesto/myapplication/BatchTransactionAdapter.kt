@@ -5,41 +5,58 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import java.text.SimpleDateFormat
-import java.util.*
+import com.ernesto.myapplication.data.SaleWithRefunds
+import java.util.Locale
 
 class BatchTransactionAdapter(
-    private val transactions: List<Map<String, Any>>
+    private val items: List<SaleWithRefunds>
 ) : RecyclerView.Adapter<BatchTransactionAdapter.ViewHolder>() {
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        val txtInfo: TextView = view.findViewById(android.R.id.text1)
+        val txtCard: TextView = view.findViewById(R.id.txtCard)
+        val txtFinalAmount: TextView = view.findViewById(R.id.txtFinalAmount)
+        val txtRefunds: TextView = view.findViewById(R.id.txtRefunds)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val view = LayoutInflater.from(parent.context)
-            .inflate(android.R.layout.simple_list_item_1, parent, false)
+            .inflate(R.layout.item_batch, parent, false)
         return ViewHolder(view)
     }
 
-    override fun getItemCount(): Int = transactions.size
-
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
 
-        val transaction = transactions[position]
+        val saleWithRefunds = items[position]
+        val sale = saleWithRefunds.sale
+        val refunds = saleWithRefunds.refunds
 
-        val amount = transaction["amount"] as? Double ?: 0.0
-        val date = transaction["timestamp"] as? Date
-        val last4 = transaction["last4"] as? String ?: ""
-        val cardBrand = transaction["cardBrand"] as? String ?: ""
+        val saleAmount = sale.amountInCents / 100.0
+        val totalRefunded = refunds.sumOf { it.amountInCents } / 100.0
+        val netAmount = saleAmount - totalRefunded
 
-        val formattedDate = if (date != null) {
-            SimpleDateFormat("MM/dd/yyyy HH:mm", Locale.getDefault()).format(date)
+        // Card name
+        holder.txtCard.text =
+            "${sale.cardBrand} •••• ${sale.last4}"
+
+        // Final amount on right
+        holder.txtFinalAmount.text =
+            String.format(Locale.getDefault(), "$%.2f", netAmount)
+
+        // Refund list
+        if (refunds.isNotEmpty()) {
+            val refundText = buildString {
+                refunds.forEach {
+                    append("🔵 Refund -$")
+                    append(String.format(Locale.getDefault(), "%.2f", it.amountInCents / 100.0))
+                    append("\n")
+                }
+            }
+            holder.txtRefunds.text = refundText
         } else {
-            ""
+            holder.txtRefunds.text = ""
         }
-
-        holder.txtInfo.text =
-            "$cardBrand •••• $last4\n$%.2f\n$formattedDate".format(amount)
     }
+
+    override fun getItemCount(): Int = items.size
 }
+

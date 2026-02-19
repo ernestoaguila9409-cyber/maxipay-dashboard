@@ -23,6 +23,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var txtTodayTotal: TextView
     private lateinit var txtTodayCount: TextView
 
+    private var currentBatchId: String = ""
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -30,20 +32,28 @@ class MainActivity : AppCompatActivity() {
         txtTodayTotal = findViewById(R.id.txtTodayTotal)
         txtTodayCount = findViewById(R.id.txtTodayCount)
 
-        // TAKE PAYMENT
+        ensureOpenBatch()
+
         findViewById<Button>(R.id.btnTakePayment).setOnClickListener {
-            startActivity(Intent(this, PaymentActivity::class.java))
+
+            if (currentBatchId.isEmpty()) {
+                Toast.makeText(this, "No open batch", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val intent = Intent(this, PaymentActivity::class.java)
+            intent.putExtra("batchId", currentBatchId)
+            startActivity(intent)
         }
 
-        // TRANSACTIONS
         findViewById<Button>(R.id.btnTransactions).setOnClickListener {
             startActivity(Intent(this, TransactionActivity::class.java))
         }
 
-        // OPEN BATCH MANAGEMENT SCREEN
         findViewById<Button>(R.id.btnSettle).setOnClickListener {
             startActivity(Intent(this, BatchManagementActivity::class.java))
         }
+
 
         loadTodayStats()
     }
@@ -53,9 +63,48 @@ class MainActivity : AppCompatActivity() {
         loadTodayStats()
     }
 
-    // ===============================
-    // DASHBOARD TOTALS
-    // ===============================
+    // ======================================
+    // ENSURE OPEN BATCH EXISTS
+    // ======================================
+    private fun ensureOpenBatch() {
+
+        db.collection("Batches")
+            .whereEqualTo("closed", false)
+            .limit(1)
+            .get()
+            .addOnSuccessListener { documents ->
+
+                if (!documents.isEmpty) {
+
+                    currentBatchId = documents.documents[0].id
+                    Log.d("BATCH_DEBUG", "Existing batch: $currentBatchId")
+
+                } else {
+
+                    val newBatchId = "BATCH_${System.currentTimeMillis()}"
+
+                    val batchData = hashMapOf(
+                        "batchId" to newBatchId,
+                        "total" to 0.0,
+                        "count" to 0,
+                        "closed" to false,
+                        "createdAt" to Date()
+                    )
+
+                    db.collection("Batches")
+                        .document(newBatchId)
+                        .set(batchData)
+                        .addOnSuccessListener {
+                            currentBatchId = newBatchId
+                            Log.d("BATCH_DEBUG", "New batch created: $currentBatchId")
+                        }
+                }
+            }
+    }
+
+    // ======================================
+    // LOAD DASHBOARD TOTALS
+    // ======================================
     private fun loadTodayStats() {
 
         val calendar = Calendar.getInstance()
@@ -76,17 +125,10 @@ class MainActivity : AppCompatActivity() {
 
                 for (doc in documents) {
 
-                    Log.d("TODAY_DEBUG", "Doc ID: ${doc.id}")
-
                     val voided = doc.getBoolean("voided") ?: false
                     val settled = doc.getBoolean("settled") ?: false
                     val amount = doc.getDouble("amount") ?: 0.0
-                    val type = doc.getString("type") ?: "NO_TYPE"
-
-                    Log.d(
-                        "TODAY_DEBUG",
-                        "type=$type amount=$amount voided=$voided settled=$settled"
-                    )
+                    val type = doc.getString("type") ?: "SALE"
 
                     if (!voided && !settled) {
 
@@ -102,16 +144,14 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-
-
-                txtTodayTotal.text = "Today: $%.2f".format(total)
+                txtTodayTotal.text = String.format(Locale.US, "Today: $%.2f", total)
                 txtTodayCount.text = "Transactions: $count"
             }
     }
 
-    // ===============================
+    // ======================================
     // CONFIRM SETTLE
-    // ===============================
+    // ======================================
     private fun confirmSettle() {
         AlertDialog.Builder(this)
             .setTitle("Settle Batch")
@@ -123,9 +163,9 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    // ===============================
+    // ======================================
     // CALL SPIN SETTLE API
-    // ===============================
+    // ======================================
     private fun settleBatch() {
 
         val json = """
@@ -164,36 +204,17 @@ class MainActivity : AppCompatActivity() {
 
             override fun onResponse(call: Call, response: Response) {
 
-                val responseText = response.body?.string() ?: ""
-
                 runOnUiThread {
 
-                    try {
+                    if (response.isSuccessful) {
 
-                        val jsonObject = org.json.JSONObject(responseText)
-                        val resultCode = jsonObject
-                            .getJSONObject("GeneralResponse")
-                            .getString("ResultCode")
+                        closeCurrentBatch()
 
-                        if (resultCode == "0") {
-
-                            // Create batch record in Firestore
-                            createBatchRecord()
-
-                        } else {
-
-                            Toast.makeText(
-                                this@MainActivity,
-                                "Settle Failed\n$responseText",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-
-                    } catch (e: Exception) {
+                    } else {
 
                         Toast.makeText(
                             this@MainActivity,
-                            "Settle Failed\n$responseText",
+                            "Settle Failed",
                             Toast.LENGTH_LONG
                         ).show()
                     }
@@ -202,67 +223,33 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    // ===============================
-    // CREATE BATCH RECORD + MARK TRANSACTIONS
-    // ===============================
-    private fun createBatchRecord() {
+    // ======================================
+    // CLOSE CURRENT BATCH
+    // ======================================
+    private fun closeCurrentBatch() {
 
-        db.collection("Transactions")
-            .whereEqualTo("voided", false)
-            .whereEqualTo("settled", false)
-            .get()
-            .addOnSuccessListener { documents ->
+        if (currentBatchId.isEmpty()) return
 
-                var total = 0.0
-                var count = 0
-
-                for (doc in documents) {
-
-                    val amount = doc.getDouble("amount") ?: 0.0
-                    val type = doc.getString("type") ?: "SALE"
-
-                    if (type == "SALE") {
-                        total += amount
-                        count++
-                    }
-
-                    if (type == "REFUND") {
-                        total -= amount
-                        count++
-                    }
-                }
-
-
-                if (count == 0) {
-                    Toast.makeText(this, "No open transactions", Toast.LENGTH_SHORT).show()
-                    return@addOnSuccessListener
-                }
-
-                val batchId = "BATCH_${System.currentTimeMillis()}"
-
-                val batchData = hashMapOf(
-                    "batchId" to batchId,
-                    "total" to total,
-                    "count" to count,
+        db.collection("Batches")
+            .document(currentBatchId)
+            .update(
+                mapOf(
+                    "closed" to true,
                     "closedAt" to Date()
                 )
+            )
+            .addOnSuccessListener {
 
-                // Save batch
-                db.collection("Batches")
-                    .document(batchId)
-                    .set(batchData)
-                    .addOnSuccessListener {
+                // Mark transactions as settled
+                db.collection("Transactions")
+                    .whereEqualTo("settled", false)
+                    .get()
+                    .addOnSuccessListener { docs ->
 
-                        // Mark transactions as settled
-                        for (doc in documents) {
+                        for (doc in docs) {
                             db.collection("Transactions")
                                 .document(doc.id)
-                                .update(
-                                    mapOf(
-                                        "settled" to true,
-                                        "batchId" to batchId
-                                    )
-                                )
+                                .update("settled", true)
                         }
 
                         Toast.makeText(
@@ -271,8 +258,11 @@ class MainActivity : AppCompatActivity() {
                             Toast.LENGTH_LONG
                         ).show()
 
+                        currentBatchId = ""
+                        ensureOpenBatch()
                         loadTodayStats()
                     }
             }
     }
 }
+

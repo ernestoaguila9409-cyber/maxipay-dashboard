@@ -16,6 +16,7 @@ import android.util.Log
 import org.json.JSONObject
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.UUID
+import java.util.Locale
 
 class PaymentActivity : AppCompatActivity() {
 
@@ -26,6 +27,9 @@ class PaymentActivity : AppCompatActivity() {
     private var amountInCents: Long = 0
     private val db = FirebaseFirestore.getInstance()
 
+    // 🔥 THIS MUST BE SET FROM INTENT
+    private var currentBatchId: String = ""
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_payment)
@@ -33,6 +37,11 @@ class PaymentActivity : AppCompatActivity() {
         txtAmount = findViewById(R.id.txtAmount)
         radioCredit = findViewById(R.id.radioCredit)
         radioDebit = findViewById(R.id.radioDebit)
+
+        // ✅ VERY IMPORTANT — GET BATCH ID FROM INTENT
+        currentBatchId = intent.getStringExtra("batchId") ?: ""
+
+        Log.d("BATCH_DEBUG", "Current Batch ID: $currentBatchId")
 
         val numberButtons = listOf(
             R.id.btn1, R.id.btn2, R.id.btn3,
@@ -59,8 +68,16 @@ class PaymentActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            val formattedAmount = String.format("%.2f", amountInCents / 100.0)
-            val selectedPaymentType = if (radioDebit.isChecked) "Debit" else "Credit"
+            if (currentBatchId.isEmpty()) {
+                Toast.makeText(this, "Batch not found", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val formattedAmount =
+                String.format(Locale.US, "%.2f", amountInCents / 100.0)
+
+            val selectedPaymentType =
+                if (radioDebit.isChecked) "Debit" else "Credit"
 
             sendSpinTransaction(formattedAmount, selectedPaymentType)
         }
@@ -77,7 +94,8 @@ class PaymentActivity : AppCompatActivity() {
 
     private fun updateDisplay() {
         val dollars = amountInCents / 100.0
-        txtAmount.text = String.format("$%.2f", dollars)
+        txtAmount.text =
+            String.format(Locale.US, "$%.2f", dollars)
     }
 
     private fun sendSpinTransaction(amount: String, paymentType: String) {
@@ -148,16 +166,21 @@ class PaymentActivity : AppCompatActivity() {
                             paymentTypeFromResponse =
                                 jsonObject.optString("PaymentType")
 
-                            val cardData = jsonObject.optJSONObject("CardData")
+                            val cardData =
+                                jsonObject.optJSONObject("CardData")
 
                             if (cardData != null) {
-                                cardBrand = cardData.optString("CardType")
-                                last4 = cardData.optString("Last4")
-                                entryType = cardData.optString("EntryType")
+                                cardBrand =
+                                    cardData.optString("CardType")
+                                last4 =
+                                    cardData.optString("Last4")
+                                entryType =
+                                    cardData.optString("EntryType")
                             }
 
                         } catch (e: Exception) {
-                            Log.e("JSON_PARSE_ERROR", e.message ?: "Parse error")
+                            Log.e("JSON_PARSE_ERROR",
+                                e.message ?: "Parse error")
                         }
 
                         Toast.makeText(
@@ -175,7 +198,6 @@ class PaymentActivity : AppCompatActivity() {
                             entryType
                         )
 
-                        // Reset amount after success
                         amountInCents = 0
                         updateDisplay()
 
@@ -204,24 +226,28 @@ class PaymentActivity : AppCompatActivity() {
         val transactionMap = hashMapOf(
             "referenceId" to referenceId,
             "amount" to amountInCents / 100.0,
-            "type" to "SALE",              // ✅ ADD THIS LINE
+            "type" to "SALE",
             "paymentType" to paymentType,
             "cardBrand" to cardBrand,
             "last4" to last4,
             "entryType" to entryType,
             "voided" to false,
             "settled" to false,
-            "timestamp" to Date()
+            "timestamp" to Date(),
+            "batchId" to currentBatchId
         )
-
 
         db.collection("Transactions")
             .add(transactionMap)
             .addOnSuccessListener {
-                Toast.makeText(this, "Saved to Cloud", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this,
+                    "Saved to Cloud",
+                    Toast.LENGTH_SHORT).show()
             }
             .addOnFailureListener {
-                Toast.makeText(this, "Cloud Save Failed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this,
+                    "Cloud Save Failed",
+                    Toast.LENGTH_SHORT).show()
             }
     }
 }

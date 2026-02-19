@@ -15,16 +15,16 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
-import java.util.UUID
 import org.json.JSONObject
 import android.util.Log
-
+import java.util.*
+import com.ernesto.myapplication.data.SaleWithRefunds
 
 class TransactionActivity : AppCompatActivity() {
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: TransactionAdapter
-    private val transactionList = mutableListOf<Transaction>()
+    private val transactionList = mutableListOf<SaleWithRefunds>()
     private val db = FirebaseFirestore.getInstance()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,10 +39,10 @@ class TransactionActivity : AppCompatActivity() {
         }
 
         recyclerView.adapter = adapter
-
         loadTransactions()
     }
 
+    // 🔥 LOAD + GROUP SALES WITH REFUNDS (CORRECT VERSION)
     private fun loadTransactions() {
         db.collection("Transactions")
             .orderBy("timestamp", Query.Direction.DESCENDING)
@@ -54,6 +54,7 @@ class TransactionActivity : AppCompatActivity() {
                 }
 
                 transactionList.clear()
+                val allTransactions = mutableListOf<Transaction>()
 
                 snapshots?.forEach { doc ->
 
@@ -65,15 +66,36 @@ class TransactionActivity : AppCompatActivity() {
                         cardBrand = doc.getString("cardBrand") ?: "",
                         last4 = doc.getString("last4") ?: "",
                         entryType = doc.getString("entryType") ?: "",
-                        voided = doc.getBoolean("voided") ?: false
+                        voided = doc.getBoolean("voided") ?: false,
+                        type = doc.getString("type") ?: "SALE",
+                        originalReferenceId = doc.getString("originalReferenceId") ?: ""
                     )
 
-                    transactionList.add(transaction)
+                    allTransactions.add(transaction)
+                }
+
+                val sales = allTransactions.filter { it.type == "SALE" }
+                val refunds = allTransactions.filter { it.type == "REFUND" }
+
+                sales.forEach { sale ->
+
+                    val relatedRefunds = refunds.filter {
+                        it.originalReferenceId == sale.referenceId
+                    }
+
+                    // 🔥 ADD CORRECT OBJECT TYPE
+                    transactionList.add(
+                        SaleWithRefunds(
+                            sale = sale,
+                            refunds = relatedRefunds
+                        )
+                    )
                 }
 
                 adapter.notifyDataSetChanged()
             }
     }
+
 
     private fun showTransactionOptions(transaction: Transaction) {
         AlertDialog.Builder(this)
@@ -153,11 +175,11 @@ class TransactionActivity : AppCompatActivity() {
             url = "https://spinpos.net/v2/Payment/Return",
             json = json,
             type = "REFUND",
-            refundAmount = amount      // ✅ ADD THIS
+            referenceId = transaction.referenceId,
+            refundAmount = amount
         )
     }
 
-    // 🔥 UPDATED FUNCTION
     private fun sendApiRequest(
         url: String,
         json: String,
@@ -198,7 +220,6 @@ class TransactionActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (response.isSuccessful && responseText.contains("Approved")) {
 
-                        // 🔹 VOID logic
                         if (type == "VOID" && referenceId != null) {
 
                             db.collection("Transactions")
@@ -213,18 +234,12 @@ class TransactionActivity : AppCompatActivity() {
                                 }
                         }
 
-                        // 🔹 REFUND logic (OUTSIDE the void block)
-                        if (type == "REFUND") {
-
-                            val jsonObject = JSONObject(json)
-                            val amountString = jsonObject.getString("Amount")
-                            val amountDouble = amountString.toDouble()
-
-                            Log.d("REFUND_DEBUG", "Refund amount: $amountDouble")
+                        if (type == "REFUND" && referenceId != null && refundAmount != null) {
 
                             val refundMap = hashMapOf(
-                                "referenceId" to java.util.UUID.randomUUID().toString(),
-                                "amount" to amountDouble,
+                                "referenceId" to UUID.randomUUID().toString(),
+                                "originalReferenceId" to referenceId,
+                                "amount" to refundAmount,
                                 "type" to "REFUND",
                                 "paymentType" to "",
                                 "cardBrand" to "",
@@ -232,17 +247,10 @@ class TransactionActivity : AppCompatActivity() {
                                 "entryType" to "",
                                 "voided" to false,
                                 "settled" to false,
-                                "timestamp" to java.util.Date()
+                                "timestamp" to Date()
                             )
 
-                            db.collection("Transactions")
-                                .add(refundMap)
-                                .addOnSuccessListener {
-                                    Log.d("REFUND_DEBUG", "Refund document successfully saved")
-                                }
-                                .addOnFailureListener { e ->
-                                    Log.d("REFUND_DEBUG", "Refund save FAILED: ${e.message}")
-                                }
+                            db.collection("Transactions").add(refundMap)
                         }
 
                         Toast.makeText(

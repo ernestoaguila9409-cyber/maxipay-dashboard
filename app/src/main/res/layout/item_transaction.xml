@@ -4,26 +4,23 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="16dp"
-    android:layout_marginBottom="8dp"
-    android:background="@android:color/white">
+    android:padding="12dp"
+    android:background="@android:color/white"
+    android:layout_marginBottom="8dp">
 
     <!-- Top Row -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:orientation="horizontal">
 
-        <!-- Status Dot -->
         <View
             android:id="@+id/statusDot"
-            android:layout_width="10dp"
-            android:layout_height="10dp"
+            android:layout_width="12dp"
+            android:layout_height="12dp"
             android:layout_marginEnd="8dp"
-            android:background="@drawable/circle_shape"/>
+            android:background="@android:color/holo_green_dark"/>
 
-        <!-- Card + Last4 -->
         <TextView
             android:id="@+id/txtCard"
             android:layout_width="0dp"
@@ -31,45 +28,55 @@
             android:layout_weight="1"
             android:textStyle="bold"
             android:textSize="16sp"
-            android:text="Card •••• 0000"/>
+            android:text="Card Info"/>
 
-        <!-- VOID badge -->
         <TextView
-            android:id="@+id/txtVoidBadge"
+            android:id="@+id/txtAmount"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="VOIDED"
-            android:textColor="@android:color/white"
-            android:backgroundTint="@android:color/holo_red_dark"
-            android:padding="4dp"
-            android:visibility="gone"/>
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:text="$0.00"/>
     </LinearLayout>
 
-    <!-- Payment Type -->
+    <!-- Type -->
     <TextView
         android:id="@+id/txtType"
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="14sp"
-        android:layout_marginTop="4dp"
-        android:text="Credit • Chip"/>
+        android:textColor="@android:color/darker_gray"
+        android:layout_marginTop="4dp"/>
 
-    <!-- Amount -->
-    <TextView
-        android:id="@+id/txtAmount"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        android:layout_marginTop="6dp"
-        android:text="$0.00"/>
-
-    <!-- Date + Ref -->
+    <!-- Meta -->
     <TextView
         android:id="@+id/txtMeta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="@android:color/darker_gray"
+        android:layout_marginTop="4dp"/>
+
+    <!-- 🔵 Refund Section -->
+    <TextView
+        android:id="@+id/txtRefunds"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="14sp"
+        android:textColor="@android:color/holo_blue_dark"
+        android:paddingStart="32dp"
+        android:layout_marginTop="6dp"
+        android:visibility="gone"/>
+
+    <!-- VOID badge -->
+    <TextView
+        android:id="@+id/txtVoidBadge"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:textSize="12sp"
-        android:layout_marginTop="4dp"
-        android:text="Date: 00/00/0000\nRef: 000000"/>
+        android:text="VOID"
+        android:textColor="@android:color/holo_red_dark"
+        android:textStyle="bold"
+        android:visibility="gone"
+        android:layout_marginTop="6dp"/>
+
 </LinearLayout>
