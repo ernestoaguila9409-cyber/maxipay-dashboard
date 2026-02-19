@@ -228,7 +228,16 @@ class BatchManagementActivity : AppCompatActivity() {
 
                 for (doc in documents) {
 
-                    total += doc.getDouble("amount") ?: 0.0
+                    val amount = doc.getDouble("amount") ?: 0.0
+                    val type = doc.getString("type") ?: "SALE"
+
+                    if (type == "SALE") {
+                        total += amount
+                    }
+
+                    if (type == "REFUND") {
+                        total -= amount
+                    }
 
                     db.collection("Transactions")
                         .document(doc.id)
@@ -239,6 +248,7 @@ class BatchManagementActivity : AppCompatActivity() {
                             )
                         )
                 }
+
 
                 val batchMap = hashMapOf(
                     "batchId" to batchId,

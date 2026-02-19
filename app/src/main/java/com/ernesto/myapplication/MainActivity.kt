@@ -14,6 +14,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.*
 import java.util.concurrent.TimeUnit
+import android.util.Log
 
 class MainActivity : AppCompatActivity() {
 
@@ -75,15 +76,33 @@ class MainActivity : AppCompatActivity() {
 
                 for (doc in documents) {
 
+                    Log.d("TODAY_DEBUG", "Doc ID: ${doc.id}")
+
                     val voided = doc.getBoolean("voided") ?: false
                     val settled = doc.getBoolean("settled") ?: false
+                    val amount = doc.getDouble("amount") ?: 0.0
+                    val type = doc.getString("type") ?: "NO_TYPE"
 
-                    // Only count NOT voided AND NOT settled
+                    Log.d(
+                        "TODAY_DEBUG",
+                        "type=$type amount=$amount voided=$voided settled=$settled"
+                    )
+
                     if (!voided && !settled) {
-                        total += doc.getDouble("amount") ?: 0.0
-                        count++
+
+                        if (type == "SALE") {
+                            total += amount
+                            count++
+                        }
+
+                        if (type == "REFUND") {
+                            total -= amount
+                            count++
+                        }
                     }
                 }
+
+
 
                 txtTodayTotal.text = "Today: $%.2f".format(total)
                 txtTodayCount.text = "Transactions: $count"
@@ -198,9 +217,21 @@ class MainActivity : AppCompatActivity() {
                 var count = 0
 
                 for (doc in documents) {
-                    total += doc.getDouble("amount") ?: 0.0
-                    count++
+
+                    val amount = doc.getDouble("amount") ?: 0.0
+                    val type = doc.getString("type") ?: "SALE"
+
+                    if (type == "SALE") {
+                        total += amount
+                        count++
+                    }
+
+                    if (type == "REFUND") {
+                        total -= amount
+                        count++
+                    }
                 }
+
 
                 if (count == 0) {
                     Toast.makeText(this, "No open transactions", Toast.LENGTH_SHORT).show()

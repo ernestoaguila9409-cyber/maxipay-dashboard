@@ -15,6 +15,10 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.UUID
+import org.json.JSONObject
+import android.util.Log
+
 
 class TransactionActivity : AppCompatActivity() {
 
@@ -148,7 +152,8 @@ class TransactionActivity : AppCompatActivity() {
         sendApiRequest(
             url = "https://spinpos.net/v2/Payment/Return",
             json = json,
-            type = "REFUND"
+            type = "REFUND",
+            refundAmount = amount      // ✅ ADD THIS
         )
     }
 
@@ -157,7 +162,8 @@ class TransactionActivity : AppCompatActivity() {
         url: String,
         json: String,
         type: String,
-        referenceId: String? = null
+        referenceId: String? = null,
+        refundAmount: Double? = null
     ) {
 
         val client = OkHttpClient.Builder()
@@ -192,7 +198,7 @@ class TransactionActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (response.isSuccessful && responseText.contains("Approved")) {
 
-                        // 🔥 If VOID approved → update Firestore
+                        // 🔹 VOID logic
                         if (type == "VOID" && referenceId != null) {
 
                             db.collection("Transactions")
@@ -207,17 +213,41 @@ class TransactionActivity : AppCompatActivity() {
                                 }
                         }
 
+                        // 🔹 REFUND logic (OUTSIDE the void block)
+                        if (type == "REFUND") {
+
+                            val jsonObject = JSONObject(json)
+                            val amountString = jsonObject.getString("Amount")
+                            val amountDouble = amountString.toDouble()
+
+                            Log.d("REFUND_DEBUG", "Refund amount: $amountDouble")
+
+                            val refundMap = hashMapOf(
+                                "referenceId" to java.util.UUID.randomUUID().toString(),
+                                "amount" to amountDouble,
+                                "type" to "REFUND",
+                                "paymentType" to "",
+                                "cardBrand" to "",
+                                "last4" to "",
+                                "entryType" to "",
+                                "voided" to false,
+                                "settled" to false,
+                                "timestamp" to java.util.Date()
+                            )
+
+                            db.collection("Transactions")
+                                .add(refundMap)
+                                .addOnSuccessListener {
+                                    Log.d("REFUND_DEBUG", "Refund document successfully saved")
+                                }
+                                .addOnFailureListener { e ->
+                                    Log.d("REFUND_DEBUG", "Refund save FAILED: ${e.message}")
+                                }
+                        }
+
                         Toast.makeText(
                             this@TransactionActivity,
                             "$type APPROVED",
-                            Toast.LENGTH_LONG
-                        ).show()
-
-                    } else {
-
-                        Toast.makeText(
-                            this@TransactionActivity,
-                            "$type DECLINED\n$responseText",
                             Toast.LENGTH_LONG
                         ).show()
                     }

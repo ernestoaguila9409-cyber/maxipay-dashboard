@@ -204,14 +204,16 @@ class PaymentActivity : AppCompatActivity() {
         val transactionMap = hashMapOf(
             "referenceId" to referenceId,
             "amount" to amountInCents / 100.0,
+            "type" to "SALE",              // ✅ ADD THIS LINE
             "paymentType" to paymentType,
             "cardBrand" to cardBrand,
             "last4" to last4,
             "entryType" to entryType,
-            "voided" to false,     // ✅ required
-            "settled" to false,    // ✅ REQUIRED FOR BATCH SYSTEM
+            "voided" to false,
+            "settled" to false,
             "timestamp" to Date()
         )
+
 
         db.collection("Transactions")
             .add(transactionMap)
