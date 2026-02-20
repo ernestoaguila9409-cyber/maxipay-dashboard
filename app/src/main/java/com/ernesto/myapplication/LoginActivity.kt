@@ -6,10 +6,11 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.google.firebase.firestore.FirebaseFirestore
 
 class LoginActivity : AppCompatActivity() {
 
-    private val correctPin = "1234"
+    private val db = FirebaseFirestore.getInstance()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -19,15 +20,42 @@ class LoginActivity : AppCompatActivity() {
         val btnLogin = findViewById<Button>(R.id.btnLogin)
 
         btnLogin.setOnClickListener {
-            val enteredPin = etPin.text.toString()
 
-            if (enteredPin == correctPin) {
-                val intent = Intent(this, MainActivity::class.java)
-                startActivity(intent)
-                finish()
-            } else {
-                Toast.makeText(this, "Wrong PIN", Toast.LENGTH_SHORT).show()
+            val enteredPin = etPin.text.toString().trim()
+
+            if (enteredPin.isEmpty()) {
+                Toast.makeText(this, "Enter PIN", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
             }
+
+            loginWithPin(enteredPin)
         }
+    }
+
+    private fun loginWithPin(pin: String) {
+
+        db.collection("Employees")
+            .whereEqualTo("pin", pin)
+            .whereEqualTo("active", true)
+            .get()
+            .addOnSuccessListener { documents ->
+
+                if (!documents.isEmpty) {
+
+                    val employee = documents.documents[0]
+                    val name = employee.getString("name") ?: ""
+                    val role = employee.getString("role") ?: ""
+
+                    val intent = Intent(this, MainActivity::class.java)
+                    intent.putExtra("employeeName", name)
+                    intent.putExtra("employeeRole", role)
+                    startActivity(intent)
+
+                    finish()
+
+                } else {
+                    Toast.makeText(this, "Invalid PIN", Toast.LENGTH_SHORT).show()
+                }
+            }
     }
 }

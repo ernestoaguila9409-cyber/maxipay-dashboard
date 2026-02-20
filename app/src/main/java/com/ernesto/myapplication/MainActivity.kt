@@ -15,7 +15,7 @@ import java.io.IOException
 import java.util.*
 import java.util.concurrent.TimeUnit
 import android.util.Log
-
+import android.widget.ImageButton
 class MainActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
@@ -28,6 +28,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // 🔥 GET LOGGED IN USER
+        val employeeName = intent.getStringExtra("employeeName") ?: ""
+        val employeeRole = intent.getStringExtra("employeeRole") ?: ""
+
+        val txtLoggedUser = findViewById<TextView?>(R.id.txtLoggedUser)
+        txtLoggedUser?.text = "Logged in as: $employeeName ($employeeRole)"
 
         txtTodayTotal = findViewById(R.id.txtTodayTotal)
         txtTodayCount = findViewById(R.id.txtTodayCount)
@@ -57,6 +64,13 @@ class MainActivity : AppCompatActivity() {
         // 🔥 NEW: EMPLOYEES BUTTON
         findViewById<Button>(R.id.btnEmployees).setOnClickListener {
             startActivity(Intent(this, EmployeesActivity::class.java))
+        }
+
+        // 🔥 LOGOUT BUTTON (PUT IT HERE)
+        findViewById<ImageButton>(R.id.btnLogout).setOnClickListener {
+            val intent = Intent(this, LoginActivity::class.java)
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            startActivity(intent)
         }
 
         loadTodayStats()

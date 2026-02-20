@@ -1,64 +1,93 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
+<FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:gravity="center"
-    android:orientation="vertical"
-    android:background="#F5F5F5"
-    android:padding="24dp">
+    android:background="#F5F5F5">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Restaurant POS"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="40dp"/>
+    <!-- CENTER CONTENT -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="24dp">
 
-    <Button
-        android:id="@+id/btnTakePayment"
-        android:layout_width="220dp"
-        android:layout_height="wrap_content"
-        android:text="TAKE PAYMENT"
-        android:layout_marginBottom="16dp"/>
+        <TextView
+            android:id="@+id/txtLoggedUser"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Logged in as:"
+            android:layout_marginBottom="8dp"/>
 
-    <Button
-        android:id="@+id/btnTransactions"
-        android:layout_width="220dp"
-        android:layout_height="wrap_content"
-        android:text="TRANSACTIONS"
-        android:layout_marginBottom="16dp"/>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Restaurant POS"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="40dp"/>
 
-    <Button
-        android:id="@+id/btnSettle"
-        android:layout_width="220dp"
-        android:layout_height="wrap_content"
-        android:text="SETTLE BATCH"/>
+        <Button
+            android:id="@+id/btnTakePayment"
+            android:layout_width="220dp"
+            android:layout_height="wrap_content"
+            android:text="TAKE PAYMENT"
+            android:layout_marginBottom="16dp"/>
 
-    <TextView
-        android:id="@+id/txtTodayTotal"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Today: $0.00"
-        android:textSize="16sp"
-        android:layout_marginTop="40dp"/>
+        <Button
+            android:id="@+id/btnTransactions"
+            android:layout_width="220dp"
+            android:layout_height="wrap_content"
+            android:text="TRANSACTIONS"
+            android:layout_marginBottom="16dp"/>
 
-    <TextView
-        android:id="@+id/txtTodayCount"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Transactions: 0"
-        android:textSize="16sp"
-        android:layout_marginTop="8dp"/>
+        <Button
+            android:id="@+id/btnSettle"
+            android:layout_width="220dp"
+            android:layout_height="wrap_content"
+            android:text="SETTLE BATCH"
+            android:layout_marginBottom="30dp"/>
 
-    <Button
-        android:id="@+id/btnEmployees"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="EMPLOYEES"
-        android:layout_marginTop="16dp"
-        android:backgroundTint="#6A4FB3"
-        android:textColor="@android:color/white"/>
+        <TextView
+            android:id="@+id/txtTodayTotal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Today: $0.00"
+            android:textSize="16sp"
+            android:layout_marginTop="20dp"/>
 
-</LinearLayout>
+        <TextView
+            android:id="@+id/txtTodayCount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Transactions: 0"
+            android:textSize="16sp"
+            android:layout_marginTop="8dp"/>
+
+        <Button
+            android:id="@+id/btnEmployees"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="EMPLOYEES"
+            android:layout_marginTop="20dp"
+            android:backgroundTint="#6A4FB3"
+            android:textColor="@android:color/white"/>
+
+    </LinearLayout>
+
+    <!-- LOCK BUTTON BOTTOM RIGHT -->
+    <ImageButton
+        android:id="@+id/btnLogout"
+        android:layout_width="55dp"
+        android:layout_height="55dp"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="20dp"
+        android:background="@drawable/rounded_logout_button"
+        android:src="@android:drawable/ic_lock_power_off"
+        android:contentDescription="Logout"
+        app:tint="@android:color/white"
+        android:padding="12dp"/>
+
+</FrameLayout>
