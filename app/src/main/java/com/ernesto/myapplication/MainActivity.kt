@@ -54,6 +54,10 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, BatchManagementActivity::class.java))
         }
 
+        // 🔥 NEW: EMPLOYEES BUTTON
+        findViewById<Button>(R.id.btnEmployees).setOnClickListener {
+            startActivity(Intent(this, EmployeesActivity::class.java))
+        }
 
         loadTodayStats()
     }
@@ -240,7 +244,6 @@ class MainActivity : AppCompatActivity() {
             )
             .addOnSuccessListener {
 
-                // Mark transactions as settled
                 db.collection("Transactions")
                     .whereEqualTo("settled", false)
                     .get()
@@ -265,4 +268,3 @@ class MainActivity : AppCompatActivity() {
             }
     }
 }
-

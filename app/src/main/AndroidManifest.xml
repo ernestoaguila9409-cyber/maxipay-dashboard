@@ -11,23 +11,30 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
         <activity
-            android:name=".BatchDetailsActivity"
+            android:name=".EmployeesActivity"
             android:exported="false" />
+        <!-- LOGIN SCREEN (FIRST SCREEN) -->
         <activity
-            android:name=".BatchManagementActivity"
-            android:exported="false" /> <!-- Main Activity -->
-        <activity
-            android:name=".MainActivity"
+            android:name=".LoginActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity> <!-- Payment Activity -->
+        </activity> <!-- MAIN POS SCREEN -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false" />
+        <activity
+            android:name=".BatchDetailsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".BatchManagementActivity"
+            android:exported="false" />
         <activity
             android:name=".PaymentActivity"
-            android:exported="false" /> <!-- Transactions Activity -->
+            android:exported="false" />
         <activity
             android:name=".TransactionActivity"
             android:exported="false" />

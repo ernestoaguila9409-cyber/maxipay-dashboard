@@ -52,4 +52,13 @@
         android:textSize="16sp"
         android:layout_marginTop="8dp"/>
 
+    <Button
+        android:id="@+id/btnEmployees"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="EMPLOYEES"
+        android:layout_marginTop="16dp"
+        android:backgroundTint="#6A4FB3"
+        android:textColor="@android:color/white"/>
+
 </LinearLayout>
