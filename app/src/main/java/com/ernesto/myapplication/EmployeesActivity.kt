@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.textfield.TextInputLayout
 import com.google.firebase.firestore.FirebaseFirestore
 
 class EmployeesActivity : AppCompatActivity() {
@@ -66,6 +67,7 @@ class EmployeesActivity : AppCompatActivity() {
 
         val etName = dialogView.findViewById<EditText>(R.id.etEmployeeName)
         val etPin = dialogView.findViewById<EditText>(R.id.etEmployeePin)
+        val pinLayout = dialogView.findViewById<TextInputLayout>(R.id.pinLayout)
         val spinnerRole = dialogView.findViewById<Spinner>(R.id.spinnerRole)
 
         val roles = arrayOf("EMPLOYEE", "ADMINISTRATOR")
@@ -75,6 +77,36 @@ class EmployeesActivity : AppCompatActivity() {
             android.R.layout.simple_spinner_dropdown_item,
             roles
         )
+
+        // 🔥 LIVE PIN CHECK
+        etPin.addTextChangedListener(object : android.text.TextWatcher {
+
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+
+            override fun afterTextChanged(s: android.text.Editable?) {
+
+                val pin = s.toString()
+
+                if (pin.length == 4) {
+
+                    db.collection("Employees")
+                        .whereEqualTo("pin", pin)
+                        .get()
+                        .addOnSuccessListener { documents ->
+
+                            if (!documents.isEmpty) {
+                                pinLayout.error = "PIN already in use"
+                            } else {
+                                pinLayout.error = null
+                            }
+                        }
+                } else {
+                    pinLayout.error = null
+                }
+            }
+        })
 
         AlertDialog.Builder(this)
             .setTitle("Add Employee")
@@ -87,6 +119,11 @@ class EmployeesActivity : AppCompatActivity() {
 
                 if (name.isEmpty() || pin.isEmpty()) {
                     Toast.makeText(this, "All fields required", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+
+                if (pinLayout.error != null) {
+                    Toast.makeText(this, "Fix PIN error first", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
 
@@ -141,7 +178,6 @@ class EmployeesActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Edit Employee")
             .setView(dialogView)
-
             .setPositiveButton("Update") { _, _ ->
 
                 val newName = etName.text.toString().trim()
@@ -167,7 +203,6 @@ class EmployeesActivity : AppCompatActivity() {
                         loadEmployees()
                     }
             }
-
             .setNeutralButton("Delete") { _, _ ->
 
                 db.collection("Employees")
@@ -178,7 +213,6 @@ class EmployeesActivity : AppCompatActivity() {
                         loadEmployees()
                     }
             }
-
             .setNegativeButton("Cancel", null)
             .show()
     }

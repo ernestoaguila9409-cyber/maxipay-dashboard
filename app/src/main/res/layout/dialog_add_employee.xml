@@ -7,13 +7,16 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content">
 
+    <!-- Employee Name -->
     <EditText
         android:id="@+id/etEmployeeName"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="Employee Name"/>
 
+    <!-- PIN Field with Eye Toggle -->
     <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/pinLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
@@ -29,6 +32,7 @@
 
     </com.google.android.material.textfield.TextInputLayout>
 
+    <!-- Role Spinner -->
     <Spinner
         android:id="@+id/spinnerRole"
         android:layout_width="match_parent"
