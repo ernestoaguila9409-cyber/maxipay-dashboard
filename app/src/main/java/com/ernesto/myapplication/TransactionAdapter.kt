@@ -38,7 +38,7 @@ class TransactionAdapter(
         val context = holder.itemView.context
 
         val saleAmount = sale.amountInCents / 100.0
-        val totalRefunded = refunds.sumOf { it.amountInCents } / 100.0
+        val totalRefunded = refunds.sumOf { kotlin.math.abs(it.amountInCents) } / 100.0
         val netAmount = saleAmount - totalRefunded
 
         val date = SimpleDateFormat("MM/dd/yyyy HH:mm", Locale.getDefault())

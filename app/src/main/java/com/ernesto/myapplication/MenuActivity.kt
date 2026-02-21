@@ -6,7 +6,7 @@ import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Locale
-
+import android.content.Intent
 class MenuActivity : AppCompatActivity() {
 
     // name -> (quantity, price)
@@ -35,7 +35,15 @@ class MenuActivity : AppCompatActivity() {
         loadCategories()
 
         btnCheckout.setOnClickListener {
-            Toast.makeText(this, "Proceed to payment", Toast.LENGTH_SHORT).show()
+
+            if (cartMap.isEmpty()) {
+                Toast.makeText(this, "Cart is empty", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val intent = Intent(this, PaymentActivity::class.java)
+            intent.putExtra("TOTAL_AMOUNT", totalAmount)
+            startActivity(intent)
         }
     }
 

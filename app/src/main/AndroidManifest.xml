@@ -10,39 +10,33 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
-        <activity
-            android:name=".MenuOnlyActivity"
-            android:exported="false" />
-        <activity
-            android:name=".MenuActivity"
-            android:exported="false" />
-        <activity
-            android:name=".EmployeesActivity"
-            android:exported="false" /> <!-- LOGIN SCREEN (FIRST SCREEN) -->
+
+        <!-- Login Screen (Launcher) -->
         <activity
             android:name=".LoginActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity> <!-- MAIN POS SCREEN -->
-        <activity
-            android:name=".MainActivity"
-            android:exported="false" />
-        <activity
-            android:name=".BatchDetailsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".BatchManagementActivity"
-            android:exported="false" />
-        <activity
-            android:name=".PaymentActivity"
-            android:exported="false" />
-        <activity
-            android:name=".TransactionActivity"
-            android:exported="false" />
+        </activity>
+
+        <!-- POS Screens -->
+        <activity android:name=".MainActivity" android:exported="false" />
+        <activity android:name=".MenuActivity" android:exported="false" />
+        <activity android:name=".MenuOnlyActivity" android:exported="false" />
+        <activity android:name=".PaymentActivity" android:exported="false" />
+
+        <!-- Employees -->
+        <activity android:name=".EmployeesActivity" android:exported="false" />
+
+        <!-- Batch -->
+        <activity android:name=".BatchManagementActivity" android:exported="false" />
+        <activity android:name=".BatchDetailsActivity" android:exported="false" />
+
+        <!-- Transactions -->
+        <activity android:name=".TransactionActivity" android:exported="false" />
+
     </application>
 
 </manifest>
