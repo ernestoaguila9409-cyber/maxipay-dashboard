@@ -3,10 +3,10 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:gravity="center"
     android:orientation="vertical"
     android:padding="24dp"
-    android:background="#F5F5F5">
+    android:background="#F5F5F5"
+    android:gravity="center_horizontal">
 
     <TextView
         android:id="@+id/txtPaymentTotal"
@@ -14,13 +14,33 @@
         android:layout_height="wrap_content"
         android:textSize="22sp"
         android:textStyle="bold"
-        android:text="Total: $0.00"/>
+        android:text="Total: $0.00"
+        android:layout_marginBottom="40dp"/>
 
     <Button
-        android:id="@+id/btnConfirmPayment"
+        android:id="@+id/btnCredit"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Confirm Payment"
-        android:layout_marginTop="24dp"/>
+        android:layout_height="60dp"
+        android:text="Credit"
+        android:layout_marginBottom="16dp"
+        android:backgroundTint="#6A4FB3"
+        android:textColor="@android:color/white"/>
+
+    <Button
+        android:id="@+id/btnDebit"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:text="Debit"
+        android:layout_marginBottom="16dp"
+        android:backgroundTint="#6A4FB3"
+        android:textColor="@android:color/white"/>
+
+    <Button
+        android:id="@+id/btnCash"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:text="Cash"
+        android:backgroundTint="#4CAF50"
+        android:textColor="@android:color/white"/>
 
 </LinearLayout>
