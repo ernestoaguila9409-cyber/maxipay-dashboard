@@ -6,14 +6,19 @@
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="My Application"
+        android:label=""
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
         <activity
-            android:name=".EmployeesActivity"
+            android:name=".MenuOnlyActivity"
             android:exported="false" />
-        <!-- LOGIN SCREEN (FIRST SCREEN) -->
+        <activity
+            android:name=".MenuActivity"
+            android:exported="false" />
+        <activity
+            android:name=".EmployeesActivity"
+            android:exported="false" /> <!-- LOGIN SCREEN (FIRST SCREEN) -->
         <activity
             android:name=".LoginActivity"
             android:exported="true">

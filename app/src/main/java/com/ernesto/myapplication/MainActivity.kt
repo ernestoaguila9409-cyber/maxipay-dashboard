@@ -3,19 +3,12 @@ package com.ernesto.myapplication
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.TextView
-import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.IOException
 import java.util.*
-import java.util.concurrent.TimeUnit
-import android.util.Log
-import android.widget.ImageButton
+
 class MainActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
@@ -29,26 +22,27 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // 🔥 GET LOGGED IN USER
+        // 🔥 MENU ICON CLICK (TOP RIGHT)
+        findViewById<ImageButton>(R.id.btnMenuTop).setOnClickListener {
+            val intent = Intent(this, MenuOnlyActivity::class.java)
+            intent.putExtra("batchId", currentBatchId)
+            startActivity(intent)
+        }
+
         val employeeName = intent.getStringExtra("employeeName") ?: ""
         val employeeRole = intent.getStringExtra("employeeRole") ?: ""
 
-        val txtLoggedUser = findViewById<TextView?>(R.id.txtLoggedUser)
-        txtLoggedUser?.text = "Logged in as: $employeeName ($employeeRole)"
+        val txtLoggedUser = findViewById<TextView>(R.id.txtLoggedUser)
+        txtLoggedUser.text = "Logged in as: $employeeName ($employeeRole)"
 
         txtTodayTotal = findViewById(R.id.txtTodayTotal)
         txtTodayCount = findViewById(R.id.txtTodayCount)
 
         ensureOpenBatch()
 
+        // TAKE PAYMENT → OPEN MENU
         findViewById<Button>(R.id.btnTakePayment).setOnClickListener {
-
-            if (currentBatchId.isEmpty()) {
-                Toast.makeText(this, "No open batch", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
-            val intent = Intent(this, PaymentActivity::class.java)
+            val intent = Intent(this, MenuActivity::class.java)
             intent.putExtra("batchId", currentBatchId)
             startActivity(intent)
         }
@@ -61,12 +55,10 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, BatchManagementActivity::class.java))
         }
 
-        // 🔥 NEW: EMPLOYEES BUTTON
         findViewById<Button>(R.id.btnEmployees).setOnClickListener {
             startActivity(Intent(this, EmployeesActivity::class.java))
         }
 
-        // 🔥 LOGOUT BUTTON (PUT IT HERE)
         findViewById<ImageButton>(R.id.btnLogout).setOnClickListener {
             val intent = Intent(this, LoginActivity::class.java)
             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -81,9 +73,6 @@ class MainActivity : AppCompatActivity() {
         loadTodayStats()
     }
 
-    // ======================================
-    // ENSURE OPEN BATCH EXISTS
-    // ======================================
     private fun ensureOpenBatch() {
 
         db.collection("Batches")
@@ -93,10 +82,7 @@ class MainActivity : AppCompatActivity() {
             .addOnSuccessListener { documents ->
 
                 if (!documents.isEmpty) {
-
                     currentBatchId = documents.documents[0].id
-                    Log.d("BATCH_DEBUG", "Existing batch: $currentBatchId")
-
                 } else {
 
                     val newBatchId = "BATCH_${System.currentTimeMillis()}"
@@ -114,15 +100,11 @@ class MainActivity : AppCompatActivity() {
                         .set(batchData)
                         .addOnSuccessListener {
                             currentBatchId = newBatchId
-                            Log.d("BATCH_DEBUG", "New batch created: $currentBatchId")
                         }
                 }
             }
     }
 
-    // ======================================
-    // LOAD DASHBOARD TOTALS
-    // ======================================
     private fun loadTodayStats() {
 
         val calendar = Calendar.getInstance()
@@ -164,121 +146,6 @@ class MainActivity : AppCompatActivity() {
 
                 txtTodayTotal.text = String.format(Locale.US, "Today: $%.2f", total)
                 txtTodayCount.text = "Transactions: $count"
-            }
-    }
-
-    // ======================================
-    // CONFIRM SETTLE
-    // ======================================
-    private fun confirmSettle() {
-        AlertDialog.Builder(this)
-            .setTitle("Settle Batch")
-            .setMessage("Are you sure you want to close the batch?")
-            .setPositiveButton("YES") { _, _ ->
-                settleBatch()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    // ======================================
-    // CALL SPIN SETTLE API
-    // ======================================
-    private fun settleBatch() {
-
-        val json = """
-        {
-          "Tpn": "11881706541A",
-          "RegisterId": "134909005",
-          "Authkey": "Qt9N7CxhDs"
-        }
-        """.trimIndent()
-
-        val client = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(180, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .build()
-
-        val body = json.toRequestBody("application/json".toMediaType())
-
-        val request = Request.Builder()
-            .url("https://spinpos.net/v2/Payment/Settle")
-            .post(body)
-            .addHeader("Content-Type", "application/json")
-            .build()
-
-        client.newCall(request).enqueue(object : Callback {
-
-            override fun onFailure(call: Call, e: IOException) {
-                runOnUiThread {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "Settle Failed: ${e.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-
-                runOnUiThread {
-
-                    if (response.isSuccessful) {
-
-                        closeCurrentBatch()
-
-                    } else {
-
-                        Toast.makeText(
-                            this@MainActivity,
-                            "Settle Failed",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                }
-            }
-        })
-    }
-
-    // ======================================
-    // CLOSE CURRENT BATCH
-    // ======================================
-    private fun closeCurrentBatch() {
-
-        if (currentBatchId.isEmpty()) return
-
-        db.collection("Batches")
-            .document(currentBatchId)
-            .update(
-                mapOf(
-                    "closed" to true,
-                    "closedAt" to Date()
-                )
-            )
-            .addOnSuccessListener {
-
-                db.collection("Transactions")
-                    .whereEqualTo("settled", false)
-                    .get()
-                    .addOnSuccessListener { docs ->
-
-                        for (doc in docs) {
-                            db.collection("Transactions")
-                                .document(doc.id)
-                                .update("settled", true)
-                        }
-
-                        Toast.makeText(
-                            this,
-                            "Batch Closed Successfully",
-                            Toast.LENGTH_LONG
-                        ).show()
-
-                        currentBatchId = ""
-                        ensureOpenBatch()
-                        loadTodayStats()
-                    }
             }
     }
 }

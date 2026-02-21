@@ -1,68 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
     android:orientation="vertical"
     android:gravity="center"
     android:padding="24dp"
-    android:background="#F5F5F5">
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
 
-    <!-- Amount Display -->
     <TextView
-        android:id="@+id/txtAmount"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="$0.00"
-        android:textSize="36sp"
+        android:id="@+id/txtTotalPayment"
+        android:textSize="28sp"
         android:textStyle="bold"
-        android:layout_marginBottom="20dp"/>
-
-    <!-- 🔥 ADD THIS RIGHT HERE -->
-    <RadioGroup
-        android:id="@+id/paymentTypeGroup"
+        android:layout_marginBottom="40dp"
         android:layout_width="wrap_content"
+        android:layout_height="wrap_content"/>
+
+    <Button
+        android:id="@+id/btnCash"
+        android:text="Pay Cash"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="20dp">
+        android:layout_marginBottom="16dp"/>
 
-        <RadioButton
-            android:id="@+id/radioCredit"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Credit"
-            android:checked="true"/>
-
-        <RadioButton
-            android:id="@+id/radioDebit"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Debit"/>
-    </RadioGroup>
-
-    <!-- Keypad -->
-    <GridLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:rowCount="4"
-        android:columnCount="3">
-
-        <Button android:id="@+id/btn1" android:text="1" style="@style/KeyButton"/>
-        <Button android:id="@+id/btn2" android:text="2" style="@style/KeyButton"/>
-        <Button android:id="@+id/btn3" android:text="3" style="@style/KeyButton"/>
-
-        <Button android:id="@+id/btn4" android:text="4" style="@style/KeyButton"/>
-        <Button android:id="@+id/btn5" android:text="5" style="@style/KeyButton"/>
-        <Button android:id="@+id/btn6" android:text="6" style="@style/KeyButton"/>
-
-        <Button android:id="@+id/btn7" android:text="7" style="@style/KeyButton"/>
-        <Button android:id="@+id/btn8" android:text="8" style="@style/KeyButton"/>
-        <Button android:id="@+id/btn9" android:text="9" style="@style/KeyButton"/>
-
-        <Button android:id="@+id/btnClear" android:text="C" style="@style/KeyButton"/>
-        <Button android:id="@+id/btn0" android:text="0" style="@style/KeyButton"/>
-        <Button android:id="@+id/btnOK" android:text="OK" style="@style/KeyButton"/>
-
-    </GridLayout>
+    <Button
+        android:id="@+id/btnCard"
+        android:text="Pay Card"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
 
 </LinearLayout>
