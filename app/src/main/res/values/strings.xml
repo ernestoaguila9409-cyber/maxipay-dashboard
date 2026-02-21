@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">My Application</string>
+    <string name="categories">Categories</string>
+    <string name="add_category">Add Category</string>
 </resources>
