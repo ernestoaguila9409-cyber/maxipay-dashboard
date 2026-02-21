@@ -1,12 +1,14 @@
 package com.ernesto.myapplication
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Locale
-import android.content.Intent
+
 class MenuActivity : AppCompatActivity() {
 
     // name -> (quantity, price)
@@ -19,8 +21,18 @@ class MenuActivity : AppCompatActivity() {
     private lateinit var btnCheckout: Button
 
     private val db = FirebaseFirestore.getInstance()
-
     private var totalAmount = 0.0
+
+    // ✅ MODERN RESULT HANDLER
+    private val paymentLauncher =
+        registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+
+            if (result.resultCode == RESULT_OK) {
+                clearCart()
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,8 +55,20 @@ class MenuActivity : AppCompatActivity() {
 
             val intent = Intent(this, PaymentActivity::class.java)
             intent.putExtra("TOTAL_AMOUNT", totalAmount)
-            startActivity(intent)
+            paymentLauncher.launch(intent)
         }
+    }
+
+    // ==========================
+    // CLEAR CART AFTER PAYMENT
+    // ==========================
+    private fun clearCart() {
+
+        cartMap.clear()
+        totalAmount = 0.0
+
+        cartContainer.removeAllViews()
+        txtTotal.text = "Total: $0.00"
     }
 
     // ==========================
@@ -59,6 +83,7 @@ class MenuActivity : AppCompatActivity() {
             .addOnSuccessListener { documents ->
 
                 for (doc in documents) {
+
                     val name = doc.getString("name") ?: continue
                     val categoryId = doc.id
 
@@ -109,7 +134,6 @@ class MenuActivity : AppCompatActivity() {
                     params.setMargins(16, 16, 16, 16)
 
                     button.layoutParams = params
-
                     itemContainer.addView(button)
                 }
             }
@@ -123,8 +147,7 @@ class MenuActivity : AppCompatActivity() {
         val current = cartMap[name]
 
         if (current != null) {
-            val newQty = current.first + 1
-            cartMap[name] = Pair(newQty, price)
+            cartMap[name] = Pair(current.first + 1, price)
         } else {
             cartMap[name] = Pair(1, price)
         }
@@ -150,7 +173,7 @@ class MenuActivity : AppCompatActivity() {
 
             val textView = TextView(this)
             textView.text =
-                "$name  x$quantity  -  $${String.format(Locale.US, "%.2f", itemTotal)}"
+                "$name x$quantity - $${String.format(Locale.US, "%.2f", itemTotal)}"
             textView.textSize = 16f
             textView.setPadding(8, 8, 8, 8)
 

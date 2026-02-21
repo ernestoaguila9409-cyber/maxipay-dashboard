@@ -241,7 +241,7 @@ class TransactionActivity : AppCompatActivity() {
                                 "originalReferenceId" to referenceId,
                                 "amount" to refundAmount,
                                 "type" to "REFUND",
-                                "paymentType" to "",
+                                "transaction.paymentType" to "",
                                 "cardBrand" to "",
                                 "last4" to "",
                                 "entryType" to "",

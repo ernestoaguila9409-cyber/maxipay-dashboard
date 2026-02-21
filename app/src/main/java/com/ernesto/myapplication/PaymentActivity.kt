@@ -130,13 +130,13 @@ class PaymentActivity : AppCompatActivity() {
                         val entryType = cardData?.optString("EntryType") ?: ""
 
                         saveTransaction(
-                            paymentType = paymentType,
-                            referenceId = referenceId,
-                            cardBrand = cardType,
-                            last4 = last4,
-                            entryType = entryType,
-                            authCode = authCode,
-                            invoiceNumber = invoiceNumber
+                            paymentType,
+                            referenceId,
+                            cardType,
+                            last4,
+                            entryType,
+                            authCode,
+                            invoiceNumber
                         )
 
                         Toast.makeText(
@@ -145,9 +145,12 @@ class PaymentActivity : AppCompatActivity() {
                             Toast.LENGTH_LONG
                         ).show()
 
+                        // 🔥 MUST BE INSIDE runOnUiThread
+                        setResult(RESULT_OK)
                         finish()
 
                     } else {
+
                         Toast.makeText(
                             this@PaymentActivity,
                             "Payment Declined ❌",
@@ -182,6 +185,7 @@ class PaymentActivity : AppCompatActivity() {
             Toast.LENGTH_LONG
         ).show()
 
+        setResult(RESULT_OK)
         finish()
     }
 

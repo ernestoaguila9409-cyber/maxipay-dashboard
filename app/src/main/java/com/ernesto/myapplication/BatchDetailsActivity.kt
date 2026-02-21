@@ -1,23 +1,27 @@
 package com.ernesto.myapplication
 
 import android.os.Bundle
-import android.util.Log
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.ernesto.myapplication.data.Transaction
-import com.ernesto.myapplication.data.SaleWithRefunds
 
 class BatchDetailsActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
 
     private lateinit var txtBatchTitle: TextView
-    private lateinit var recyclerTransactions: RecyclerView
+
+    private lateinit var txtCashSales: TextView
+    private lateinit var txtCreditSales: TextView
+    private lateinit var txtDebitSales: TextView
+    private lateinit var txtCashRefunds: TextView
+    private lateinit var txtCardRefunds: TextView
+    private lateinit var txtNetCash: TextView
+    private lateinit var txtNetCard: TextView
+    private lateinit var txtBatchTotal: TextView
 
     private var batchId: String = ""
 
@@ -26,12 +30,17 @@ class BatchDetailsActivity : AppCompatActivity() {
         setContentView(R.layout.activity_batch_details)
 
         txtBatchTitle = findViewById(R.id.txtBatchTitle)
-        recyclerTransactions = findViewById(R.id.recyclerBatchTransactions)
 
-        recyclerTransactions.layoutManager = LinearLayoutManager(this)
+        txtCashSales = findViewById(R.id.txtCashSales)
+        txtCreditSales = findViewById(R.id.txtCreditSales)
+        txtDebitSales = findViewById(R.id.txtDebitSales)
+        txtCashRefunds = findViewById(R.id.txtCashRefunds)
+        txtCardRefunds = findViewById(R.id.txtCardRefunds)
+        txtNetCash = findViewById(R.id.txtNetCash)
+        txtNetCard = findViewById(R.id.txtNetCard)
+        txtBatchTotal = findViewById(R.id.txtBatchTotal)
 
         batchId = intent.getStringExtra("batchId") ?: ""
-
         txtBatchTitle.text = "Batch ID: $batchId"
 
         loadBatchTransactions()
@@ -44,14 +53,6 @@ class BatchDetailsActivity : AppCompatActivity() {
             .orderBy("timestamp", Query.Direction.DESCENDING)
             .get()
             .addOnSuccessListener { documents ->
-
-                // 🔥 DEBUG LOGS
-                Log.d("BATCH_DEBUG", "Batch ID: $batchId")
-                Log.d("BATCH_DEBUG", "Documents size: ${documents.size()}")
-
-                for (doc in documents) {
-                    Log.d("BATCH_DEBUG", doc.data.toString())
-                }
 
                 if (documents.isEmpty) {
                     Toast.makeText(
@@ -82,25 +83,56 @@ class BatchDetailsActivity : AppCompatActivity() {
                     allTransactions.add(transaction)
                 }
 
-                val sales = allTransactions.filter { it.type == "SALE" }
-                val refunds = allTransactions.filter { it.type == "REFUND" }
+                // ===============================
+                // CALCULATE TOTALS
+                // ===============================
 
-                val groupedList = mutableListOf<SaleWithRefunds>()
+                var cashSales = 0.0
+                var creditSales = 0.0
+                var debitSales = 0.0
 
-                sales.forEach { sale ->
-                    val saleRefunds =
-                        refunds.filter { it.originalReferenceId == sale.referenceId }
+                var cashRefunds = 0.0
+                var cardRefunds = 0.0
 
-                    groupedList.add(
-                        SaleWithRefunds(
-                            sale = sale,
-                            refunds = saleRefunds
-                        )
-                    )
+                for (transaction in allTransactions) {
+
+                    val amount = transaction.amountInCents / 100.0
+
+                    if (transaction.type == "SALE") {
+                        when (transaction.paymentType) {
+                            "Cash" -> cashSales += amount
+                            "Credit" -> creditSales += amount
+                            "Debit" -> debitSales += amount
+                        }
+                    }
+
+                    if (transaction.type == "REFUND") {
+                        when (transaction.paymentType) {
+                            "Cash" -> cashRefunds += amount
+                            "Credit", "Debit" -> cardRefunds += amount
+                        }
+                    }
                 }
 
-                recyclerTransactions.adapter =
-                    BatchTransactionAdapter(groupedList)
+                val netCash = cashSales - cashRefunds
+                val netCard = (creditSales + debitSales) - cardRefunds
+                val batchNetTotal = netCash + netCard
+
+                // ===============================
+                // DISPLAY SUMMARY
+                // ===============================
+
+                txtCashSales.text = "Cash Sales: $${format(cashSales)}"
+                txtCreditSales.text = "Credit Sales: $${format(creditSales)}"
+                txtDebitSales.text = "Debit Sales: $${format(debitSales)}"
+
+                txtCashRefunds.text = "Cash Refunds: -$${format(cashRefunds)}"
+                txtCardRefunds.text = "Card Refunds: -$${format(cardRefunds)}"
+
+                txtNetCash.text = "Net Cash: $${format(netCash)}"
+                txtNetCard.text = "Net Card: $${format(netCard)}"
+
+                txtBatchTotal.text = "Batch Net Total: $${format(batchNetTotal)}"
             }
             .addOnFailureListener {
                 Toast.makeText(
@@ -109,5 +141,9 @@ class BatchDetailsActivity : AppCompatActivity() {
                     Toast.LENGTH_SHORT
                 ).show()
             }
+    }
+
+    private fun format(value: Double): String {
+        return String.format("%.2f", value)
     }
 }
