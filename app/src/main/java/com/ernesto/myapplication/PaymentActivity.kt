@@ -1,8 +1,11 @@
 package com.ernesto.myapplication
 
-import android.os.Bundle
+import android.os.*
 import android.util.Log
+import android.view.View
 import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -10,6 +13,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.IOException
 import java.util.*
 import java.util.concurrent.TimeUnit
@@ -17,6 +21,10 @@ import java.util.Locale
 
 class PaymentActivity : AppCompatActivity() {
 
+    private lateinit var statusContainer: LinearLayout
+    private lateinit var progressBar: ProgressBar
+    private lateinit var txtSubStatus: TextView
+    private lateinit var txtStatus: TextView
     private lateinit var txtPaymentTotal: TextView
     private lateinit var btnCredit: Button
     private lateinit var btnDebit: Button
@@ -34,26 +42,81 @@ class PaymentActivity : AppCompatActivity() {
         btnDebit = findViewById(R.id.btnDebit)
         btnCash = findViewById(R.id.btnCash)
 
+        statusContainer = findViewById(R.id.statusContainer)
+        progressBar = findViewById(R.id.progressBar)
+        txtSubStatus = findViewById(R.id.txtSubStatus)
+        txtStatus = findViewById(R.id.txtStatus)
+
         totalAmount = intent.getDoubleExtra("TOTAL_AMOUNT", 0.0)
 
         txtPaymentTotal.text =
             String.format(Locale.US, "Total: $%.2f", totalAmount)
 
         btnCredit.setOnClickListener {
+            showWaitingStatus()
             processCardPayment("Credit")
         }
 
         btnDebit.setOnClickListener {
+            showWaitingStatus()
             processCardPayment("Debit")
         }
 
         btnCash.setOnClickListener {
+            showWaitingStatus()
             processCashPayment()
         }
     }
 
     // ===============================
-    // CREDIT / DEBIT PROCESSING
+    // SHOW WAITING
+    // ===============================
+    private fun showWaitingStatus() {
+        statusContainer.visibility = View.VISIBLE
+        progressBar.visibility = View.VISIBLE
+
+        txtStatus.text = "Waiting for card..."
+        txtStatus.setTextColor(getColor(android.R.color.holo_orange_dark))
+        txtSubStatus.text = "Please present card on terminal"
+
+        btnCredit.isEnabled = false
+        btnDebit.isEnabled = false
+        btnCash.isEnabled = false
+    }
+
+    // ===============================
+    // SHOW APPROVED
+    // ===============================
+    private fun showApproved() {
+        progressBar.visibility = View.GONE
+
+        txtStatus.text = "APPROVED ✅"
+        txtStatus.setTextColor(getColor(android.R.color.holo_green_dark))
+        txtSubStatus.text = "Transaction successful"
+
+        Handler(Looper.getMainLooper()).postDelayed({
+            setResult(RESULT_OK)
+            finish()
+        }, 1500)
+    }
+
+    // ===============================
+    // SHOW DECLINED
+    // ===============================
+    private fun showDeclined() {
+        progressBar.visibility = View.GONE
+
+        txtStatus.text = "DECLINED ❌"
+        txtStatus.setTextColor(getColor(android.R.color.holo_red_dark))
+        txtSubStatus.text = "Please try again"
+
+        btnCredit.isEnabled = true
+        btnDebit.isEnabled = true
+        btnCash.isEnabled = true
+    }
+
+    // ===============================
+    // CARD PROCESSING
     // ===============================
     private fun processCardPayment(paymentType: String) {
 
@@ -99,6 +162,7 @@ class PaymentActivity : AppCompatActivity() {
 
             override fun onFailure(call: Call, e: IOException) {
                 runOnUiThread {
+                    showDeclined()
                     Toast.makeText(
                         this@PaymentActivity,
                         "Payment Failed: ${e.message}",
@@ -110,7 +174,6 @@ class PaymentActivity : AppCompatActivity() {
             override fun onResponse(call: Call, response: Response) {
 
                 val responseText = response.body?.string() ?: ""
-
                 Log.d("SPINPOS_RESPONSE", responseText)
 
                 runOnUiThread {
@@ -119,7 +182,7 @@ class PaymentActivity : AppCompatActivity() {
                         responseText.contains("Approved", ignoreCase = true)
                     ) {
 
-                        val jsonObj = org.json.JSONObject(responseText)
+                        val jsonObj = JSONObject(responseText)
 
                         val authCode = jsonObj.optString("AuthCode")
                         val invoiceNumber = jsonObj.optString("InvoiceNumber")
@@ -139,23 +202,10 @@ class PaymentActivity : AppCompatActivity() {
                             invoiceNumber
                         )
 
-                        Toast.makeText(
-                            this@PaymentActivity,
-                            "PAYMENT APPROVED ✅",
-                            Toast.LENGTH_LONG
-                        ).show()
-
-                        // 🔥 MUST BE INSIDE runOnUiThread
-                        setResult(RESULT_OK)
-                        finish()
+                        showApproved()
 
                     } else {
-
-                        Toast.makeText(
-                            this@PaymentActivity,
-                            "Payment Declined ❌",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        showDeclined()
                     }
                 }
             }
@@ -179,14 +229,7 @@ class PaymentActivity : AppCompatActivity() {
             invoiceNumber = ""
         )
 
-        Toast.makeText(
-            this,
-            "Cash Payment Completed 💵",
-            Toast.LENGTH_LONG
-        ).show()
-
-        setResult(RESULT_OK)
-        finish()
+        showApproved()
     }
 
     // ===============================

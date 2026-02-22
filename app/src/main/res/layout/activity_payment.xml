@@ -4,9 +4,9 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="24dp"
+    android:gravity="center_horizontal"
     android:background="#F5F5F5"
-    android:gravity="center_horizontal">
+    android:padding="24dp">
 
     <TextView
         android:id="@+id/txtPaymentTotal"
@@ -14,33 +14,61 @@
         android:layout_height="wrap_content"
         android:textSize="22sp"
         android:textStyle="bold"
-        android:text="Total: $0.00"
-        android:layout_marginBottom="40dp"/>
+        android:layout_marginBottom="24dp"/>
+
+    <!-- 🔥 STATUS CONTAINER -->
+    <LinearLayout
+        android:id="@+id/statusContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:visibility="gone"
+        android:padding="24dp">
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView
+            android:id="@+id/txtStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Waiting for card..."
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="#FF9800"/>
+
+        <TextView
+            android:id="@+id/txtSubStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Please present card on terminal"
+            android:textSize="14sp"
+            android:textColor="#777777"
+            android:layout_marginTop="8dp"/>
+    </LinearLayout>
 
     <Button
         android:id="@+id/btnCredit"
         android:layout_width="match_parent"
-        android:layout_height="60dp"
+        android:layout_height="wrap_content"
         android:text="Credit"
-        android:layout_marginBottom="16dp"
-        android:backgroundTint="#6A4FB3"
-        android:textColor="@android:color/white"/>
+        android:layout_marginTop="24dp"/>
 
     <Button
         android:id="@+id/btnDebit"
         android:layout_width="match_parent"
-        android:layout_height="60dp"
+        android:layout_height="wrap_content"
         android:text="Debit"
-        android:layout_marginBottom="16dp"
-        android:backgroundTint="#6A4FB3"
-        android:textColor="@android:color/white"/>
+        android:layout_marginTop="16dp"/>
 
     <Button
         android:id="@+id/btnCash"
         android:layout_width="match_parent"
-        android:layout_height="60dp"
+        android:layout_height="wrap_content"
         android:text="Cash"
-        android:backgroundTint="#4CAF50"
-        android:textColor="@android:color/white"/>
-
+        android:layout_marginTop="16dp"/>
 </LinearLayout>
