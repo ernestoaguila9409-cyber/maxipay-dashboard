@@ -1,37 +1,39 @@
 package com.ernesto.myapplication
 
-import android.graphics.Color
 import android.os.Bundle
 import android.text.InputType
-import android.widget.*
+import android.widget.EditText
+import android.widget.ImageButton
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.FirebaseFirestore
 
 class MenuOnlyActivity : AppCompatActivity() {
 
-    private lateinit var categoryContainer: LinearLayout
-    private lateinit var itemContainer: LinearLayout
-
-    private var selectedCategoryId: String? = null
+    private lateinit var categoryRecycler: RecyclerView
+    private lateinit var itemRecycler: RecyclerView
 
     private val db = FirebaseFirestore.getInstance()
+    private var selectedCategoryId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_menu_only)
 
-        categoryContainer = findViewById(R.id.categoryContainer)
-        itemContainer = findViewById(R.id.itemContainer)
+        categoryRecycler = findViewById(R.id.categoryRecycler)
+        itemRecycler = findViewById(R.id.itemRecycler)
 
-        // ➕ Add Category
+        categoryRecycler.layoutManager = LinearLayoutManager(this)
+        itemRecycler.layoutManager = LinearLayoutManager(this)
+
         findViewById<ImageButton>(R.id.btnAddCategory).setOnClickListener {
             showAddCategoryDialog()
         }
 
-        // ➕ Add Item
         findViewById<ImageButton>(R.id.btnAddItem).setOnClickListener {
-
             if (selectedCategoryId == null) {
                 Toast.makeText(this, "Select a category first", Toast.LENGTH_SHORT).show()
             } else {
@@ -43,7 +45,72 @@ class MenuOnlyActivity : AppCompatActivity() {
     }
 
     // =========================================================
-    // CATEGORY SECTION
+    // LOAD CATEGORIES
+    // =========================================================
+
+    private fun loadCategories() {
+
+        db.collection("Categories")
+            .get()
+            .addOnSuccessListener { documents ->
+
+                val categoryList = mutableListOf<Pair<String, String>>() // id, name
+
+                for (doc in documents) {
+                    val name = doc.getString("name") ?: continue
+                    categoryList.add(Pair(doc.id, name))
+                }
+
+                categoryRecycler.adapter =
+                    CategoryAdapter(
+                        categories = categoryList,
+                        onCategoryClick = { categoryId ->
+                            selectedCategoryId = categoryId
+                            loadItems(categoryId)
+                        },
+                        context = this,
+                        onDataChanged = {
+                            loadCategories()
+                        }
+                    )}
+    }
+
+    // =========================================================
+    // LOAD ITEMS
+    // =========================================================
+
+    private fun loadItems(categoryId: String) {
+
+        db.collection("MenuItems")
+            .whereEqualTo("categoryId", categoryId)
+            .get()
+            .addOnSuccessListener { documents ->
+
+                val itemList = mutableListOf<ItemModel>()
+
+                for (doc in documents) {
+                    val name = doc.getString("name") ?: continue
+                    val price = doc.getDouble("price") ?: 0.0
+                    val stock = doc.getLong("stock") ?: 0L
+
+                    itemList.add(
+                        ItemModel(
+                            id = doc.id,
+                            name = name,
+                            price = price,
+                            stock = stock
+                        )
+                    )
+                }
+
+                itemRecycler.adapter = ItemAdapter(this, itemList) {
+                    loadItems(categoryId)
+                }
+            }
+    }
+
+    // =========================================================
+    // ADD CATEGORY
     // =========================================================
 
     private fun showAddCategoryDialog() {
@@ -51,91 +118,127 @@ class MenuOnlyActivity : AppCompatActivity() {
         val input = EditText(this)
         input.hint = "Category name"
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Add Category")
             .setView(input)
-            .setPositiveButton("Add") { _, _ ->
-                val name = input.text.toString().trim()
-                if (name.isNotEmpty()) {
-                    saveCategory(name)
-                }
-            }
+            .setPositiveButton("Add", null) // we override later
             .setNegativeButton("Cancel", null)
-            .show()
-    }
+            .create()
 
-    private fun saveCategory(name: String) {
+        dialog.setOnShowListener {
 
-        val category = hashMapOf(
-            "name" to name
-        )
+            val addButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            addButton.isEnabled = false
 
-        db.collection("Categories")
-            .add(category)
-            .addOnSuccessListener {
-                loadCategories()
+            input.addTextChangedListener(object : android.text.TextWatcher {
+
+                override fun afterTextChanged(s: android.text.Editable?) {}
+
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+
+                override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {
+
+                    val name = text.toString().trim()
+
+                    if (name.isEmpty()) {
+                        input.error = null
+                        addButton.isEnabled = false
+                        return
+                    }
+
+                    checkCategoryExists(name) { exists ->
+
+                        if (exists) {
+                            input.error = "Category already exists"
+                            addButton.isEnabled = false
+                        } else {
+                            input.error = null
+                            addButton.isEnabled = true
+                        }
+                    }
+                }
+            })
+
+            addButton.setOnClickListener {
+                val name = input.text.toString().trim()
+                saveCategory(name)
+                dialog.dismiss()
             }
+        }
+
+        dialog.show()
     }
+    private fun checkCategoryExists(name: String, callback: (Boolean) -> Unit) {
 
-    private fun loadCategories() {
-
-        categoryContainer.removeAllViews()
+        val normalizedName = name.trim().lowercase()
 
         db.collection("Categories")
             .get()
             .addOnSuccessListener { documents ->
 
+                var exists = false
+
                 for (doc in documents) {
-                    val name = doc.getString("name") ?: continue
-                    val categoryId = doc.id
-                    addCategoryView(name, categoryId)
+                    val existingName = doc.getString("name") ?: continue
+                    if (existingName.trim().lowercase() == normalizedName) {
+                        exists = true
+                        break
+                    }
+                }
+
+                callback(exists)
+            }
+    }
+    private fun saveCategory(name: String) {
+
+        val normalizedName = name.trim().lowercase()
+
+        db.collection("Categories")
+            .get()
+            .addOnSuccessListener { documents ->
+
+                var exists = false
+
+                for (doc in documents) {
+                    val existingName = doc.getString("name") ?: continue
+                    if (existingName.trim().lowercase() == normalizedName) {
+                        exists = true
+                        break
+                    }
+                }
+
+                if (exists) {
+                    Toast.makeText(
+                        this,
+                        "Category already exists",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+
+                    val category = hashMapOf("name" to name)
+
+                    db.collection("Categories")
+                        .add(category)
+                        .addOnSuccessListener {
+                            loadCategories()
+                            Toast.makeText(
+                                this,
+                                "Category added",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                 }
             }
     }
 
-    private fun addCategoryView(name: String, categoryId: String) {
-
-        val textView = TextView(this)
-        textView.text = name
-        textView.setPadding(40, 20, 40, 20)
-        textView.setBackgroundColor(Color.parseColor("#6A4FB3"))
-        textView.setTextColor(Color.WHITE)
-
-        val params = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        )
-        params.setMargins(0, 0, 20, 0)
-        textView.layoutParams = params
-
-        textView.setOnClickListener {
-
-            selectedCategoryId = categoryId
-            highlightSelectedCategory(textView)
-            loadItems(categoryId)
-        }
-
-        categoryContainer.addView(textView)
-    }
-
-    private fun highlightSelectedCategory(selectedView: TextView) {
-
-        for (i in 0 until categoryContainer.childCount) {
-            val child = categoryContainer.getChildAt(i) as TextView
-            child.setBackgroundColor(Color.parseColor("#6A4FB3"))
-        }
-
-        selectedView.setBackgroundColor(Color.parseColor("#4CAF50"))
-    }
-
     // =========================================================
-    // ITEMS SECTION
+    // ADD ITEM
     // =========================================================
 
     private fun showAddItemDialog() {
 
-        val layout = LinearLayout(this)
-        layout.orientation = LinearLayout.VERTICAL
+        val layout = android.widget.LinearLayout(this)
+        layout.orientation = android.widget.LinearLayout.VERTICAL
         layout.setPadding(40, 40, 40, 40)
 
         val nameInput = EditText(this)
@@ -174,55 +277,5 @@ class MenuOnlyActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
-    }
-
-    private fun loadItems(categoryId: String) {
-
-        itemContainer.removeAllViews()
-
-        db.collection("MenuItems")
-            .whereEqualTo("categoryId", categoryId)
-            .get()
-            .addOnSuccessListener { documents ->
-
-                if (documents.isEmpty) {
-                    showNoItems()
-                    return@addOnSuccessListener
-                }
-
-                for (doc in documents) {
-                    val name = doc.getString("name") ?: continue
-                    val price = doc.getDouble("price") ?: 0.0
-                    addItemView(name, price)
-                }
-            }
-    }
-
-    private fun addItemView(name: String, price: Double) {
-
-        val textView = TextView(this)
-        textView.text = "$name - $${String.format("%.2f", price)}"
-        textView.textSize = 16f
-        textView.setPadding(40, 40, 40, 40)
-        textView.setBackgroundColor(Color.WHITE)
-
-        val params = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        )
-        params.setMargins(0, 0, 0, 30)
-        textView.layoutParams = params
-
-        itemContainer.addView(textView)
-    }
-
-    private fun showNoItems() {
-
-        val textView = TextView(this)
-        textView.text = "No items yet"
-        textView.setPadding(40, 40, 40, 40)
-        textView.setBackgroundColor(Color.LTGRAY)
-
-        itemContainer.addView(textView)
     }
 }

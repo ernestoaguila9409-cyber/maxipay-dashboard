@@ -9,10 +9,23 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Locale
 
+// =============================================
+// CART MODEL
+// =============================================
+data class CartItem(
+    val itemId: String,
+    val name: String,
+    var quantity: Int,
+    val price: Double,
+    val stock: Long
+)
+
 class MenuActivity : AppCompatActivity() {
 
-    // name -> (quantity, price)
-    private val cartMap = mutableMapOf<String, Pair<Int, Double>>()
+    private val db = FirebaseFirestore.getInstance()
+
+    // itemId -> CartItem
+    private val cartMap = mutableMapOf<String, CartItem>()
 
     private lateinit var categoryContainer: LinearLayout
     private lateinit var itemContainer: GridLayout
@@ -20,17 +33,38 @@ class MenuActivity : AppCompatActivity() {
     private lateinit var txtTotal: TextView
     private lateinit var btnCheckout: Button
 
-    private val db = FirebaseFirestore.getInstance()
     private var totalAmount = 0.0
 
-    // ✅ MODERN RESULT HANDLER
+    // =============================================
+    // PAYMENT RESULT HANDLER
+    // =============================================
     private val paymentLauncher =
         registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
 
             if (result.resultCode == RESULT_OK) {
-                clearCart()
+
+                deductStockTransaction(
+                    onSuccess = {
+                        clearCart()
+                        Toast.makeText(
+                            this,
+                            "Stock updated successfully",
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        // Reload visible items to refresh stock display
+                        loadCategories()
+                    },
+                    onFailure = { error ->
+                        Toast.makeText(
+                            this,
+                            error,
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                )
             }
         }
 
@@ -59,21 +93,9 @@ class MenuActivity : AppCompatActivity() {
         }
     }
 
-    // ==========================
-    // CLEAR CART AFTER PAYMENT
-    // ==========================
-    private fun clearCart() {
-
-        cartMap.clear()
-        totalAmount = 0.0
-
-        cartContainer.removeAllViews()
-        txtTotal.text = "Total: $0.00"
-    }
-
-    // ==========================
+    // =============================================
     // LOAD CATEGORIES
-    // ==========================
+    // =============================================
     private fun loadCategories() {
 
         categoryContainer.removeAllViews()
@@ -100,9 +122,9 @@ class MenuActivity : AppCompatActivity() {
             }
     }
 
-    // ==========================
+    // =============================================
     // LOAD ITEMS
-    // ==========================
+    // =============================================
     private fun loadItems(categoryId: String) {
 
         itemContainer.removeAllViews()
@@ -114,17 +136,36 @@ class MenuActivity : AppCompatActivity() {
 
                 for (doc in documents) {
 
+                    val itemId = doc.id
                     val name = doc.getString("name") ?: continue
                     val price = doc.getDouble("price") ?: 0.0
+                    val stock = doc.getLong("stock") ?: 0L
 
                     val button = Button(this)
-                    button.text = name
-                    button.textSize = 16f
+
+                    button.text =
+                        "$name\n$${String.format(Locale.US, "%.2f", price)}\nStock: $stock"
+
+                    button.textSize = 14f
                     button.setTextColor(Color.WHITE)
-                    button.setBackgroundResource(R.drawable.item_tile)
+
+                    when {
+                        stock <= 0 -> {
+                            button.setBackgroundColor(Color.parseColor("#D32F2F"))
+                            button.isEnabled = false
+                        }
+
+                        stock <= 5 -> {
+                            button.setBackgroundColor(Color.parseColor("#F57C00"))
+                        }
+
+                        else -> {
+                            button.setBackgroundColor(Color.parseColor("#6A4FB3"))
+                        }
+                    }
 
                     button.setOnClickListener {
-                        addToCart(name, price)
+                        addToCart(itemId, name, price, stock)
                     }
 
                     val params = GridLayout.LayoutParams()
@@ -139,55 +180,123 @@ class MenuActivity : AppCompatActivity() {
             }
     }
 
-    // ==========================
-    // ADD TO CART
-    // ==========================
-    private fun addToCart(name: String, price: Double) {
+    // =============================================
+    // ADD TO CART (UI STOCK PROTECTION)
+    // =============================================
+    private fun addToCart(
+        itemId: String,
+        name: String,
+        price: Double,
+        stock: Long
+    ) {
 
-        val current = cartMap[name]
+        val existingItem = cartMap[itemId]
 
-        if (current != null) {
-            cartMap[name] = Pair(current.first + 1, price)
+        if (existingItem != null) {
+
+            if (existingItem.quantity >= stock) {
+                Toast.makeText(
+                    this,
+                    "Only $stock in stock.",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return
+            }
+
+            existingItem.quantity += 1
+
         } else {
-            cartMap[name] = Pair(1, price)
+
+            if (stock <= 0) {
+                Toast.makeText(
+                    this,
+                    "Out of stock.",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return
+            }
+
+            cartMap[itemId] = CartItem(
+                itemId = itemId,
+                name = name,
+                quantity = 1,
+                price = price,
+                stock = stock
+            )
         }
 
         refreshCart()
     }
 
-    // ==========================
+    // =============================================
     // REFRESH CART
-    // ==========================
+    // =============================================
     private fun refreshCart() {
 
         cartContainer.removeAllViews()
         totalAmount = 0.0
 
-        for ((name, data) in cartMap) {
+        for ((_, item) in cartMap) {
 
-            val quantity = data.first
-            val price = data.second
-            val itemTotal = quantity * price
-
+            val itemTotal = item.quantity * item.price
             totalAmount += itemTotal
 
             val textView = TextView(this)
             textView.text =
-                "$name x$quantity - $${String.format(Locale.US, "%.2f", itemTotal)}"
+                "${item.name} x${item.quantity} - $${String.format(Locale.US, "%.2f", itemTotal)}"
             textView.textSize = 16f
             textView.setPadding(8, 8, 8, 8)
 
             cartContainer.addView(textView)
         }
 
-        updateTotal()
-    }
-
-    // ==========================
-    // UPDATE TOTAL
-    // ==========================
-    private fun updateTotal() {
         txtTotal.text =
             "Total: $${String.format(Locale.US, "%.2f", totalAmount)}"
+    }
+
+    // =============================================
+    // FIRESTORE TRANSACTION (MULTI DEVICE SAFE)
+    // =============================================
+    private fun deductStockTransaction(
+        onSuccess: () -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+
+        db.runTransaction { transaction ->
+
+            for ((_, cartItem) in cartMap) {
+
+                val itemRef = db.collection("MenuItems")
+                    .document(cartItem.itemId)
+
+                val snapshot = transaction.get(itemRef)
+
+                val currentStock = snapshot.getLong("stock") ?: 0L
+
+                if (currentStock < cartItem.quantity) {
+                    throw Exception("Stock changed. Not enough inventory.")
+                }
+
+                val newStock = currentStock - cartItem.quantity
+
+                transaction.update(itemRef, "stock", newStock)
+            }
+
+            null
+        }
+            .addOnSuccessListener { onSuccess() }
+            .addOnFailureListener {
+                onFailure(it.message ?: "Transaction failed")
+            }
+    }
+
+    // =============================================
+    // CLEAR CART
+    // =============================================
+    private fun clearCart() {
+        cartMap.clear()
+        totalAmount = 0.0
+        cartContainer.removeAllViews()
+        txtTotal.text = "Total: $0.00"
     }
 }
