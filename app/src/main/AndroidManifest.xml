@@ -36,7 +36,8 @@
 
         <!-- Transactions -->
         <activity android:name=".TransactionActivity" android:exported="false" />
-
+        <activity android:name=".ModifierManagementActivity" />
+        <activity android:name=".GlobalModifierActivity"/>
     </application>
 
 </manifest>

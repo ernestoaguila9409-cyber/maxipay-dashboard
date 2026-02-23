@@ -8,6 +8,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.*
+import com.ernesto.myapplication.ModifierManagementActivity
 
 class MainActivity : AppCompatActivity() {
 
@@ -22,6 +23,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        findViewById<ImageButton>(R.id.btnModifiers).setOnClickListener {
+            startActivity(Intent(this, GlobalModifierActivity::class.java))
+        }
         // 🔥 MENU ICON CLICK (TOP RIGHT)
         findViewById<ImageButton>(R.id.btnMenuTop).setOnClickListener {
             val intent = Intent(this, MenuOnlyActivity::class.java)
