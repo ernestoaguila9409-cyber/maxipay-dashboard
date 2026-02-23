@@ -12,7 +12,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.FirebaseFirestore
-
+import android.content.Intent
 class ItemAdapter(
     private val context: Context,
     private val itemList: List<ItemModel>,
@@ -69,14 +69,23 @@ class ItemAdapter(
 
     private fun showOptionsDialog(item: ItemModel) {
 
-        val options = arrayOf("Edit", "Delete")
+        val options = arrayOf("Edit", "Delete", "Assign Modifiers")
 
         AlertDialog.Builder(context)
             .setTitle(item.name)
             .setItems(options) { _, which ->
                 when (which) {
+
                     0 -> showEditDialog(item)
+
                     1 -> deleteItem(item.id)
+
+                    2 -> {
+                        val intent = Intent(context, AssignModifierToItemActivity::class.java)
+                        intent.putExtra("ITEM_ID", item.id)
+                        intent.putExtra("ITEM_NAME", item.name)
+                        context.startActivity(intent)
+                    }
                 }
             }
             .show()

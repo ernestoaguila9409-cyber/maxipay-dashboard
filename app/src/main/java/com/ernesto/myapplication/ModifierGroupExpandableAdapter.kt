@@ -9,6 +9,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.FirebaseFirestore
+import java.util.Locale
 
 class ModifierGroupExpandableAdapter(
     private val groups: MutableList<ModifierGroupModel>
@@ -32,6 +33,9 @@ class ModifierGroupExpandableAdapter(
         val group = groups[position]
         holder.layout.removeAllViews()
 
+        // =========================
+        // GROUP TITLE
+        // =========================
         val title = TextView(holder.layout.context)
         title.text = group.name
         title.textSize = 18f
@@ -40,11 +44,22 @@ class ModifierGroupExpandableAdapter(
 
         holder.layout.addView(title)
 
+        // Expand on long press
+        // NORMAL TAP → Expand
         title.setOnClickListener {
             group.isExpanded = !group.isExpanded
             notifyItemChanged(position)
         }
 
+// LONG PRESS → Edit/Delete
+        title.setOnLongClickListener {
+            showGroupOptionsDialog(holder.layout.context, group)
+            true
+        }
+
+        // =========================
+        // IF EXPANDED → LOAD OPTIONS
+        // =========================
         if (group.isExpanded) {
 
             loadOptions(group, holder)
@@ -62,6 +77,100 @@ class ModifierGroupExpandableAdapter(
         }
     }
 
+    // =====================================================
+    // GROUP EDIT / DELETE
+    // =====================================================
+    private fun showGroupOptionsDialog(
+        context: android.content.Context,
+        group: ModifierGroupModel
+    ) {
+
+        val options = arrayOf("Edit Group", "Delete Group")
+
+        AlertDialog.Builder(context)
+            .setTitle(group.name)
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showEditGroupDialog(context, group)
+                    1 -> deleteGroup(group)
+                }
+            }
+            .show()
+    }
+
+    private fun showEditGroupDialog(
+        context: android.content.Context,
+        group: ModifierGroupModel
+    ) {
+
+        val layout = LinearLayout(context)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(40, 20, 40, 10)
+
+        val nameInput = EditText(context)
+        nameInput.setText(group.name)
+
+        val requiredCheckbox = android.widget.CheckBox(context)
+        requiredCheckbox.text = "Required"
+        requiredCheckbox.isChecked = group.required
+
+        val maxSelectionInput = EditText(context)
+        maxSelectionInput.setText(group.maxSelection.toString())
+        maxSelectionInput.inputType =
+            InputType.TYPE_CLASS_NUMBER
+
+        layout.addView(nameInput)
+        layout.addView(requiredCheckbox)
+        layout.addView(maxSelectionInput)
+
+        AlertDialog.Builder(context)
+            .setTitle("Edit Modifier Group")
+            .setView(layout)
+            .setPositiveButton("Save") { _, _ ->
+
+                val newName = nameInput.text.toString().trim()
+                val newRequired = requiredCheckbox.isChecked
+                val newMax =
+                    maxSelectionInput.text.toString().toIntOrNull() ?: 1
+
+                if (newName.isNotEmpty()) {
+
+                    val updates = mapOf(
+                        "name" to newName,
+                        "required" to newRequired,
+                        "maxSelection" to newMax
+                    )
+
+                    db.collection("ModifierGroups")
+                        .document(group.id)
+                        .update(updates)
+                        .addOnSuccessListener {
+
+                            group.name = newName
+                            group.isExpanded = false
+
+                            notifyDataSetChanged()
+                        }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun deleteGroup(group: ModifierGroupModel) {
+
+        db.collection("ModifierGroups")
+            .document(group.id)
+            .delete()
+            .addOnSuccessListener {
+                groups.remove(group)
+                notifyDataSetChanged()
+            }
+    }
+
+    // =====================================================
+    // LOAD OPTIONS
+    // =====================================================
     private fun loadOptions(group: ModifierGroupModel, holder: GroupViewHolder) {
 
         db.collection("ModifierOptions")
@@ -76,7 +185,7 @@ class ModifierGroupExpandableAdapter(
 
                     val optionText = TextView(holder.layout.context)
                     optionText.text =
-                        "• $name   +$${String.format("%.2f", price)}"
+                        "• $name   +$${String.format(Locale.US, "%.2f", price)}"
                     optionText.setPadding(80, 20, 40, 20)
 
                     holder.layout.addView(optionText)
@@ -93,6 +202,9 @@ class ModifierGroupExpandableAdapter(
             }
     }
 
+    // =====================================================
+    // ADD OPTION
+    // =====================================================
     private fun showAddOptionDialog(
         context: android.content.Context,
         group: ModifierGroupModel
@@ -140,6 +252,9 @@ class ModifierGroupExpandableAdapter(
             .show()
     }
 
+    // =====================================================
+    // EDIT / DELETE OPTION
+    // =====================================================
     private fun showEditOptionDialog(
         context: android.content.Context,
         optionId: String,
@@ -157,8 +272,7 @@ class ModifierGroupExpandableAdapter(
         val priceInput = EditText(context)
         priceInput.setText(currentPrice.toString())
         priceInput.inputType =
-            InputType.TYPE_CLASS_NUMBER or
-                    InputType.TYPE_NUMBER_FLAG_DECIMAL
+            InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
 
         layout.addView(nameInput)
         layout.addView(priceInput)

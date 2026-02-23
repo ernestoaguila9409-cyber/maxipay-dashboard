@@ -3,15 +3,14 @@ package com.ernesto.myapplication
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.view.View
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Locale
 
-// =============================================
-// CART MODEL
-// =============================================
 data class CartItem(
     val itemId: String,
     val name: String,
@@ -23,8 +22,6 @@ data class CartItem(
 class MenuActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
-
-    // itemId -> CartItem
     private val cartMap = mutableMapOf<String, CartItem>()
 
     private lateinit var categoryContainer: LinearLayout
@@ -35,34 +32,19 @@ class MenuActivity : AppCompatActivity() {
 
     private var totalAmount = 0.0
 
-    // =============================================
-    // PAYMENT RESULT HANDLER
-    // =============================================
     private val paymentLauncher =
         registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
-
             if (result.resultCode == RESULT_OK) {
-
                 deductStockTransaction(
                     onSuccess = {
                         clearCart()
-                        Toast.makeText(
-                            this,
-                            "Stock updated successfully",
-                            Toast.LENGTH_SHORT
-                        ).show()
-
-                        // Reload visible items to refresh stock display
+                        Toast.makeText(this, "Stock updated successfully", Toast.LENGTH_SHORT).show()
                         loadCategories()
                     },
-                    onFailure = { error ->
-                        Toast.makeText(
-                            this,
-                            error,
-                            Toast.LENGTH_LONG
-                        ).show()
+                    onFailure = {
+                        Toast.makeText(this, it, Toast.LENGTH_LONG).show()
                     }
                 )
             }
@@ -81,7 +63,6 @@ class MenuActivity : AppCompatActivity() {
         loadCategories()
 
         btnCheckout.setOnClickListener {
-
             if (cartMap.isEmpty()) {
                 Toast.makeText(this, "Cart is empty", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
@@ -93,40 +74,26 @@ class MenuActivity : AppCompatActivity() {
         }
     }
 
-    // =============================================
-    // LOAD CATEGORIES
-    // =============================================
     private fun loadCategories() {
-
         categoryContainer.removeAllViews()
 
         db.collection("Categories")
             .get()
             .addOnSuccessListener { documents ->
-
                 for (doc in documents) {
-
                     val name = doc.getString("name") ?: continue
                     val categoryId = doc.id
 
                     val button = Button(this)
                     button.text = name
-                    button.setPadding(40, 20, 40, 20)
-
-                    button.setOnClickListener {
-                        loadItems(categoryId)
-                    }
+                    button.setOnClickListener { loadItems(categoryId) }
 
                     categoryContainer.addView(button)
                 }
             }
     }
 
-    // =============================================
-    // LOAD ITEMS
-    // =============================================
     private fun loadItems(categoryId: String) {
-
         itemContainer.removeAllViews()
 
         db.collection("MenuItems")
@@ -142,47 +109,231 @@ class MenuActivity : AppCompatActivity() {
                     val stock = doc.getLong("stock") ?: 0L
 
                     val button = Button(this)
-
                     button.text =
                         "$name\n$${String.format(Locale.US, "%.2f", price)}\nStock: $stock"
-
-                    button.textSize = 14f
                     button.setTextColor(Color.WHITE)
 
                     when {
                         stock <= 0 -> {
-                            button.setBackgroundColor(Color.parseColor("#D32F2F"))
+                            button.setBackgroundColor(Color.RED)
                             button.isEnabled = false
                         }
-
                         stock <= 5 -> {
                             button.setBackgroundColor(Color.parseColor("#F57C00"))
                         }
-
                         else -> {
                             button.setBackgroundColor(Color.parseColor("#6A4FB3"))
                         }
                     }
 
                     button.setOnClickListener {
-                        addToCart(itemId, name, price, stock)
+                        checkAndShowModifiers(itemId, name, price, stock)
                     }
 
                     val params = GridLayout.LayoutParams()
                     params.width = 0
-                    params.height = GridLayout.LayoutParams.WRAP_CONTENT
                     params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
                     params.setMargins(16, 16, 16, 16)
-
                     button.layoutParams = params
+
                     itemContainer.addView(button)
                 }
             }
     }
 
-    // =============================================
-    // ADD TO CART (UI STOCK PROTECTION)
-    // =============================================
+    private fun checkAndShowModifiers(
+        itemId: String,
+        name: String,
+        basePrice: Double,
+        stock: Long
+    ) {
+        db.collection("ItemModifierGroups")
+            .whereEqualTo("itemId", itemId)
+            .get()
+            .addOnSuccessListener { documents ->
+
+                if (documents.isEmpty) {
+                    addToCart(itemId, name, basePrice, stock)
+                } else {
+                    val groupIds = documents.mapNotNull { it.getString("groupId") }
+                    showModifierDialog(itemId, name, basePrice, stock, groupIds)
+                }
+            }
+    }
+
+    private fun showModifierDialog(
+        itemId: String,
+        name: String,
+        basePrice: Double,
+        stock: Long,
+        groupIds: List<String>
+    ) {
+
+        val selectedPricePerGroup = mutableMapOf<String, Double>()
+        val selectedCountPerGroup = mutableMapOf<String, Int>()
+        val requiredGroups = mutableSetOf<String>()
+
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(40, 40, 40, 40)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Select Options")
+            .setView(layout)
+            .setPositiveButton("Add to Cart", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+            val addButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+
+            addButton.setOnClickListener {
+
+                for (requiredGroup in requiredGroups) {
+                    if ((selectedCountPerGroup[requiredGroup] ?: 0) == 0) {
+                        Toast.makeText(
+                            this,
+                            "Please select required options.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        return@setOnClickListener
+                    }
+                }
+
+                val totalModifierPrice =
+                    selectedPricePerGroup.values.sum()
+
+                val finalPrice = basePrice + totalModifierPrice
+
+                addToCart(itemId, name, finalPrice, stock)
+                dialog.dismiss()
+            }
+        }
+
+        for (groupId in groupIds) {
+
+            db.collection("ModifierGroups")
+                .document(groupId)
+                .get()
+                .addOnSuccessListener { groupDoc ->
+
+                    val groupName = groupDoc.getString("name") ?: ""
+                    val isRequired = groupDoc.getBoolean("required") ?: false
+                    val maxSelection =
+                        groupDoc.getLong("maxSelection")?.toInt() ?: 1
+
+                    if (isRequired) requiredGroups.add(groupId)
+
+                    val title = TextView(this)
+                    title.text =
+                        if (isRequired) "$groupName (Required)" else groupName
+                    title.textSize = 18f
+                    title.setPadding(0, 20, 0, 10)
+
+                    layout.addView(title)
+
+                    db.collection("ModifierOptions")
+                        .whereEqualTo("groupId", groupId)
+                        .get()
+                        .addOnSuccessListener { options ->
+
+                            if (maxSelection == 1) {
+
+                                val radioGroup = RadioGroup(this)
+                                radioGroup.orientation = RadioGroup.VERTICAL
+                                layout.addView(radioGroup)
+
+                                val optionPriceMap = mutableMapOf<Int, Double>()
+
+                                for (doc in options) {
+
+                                    val optionName =
+                                        doc.getString("name") ?: continue
+                                    val optionPrice =
+                                        doc.getDouble("price") ?: 0.0
+
+                                    val radioButton =
+                                        RadioButton(this)
+
+                                    radioButton.text =
+                                        "$optionName +$${String.format("%.2f", optionPrice)}"
+
+                                    val id = View.generateViewId()
+                                    radioButton.id = id
+                                    optionPriceMap[id] = optionPrice
+
+                                    radioGroup.addView(radioButton)
+                                }
+
+                                radioGroup.setOnCheckedChangeListener { _, checkedId ->
+
+                                    val newPrice =
+                                        optionPriceMap[checkedId] ?: 0.0
+
+                                    selectedPricePerGroup[groupId] = newPrice
+                                    selectedCountPerGroup[groupId] = 1
+                                }
+
+                            } else {
+
+                                selectedPricePerGroup[groupId] = 0.0
+                                selectedCountPerGroup[groupId] = 0
+
+                                for (doc in options) {
+
+                                    val optionName =
+                                        doc.getString("name") ?: continue
+                                    val optionPrice =
+                                        doc.getDouble("price") ?: 0.0
+
+                                    val checkBox = CheckBox(this)
+
+                                    checkBox.text =
+                                        "$optionName +$${String.format("%.2f", optionPrice)}"
+
+                                    layout.addView(checkBox)
+
+                                    checkBox.setOnCheckedChangeListener { _, isChecked ->
+
+                                        var groupTotal =
+                                            selectedPricePerGroup[groupId] ?: 0.0
+
+                                        var count =
+                                            selectedCountPerGroup[groupId] ?: 0
+
+                                        if (isChecked) {
+
+                                            if (count >= maxSelection) {
+                                                checkBox.isChecked = false
+                                                Toast.makeText(
+                                                    this,
+                                                    "Maximum $maxSelection selections allowed",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                                return@setOnCheckedChangeListener
+                                            }
+
+                                            groupTotal += optionPrice
+                                            count++
+
+                                        } else {
+
+                                            groupTotal -= optionPrice
+                                            count--
+                                        }
+
+                                        selectedPricePerGroup[groupId] = groupTotal
+                                        selectedCountPerGroup[groupId] = count
+                                    }
+                                }
+                            }
+                        }
+                }
+        }
+
+        dialog.show()
+    }
+
     private fun addToCart(
         itemId: String,
         name: String,
@@ -195,11 +346,7 @@ class MenuActivity : AppCompatActivity() {
         if (existingItem != null) {
 
             if (existingItem.quantity >= stock) {
-                Toast.makeText(
-                    this,
-                    "Only $stock in stock.",
-                    Toast.LENGTH_SHORT
-                ).show()
+                Toast.makeText(this, "Only $stock in stock.", Toast.LENGTH_SHORT).show()
                 return
             }
 
@@ -208,11 +355,7 @@ class MenuActivity : AppCompatActivity() {
         } else {
 
             if (stock <= 0) {
-                Toast.makeText(
-                    this,
-                    "Out of stock.",
-                    Toast.LENGTH_SHORT
-                ).show()
+                Toast.makeText(this, "Out of stock.", Toast.LENGTH_SHORT).show()
                 return
             }
 
@@ -228,9 +371,6 @@ class MenuActivity : AppCompatActivity() {
         refreshCart()
     }
 
-    // =============================================
-    // REFRESH CART
-    // =============================================
     private fun refreshCart() {
 
         cartContainer.removeAllViews()
@@ -244,8 +384,6 @@ class MenuActivity : AppCompatActivity() {
             val textView = TextView(this)
             textView.text =
                 "${item.name} x${item.quantity} - $${String.format(Locale.US, "%.2f", itemTotal)}"
-            textView.textSize = 16f
-            textView.setPadding(8, 8, 8, 8)
 
             cartContainer.addView(textView)
         }
@@ -254,9 +392,6 @@ class MenuActivity : AppCompatActivity() {
             "Total: $${String.format(Locale.US, "%.2f", totalAmount)}"
     }
 
-    // =============================================
-    // FIRESTORE TRANSACTION (MULTI DEVICE SAFE)
-    // =============================================
     private fun deductStockTransaction(
         onSuccess: () -> Unit,
         onFailure: (String) -> Unit
@@ -266,11 +401,10 @@ class MenuActivity : AppCompatActivity() {
 
             for ((_, cartItem) in cartMap) {
 
-                val itemRef = db.collection("MenuItems")
-                    .document(cartItem.itemId)
+                val itemRef =
+                    db.collection("MenuItems").document(cartItem.itemId)
 
                 val snapshot = transaction.get(itemRef)
-
                 val currentStock = snapshot.getLong("stock") ?: 0L
 
                 if (currentStock < cartItem.quantity) {
@@ -278,7 +412,6 @@ class MenuActivity : AppCompatActivity() {
                 }
 
                 val newStock = currentStock - cartItem.quantity
-
                 transaction.update(itemRef, "stock", newStock)
             }
 
@@ -290,9 +423,6 @@ class MenuActivity : AppCompatActivity() {
             }
     }
 
-    // =============================================
-    // CLEAR CART
-    // =============================================
     private fun clearCart() {
         cartMap.clear()
         totalAmount = 0.0

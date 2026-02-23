@@ -249,8 +249,13 @@ class MenuOnlyActivity : AppCompatActivity() {
         priceInput.inputType =
             InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
 
+        val stockInput = EditText(this)
+        stockInput.hint = "Stock"
+        stockInput.inputType = InputType.TYPE_CLASS_NUMBER
+
         layout.addView(nameInput)
         layout.addView(priceInput)
+        layout.addView(stockInput)
 
         AlertDialog.Builder(this)
             .setTitle("Add Item")
@@ -259,12 +264,17 @@ class MenuOnlyActivity : AppCompatActivity() {
 
                 val name = nameInput.text.toString().trim()
                 val price = priceInput.text.toString().toDoubleOrNull()
+                val stock = stockInput.text.toString().toLongOrNull() ?: 0L
 
-                if (name.isNotEmpty() && price != null && selectedCategoryId != null) {
+                if (name.isNotEmpty() &&
+                    price != null &&
+                    selectedCategoryId != null
+                ) {
 
                     val item = hashMapOf(
                         "name" to name,
                         "price" to price,
+                        "stock" to stock, // ✅ IMPORTANT
                         "categoryId" to selectedCategoryId
                     )
 

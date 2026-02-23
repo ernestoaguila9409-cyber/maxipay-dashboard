@@ -69,8 +69,9 @@ class PaymentActivity : AppCompatActivity() {
     }
 
     // ===============================
-    // SHOW WAITING
+    // UI STATES
     // ===============================
+
     private fun showWaitingStatus() {
         statusContainer.visibility = View.VISIBLE
         progressBar.visibility = View.VISIBLE
@@ -79,14 +80,9 @@ class PaymentActivity : AppCompatActivity() {
         txtStatus.setTextColor(getColor(android.R.color.holo_orange_dark))
         txtSubStatus.text = "Please present card on terminal"
 
-        btnCredit.isEnabled = false
-        btnDebit.isEnabled = false
-        btnCash.isEnabled = false
+        setButtonsEnabled(false)
     }
 
-    // ===============================
-    // SHOW APPROVED
-    // ===============================
     private fun showApproved() {
         progressBar.visibility = View.GONE
 
@@ -100,43 +96,45 @@ class PaymentActivity : AppCompatActivity() {
         }, 1500)
     }
 
-    // ===============================
-    // SHOW DECLINED
-    // ===============================
-    private fun showDeclined() {
+    private fun showDeclined(message: String = "Please try again") {
         progressBar.visibility = View.GONE
 
         txtStatus.text = "DECLINED ❌"
         txtStatus.setTextColor(getColor(android.R.color.holo_red_dark))
-        txtSubStatus.text = "Please try again"
+        txtSubStatus.text = message
 
-        btnCredit.isEnabled = true
-        btnDebit.isEnabled = true
-        btnCash.isEnabled = true
+        setButtonsEnabled(true)
+    }
+
+    private fun setButtonsEnabled(enabled: Boolean) {
+        btnCredit.isEnabled = enabled
+        btnDebit.isEnabled = enabled
+        btnCash.isEnabled = enabled
     }
 
     // ===============================
     // CARD PROCESSING
     // ===============================
+
     private fun processCardPayment(paymentType: String) {
 
-        val formattedAmount = String.format(Locale.US, "%.2f", totalAmount)
+        val formattedAmount =
+            String.format(Locale.US, "%.2f", totalAmount)
+
         val referenceId = UUID.randomUUID().toString()
 
-        val json = """
-        {
-          "Amount": "$formattedAmount",
-          "PaymentType": "$paymentType",
-          "ReferenceId": "$referenceId",
-          "PrintReceipt": "No",
-          "GetReceipt": "No",
-          "Tpn": "11881706541A",
-          "RegisterId": "134909005",
-          "Authkey": "Qt9N7CxhDs"
+        val json = JSONObject().apply {
+            put("Amount", formattedAmount)
+            put("PaymentType", paymentType)
+            put("ReferenceId", referenceId)
+            put("PrintReceipt", "No")
+            put("GetReceipt", "No")
+            put("Tpn", "11881706541A")
+            put("RegisterId", "134909005")
+            put("Authkey", "Qt9N7CxhDs")
         }
-        """.trimIndent()
 
-        sendApiRequest(json, paymentType, referenceId)
+        sendApiRequest(json.toString(), paymentType, referenceId)
     }
 
     private fun sendApiRequest(
@@ -162,10 +160,10 @@ class PaymentActivity : AppCompatActivity() {
 
             override fun onFailure(call: Call, e: IOException) {
                 runOnUiThread {
-                    showDeclined()
+                    showDeclined("Payment Failed")
                     Toast.makeText(
                         this@PaymentActivity,
-                        "Payment Failed: ${e.message}",
+                        e.message,
                         Toast.LENGTH_LONG
                     ).show()
                 }
@@ -178,19 +176,35 @@ class PaymentActivity : AppCompatActivity() {
 
                 runOnUiThread {
 
-                    if (response.isSuccessful &&
-                        responseText.contains("Approved", ignoreCase = true)
-                    ) {
+                    if (!response.isSuccessful) {
+                        showDeclined("Server Error")
+                        return@runOnUiThread
+                    }
 
-                        val jsonObj = JSONObject(responseText)
+                    val jsonObj = JSONObject(responseText)
 
-                        val authCode = jsonObj.optString("AuthCode")
-                        val invoiceNumber = jsonObj.optString("InvoiceNumber")
+                    val status =
+                        jsonObj.optString("Status", "")
 
-                        val cardData = jsonObj.optJSONObject("CardData")
-                        val cardType = cardData?.optString("CardType") ?: ""
-                        val last4 = cardData?.optString("Last4") ?: ""
-                        val entryType = cardData?.optString("EntryType") ?: ""
+                    if (status.equals("Approved", true)) {
+
+                        val authCode =
+                            jsonObj.optString("AuthCode")
+
+                        val invoiceNumber =
+                            jsonObj.optString("InvoiceNumber")
+
+                        val cardData =
+                            jsonObj.optJSONObject("CardData")
+
+                        val cardType =
+                            cardData?.optString("CardType") ?: ""
+
+                        val last4 =
+                            cardData?.optString("Last4") ?: ""
+
+                        val entryType =
+                            cardData?.optString("EntryType") ?: ""
 
                         saveTransaction(
                             paymentType,
@@ -205,7 +219,7 @@ class PaymentActivity : AppCompatActivity() {
                         showApproved()
 
                     } else {
-                        showDeclined()
+                        showDeclined("Transaction Declined")
                     }
                 }
             }
@@ -215,6 +229,7 @@ class PaymentActivity : AppCompatActivity() {
     // ===============================
     // CASH PROCESSING
     // ===============================
+
     private fun processCashPayment() {
 
         val referenceId = UUID.randomUUID().toString()
@@ -235,6 +250,7 @@ class PaymentActivity : AppCompatActivity() {
     // ===============================
     // SAVE TRANSACTION
     // ===============================
+
     private fun saveTransaction(
         paymentType: String,
         referenceId: String,
@@ -260,6 +276,10 @@ class PaymentActivity : AppCompatActivity() {
             "timestamp" to Date()
         )
 
-        db.collection("Transactions").add(transactionMap)
+        db.collection("Transactions")
+            .add(transactionMap)
+            .addOnFailureListener {
+                Log.e("FIRESTORE", "Failed to save transaction")
+            }
     }
 }

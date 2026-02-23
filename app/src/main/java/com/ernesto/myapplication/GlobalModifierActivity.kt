@@ -1,7 +1,10 @@
 package com.ernesto.myapplication
 
 import android.os.Bundle
+import android.text.InputType
+import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.LinearLayout
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -40,34 +43,64 @@ class GlobalModifierActivity : AppCompatActivity() {
                 val list = mutableListOf<ModifierGroupModel>()
 
                 for (doc in documents) {
+
                     val name = doc.getString("name") ?: continue
+                    val required = doc.getBoolean("required") ?: false
+                    val maxSelection =
+                        doc.getLong("maxSelection")?.toInt() ?: 1
 
                     list.add(
                         ModifierGroupModel(
                             id = doc.id,
-                            name = name
+                            name = name,
+                            required = required,
+                            maxSelection = maxSelection
                         )
                     )
                 }
 
-                recycler.adapter = ModifierGroupExpandableAdapter(list)
+                recycler.adapter =
+                    ModifierGroupExpandableAdapter(list)
             }
     }
 
     private fun showAddGroupDialog() {
 
-        val input = EditText(this)
-        input.hint = "Group name (ex: Size, Toppings)"
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(40, 20, 40, 10)
+
+        val nameInput = EditText(this)
+        nameInput.hint = "Group name (ex: Size)"
+
+        val requiredCheckbox = CheckBox(this)
+        requiredCheckbox.text = "Required"
+
+        val maxSelectionInput = EditText(this)
+        maxSelectionInput.hint = "Max Selection (ex: 1)"
+        maxSelectionInput.inputType =
+            InputType.TYPE_CLASS_NUMBER
+
+        layout.addView(nameInput)
+        layout.addView(requiredCheckbox)
+        layout.addView(maxSelectionInput)
 
         AlertDialog.Builder(this)
             .setTitle("Add Modifier Group")
-            .setView(input)
+            .setView(layout)
             .setPositiveButton("Save") { _, _ ->
-                val name = input.text.toString().trim()
+
+                val name = nameInput.text.toString().trim()
+                val required = requiredCheckbox.isChecked
+                val maxSelection =
+                    maxSelectionInput.text.toString().toIntOrNull() ?: 1
+
                 if (name.isNotEmpty()) {
 
                     val group = hashMapOf(
-                        "name" to name
+                        "name" to name,
+                        "required" to required,
+                        "maxSelection" to maxSelection
                     )
 
                     db.collection("ModifierGroups")
