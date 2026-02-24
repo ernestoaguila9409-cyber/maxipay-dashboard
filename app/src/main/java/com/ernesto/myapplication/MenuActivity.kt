@@ -420,6 +420,21 @@ class MenuActivity : AppCompatActivity() {
 
             itemLayout.addView(divider)
 
+            itemLayout.setOnLongClickListener {
+
+                AlertDialog.Builder(this)
+                    .setTitle("Remove Item")
+                    .setMessage("Remove ${item.name} from cart?")
+                    .setPositiveButton("Yes") { _, _ ->
+                        cartMap.remove(item.itemId)
+                        refreshCart()
+                    }
+                    .setNegativeButton("No", null)
+                    .show()
+
+                true
+            }
+
             cartContainer.addView(itemLayout)
 
             totalAmount += itemTotal
