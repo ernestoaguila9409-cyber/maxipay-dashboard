@@ -149,6 +149,7 @@ class MenuActivity : AppCompatActivity() {
     ) {
         db.collection("ItemModifierGroups")
             .whereEqualTo("itemId", itemId)
+            .orderBy("displayOrder")
             .get()
             .addOnSuccessListener { documents ->
 
@@ -200,9 +201,7 @@ class MenuActivity : AppCompatActivity() {
                     }
                 }
 
-                val totalModifierPrice =
-                    selectedPricePerGroup.values.sum()
-
+                val totalModifierPrice = selectedPricePerGroup.values.sum()
                 val finalPrice = basePrice + totalModifierPrice
 
                 addToCart(itemId, name, finalPrice, stock)
@@ -217,20 +216,52 @@ class MenuActivity : AppCompatActivity() {
                 .get()
                 .addOnSuccessListener { groupDoc ->
 
-                    val groupName = groupDoc.getString("name") ?: ""
+                    val groupName = groupDoc.getString("name") ?: return@addOnSuccessListener
                     val isRequired = groupDoc.getBoolean("required") ?: false
-                    val maxSelection =
-                        groupDoc.getLong("maxSelection")?.toInt() ?: 1
+                    val maxSelection = groupDoc.getLong("maxSelection")?.toInt() ?: 1
 
                     if (isRequired) requiredGroups.add(groupId)
 
-                    val title = TextView(this)
-                    title.text =
-                        if (isRequired) "$groupName (Required)" else groupName
-                    title.textSize = 18f
-                    title.setPadding(0, 20, 0, 10)
+                    // 🔥 Group container
+                    val groupContainer = LinearLayout(this)
+                    groupContainer.orientation = LinearLayout.VERTICAL
+                    groupContainer.setPadding(0, 40, 0, 40)
 
-                    layout.addView(title)
+                    // 🔥 Title
+                    val title = TextView(this)
+                    title.text = groupName
+                    title.textSize = 18f
+                    title.setTypeface(null, android.graphics.Typeface.BOLD)
+
+                    // 🔥 Subtitle (Required + Selection Info)
+                    val selectionText = when {
+                        maxSelection == 1 -> "Select 1"
+                        else -> "Select up to $maxSelection"
+                    }
+
+                    val subtitle = TextView(this)
+                    subtitle.text = if (isRequired)
+                        "Required • $selectionText"
+                    else
+                        selectionText
+
+                    subtitle.setTextColor(Color.GRAY)
+                    subtitle.textSize = 14f
+                    subtitle.setPadding(0, 8, 0, 20)
+
+                    groupContainer.addView(title)
+                    groupContainer.addView(subtitle)
+
+                    // 🔥 Divider
+                    val divider = View(this)
+                    divider.setBackgroundColor(Color.LTGRAY)
+                    divider.layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        2
+                    )
+                    groupContainer.addView(divider)
+
+                    layout.addView(groupContainer)
 
                     db.collection("ModifierOptions")
                         .whereEqualTo("groupId", groupId)
@@ -241,20 +272,16 @@ class MenuActivity : AppCompatActivity() {
 
                                 val radioGroup = RadioGroup(this)
                                 radioGroup.orientation = RadioGroup.VERTICAL
-                                layout.addView(radioGroup)
+                                groupContainer.addView(radioGroup)
 
                                 val optionPriceMap = mutableMapOf<Int, Double>()
 
                                 for (doc in options) {
 
-                                    val optionName =
-                                        doc.getString("name") ?: continue
-                                    val optionPrice =
-                                        doc.getDouble("price") ?: 0.0
+                                    val optionName = doc.getString("name") ?: continue
+                                    val optionPrice = doc.getDouble("price") ?: 0.0
 
-                                    val radioButton =
-                                        RadioButton(this)
-
+                                    val radioButton = RadioButton(this)
                                     radioButton.text =
                                         "$optionName +$${String.format("%.2f", optionPrice)}"
 
@@ -266,10 +293,7 @@ class MenuActivity : AppCompatActivity() {
                                 }
 
                                 radioGroup.setOnCheckedChangeListener { _, checkedId ->
-
-                                    val newPrice =
-                                        optionPriceMap[checkedId] ?: 0.0
-
+                                    val newPrice = optionPriceMap[checkedId] ?: 0.0
                                     selectedPricePerGroup[groupId] = newPrice
                                     selectedCountPerGroup[groupId] = 1
                                 }
@@ -281,17 +305,14 @@ class MenuActivity : AppCompatActivity() {
 
                                 for (doc in options) {
 
-                                    val optionName =
-                                        doc.getString("name") ?: continue
-                                    val optionPrice =
-                                        doc.getDouble("price") ?: 0.0
+                                    val optionName = doc.getString("name") ?: continue
+                                    val optionPrice = doc.getDouble("price") ?: 0.0
 
                                     val checkBox = CheckBox(this)
-
                                     checkBox.text =
                                         "$optionName +$${String.format("%.2f", optionPrice)}"
 
-                                    layout.addView(checkBox)
+                                    groupContainer.addView(checkBox)
 
                                     checkBox.setOnCheckedChangeListener { _, isChecked ->
 
