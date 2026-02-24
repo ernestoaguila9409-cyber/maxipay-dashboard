@@ -15,8 +15,9 @@ data class CartItem(
     val itemId: String,
     val name: String,
     var quantity: Int,
-    val price: Double,
-    val stock: Long
+    val basePrice: Double,
+    val stock: Long,
+    val modifiers: List<Pair<String, Double>>
 )
 
 class MenuActivity : AppCompatActivity() {
@@ -113,18 +114,7 @@ class MenuActivity : AppCompatActivity() {
                         "$name\n$${String.format(Locale.US, "%.2f", price)}\nStock: $stock"
                     button.setTextColor(Color.WHITE)
 
-                    when {
-                        stock <= 0 -> {
-                            button.setBackgroundColor(Color.RED)
-                            button.isEnabled = false
-                        }
-                        stock <= 5 -> {
-                            button.setBackgroundColor(Color.parseColor("#F57C00"))
-                        }
-                        else -> {
-                            button.setBackgroundColor(Color.parseColor("#6A4FB3"))
-                        }
-                    }
+                    button.setBackgroundColor(Color.parseColor("#6A4FB3"))
 
                     button.setOnClickListener {
                         checkAndShowModifiers(itemId, name, price, stock)
@@ -154,7 +144,7 @@ class MenuActivity : AppCompatActivity() {
             .addOnSuccessListener { documents ->
 
                 if (documents.isEmpty) {
-                    addToCart(itemId, name, basePrice, stock)
+                    addToCart(itemId, name, basePrice, stock, emptyList())
                 } else {
                     val groupIds = documents.mapNotNull { it.getString("groupId") }
                     showModifierDialog(itemId, name, basePrice, stock, groupIds)
@@ -170,17 +160,17 @@ class MenuActivity : AppCompatActivity() {
         groupIds: List<String>
     ) {
 
-        val selectedPricePerGroup = mutableMapOf<String, Double>()
+        val selectedModifiers = mutableListOf<Pair<String, Double>>()
         val selectedCountPerGroup = mutableMapOf<String, Int>()
         val requiredGroups = mutableSetOf<String>()
 
-        val layout = LinearLayout(this)
-        layout.orientation = LinearLayout.VERTICAL
-        layout.setPadding(40, 40, 40, 40)
+        val mainLayout = LinearLayout(this)
+        mainLayout.orientation = LinearLayout.VERTICAL
+        mainLayout.setPadding(40, 40, 40, 40)
 
         val dialog = AlertDialog.Builder(this)
             .setTitle("Select Options")
-            .setView(layout)
+            .setView(mainLayout)
             .setPositiveButton("Add to Cart", null)
             .setNegativeButton("Cancel", null)
             .create()
@@ -201,10 +191,7 @@ class MenuActivity : AppCompatActivity() {
                     }
                 }
 
-                val totalModifierPrice = selectedPricePerGroup.values.sum()
-                val finalPrice = basePrice + totalModifierPrice
-
-                addToCart(itemId, name, finalPrice, stock)
+                addToCart(itemId, name, basePrice, stock, selectedModifiers)
                 dialog.dismiss()
             }
         }
@@ -222,37 +209,32 @@ class MenuActivity : AppCompatActivity() {
 
                     if (isRequired) requiredGroups.add(groupId)
 
-                    // 🔥 Group container
+                    // 🔥 CREATE GROUP CONTAINER
                     val groupContainer = LinearLayout(this)
                     groupContainer.orientation = LinearLayout.VERTICAL
                     groupContainer.setPadding(0, 40, 0, 40)
 
-                    // 🔥 Title
+                    // TITLE
                     val title = TextView(this)
                     title.text = groupName
                     title.textSize = 18f
                     title.setTypeface(null, android.graphics.Typeface.BOLD)
 
-                    // 🔥 Subtitle (Required + Selection Info)
-                    val selectionText = when {
-                        maxSelection == 1 -> "Select 1"
-                        else -> "Select up to $maxSelection"
-                    }
-
+                    // SUBTITLE
                     val subtitle = TextView(this)
-                    subtitle.text = if (isRequired)
-                        "Required • $selectionText"
-                    else
-                        selectionText
+                    subtitle.text =
+                        if (isRequired)
+                            "Required • Select up to $maxSelection"
+                        else
+                            "Optional • Select up to $maxSelection"
 
                     subtitle.setTextColor(Color.GRAY)
-                    subtitle.textSize = 14f
-                    subtitle.setPadding(0, 8, 0, 20)
+                    subtitle.setPadding(0, 8, 0, 16)
 
                     groupContainer.addView(title)
                     groupContainer.addView(subtitle)
 
-                    // 🔥 Divider
+                    // DIVIDER
                     val divider = View(this)
                     divider.setBackgroundColor(Color.LTGRAY)
                     divider.layoutParams = LinearLayout.LayoutParams(
@@ -261,7 +243,8 @@ class MenuActivity : AppCompatActivity() {
                     )
                     groupContainer.addView(divider)
 
-                    layout.addView(groupContainer)
+                    // 🔥 ADD GROUP CONTAINER TO MAIN
+                    mainLayout.addView(groupContainer)
 
                     db.collection("ModifierOptions")
                         .whereEqualTo("groupId", groupId)
@@ -274,8 +257,6 @@ class MenuActivity : AppCompatActivity() {
                                 radioGroup.orientation = RadioGroup.VERTICAL
                                 groupContainer.addView(radioGroup)
 
-                                val optionPriceMap = mutableMapOf<Int, Double>()
-
                                 for (doc in options) {
 
                                     val optionName = doc.getString("name") ?: continue
@@ -285,22 +266,17 @@ class MenuActivity : AppCompatActivity() {
                                     radioButton.text =
                                         "$optionName +$${String.format("%.2f", optionPrice)}"
 
-                                    val id = View.generateViewId()
-                                    radioButton.id = id
-                                    optionPriceMap[id] = optionPrice
-
                                     radioGroup.addView(radioButton)
-                                }
 
-                                radioGroup.setOnCheckedChangeListener { _, checkedId ->
-                                    val newPrice = optionPriceMap[checkedId] ?: 0.0
-                                    selectedPricePerGroup[groupId] = newPrice
-                                    selectedCountPerGroup[groupId] = 1
+                                    radioButton.setOnClickListener {
+                                        selectedModifiers.removeAll { it.first == optionName }
+                                        selectedModifiers.add(optionName to optionPrice)
+                                        selectedCountPerGroup[groupId] = 1
+                                    }
                                 }
 
                             } else {
 
-                                selectedPricePerGroup[groupId] = 0.0
                                 selectedCountPerGroup[groupId] = 0
 
                                 for (doc in options) {
@@ -316,11 +292,7 @@ class MenuActivity : AppCompatActivity() {
 
                                     checkBox.setOnCheckedChangeListener { _, isChecked ->
 
-                                        var groupTotal =
-                                            selectedPricePerGroup[groupId] ?: 0.0
-
-                                        var count =
-                                            selectedCountPerGroup[groupId] ?: 0
+                                        var count = selectedCountPerGroup[groupId] ?: 0
 
                                         if (isChecked) {
 
@@ -334,16 +306,14 @@ class MenuActivity : AppCompatActivity() {
                                                 return@setOnCheckedChangeListener
                                             }
 
-                                            groupTotal += optionPrice
+                                            selectedModifiers.add(optionName to optionPrice)
                                             count++
 
                                         } else {
-
-                                            groupTotal -= optionPrice
+                                            selectedModifiers.remove(optionName to optionPrice)
                                             count--
                                         }
 
-                                        selectedPricePerGroup[groupId] = groupTotal
                                         selectedCountPerGroup[groupId] = count
                                     }
                                 }
@@ -358,34 +328,23 @@ class MenuActivity : AppCompatActivity() {
     private fun addToCart(
         itemId: String,
         name: String,
-        price: Double,
-        stock: Long
+        basePrice: Double,
+        stock: Long,
+        modifiers: List<Pair<String, Double>>
     ) {
 
         val existingItem = cartMap[itemId]
 
         if (existingItem != null) {
-
-            if (existingItem.quantity >= stock) {
-                Toast.makeText(this, "Only $stock in stock.", Toast.LENGTH_SHORT).show()
-                return
-            }
-
             existingItem.quantity += 1
-
         } else {
-
-            if (stock <= 0) {
-                Toast.makeText(this, "Out of stock.", Toast.LENGTH_SHORT).show()
-                return
-            }
-
             cartMap[itemId] = CartItem(
-                itemId = itemId,
-                name = name,
-                quantity = 1,
-                price = price,
-                stock = stock
+                itemId,
+                name,
+                1,
+                basePrice,
+                stock,
+                modifiers
             )
         }
 
@@ -399,14 +358,71 @@ class MenuActivity : AppCompatActivity() {
 
         for ((_, item) in cartMap) {
 
-            val itemTotal = item.quantity * item.price
+            val itemLayout = LinearLayout(this)
+            itemLayout.orientation = LinearLayout.VERTICAL
+            itemLayout.setPadding(0, 0, 0, 24)
+
+            val nameText = TextView(this)
+            nameText.text = item.name
+            nameText.textSize = 16f
+            nameText.setTypeface(null, android.graphics.Typeface.BOLD)
+            itemLayout.addView(nameText)
+
+            var modifiersTotal = 0.0
+
+            for (modifier in item.modifiers) {
+
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                row.layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+
+                val nameView = TextView(this)
+                nameView.text = "• ${modifier.first}"
+                nameView.layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                )
+
+                val priceView = TextView(this)
+                priceView.text = "+$${String.format(Locale.US, "%.2f", modifier.second)}"
+
+                row.addView(nameView)
+                row.addView(priceView)
+
+                itemLayout.addView(row)
+
+                modifiersTotal += modifier.second
+            }
+
+            val qtyText = TextView(this)
+            qtyText.text = "Qty: ${item.quantity}"
+            itemLayout.addView(qtyText)
+
+            val singleItemTotal = item.basePrice + modifiersTotal
+            val itemTotal = singleItemTotal * item.quantity
+
+            val subtotalText = TextView(this)
+            subtotalText.text =
+                "Subtotal: $${String.format(Locale.US, "%.2f", itemTotal)}"
+            subtotalText.setTypeface(null, android.graphics.Typeface.BOLD)
+            itemLayout.addView(subtotalText)
+
+            val divider = View(this)
+            divider.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                2
+            ).apply { setMargins(0, 16, 0, 16) }
+            divider.setBackgroundColor(Color.LTGRAY)
+
+            itemLayout.addView(divider)
+
+            cartContainer.addView(itemLayout)
+
             totalAmount += itemTotal
-
-            val textView = TextView(this)
-            textView.text =
-                "${item.name} x${item.quantity} - $${String.format(Locale.US, "%.2f", itemTotal)}"
-
-            cartContainer.addView(textView)
         }
 
         txtTotal.text =
