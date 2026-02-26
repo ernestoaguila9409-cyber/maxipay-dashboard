@@ -23,6 +23,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        findViewById<ImageButton>(R.id.btnHamburger).setOnClickListener {
+            startActivity(Intent(this, SideMenuActivity::class.java))
+        }
         findViewById<ImageButton>(R.id.btnModifiers).setOnClickListener {
             startActivity(Intent(this, GlobalModifierActivity::class.java))
         }
@@ -48,6 +51,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnTakePayment).setOnClickListener {
             val intent = Intent(this, MenuActivity::class.java)
             intent.putExtra("batchId", currentBatchId)
+            intent.putExtra("employeeName", employeeName)  // ✅ ADD THIS
             startActivity(intent)
         }
 

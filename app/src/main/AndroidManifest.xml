@@ -11,7 +11,19 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
 
-        <!-- Login Screen (Launcher) -->
+        <activity
+            android:name=".OrderDetailActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".OrdersActivity"
+            android:exported="false"
+            android:theme="@style/Theme.MyApplication" />
+
+        <activity
+            android:name=".SideMenuActivity"
+            android:exported="false" />
+
         <activity
             android:name=".LoginActivity"
             android:exported="true">
@@ -21,24 +33,37 @@
             </intent-filter>
         </activity>
 
-        <!-- POS Screens -->
-        <activity android:name=".MainActivity" android:exported="false" />
-        <activity android:name=".MenuActivity" android:exported="false" />
-        <activity android:name=".MenuOnlyActivity" android:exported="false" />
-        <activity android:name=".PaymentActivity" android:exported="false" />
+        <activity
+            android:name=".MainActivity"
+            android:exported="false" />
+        <activity
+            android:name=".MenuActivity"
+            android:exported="false" />
+        <activity
+            android:name=".MenuOnlyActivity"
+            android:exported="false" />
+        <activity
+            android:name=".PaymentActivity"
+            android:exported="false" />
 
-        <!-- Employees -->
-        <activity android:name=".EmployeesActivity" android:exported="false" />
+        <activity
+            android:name=".EmployeesActivity"
+            android:exported="false" />
+        <activity
+            android:name=".BatchManagementActivity"
+            android:exported="false" />
+        <activity
+            android:name=".BatchDetailsActivity"
+            android:exported="false" />
 
-        <!-- Batch -->
-        <activity android:name=".BatchManagementActivity" android:exported="false" />
-        <activity android:name=".BatchDetailsActivity" android:exported="false" />
+        <activity
+            android:name=".TransactionActivity"
+            android:exported="false" />
 
-        <!-- Transactions -->
-        <activity android:name=".TransactionActivity" android:exported="false" />
         <activity android:name=".ModifierManagementActivity" />
-        <activity android:name=".GlobalModifierActivity"/>
-        <activity android:name=".AssignModifierToItemActivity"/>
+        <activity android:name=".GlobalModifierActivity" />
+        <activity android:name=".AssignModifierToItemActivity" />
+
     </application>
 
 </manifest>

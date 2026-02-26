@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
+import java.util.Date
 import java.util.Locale
 
 data class CartItem(
@@ -23,6 +24,8 @@ data class CartItem(
 class MenuActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
+
+    // key = lineKey (itemId + modifiers)
     private val cartMap = mutableMapOf<String, CartItem>()
 
     private lateinit var categoryContainer: LinearLayout
@@ -30,13 +33,13 @@ class MenuActivity : AppCompatActivity() {
     private lateinit var cartContainer: LinearLayout
     private lateinit var txtTotal: TextView
     private lateinit var btnCheckout: Button
-
+    private var orderId: String? = null
     private var totalAmount = 0.0
+    private var employeeName: String = ""
+    private var currentOrderId: String? = null
 
     private val paymentLauncher =
-        registerForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) { result ->
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
                 deductStockTransaction(
                     onSuccess = {
@@ -44,8 +47,8 @@ class MenuActivity : AppCompatActivity() {
                         Toast.makeText(this, "Stock updated successfully", Toast.LENGTH_SHORT).show()
                         loadCategories()
                     },
-                    onFailure = {
-                        Toast.makeText(this, it, Toast.LENGTH_LONG).show()
+                    onFailure = { msg ->
+                        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                     }
                 )
             }
@@ -54,6 +57,8 @@ class MenuActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_menu)
+
+        employeeName = intent.getStringExtra("employeeName") ?: ""
 
         categoryContainer = findViewById(R.id.categoryContainer)
         itemContainer = findViewById(R.id.itemContainer)
@@ -71,9 +76,14 @@ class MenuActivity : AppCompatActivity() {
 
             val intent = Intent(this, PaymentActivity::class.java)
             intent.putExtra("TOTAL_AMOUNT", totalAmount)
+            intent.putExtra("ORDER_ID", currentOrderId) // ✅ ADD THIS LINE
             paymentLauncher.launch(intent)
         }
     }
+
+    // ----------------------------
+    // LOAD CATEGORIES / ITEMS
+    // ----------------------------
 
     private fun loadCategories() {
         categoryContainer.removeAllViews()
@@ -103,17 +113,14 @@ class MenuActivity : AppCompatActivity() {
             .addOnSuccessListener { documents ->
 
                 for (doc in documents) {
-
                     val itemId = doc.id
                     val name = doc.getString("name") ?: continue
                     val price = doc.getDouble("price") ?: 0.0
                     val stock = doc.getLong("stock") ?: 0L
 
                     val button = Button(this)
-                    button.text =
-                        "$name\n$${String.format(Locale.US, "%.2f", price)}\nStock: $stock"
+                    button.text = "$name\n$${String.format(Locale.US, "%.2f", price)}\nStock: $stock"
                     button.setTextColor(Color.WHITE)
-
                     button.setBackgroundColor(Color.parseColor("#6A4FB3"))
 
                     button.setOnClickListener {
@@ -131,6 +138,10 @@ class MenuActivity : AppCompatActivity() {
             }
     }
 
+    // ----------------------------
+    // MODIFIERS
+    // ----------------------------
+
     private fun checkAndShowModifiers(
         itemId: String,
         name: String,
@@ -142,7 +153,6 @@ class MenuActivity : AppCompatActivity() {
             .orderBy("displayOrder")
             .get()
             .addOnSuccessListener { documents ->
-
                 if (documents.isEmpty) {
                     addToCart(itemId, name, basePrice, stock, emptyList())
                 } else {
@@ -159,7 +169,6 @@ class MenuActivity : AppCompatActivity() {
         stock: Long,
         groupIds: List<String>
     ) {
-
         val selectedModifiers = mutableListOf<Pair<String, Double>>()
         val selectedCountPerGroup = mutableMapOf<String, Int>()
         val requiredGroups = mutableSetOf<String>()
@@ -177,16 +186,11 @@ class MenuActivity : AppCompatActivity() {
 
         dialog.setOnShowListener {
             val addButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-
             addButton.setOnClickListener {
 
                 for (requiredGroup in requiredGroups) {
                     if ((selectedCountPerGroup[requiredGroup] ?: 0) == 0) {
-                        Toast.makeText(
-                            this,
-                            "Please select required options.",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(this, "Please select required options.", Toast.LENGTH_SHORT).show()
                         return@setOnClickListener
                     }
                 }
@@ -197,7 +201,6 @@ class MenuActivity : AppCompatActivity() {
         }
 
         for (groupId in groupIds) {
-
             db.collection("ModifierGroups")
                 .document(groupId)
                 .get()
@@ -209,32 +212,25 @@ class MenuActivity : AppCompatActivity() {
 
                     if (isRequired) requiredGroups.add(groupId)
 
-                    // 🔥 CREATE GROUP CONTAINER
                     val groupContainer = LinearLayout(this)
                     groupContainer.orientation = LinearLayout.VERTICAL
                     groupContainer.setPadding(0, 40, 0, 40)
 
-                    // TITLE
                     val title = TextView(this)
                     title.text = groupName
                     title.textSize = 18f
                     title.setTypeface(null, android.graphics.Typeface.BOLD)
 
-                    // SUBTITLE
                     val subtitle = TextView(this)
                     subtitle.text =
-                        if (isRequired)
-                            "Required • Select up to $maxSelection"
-                        else
-                            "Optional • Select up to $maxSelection"
-
+                        if (isRequired) "Required • Select up to $maxSelection"
+                        else "Optional • Select up to $maxSelection"
                     subtitle.setTextColor(Color.GRAY)
                     subtitle.setPadding(0, 8, 0, 16)
 
                     groupContainer.addView(title)
                     groupContainer.addView(subtitle)
 
-                    // DIVIDER
                     val divider = View(this)
                     divider.setBackgroundColor(Color.LTGRAY)
                     divider.layoutParams = LinearLayout.LayoutParams(
@@ -243,7 +239,6 @@ class MenuActivity : AppCompatActivity() {
                     )
                     groupContainer.addView(divider)
 
-                    // 🔥 ADD GROUP CONTAINER TO MAIN
                     mainLayout.addView(groupContainer)
 
                     db.collection("ModifierOptions")
@@ -258,17 +253,16 @@ class MenuActivity : AppCompatActivity() {
                                 groupContainer.addView(radioGroup)
 
                                 for (doc in options) {
-
                                     val optionName = doc.getString("name") ?: continue
                                     val optionPrice = doc.getDouble("price") ?: 0.0
 
                                     val radioButton = RadioButton(this)
-                                    radioButton.text =
-                                        "$optionName +$${String.format("%.2f", optionPrice)}"
-
+                                    radioButton.text = "$optionName +$${String.format(Locale.US, "%.2f", optionPrice)}"
                                     radioGroup.addView(radioButton)
 
                                     radioButton.setOnClickListener {
+                                        // remove any previous selection from this group by name (simple approach)
+                                        // (for perfect behavior, store groupId -> selected option)
                                         selectedModifiers.removeAll { it.first == optionName }
                                         selectedModifiers.add(optionName to optionPrice)
                                         selectedCountPerGroup[groupId] = 1
@@ -280,22 +274,17 @@ class MenuActivity : AppCompatActivity() {
                                 selectedCountPerGroup[groupId] = 0
 
                                 for (doc in options) {
-
                                     val optionName = doc.getString("name") ?: continue
                                     val optionPrice = doc.getDouble("price") ?: 0.0
 
                                     val checkBox = CheckBox(this)
-                                    checkBox.text =
-                                        "$optionName +$${String.format("%.2f", optionPrice)}"
-
+                                    checkBox.text = "$optionName +$${String.format(Locale.US, "%.2f", optionPrice)}"
                                     groupContainer.addView(checkBox)
 
                                     checkBox.setOnCheckedChangeListener { _, isChecked ->
-
                                         var count = selectedCountPerGroup[groupId] ?: 0
 
                                         if (isChecked) {
-
                                             if (count >= maxSelection) {
                                                 checkBox.isChecked = false
                                                 Toast.makeText(
@@ -305,10 +294,8 @@ class MenuActivity : AppCompatActivity() {
                                                 ).show()
                                                 return@setOnCheckedChangeListener
                                             }
-
                                             selectedModifiers.add(optionName to optionPrice)
                                             count++
-
                                         } else {
                                             selectedModifiers.remove(optionName to optionPrice)
                                             count--
@@ -325,6 +312,10 @@ class MenuActivity : AppCompatActivity() {
         dialog.show()
     }
 
+    // ----------------------------
+    // CART LOGIC (separate lines by modifiers)
+    // ----------------------------
+
     private fun addToCart(
         itemId: String,
         name: String,
@@ -332,31 +323,37 @@ class MenuActivity : AppCompatActivity() {
         stock: Long,
         modifiers: List<Pair<String, Double>>
     ) {
+        ensureOrderThen {
 
-        val existingItem = cartMap[itemId]
+            val lineKey = cartKey(itemId, modifiers)
+            val existingItem = cartMap[lineKey]
 
-        if (existingItem != null) {
-            existingItem.quantity += 1
-        } else {
-            cartMap[itemId] = CartItem(
-                itemId,
-                name,
-                1,
-                basePrice,
-                stock,
-                modifiers
-            )
+            if (existingItem != null) {
+                existingItem.quantity += 1
+                // keep same modifiers for that line
+                cartMap[lineKey] = existingItem
+            } else {
+                cartMap[lineKey] = CartItem(
+                    itemId = itemId,
+                    name = name,
+                    quantity = 1,
+                    basePrice = basePrice,
+                    stock = stock,
+                    modifiers = modifiers
+                )
+            }
+
+            refreshCart()
+
+            cartMap[lineKey]?.let { saveCartItemToOrder(lineKey, it) }
         }
-
-        refreshCart()
     }
 
     private fun refreshCart() {
-
         cartContainer.removeAllViews()
         totalAmount = 0.0
 
-        for ((_, item) in cartMap) {
+        for ((lineKey, item) in cartMap) {
 
             val itemLayout = LinearLayout(this)
             itemLayout.orientation = LinearLayout.VERTICAL
@@ -368,10 +365,9 @@ class MenuActivity : AppCompatActivity() {
             nameText.setTypeface(null, android.graphics.Typeface.BOLD)
             itemLayout.addView(nameText)
 
-            var modifiersTotal = 0.0
+            val modifiersTotal = item.modifiers.sumOf { it.second }
 
             for (modifier in item.modifiers) {
-
                 val row = LinearLayout(this)
                 row.orientation = LinearLayout.HORIZONTAL
                 row.layoutParams = LinearLayout.LayoutParams(
@@ -392,22 +388,18 @@ class MenuActivity : AppCompatActivity() {
 
                 row.addView(nameView)
                 row.addView(priceView)
-
                 itemLayout.addView(row)
-
-                modifiersTotal += modifier.second
             }
 
             val qtyText = TextView(this)
             qtyText.text = "Qty: ${item.quantity}"
             itemLayout.addView(qtyText)
 
-            val singleItemTotal = item.basePrice + modifiersTotal
-            val itemTotal = singleItemTotal * item.quantity
+            val unitPrice = item.basePrice + modifiersTotal
+            val lineTotal = unitPrice * item.quantity
 
             val subtotalText = TextView(this)
-            subtotalText.text =
-                "Subtotal: $${String.format(Locale.US, "%.2f", itemTotal)}"
+            subtotalText.text = "Subtotal: $${String.format(Locale.US, "%.2f", lineTotal)}"
             subtotalText.setTypeface(null, android.graphics.Typeface.BOLD)
             itemLayout.addView(subtotalText)
 
@@ -417,45 +409,131 @@ class MenuActivity : AppCompatActivity() {
                 2
             ).apply { setMargins(0, 16, 0, 16) }
             divider.setBackgroundColor(Color.LTGRAY)
-
             itemLayout.addView(divider)
 
+            // Long press remove that exact line
             itemLayout.setOnLongClickListener {
-
                 AlertDialog.Builder(this)
                     .setTitle("Remove Item")
                     .setMessage("Remove ${item.name} from cart?")
                     .setPositiveButton("Yes") { _, _ ->
-                        cartMap.remove(item.itemId)
+                        cartMap.remove(lineKey)
+                        deleteOrderLine(lineKey)
                         refreshCart()
+                        updateOrderTotal()
                     }
                     .setNegativeButton("No", null)
                     .show()
-
                 true
             }
 
             cartContainer.addView(itemLayout)
 
-            totalAmount += itemTotal
+            totalAmount += lineTotal
         }
 
-        txtTotal.text =
-            "Total: $${String.format(Locale.US, "%.2f", totalAmount)}"
+        txtTotal.text = "Total: $${String.format(Locale.US, "%.2f", totalAmount)}"
     }
+
+    // ----------------------------
+    // FIRESTORE ORDER / ITEMS
+    // ----------------------------
+
+    private fun ensureOrderThen(action: () -> Unit) {
+        if (currentOrderId != null) {
+            action()
+            return
+        }
+
+        val orderMap = hashMapOf(
+            "employeeName" to employeeName,
+            "status" to "OPEN",
+            "createdAt" to Date(),
+            "updatedAt" to Date(),
+            "total" to 0.0
+        )
+
+        db.collection("Orders")
+            .add(orderMap)
+            .addOnSuccessListener { doc ->
+                currentOrderId = doc.id
+                action()
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to create order: ${it.message}", Toast.LENGTH_LONG).show()
+            }
+    }
+
+    private fun saveCartItemToOrder(lineKey: String, cartItem: CartItem) {
+        val modifiersTotal = cartItem.modifiers.sumOf { it.second }
+        val unitPrice = cartItem.basePrice + modifiersTotal
+        val lineTotal = unitPrice * cartItem.quantity
+
+        val itemMap = hashMapOf(
+            "itemId" to cartItem.itemId,
+            "name" to cartItem.name,
+            "quantity" to cartItem.quantity,
+            "basePrice" to cartItem.basePrice,
+            "modifiers" to cartItem.modifiers,
+            "modifiersTotal" to modifiersTotal,
+            "unitPrice" to unitPrice,
+            "lineTotal" to lineTotal,
+            "updatedAt" to Date()
+        )
+
+        val orderId = currentOrderId ?: return
+
+        db.collection("Orders")
+            .document(orderId)
+            .collection("items")
+            .document(lineKey)
+            .set(itemMap)
+
+        updateOrderTotal()
+    }
+
+    private fun deleteOrderLine(lineKey: String) {
+        val orderId = currentOrderId ?: return
+        db.collection("Orders")
+            .document(orderId)
+            .collection("items")
+            .document(lineKey)
+            .delete()
+    }
+
+    private fun updateOrderTotal() {
+        val orderId = currentOrderId ?: return
+
+        var total = 0.0
+        for ((_, item) in cartMap) {
+            val modifiersTotal = item.modifiers.sumOf { it.second }
+            val unitPrice = item.basePrice + modifiersTotal
+            total += unitPrice * item.quantity
+        }
+
+        db.collection("Orders")
+            .document(orderId)
+            .update("total", total)
+    }
+
+    // key that separates same item with different modifiers
+    private fun cartKey(itemId: String, modifiers: List<Pair<String, Double>>): String {
+        val sorted = modifiers.sortedBy { it.first + "|" + it.second }
+        val modsKey = sorted.joinToString("|") { "${it.first}:${it.second}" }
+        return "${itemId}__${modsKey}"
+    }
+
+    // ----------------------------
+    // STOCK DEDUCTION (after payment)
+    // ----------------------------
 
     private fun deductStockTransaction(
         onSuccess: () -> Unit,
         onFailure: (String) -> Unit
     ) {
-
         db.runTransaction { transaction ->
-
             for ((_, cartItem) in cartMap) {
-
-                val itemRef =
-                    db.collection("MenuItems").document(cartItem.itemId)
-
+                val itemRef = db.collection("MenuItems").document(cartItem.itemId)
                 val snapshot = transaction.get(itemRef)
                 val currentStock = snapshot.getLong("stock") ?: 0L
 
@@ -466,13 +544,10 @@ class MenuActivity : AppCompatActivity() {
                 val newStock = currentStock - cartItem.quantity
                 transaction.update(itemRef, "stock", newStock)
             }
-
             null
         }
             .addOnSuccessListener { onSuccess() }
-            .addOnFailureListener {
-                onFailure(it.message ?: "Transaction failed")
-            }
+            .addOnFailureListener { onFailure(it.message ?: "Transaction failed") }
     }
 
     private fun clearCart() {

@@ -92,6 +92,19 @@
         android:contentDescription="Logout"
         app:tint="@android:color/white"
         android:padding="12dp"/>
+    <ImageButton
+        android:id="@+id/btnHamburger"
+        android:layout_width="60dp"
+        android:layout_height="60dp"
+        android:layout_gravity="top|start"
+        android:layout_margin="16dp"
+        android:background="@android:color/transparent"
+        android:src="@drawable/ic_hamburger"
+        android:contentDescription="Menu"
+        android:padding="4dp"
+        android:scaleType="fitCenter"
+        android:clickable="true"
+        android:focusable="true"/>
 
     <ImageButton
         android:id="@+id/btnMenuTop"

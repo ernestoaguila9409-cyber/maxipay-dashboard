@@ -29,7 +29,7 @@ class PaymentActivity : AppCompatActivity() {
     private lateinit var btnCredit: Button
     private lateinit var btnDebit: Button
     private lateinit var btnCash: Button
-
+    private var orderId: String? = null
     private var totalAmount = 0.0
     private val db = FirebaseFirestore.getInstance()
 
@@ -49,6 +49,8 @@ class PaymentActivity : AppCompatActivity() {
 
         totalAmount = intent.getDoubleExtra("TOTAL_AMOUNT", 0.0)
 
+        orderId = intent.getStringExtra("ORDER_ID")
+        Toast.makeText(this, "ORDER_ID: $orderId", Toast.LENGTH_LONG).show()
         txtPaymentTotal.text =
             String.format(Locale.US, "Total: $%.2f", totalAmount)
 
@@ -278,8 +280,26 @@ class PaymentActivity : AppCompatActivity() {
 
         db.collection("Transactions")
             .add(transactionMap)
+            .addOnSuccessListener { transactionDoc ->
+
+                // ✅ CLOSE THE ORDER
+                orderId?.let { oid ->
+                    db.collection("Orders")
+                        .document(oid)
+                        .update(
+                            mapOf(
+                                "status" to "CLOSED",
+                                "closedAt" to Date(),
+                                "paymentType" to paymentType,
+                                "total" to totalAmount,
+                                "transactionId" to transactionDoc.id
+                            )
+                        )
+                }
+
+            }
             .addOnFailureListener {
-                Log.e("FIRESTORE", "Failed to save transaction")
+                Log.e("FIRESTORE", "Failed to save transaction: ${it.message}")
             }
     }
 }
