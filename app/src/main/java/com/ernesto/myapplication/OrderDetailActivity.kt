@@ -1,127 +1,93 @@
 package com.ernesto.myapplication
 
+import android.graphics.Rect
 import android.os.Bundle
 import android.view.View
-import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.FirebaseFirestore
+import java.text.SimpleDateFormat
 import java.util.Locale
 
 class OrderDetailActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
+    private lateinit var recycler: RecyclerView
+    private lateinit var txtEmptyItems: TextView
 
-    private lateinit var itemsContainer: LinearLayout
-    private lateinit var txtHeader: TextView
+    private val itemDocs = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
+    private lateinit var adapter: OrderItemsAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_order_detail)
 
-        itemsContainer = findViewById(R.id.itemsContainer)
-        txtHeader = findViewById(R.id.txtHeader)
+        recycler = findViewById(R.id.recyclerOrderItems)
+        txtEmptyItems = findViewById(R.id.txtEmptyItems)
 
-        val orderId = intent.getStringExtra("ORDER_ID") ?: ""
-        if (orderId.isBlank()) {
-            txtHeader.text = "Missing ORDER_ID"
-            return
-        }
+        recycler.layoutManager = LinearLayoutManager(this)
+        adapter = OrderItemsAdapter(itemDocs)
+        recycler.adapter = adapter
 
-        loadOrder(orderId)
+        // spacing between item cards
+        recycler.addItemDecoration(object : RecyclerView.ItemDecoration() {
+            override fun getItemOffsets(
+                outRect: Rect,
+                view: View,
+                parent: RecyclerView,
+                state: RecyclerView.State
+            ) {
+                outRect.top = 12
+                outRect.left = 6
+                outRect.right = 6
+                outRect.bottom = 12
+            }
+        })
+
+        val orderId = intent.getStringExtra("ORDER_ID") ?: return
+
+        loadHeader(orderId)
         loadItems(orderId)
     }
 
-    private fun loadOrder(orderId: String) {
+    private fun loadHeader(orderId: String) {
         db.collection("Orders").document(orderId)
             .get()
             .addOnSuccessListener { doc ->
-                val employee = doc.getString("employeeName") ?: "Unknown"
-                val status = doc.getString("status") ?: "?"
-                val total = doc.getDouble("total") ?: 0.0
 
-                txtHeader.text = "$status • $employee • Total: $${String.format(Locale.US, "%.2f", total)}"
+                val employee = doc.getString("employeeName") ?: ""
+                val createdAt = doc.getDate("createdAt")
+
+                val txtEmployee = findViewById<TextView>(R.id.txtHeaderEmployee)
+                val txtTime = findViewById<TextView>(R.id.txtHeaderTime)
+
+                txtEmployee.text = employee
+
+                if (createdAt != null) {
+                    txtTime.text =
+                        SimpleDateFormat("MMM dd • hh:mm a", Locale.US).format(createdAt)
+                }
             }
     }
 
     private fun loadItems(orderId: String) {
-        itemsContainer.removeAllViews()
-
-        db.collection("Orders")
-            .document(orderId)
+        db.collection("Orders").document(orderId)
             .collection("items")
             .get()
             .addOnSuccessListener { docs ->
+                itemDocs.clear()
+                itemDocs.addAll(docs.documents)
+                adapter.notifyDataSetChanged()
 
-                if (docs.isEmpty) {
-                    val empty = TextView(this)
-                    empty.text = "No items"
-                    empty.textSize = 16f
-                    itemsContainer.addView(empty)
-                    return@addOnSuccessListener
-                }
-
-                for (doc in docs) {
-
-                    val name = doc.getString("name") ?: "Item"
-                    val qty = (doc.getLong("quantity") ?: 0L).toInt()
-                    val unitPrice = doc.getDouble("unitPrice") ?: 0.0
-                    val lineTotal = doc.getDouble("lineTotal") ?: 0.0
-
-                    val block = LinearLayout(this)
-                    block.orientation = LinearLayout.VERTICAL
-                    block.setPadding(24, 24, 24, 24)
-
-                    val title = TextView(this)
-                    title.text = "$name  (Qty: $qty)"
-                    title.textSize = 18f
-                    title.setTypeface(null, android.graphics.Typeface.BOLD)
-                    block.addView(title)
-
-                    val price = TextView(this)
-                    price.text = "Unit: $${String.format(Locale.US, "%.2f", unitPrice)}    Line: $${String.format(Locale.US, "%.2f", lineTotal)}"
-                    price.textSize = 14f
-                    block.addView(price)
-
-                    // modifiers is saved as array of maps like: [{first:"Onion", second:0.0}, ...]
-                    val modsAny = doc.get("modifiers")
-                    val modsList = mutableListOf<Pair<String, Double>>()
-
-                    if (modsAny is List<*>) {
-                        for (m in modsAny) {
-                            if (m is Map<*, *>) {
-                                val first = m["first"]?.toString() ?: ""
-                                val second = (m["second"] as? Number)?.toDouble() ?: 0.0
-                                if (first.isNotBlank()) modsList.add(first to second)
-                            }
-                        }
-                    }
-
-                    if (modsList.isNotEmpty()) {
-                        val modsTitle = TextView(this)
-                        modsTitle.text = "Modifiers:"
-                        modsTitle.setPadding(0, 12, 0, 4)
-                        modsTitle.setTypeface(null, android.graphics.Typeface.BOLD)
-                        block.addView(modsTitle)
-
-                        for (mod in modsList) {
-                            val t = TextView(this)
-                            t.text = "• ${mod.first}  (+$${String.format(Locale.US, "%.2f", mod.second)})"
-                            block.addView(t)
-                        }
-                    }
-
-                    val divider = View(this)
-                    divider.setBackgroundColor(android.graphics.Color.LTGRAY)
-                    val params = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        2
-                    )
-                    params.setMargins(0, 24, 0, 24)
-                    divider.layoutParams = params
-                    block.addView(divider)
-
-                    itemsContainer.addView(block)
+                // show a friendly message instead of a blank screen
+                if (itemDocs.isEmpty()) {
+                    txtEmptyItems.visibility = View.VISIBLE
+                    recycler.visibility = View.GONE
+                } else {
+                    txtEmptyItems.visibility = View.GONE
+                    recycler.visibility = View.VISIBLE
                 }
             }
     }
