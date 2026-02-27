@@ -2,152 +2,209 @@ package com.ernesto.myapplication
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
+import android.widget.ImageButton
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.chip.Chip
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
-import java.text.SimpleDateFormat
-import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 
 class OrdersActivity : AppCompatActivity() {
 
-    private val db = FirebaseFirestore.getInstance()
-
     private lateinit var recyclerOrders: RecyclerView
+    private lateinit var btnMultiDelete: ImageButton
+
+    private lateinit var chipAll: Chip
+    private lateinit var chipOpen: Chip
+    private lateinit var chipClosed: Chip
+
+    private val db: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
+
     private lateinit var adapter: OrdersAdapter
+    private val orders = mutableListOf<OrderRow>()
 
-    // What the adapter displays
-    private val orderList = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
+    private var listener: ListenerRegistration? = null
 
-    // Full list from Firestore (source of truth)
-    private val allOrders = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
+    // Filters: "ALL", "OPEN", "CLOSED"
+    private var filter: String = "ALL"
 
-    private var currentFilter = "ALL" // ALL | OPEN | CLOSED
+    // Selection mode
+    private var selectionMode = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_orders)
 
         recyclerOrders = findViewById(R.id.recyclerOrders)
-        recyclerOrders.layoutManager = LinearLayoutManager(this)
+        btnMultiDelete = findViewById(R.id.btnMultiDelete)
 
-        adapter = OrdersAdapter(orderList)
-        recyclerOrders.adapter = adapter
+        chipAll = findViewById(R.id.chipAll)
+        chipOpen = findViewById(R.id.chipOpen)
+        chipClosed = findViewById(R.id.chipClosed)
 
-        recyclerOrders.addItemDecoration(
-            object : RecyclerView.ItemDecoration() {
-                override fun getItemOffsets(
-                    outRect: android.graphics.Rect,
-                    view: android.view.View,
-                    parent: RecyclerView,
-                    state: RecyclerView.State
-                ) {
-                    outRect.top = 16
-                    outRect.left = 8
-                    outRect.right = 8
-                    outRect.bottom = 16
+        adapter = OrdersAdapter(
+            onOrderClick = { order ->
+                if (selectionMode) {
+                    adapter.toggleSelected(order.id)
+                    updateDeleteButtonState()
+                } else {
+                    val intent = Intent(this, OrderDetailActivity::class.java)
+                    intent.putExtra("orderId", order.id)
+                    startActivity(intent)
+                }
+            },
+            onOrderLongPress = { order ->
+                if (!selectionMode) {
+                    selectionMode = true
+                    adapter.toggleSelected(order.id)
+                    updateDeleteButtonState()
+                    true
+                } else {
+                    false
                 }
             }
         )
 
-        // Filter chips (must exist in activity_orders.xml)
-        val chipAll = findViewById<com.google.android.material.chip.Chip>(R.id.chipAll)
-        val chipOpen = findViewById<com.google.android.material.chip.Chip>(R.id.chipOpen)
-        val chipClosed = findViewById<com.google.android.material.chip.Chip>(R.id.chipClosed)
+        recyclerOrders.layoutManager = LinearLayoutManager(this)
+        recyclerOrders.adapter = adapter
 
-        chipAll.setOnClickListener {
-            currentFilter = "ALL"
-            applyFilter()
-        }
-        chipOpen.setOnClickListener {
-            currentFilter = "OPEN"
-            applyFilter()
-        }
-        chipClosed.setOnClickListener {
-            currentFilter = "CLOSED"
-            applyFilter()
+        btnMultiDelete.setOnClickListener {
+            if (!selectionMode) {
+                selectionMode = true
+                Toast.makeText(this, "Select orders to delete", Toast.LENGTH_SHORT).show()
+                updateDeleteButtonState()
+            } else {
+                val selected = adapter.getSelectedIds()
+                if (selected.isEmpty()) {
+                    selectionMode = false
+                    adapter.clearSelection()
+                    updateDeleteButtonState()
+                } else {
+                    deleteSelectedOrders(selected)
+                }
+            }
         }
 
-        loadOrders()
+        chipAll.setOnClickListener { setFilter("ALL") }
+        chipOpen.setOnClickListener { setFilter("OPEN") }
+        chipClosed.setOnClickListener { setFilter("CLOSED") }
     }
 
-    private fun loadOrders() {
-        db.collection("Orders")
+    override fun onStart() {
+        super.onStart()
+        startListening()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        listener?.remove()
+        listener = null
+    }
+
+    private fun setFilter(newFilter: String) {
+        filter = newFilter
+        startListening()
+    }
+
+    private fun startListening() {
+        listener?.remove()
+        listener = null
+
+        var query: Query = db.collection("Orders")
             .orderBy("createdAt", Query.Direction.DESCENDING)
-            .get()
-            .addOnSuccessListener { documents ->
-                allOrders.clear()
-                allOrders.addAll(documents.documents)
-                applyFilter()
+
+        if (filter == "OPEN" || filter == "CLOSED") {
+            query = query.whereEqualTo("status", filter)
+        }
+
+        listener = query.addSnapshotListener { snap, err ->
+            if (err != null) {
+                Toast.makeText(this, "Error: ${err.message}", Toast.LENGTH_LONG).show()
+                return@addSnapshotListener
             }
+            if (snap == null) return@addSnapshotListener
+
+            Toast.makeText(this, "Orders found: ${snap.size()}", Toast.LENGTH_SHORT).show()
+
+            orders.clear()
+
+            for (doc in snap.documents) {
+                val id = doc.id
+
+                val status = doc.getString("status") ?: "OPEN"
+
+                // 🔥 Your Firestore stores total as Double (ex: 0.04)
+                val totalDouble = doc.getDouble("total") ?: 0.0
+                val totalCents = (totalDouble * 100).toLong()
+
+                val employee = doc.getString("employeeName") ?: "—"
+
+                val createdAt = doc.getTimestamp("createdAt") ?: Timestamp.now()
+
+                orders.add(
+                    OrderRow(
+                        id = id,
+                        status = status,
+                        totalCents = totalCents,
+                        employeeName = employee,
+                        createdAt = createdAt
+                    )
+                )
+            }
+
+            adapter.submit(orders)
+            updateDeleteButtonState()
+        }
     }
 
-    private fun applyFilter() {
-        orderList.clear()
-
-        when (currentFilter) {
-            "OPEN" -> orderList.addAll(allOrders.filter { it.getString("status") == "OPEN" })
-            "CLOSED" -> orderList.addAll(allOrders.filter { it.getString("status") == "CLOSED" })
-            else -> orderList.addAll(allOrders)
-        }
-
-        adapter.notifyDataSetChanged()
+    private fun updateDeleteButtonState() {
+        val selectedCount = adapter.getSelectedIds().size
+        btnMultiDelete.alpha = if (!selectionMode) 1f else if (selectedCount == 0) 0.6f else 1f
     }
 
-    inner class OrdersAdapter(
-        private val orders: List<com.google.firebase.firestore.DocumentSnapshot>
-    ) : RecyclerView.Adapter<OrdersAdapter.OrderViewHolder>() {
+    private fun deleteSelectedOrders(selectedIds: Set<String>) {
+        lifecycleScope.launch {
+            try {
+                btnMultiDelete.isEnabled = false
 
-        inner class OrderViewHolder(view: android.view.View) :
-            RecyclerView.ViewHolder(view) {
+                withContext(Dispatchers.IO) {
+                    for (orderId in selectedIds) {
+                        deleteOrderWithItems(orderId)
+                    }
+                }
 
-            val txtStatus: android.widget.TextView = view.findViewById(R.id.txtStatus)
-            val txtTotal: android.widget.TextView = view.findViewById(R.id.txtTotal)
-            val txtEmployee: android.widget.TextView = view.findViewById(R.id.txtEmployee)
-            val txtTime: android.widget.TextView = view.findViewById(R.id.txtTime)
-        }
+                Toast.makeText(this@OrdersActivity, "Deleted ${selectedIds.size} orders", Toast.LENGTH_SHORT).show()
 
-        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): OrderViewHolder {
-            val view = layoutInflater.inflate(R.layout.item_order, parent, false)
-            return OrderViewHolder(view)
-        }
+                selectionMode = false
+                adapter.clearSelection()
+                updateDeleteButtonState()
 
-        override fun getItemCount(): Int = orders.size
-
-        override fun onBindViewHolder(holder: OrderViewHolder, position: Int) {
-            val doc = orders[position]
-
-            val status = doc.getString("status") ?: ""
-            val total = doc.getDouble("total") ?: 0.0
-            val employee = doc.getString("employeeName") ?: ""
-            val date = doc.getDate("createdAt")
-
-            holder.txtStatus.text = status
-            holder.txtTotal.text = "$${String.format(Locale.US, "%.2f", total)}"
-            holder.txtEmployee.text = employee
-
-            if (date != null) {
-                val format = SimpleDateFormat("MMM dd • hh:mm a", Locale.US)
-                holder.txtTime.text = format.format(date)
-            } else {
-                holder.txtTime.text = ""
-            }
-
-            // Status styling
-            if (status == "OPEN") {
-                holder.txtStatus.setTextColor(android.graphics.Color.parseColor("#2E7D32"))
-                holder.txtStatus.setBackgroundResource(R.drawable.status_badge_background)
-            } else {
-                holder.txtStatus.setTextColor(android.graphics.Color.parseColor("#C62828"))
-                holder.txtStatus.setBackgroundResource(R.drawable.status_badge_closed)
-            }
-
-            holder.itemView.setOnClickListener {
-                val intent = Intent(this@OrdersActivity, OrderDetailActivity::class.java)
-                intent.putExtra("ORDER_ID", doc.id)
-                startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(this@OrdersActivity, "Delete failed: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                btnMultiDelete.isEnabled = true
             }
         }
+    }
+
+    private suspend fun deleteOrderWithItems(orderId: String) {
+        val orderRef = db.collection("Orders").document(orderId)
+
+        val itemsSnap = orderRef.collection("items").get().await()
+        for (item in itemsSnap.documents) {
+            item.reference.delete().await()
+        }
+
+        orderRef.delete().await()
     }
 }

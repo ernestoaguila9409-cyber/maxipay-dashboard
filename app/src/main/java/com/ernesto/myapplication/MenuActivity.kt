@@ -25,7 +25,7 @@ class MenuActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
 
-    // key = lineKey (itemId + modifiers)
+    // key = lineKey (doc id in Orders/{orderId}/items)
     private val cartMap = mutableMapOf<String, CartItem>()
 
     private lateinit var categoryContainer: LinearLayout
@@ -33,7 +33,7 @@ class MenuActivity : AppCompatActivity() {
     private lateinit var cartContainer: LinearLayout
     private lateinit var txtTotal: TextView
     private lateinit var btnCheckout: Button
-    private var orderId: String? = null
+
     private var totalAmount = 0.0
     private var employeeName: String = ""
     private var currentOrderId: String? = null
@@ -66,7 +66,15 @@ class MenuActivity : AppCompatActivity() {
         txtTotal = findViewById(R.id.txtTotal)
         btnCheckout = findViewById(R.id.btnCheckout)
 
+        // ✅ IMPORTANT: if we came from OrderDetail "Checkout", we are editing an existing order
+        currentOrderId = intent.getStringExtra("ORDER_ID")
+
         loadCategories()
+
+        // ✅ Load existing order items into cart if ORDER_ID was provided
+        currentOrderId?.let { existingOrderId ->
+            loadExistingOrderIntoCart(existingOrderId)
+        }
 
         btnCheckout.setOnClickListener {
             if (cartMap.isEmpty()) {
@@ -76,9 +84,72 @@ class MenuActivity : AppCompatActivity() {
 
             val intent = Intent(this, PaymentActivity::class.java)
             intent.putExtra("TOTAL_AMOUNT", totalAmount)
-            intent.putExtra("ORDER_ID", currentOrderId) // ✅ ADD THIS LINE
+            intent.putExtra("ORDER_ID", currentOrderId) // existing order id
             paymentLauncher.launch(intent)
         }
+    }
+
+    // ----------------------------
+    // LOAD EXISTING ORDER -> CART
+    // ----------------------------
+
+    private fun loadExistingOrderIntoCart(orderId: String) {
+        // (Optional) load employeeName from the order if you want
+        db.collection("Orders").document(orderId)
+            .get()
+            .addOnSuccessListener { orderDoc ->
+                val nameFromOrder = orderDoc.getString("employeeName")
+                if (!nameFromOrder.isNullOrBlank()) {
+                    employeeName = nameFromOrder
+                }
+
+                // Load items
+                db.collection("Orders")
+                    .document(orderId)
+                    .collection("items")
+                    .get()
+                    .addOnSuccessListener { docs ->
+                        cartMap.clear()
+
+                        for (doc in docs.documents) {
+                            val lineKey = doc.id
+
+                            val itemId = doc.getString("itemId") ?: continue
+                            val name = doc.getString("name") ?: "Item"
+                            val qty = (doc.getLong("quantity") ?: 1L).toInt()
+                            val basePrice = doc.getDouble("basePrice") ?: 0.0
+
+                            val modifiers = parseModifiers(doc.get("modifiers"))
+                            val stock = 0L // not needed for display; stock is checked during deduction
+
+                            cartMap[lineKey] = CartItem(
+                                itemId = itemId,
+                                name = name,
+                                quantity = qty,
+                                basePrice = basePrice,
+                                stock = stock,
+                                modifiers = modifiers
+                            )
+                        }
+
+                        refreshCart()
+                    }
+            }
+    }
+
+    private fun parseModifiers(raw: Any?): List<Pair<String, Double>> {
+        // Your Firestore stores modifiers as:
+        // modifiers: [ {first:"Medium", second:0.02}, {first:"grande", second:0.02} ]
+        val list = raw as? List<*> ?: return emptyList()
+
+        val out = mutableListOf<Pair<String, Double>>()
+        for (item in list) {
+            val map = item as? Map<*, *> ?: continue
+            val name = map["first"]?.toString() ?: continue
+            val price = (map["second"] as? Number)?.toDouble() ?: 0.0
+            out.add(name to price)
+        }
+        return out
     }
 
     // ----------------------------
@@ -261,8 +332,6 @@ class MenuActivity : AppCompatActivity() {
                                     radioGroup.addView(radioButton)
 
                                     radioButton.setOnClickListener {
-                                        // remove any previous selection from this group by name (simple approach)
-                                        // (for perfect behavior, store groupId -> selected option)
                                         selectedModifiers.removeAll { it.first == optionName }
                                         selectedModifiers.add(optionName to optionPrice)
                                         selectedCountPerGroup[groupId] = 1
@@ -330,7 +399,6 @@ class MenuActivity : AppCompatActivity() {
 
             if (existingItem != null) {
                 existingItem.quantity += 1
-                // keep same modifiers for that line
                 cartMap[lineKey] = existingItem
             } else {
                 cartMap[lineKey] = CartItem(
@@ -360,12 +428,19 @@ class MenuActivity : AppCompatActivity() {
             itemLayout.setPadding(0, 0, 0, 24)
 
             val nameText = TextView(this)
-            nameText.text = item.name
+            nameText.text = "${item.name} (Qty: ${item.quantity})"
             nameText.textSize = 16f
             nameText.setTypeface(null, android.graphics.Typeface.BOLD)
             itemLayout.addView(nameText)
 
             val modifiersTotal = item.modifiers.sumOf { it.second }
+
+            if (item.modifiers.isNotEmpty()) {
+                val modTitle = TextView(this)
+                modTitle.text = "Modifiers:"
+                modTitle.setTextColor(Color.DKGRAY)
+                itemLayout.addView(modTitle)
+            }
 
             for (modifier in item.modifiers) {
                 val row = LinearLayout(this)
@@ -391,15 +466,11 @@ class MenuActivity : AppCompatActivity() {
                 itemLayout.addView(row)
             }
 
-            val qtyText = TextView(this)
-            qtyText.text = "Qty: ${item.quantity}"
-            itemLayout.addView(qtyText)
-
             val unitPrice = item.basePrice + modifiersTotal
             val lineTotal = unitPrice * item.quantity
 
             val subtotalText = TextView(this)
-            subtotalText.text = "Subtotal: $${String.format(Locale.US, "%.2f", lineTotal)}"
+            subtotalText.text = "Line Total: $${String.format(Locale.US, "%.2f", lineTotal)}"
             subtotalText.setTypeface(null, android.graphics.Typeface.BOLD)
             itemLayout.addView(subtotalText)
 
@@ -411,7 +482,6 @@ class MenuActivity : AppCompatActivity() {
             divider.setBackgroundColor(Color.LTGRAY)
             itemLayout.addView(divider)
 
-            // Long press remove that exact line
             itemLayout.setOnLongClickListener {
                 AlertDialog.Builder(this)
                     .setTitle("Remove Item")
@@ -421,6 +491,7 @@ class MenuActivity : AppCompatActivity() {
                         deleteOrderLine(lineKey)
                         refreshCart()
                         updateOrderTotal()
+                        deleteOrderIfEmpty()
                     }
                     .setNegativeButton("No", null)
                     .show()
@@ -428,7 +499,6 @@ class MenuActivity : AppCompatActivity() {
             }
 
             cartContainer.addView(itemLayout)
-
             totalAmount += lineTotal
         }
 
@@ -440,6 +510,7 @@ class MenuActivity : AppCompatActivity() {
     // ----------------------------
 
     private fun ensureOrderThen(action: () -> Unit) {
+        // ✅ If we already have an order id (editing existing order), do NOT create a new one
         if (currentOrderId != null) {
             action()
             return
@@ -474,7 +545,7 @@ class MenuActivity : AppCompatActivity() {
             "name" to cartItem.name,
             "quantity" to cartItem.quantity,
             "basePrice" to cartItem.basePrice,
-            "modifiers" to cartItem.modifiers,
+            "modifiers" to cartItem.modifiers, // will store as {first,second}
             "modifiersTotal" to modifiersTotal,
             "unitPrice" to unitPrice,
             "lineTotal" to lineTotal,
@@ -513,10 +584,14 @@ class MenuActivity : AppCompatActivity() {
 
         db.collection("Orders")
             .document(orderId)
-            .update("total", total)
+            .update(
+                mapOf(
+                    "total" to total,
+                    "updatedAt" to Date()
+                )
+            )
     }
 
-    // key that separates same item with different modifiers
     private fun cartKey(itemId: String, modifiers: List<Pair<String, Double>>): String {
         val sorted = modifiers.sortedBy { it.first + "|" + it.second }
         val modsKey = sorted.joinToString("|") { "${it.first}:${it.second}" }
@@ -549,7 +624,28 @@ class MenuActivity : AppCompatActivity() {
             .addOnSuccessListener { onSuccess() }
             .addOnFailureListener { onFailure(it.message ?: "Transaction failed") }
     }
+    private fun deleteOrderIfEmpty() {
+        val orderId = currentOrderId ?: return
 
+        db.collection("Orders")
+            .document(orderId)
+            .collection("items")
+            .limit(1)
+            .get()
+            .addOnSuccessListener { docs ->
+                if (docs.isEmpty) {
+                    // no items left -> delete the order doc
+                    db.collection("Orders")
+                        .document(orderId)
+                        .delete()
+                        .addOnSuccessListener {
+                            currentOrderId = null
+                            Toast.makeText(this, "Order removed (empty cart)", Toast.LENGTH_SHORT).show()
+                            finish() // go back to previous screen
+                        }
+                }
+            }
+    }
     private fun clearCart() {
         cartMap.clear()
         totalAmount = 0.0

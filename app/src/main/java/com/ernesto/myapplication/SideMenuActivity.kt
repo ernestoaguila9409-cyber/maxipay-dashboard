@@ -9,6 +9,20 @@ class SideMenuActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // If we came here from an OPEN order "Checkout", forward to the menu/cart screen
+        val orderIdFromDetail = intent.getStringExtra("ORDER_ID")
+        if (!orderIdFromDetail.isNullOrBlank()) {
+            val i = Intent(this, MainActivity::class.java) // <-- this is your 2nd picture screen in most setups
+            i.putExtra("ORDER_ID", orderIdFromDetail)
+            // Optional: tell MainActivity we're editing an existing order
+            i.putExtra("MODE", "EDIT_ORDER")
+            startActivity(i)
+            finish()
+            return
+        }
+
+        // Normal entry (no orderId): show the side menu page
         setContentView(R.layout.activity_side_menu)
 
         val btnOrders = findViewById<Button>(R.id.btnOrders)

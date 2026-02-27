@@ -8,7 +8,7 @@
     android:background="#F5F5F5"
     android:padding="12dp">
 
-    <!-- Header Card -->
+    <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -29,8 +29,14 @@
             android:layout_marginTop="6dp"
             android:textSize="13sp"
             android:textColor="#666666"/>
-
     </LinearLayout>
+
+    <!-- Items list -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerOrderItems"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
 
     <TextView
         android:id="@+id/txtEmptyItems"
@@ -42,10 +48,50 @@
         android:textColor="#666666"
         android:visibility="gone"/>
 
-    <!-- Items list (scrolls automatically) -->
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerOrderItems"
+    <!-- OPEN order button -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnCheckout"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"/>
+        android:layout_height="52dp"
+        android:text="Checkout"
+        android:layout_marginTop="10dp"
+        android:visibility="gone"
+        app:cornerRadius="24dp"
+        android:backgroundTint="#6A4FB3"
+        android:textColor="@android:color/white"/>
+
+    <!-- CLOSED order buttons (bottom) -->
+    <LinearLayout
+        android:id="@+id/bottomActions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="10dp"
+        android:visibility="gone">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnVoid"
+            android:layout_width="0dp"
+            android:layout_height="52dp"
+            android:layout_weight="1"
+            android:text="VOID"
+            app:cornerRadius="24dp"
+            android:backgroundTint="#C62828"
+            android:textColor="@android:color/white"/>
+
+        <View
+            android:layout_width="10dp"
+            android:layout_height="1dp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnRefund"
+            android:layout_width="0dp"
+            android:layout_height="52dp"
+            android:layout_weight="1"
+            android:text="REFUND"
+            app:cornerRadius="24dp"
+            android:backgroundTint="#6A4FB3"
+            android:textColor="@android:color/white"/>
+    </LinearLayout>
+
 </LinearLayout>
