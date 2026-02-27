@@ -634,14 +634,22 @@ class MenuActivity : AppCompatActivity() {
             .get()
             .addOnSuccessListener { docs ->
                 if (docs.isEmpty) {
-                    // no items left -> delete the order doc
+
                     db.collection("Orders")
                         .document(orderId)
                         .delete()
                         .addOnSuccessListener {
+
                             currentOrderId = null
-                            Toast.makeText(this, "Order removed (empty cart)", Toast.LENGTH_SHORT).show()
-                            finish() // go back to previous screen
+
+                            // 🔥 Go directly to Orders list
+                            val intent = Intent(this, OrdersActivity::class.java)
+                            intent.flags =
+                                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+
+                            startActivity(intent)
+                            finish()
                         }
                 }
             }
