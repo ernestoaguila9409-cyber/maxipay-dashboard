@@ -232,7 +232,40 @@ class PaymentActivity : AppCompatActivity() {
     // ===============================
     // CASH PROCESSING
     // ===============================
+    private fun getOrCreateOpenBatch(onResult: (String) -> Unit) {
 
+        db.collection("Batches")
+            .whereEqualTo("closed", false)
+            .limit(1)
+            .get()
+            .addOnSuccessListener { docs ->
+
+                if (!docs.isEmpty) {
+                    // ✅ Reuse existing open batch
+                    onResult(docs.documents[0].id)
+                    return@addOnSuccessListener
+                }
+
+                // ✅ No open batch → create new one
+                val newBatchId = "BATCH_${System.currentTimeMillis()}"
+
+                val batchMap = hashMapOf(
+                    "batchId" to newBatchId,
+                    "createdAt" to Date(),
+                    "closed" to false,
+                    "closedAt" to null,
+                    "totalSales" to 0.0,
+                    "count" to 0
+                )
+
+                db.collection("Batches")
+                    .document(newBatchId)
+                    .set(batchMap)
+                    .addOnSuccessListener {
+                        onResult(newBatchId)
+                    }
+            }
+    }
     private fun processCashPayment() {
 
         val referenceId = UUID.randomUUID().toString()
@@ -285,19 +318,31 @@ class PaymentActivity : AppCompatActivity() {
 
                 // ✅ CLOSE THE ORDER
                 orderId?.let { oid ->
-                    db.collection("Orders")
-                        .document(oid)
-                        .update(
-                            mapOf(
-                                "status" to "CLOSED",
-                                "closedAt" to Date(),
-                                "paymentType" to paymentType,
-                                "total" to totalAmount,
-                                "transactionId" to transactionDoc.id
-                            )
-                        )
-                }
 
+                    getOrCreateOpenBatch { batchId ->
+
+                        db.collection("Orders")
+                            .document(oid)
+                            .update(
+                                mapOf(
+                                    "status" to "CLOSED",
+                                    "closedAt" to Date(),
+                                    "paymentType" to paymentType,
+                                    "total" to totalAmount,
+                                    "transactionId" to transactionDoc.id,
+                                    "batchId" to batchId
+                                )
+                            )
+
+                        // Optional: update batch totals
+                        db.collection("Batches")
+                            .document(batchId)
+                            .update(
+                                "totalSales",
+                                com.google.firebase.firestore.FieldValue.increment(totalAmount)
+                            )
+                    }
+                }
             }
             .addOnFailureListener {
                 Log.e("FIRESTORE", "Failed to save transaction: ${it.message}")
