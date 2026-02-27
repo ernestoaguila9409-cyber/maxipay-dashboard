@@ -10,9 +10,9 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.button.MaterialButton
 import com.google.firebase.firestore.FirebaseFirestore
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 class OrderDetailActivity : AppCompatActivity() {
@@ -22,18 +22,15 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var recycler: RecyclerView
     private lateinit var txtEmptyItems: TextView
 
-    // OPEN order action
-    private lateinit var btnCheckout: com.google.android.material.button.MaterialButton
-
-    // CLOSED order actions (bottom)
+    private lateinit var btnCheckout: MaterialButton
     private lateinit var bottomActions: View
-    private lateinit var btnVoid: com.google.android.material.button.MaterialButton
-    private lateinit var btnRefund: com.google.android.material.button.MaterialButton
+    private lateinit var btnVoid: MaterialButton
+    private lateinit var btnRefund: MaterialButton
 
-    private val itemDocs = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
     private lateinit var adapter: OrderItemsAdapter
+    private val itemDocs = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
 
-    private var currentOrderId: String = ""
+    private lateinit var orderId: String
     private var currentOrderStatus: String = ""
     private var currentBatchId: String? = null
 
@@ -41,11 +38,19 @@ class OrderDetailActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_order_detail)
 
+        // ✅ Correct key (must match OrdersActivity)
+        orderId = intent.getStringExtra("orderId") ?: ""
+
+        if (orderId.isBlank()) {
+            Toast.makeText(this, "Invalid order ID", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
+
         recycler = findViewById(R.id.recyclerOrderItems)
         txtEmptyItems = findViewById(R.id.txtEmptyItems)
 
         btnCheckout = findViewById(R.id.btnCheckout)
-
         bottomActions = findViewById(R.id.bottomActions)
         btnVoid = findViewById(R.id.btnVoid)
         btnRefund = findViewById(R.id.btnRefund)
@@ -61,104 +66,68 @@ class OrderDetailActivity : AppCompatActivity() {
                 parent: RecyclerView,
                 state: RecyclerView.State
             ) {
-                outRect.top = 12
-                outRect.left = 6
-                outRect.right = 6
-                outRect.bottom = 12
+                outRect.set(12, 12, 12, 12)
             }
         })
 
-        currentOrderId = intent.getStringExtra("ORDER_ID") ?: return
-
-        loadHeader(currentOrderId)
-        loadItems(currentOrderId)
+        loadHeader()
+        loadItems()
     }
 
-    private fun loadHeader(orderId: String) {
+    private fun loadHeader() {
         db.collection("Orders").document(orderId)
             .get()
             .addOnSuccessListener { doc ->
 
+                if (!doc.exists()) return@addOnSuccessListener
+
                 val status = doc.getString("status") ?: ""
                 currentOrderStatus = status
+                currentBatchId = doc.getString("batchId")
 
                 val employee = doc.getString("employeeName") ?: ""
                 val createdAt = doc.getDate("createdAt")
-                currentBatchId = doc.getString("batchId")
 
-                val txtEmployee = findViewById<TextView>(R.id.txtHeaderEmployee)
-                val txtTime = findViewById<TextView>(R.id.txtHeaderTime)
+                findViewById<TextView>(R.id.txtHeaderEmployee).text = employee
+                findViewById<TextView>(R.id.txtHeaderTime).text =
+                    createdAt?.let {
+                        SimpleDateFormat("MMM dd • hh:mm a", Locale.US).format(it)
+                    } ?: ""
 
-                txtEmployee.text = employee
-                txtTime.text = if (createdAt != null) {
-                    SimpleDateFormat("MMM dd • hh:mm a", Locale.US).format(createdAt)
-                } else ""
-
-                // Reset buttons
                 btnCheckout.visibility = View.GONE
-                btnCheckout.setOnClickListener(null)
                 bottomActions.visibility = View.GONE
                 btnVoid.visibility = View.GONE
                 btnRefund.visibility = View.GONE
 
-                // ✅ OPEN -> show Checkout (bottom in your XML)
                 if (status == "OPEN") {
                     btnCheckout.visibility = View.VISIBLE
                     btnCheckout.setOnClickListener {
-                        val i = Intent(this@OrderDetailActivity, MenuActivity::class.java)
+                        val i = Intent(this, MenuActivity::class.java)
                         i.putExtra("ORDER_ID", orderId)
-
-                        // Optional extras (safe even if empty)
-                        i.putExtra("batchId", intent.getStringExtra("batchId") ?: "")
-                        i.putExtra("employeeName", intent.getStringExtra("employeeName") ?: "")
                         startActivity(i)
                     }
-                    return@addOnSuccessListener
                 }
 
-                // ✅ CLOSED -> show Refund always, show Void only if batch is still open
                 if (status == "CLOSED") {
                     bottomActions.visibility = View.VISIBLE
                     btnRefund.visibility = View.VISIBLE
-
-                    btnRefund.setOnClickListener { confirmRefund(orderId) }
-                    btnVoid.setOnClickListener { confirmVoid(orderId) }
+                    btnRefund.setOnClickListener { confirmRefund() }
 
                     val batchId = currentBatchId
-                    if (batchId.isNullOrBlank()) {
-                        // can't determine batch -> refund only
-                        btnVoid.visibility = View.GONE
-                    } else {
+                    if (!batchId.isNullOrBlank()) {
                         db.collection("Batches").document(batchId)
                             .get()
                             .addOnSuccessListener { batchDoc ->
                                 val batchClosed = batchDoc.getBoolean("closed") ?: true
-                                btnVoid.visibility = if (!batchClosed) View.VISIBLE else View.GONE
-                            }
-                            .addOnFailureListener {
-                                // fallback refund only
-                                btnVoid.visibility = View.GONE
+                                btnVoid.visibility =
+                                    if (!batchClosed) View.VISIBLE else View.GONE
                             }
                     }
                 }
             }
     }
 
-    private fun deleteOrderIfEmpty(orderId: String) {
-        db.collection("Orders").document(orderId)
-            .collection("items")
-            .limit(1)
-            .get()
-            .addOnSuccessListener { docs ->
-                if (docs.isEmpty) {
-                    db.collection("Orders").document(orderId)
-                        .delete()
-                        .addOnSuccessListener { finish() }
-                }
-            }
-    }
-
-    private fun loadItems(orderId: String) {
+    private fun loadItems() {
         db.collection("Orders").document(orderId)
             .collection("items")
             .get()
@@ -170,9 +139,6 @@ class OrderDetailActivity : AppCompatActivity() {
                 if (itemDocs.isEmpty()) {
                     txtEmptyItems.visibility = View.VISIBLE
                     recycler.visibility = View.GONE
-
-                    // ✅ remove empty OPEN orders from database
-                    deleteOrderIfEmpty(orderId)
                 } else {
                     txtEmptyItems.visibility = View.GONE
                     recycler.visibility = View.VISIBLE
@@ -180,34 +146,23 @@ class OrderDetailActivity : AppCompatActivity() {
             }
     }
 
-    // ----------------------------
-    // VOID / REFUND dialogs
-    // ----------------------------
-
-    private fun confirmVoid(orderId: String) {
+    private fun confirmVoid() {
         AlertDialog.Builder(this)
             .setTitle("Void Order")
-            .setMessage("Void this order? (Only allowed if batch is still open)")
+            .setMessage("Void this order?")
             .setPositiveButton("Void") { _, _ ->
-                // For now: just show message. We can connect real logic next.
-                Toast.makeText(this, "VOID pressed for $orderId", Toast.LENGTH_SHORT).show()
-
-                // TODO (next step): mark SALE transaction voided, update order status, optionally restore stock.
-                // voidOrder(orderId)
+                Toast.makeText(this, "VOID pressed", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun confirmRefund(orderId: String) {
+    private fun confirmRefund() {
         AlertDialog.Builder(this)
             .setTitle("Refund Order")
             .setMessage("Refund this order?")
             .setPositiveButton("Refund") { _, _ ->
-                Toast.makeText(this, "REFUND pressed for $orderId", Toast.LENGTH_SHORT).show()
-
-                // TODO (next step): create REFUND transaction, update order status, optionally restore stock.
-                // refundOrder(orderId)
+                Toast.makeText(this, "REFUND pressed", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
             .show()
