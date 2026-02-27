@@ -185,10 +185,11 @@ class PaymentActivity : AppCompatActivity() {
 
                     val jsonObj = JSONObject(responseText)
 
-                    val status =
-                        jsonObj.optString("Status", "")
+                    val generalResponse = jsonObj.optJSONObject("GeneralResponse")
+                    val message = generalResponse?.optString("Message", "") ?: ""
+                    val resultCode = generalResponse?.optString("ResultCode", "") ?: ""
 
-                    if (status.equals("Approved", true)) {
+                    if (resultCode == "0" && message.equals("Approved", true)) {
 
                         val authCode =
                             jsonObj.optString("AuthCode")
