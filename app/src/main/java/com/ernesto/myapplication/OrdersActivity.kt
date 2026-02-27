@@ -81,7 +81,7 @@ class OrdersActivity : AppCompatActivity() {
         btnMultiDelete.setOnClickListener {
             if (!selectionMode) {
                 selectionMode = true
-                Toast.makeText(this, "Select orders to delete", Toast.LENGTH_SHORT).show()
+
                 updateDeleteButtonState()
             } else {
                 val selected = adapter.getSelectedIds()

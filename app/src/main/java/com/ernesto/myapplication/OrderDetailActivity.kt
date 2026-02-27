@@ -11,9 +11,17 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+import java.io.IOException
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class OrderDetailActivity : AppCompatActivity() {
 
@@ -28,17 +36,15 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var btnRefund: MaterialButton
 
     private lateinit var adapter: OrderItemsAdapter
-    private val itemDocs = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
+    private val itemDocs = mutableListOf<DocumentSnapshot>()
 
     private lateinit var orderId: String
-    private var currentOrderStatus: String = ""
     private var currentBatchId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_order_detail)
 
-        // ✅ Correct key (must match OrdersActivity)
         orderId = intent.getStringExtra("orderId") ?: ""
 
         if (orderId.isBlank()) {
@@ -82,31 +88,12 @@ class OrderDetailActivity : AppCompatActivity() {
                 if (!doc.exists()) return@addOnSuccessListener
 
                 val status = doc.getString("status") ?: ""
-                currentOrderStatus = status
                 currentBatchId = doc.getString("batchId")
-
-                val employee = doc.getString("employeeName") ?: ""
-                val createdAt = doc.getDate("createdAt")
-
-                findViewById<TextView>(R.id.txtHeaderEmployee).text = employee
-                findViewById<TextView>(R.id.txtHeaderTime).text =
-                    createdAt?.let {
-                        SimpleDateFormat("MMM dd • hh:mm a", Locale.US).format(it)
-                    } ?: ""
 
                 btnCheckout.visibility = View.GONE
                 bottomActions.visibility = View.GONE
                 btnVoid.visibility = View.GONE
                 btnRefund.visibility = View.GONE
-
-                if (status == "OPEN") {
-                    btnCheckout.visibility = View.VISIBLE
-                    btnCheckout.setOnClickListener {
-                        val i = Intent(this, MenuActivity::class.java)
-                        i.putExtra("ORDER_ID", orderId)
-                        startActivity(i)
-                    }
-                }
 
                 if (status == "CLOSED") {
                     bottomActions.visibility = View.VISIBLE
@@ -115,12 +102,15 @@ class OrderDetailActivity : AppCompatActivity() {
 
                     val batchId = currentBatchId
                     if (!batchId.isNullOrBlank()) {
-                        db.collection("Batches").document(batchId)
+                        db.collection("Batches")
+                            .document(batchId)
                             .get()
                             .addOnSuccessListener { batchDoc ->
-                                val batchClosed = batchDoc.getBoolean("closed") ?: true
-                                btnVoid.visibility =
-                                    if (!batchClosed) View.VISIBLE else View.GONE
+                                val batchClosed = batchDoc.getBoolean("closed") == true
+                                if (!batchClosed) {
+                                    btnVoid.visibility = View.VISIBLE
+                                    btnVoid.setOnClickListener { confirmVoid() }
+                                }
                             }
                     }
                 }
@@ -147,14 +137,143 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun confirmVoid() {
-        AlertDialog.Builder(this)
-            .setTitle("Void Order")
-            .setMessage("Void this order?")
-            .setPositiveButton("Void") { _, _ ->
-                Toast.makeText(this, "VOID pressed", Toast.LENGTH_SHORT).show()
+
+        val batchId = currentBatchId ?: return
+
+        db.collection("Batches")
+            .document(batchId)
+            .get()
+            .addOnSuccessListener { batchDoc ->
+
+                val batchClosed = batchDoc.getBoolean("closed") ?: true
+
+                if (batchClosed) {
+                    Toast.makeText(this, "Batch already closed. Cannot void.", Toast.LENGTH_LONG).show()
+                    btnVoid.visibility = View.GONE
+                    return@addOnSuccessListener
+                }
+
+                AlertDialog.Builder(this)
+                    .setTitle("Void Order")
+                    .setMessage("Void this order?")
+                    .setPositiveButton("Void") { _, _ -> executeVoid() }
+                    .setNegativeButton("Cancel", null)
+                    .show()
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+    }
+
+    private fun executeVoid() {
+        db.collection("Orders")
+            .document(orderId)
+            .get()
+            .addOnSuccessListener { orderDoc ->
+
+                val transactionId = orderDoc.getString("transactionId") ?: return@addOnSuccessListener
+
+                db.collection("Transactions")
+                    .document(transactionId)
+                    .get()
+                    .addOnSuccessListener { txDoc ->
+
+                        val referenceId = txDoc.getString("referenceId") ?: return@addOnSuccessListener
+                        val paymentType = txDoc.getString("paymentType") ?: "Credit"
+                        val amount = txDoc.getDouble("amount") ?: 0.0
+
+                        callVoidApi(referenceId, paymentType, amount, transactionId)
+                    }
+            }
+    }
+
+    private fun callVoidApi(
+        referenceId: String,
+        paymentType: String,
+        amount: Double,
+        transactionId: String
+    ) {
+
+        val json = JSONObject().apply {
+            put("Amount", amount)
+            put("PaymentType", paymentType)
+            put("ReferenceId", referenceId)
+            put("PrintReceipt", "No")
+            put("GetReceipt", "No")
+            put("CaptureSignature", false)
+            put("GetExtendedData", true)
+            put("CallbackInfo", JSONObject().apply { put("Url", "") })
+            put("Tpn", "11881706541A")
+            put("Authkey", "Qt9N7CxhDs")
+        }
+
+        val client = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+
+        val body = json.toString()
+            .toRequestBody("application/json".toMediaType())
+
+        val request = Request.Builder()
+            .url("https://spinpos.net/v2/Payment/Void")
+            .post(body)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+
+            override fun onFailure(call: Call, e: IOException) {
+                runOnUiThread {
+                    Toast.makeText(this@OrderDetailActivity, "Void Failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val responseText = response.body?.string() ?: ""
+
+                runOnUiThread {
+
+                    if (!response.isSuccessful) {
+                        Toast.makeText(this@OrderDetailActivity,
+                            "Void error ${response.code}: $responseText",
+                            Toast.LENGTH_LONG).show()
+                        return@runOnUiThread
+                    }
+
+                    val jsonObj = JSONObject(responseText)
+                    val resultCode = jsonObj
+                        .optJSONObject("GeneralResponse")
+                        ?.optString("ResultCode")
+
+                    if (resultCode == "0") {
+                        finalizeVoid(transactionId)
+                    } else {
+                        Toast.makeText(this@OrderDetailActivity, "Void Declined", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        })
+    }
+
+    private fun finalizeVoid(transactionId: String) {
+
+        db.runBatch { batch ->
+
+            val orderRef = db.collection("Orders").document(orderId)
+            val txRef = db.collection("Transactions").document(transactionId)
+
+            batch.update(txRef, "voided", true)
+
+            batch.update(orderRef, mapOf(
+                "status" to "VOIDED",
+                "voidedAt" to Date()
+            ))
+        }
+            .addOnSuccessListener {
+                Toast.makeText(this, "Sale Voided Successfully", Toast.LENGTH_LONG).show()
+
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    finish()
+                }, 500)
+            }
     }
 
     private fun confirmRefund() {
@@ -162,7 +281,7 @@ class OrderDetailActivity : AppCompatActivity() {
             .setTitle("Refund Order")
             .setMessage("Refund this order?")
             .setPositiveButton("Refund") { _, _ ->
-                Toast.makeText(this, "REFUND pressed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Refund pressed", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
             .show()
