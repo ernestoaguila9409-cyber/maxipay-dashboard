@@ -64,7 +64,7 @@ class BatchManagementActivity : AppCompatActivity() {
     private fun loadClosedBatches() {
 
         db.collection("Batches")
-            .orderBy("timestamp")
+            .whereEqualTo("closed", true)
             .get()
             .addOnSuccessListener { documents ->
 
@@ -72,10 +72,9 @@ class BatchManagementActivity : AppCompatActivity() {
 
                 for (doc in documents) {
 
-                    val batchId = doc.getString("batchId") ?: ""
-                    val total = doc.getDouble("total") ?: 0.0
+                    val total = doc.getDouble("totalSales") ?: 0.0
                     val count = doc.getLong("transactionCount") ?: 0
-                    val date = doc.getDate("timestamp")
+                    val date = doc.getDate("closedAt")
 
                     val formattedDate = SimpleDateFormat(
                         "MM/dd/yyyy HH:mm",
@@ -83,7 +82,7 @@ class BatchManagementActivity : AppCompatActivity() {
                     ).format(date ?: Date())
 
                     val batchMap = hashMapOf<String, Any>(
-                        "batchId" to batchId,
+                        "batchId" to doc.id,
                         "total" to total,
                         "transactionCount" to count,
                         "formattedDate" to formattedDate
@@ -212,63 +211,73 @@ class BatchManagementActivity : AppCompatActivity() {
     // 🔹 CLOSE BATCH IN FIREBASE AFTER Z8 CONFIRMS
     private fun closeBatchInFirebase() {
 
-        db.collection("Transactions")
-            .whereEqualTo("settled", false)
-            .whereEqualTo("voided", false)
+        db.collection("Batches")
+            .whereEqualTo("closed", false)
+            .limit(1)
             .get()
-            .addOnSuccessListener { documents ->
+            .addOnSuccessListener { batchSnap ->
 
-                if (documents.isEmpty) {
-                    Toast.makeText(this, "No open transactions", Toast.LENGTH_SHORT).show()
+                if (batchSnap.isEmpty) {
+                    Toast.makeText(this, "No open batch found", Toast.LENGTH_SHORT).show()
                     return@addOnSuccessListener
                 }
 
-                var total = 0.0
-                val batchId = UUID.randomUUID().toString().take(8)
+                val batchDoc = batchSnap.documents.first()
+                val batchRef = db.collection("Batches").document(batchDoc.id)
+                val batchId = batchDoc.id
 
-                for (doc in documents) {
+                db.collection("Transactions")
+                    .whereEqualTo("settled", false)
+                    .whereEqualTo("voided", false)
+                    .get()
+                    .addOnSuccessListener { transactions ->
 
-                    val amount = doc.getDouble("amount") ?: 0.0
-                    val type = doc.getString("type") ?: "SALE"
+                        val batchWrite = db.batch()
 
-                    if (type == "SALE") {
-                        total += amount
-                    }
+                        var totalSales = 0.0
+                        var count = 0
 
-                    if (type == "REFUND") {
-                        total -= amount
-                    }
+                        for (tx in transactions) {
 
-                    db.collection("Transactions")
-                        .document(doc.id)
-                        .update(
+                            val amount = tx.getDouble("amount") ?: 0.0
+                            val type = tx.getString("type") ?: "SALE"
+
+                            if (type == "SALE") totalSales += amount
+                            if (type == "REFUND") totalSales -= amount
+
+                            count++
+
+                            batchWrite.update(
+                                tx.reference,
+                                mapOf(
+                                    "settled" to true,
+                                    "batchId" to batchId
+                                )
+                            )
+                        }
+
+                        batchWrite.update(
+                            batchRef,
                             mapOf(
-                                "settled" to true,
-                                "batchId" to batchId
+                                "closed" to true,
+                                "closedAt" to Date(),
+                                "totalSales" to totalSales,
+                                "transactionCount" to count
                             )
                         )
-                }
 
+                        batchWrite.commit()
+                            .addOnSuccessListener {
 
-                val batchMap = hashMapOf(
-                    "batchId" to batchId,
-                    "transactionCount" to documents.size(),
-                    "total" to total,
-                    "timestamp" to Date()
-                )
+                                Toast.makeText(
+                                    this,
+                                    "Batch Closed Successfully",
+                                    Toast.LENGTH_LONG
+                                ).show()
 
-                db.collection("Batches")
-                    .add(batchMap)
-                    .addOnSuccessListener {
-
-                        Toast.makeText(
-                            this,
-                            "Batch Saved to Cloud",
-                            Toast.LENGTH_LONG
-                        ).show()
-
-                        loadOpenBatch()
-                        loadClosedBatches()
+                                loadOpenBatch()
+                                loadClosedBatches()
+                            }
                     }
             }
     }

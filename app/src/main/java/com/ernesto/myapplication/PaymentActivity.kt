@@ -3,12 +3,9 @@ package com.ernesto.myapplication
 import android.os.*
 import android.util.Log
 import android.view.View
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.TextView
-import android.widget.Toast
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -29,8 +26,10 @@ class PaymentActivity : AppCompatActivity() {
     private lateinit var btnCredit: Button
     private lateinit var btnDebit: Button
     private lateinit var btnCash: Button
+
     private var orderId: String? = null
     private var totalAmount = 0.0
+
     private val db = FirebaseFirestore.getInstance()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -48,11 +47,9 @@ class PaymentActivity : AppCompatActivity() {
         txtStatus = findViewById(R.id.txtStatus)
 
         totalAmount = intent.getDoubleExtra("TOTAL_AMOUNT", 0.0)
-
         orderId = intent.getStringExtra("ORDER_ID")
-        Toast.makeText(this, "ORDER_ID: $orderId", Toast.LENGTH_LONG).show()
-        txtPaymentTotal.text =
-            String.format(Locale.US, "Total: $%.2f", totalAmount)
+
+        txtPaymentTotal.text = String.format(Locale.US, "Total: $%.2f", totalAmount)
 
         btnCredit.setOnClickListener {
             showWaitingStatus()
@@ -119,10 +116,7 @@ class PaymentActivity : AppCompatActivity() {
     // ===============================
 
     private fun processCardPayment(paymentType: String) {
-
-        val formattedAmount =
-            String.format(Locale.US, "%.2f", totalAmount)
-
+        val formattedAmount = String.format(Locale.US, "%.2f", totalAmount)
         val referenceId = UUID.randomUUID().toString()
 
         val json = JSONObject().apply {
@@ -144,7 +138,6 @@ class PaymentActivity : AppCompatActivity() {
         paymentType: String,
         referenceId: String
     ) {
-
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(180, TimeUnit.SECONDS)
@@ -163,66 +156,49 @@ class PaymentActivity : AppCompatActivity() {
             override fun onFailure(call: Call, e: IOException) {
                 runOnUiThread {
                     showDeclined("Payment Failed")
-                    Toast.makeText(
-                        this@PaymentActivity,
-                        e.message,
-                        Toast.LENGTH_LONG
-                    ).show()
+                    Toast.makeText(this@PaymentActivity, e.message, Toast.LENGTH_LONG).show()
                 }
             }
 
             override fun onResponse(call: Call, response: Response) {
-
                 val responseText = response.body?.string() ?: ""
                 Log.d("SPINPOS_RESPONSE", responseText)
 
                 runOnUiThread {
-
                     if (!response.isSuccessful) {
                         showDeclined("Server Error")
                         return@runOnUiThread
                     }
 
                     val jsonObj = JSONObject(responseText)
-
                     val generalResponse = jsonObj.optJSONObject("GeneralResponse")
                     val message = generalResponse?.optString("Message", "") ?: ""
                     val resultCode = generalResponse?.optString("ResultCode", "") ?: ""
 
-                    if (resultCode == "0" && message.equals("Approved", true)) {
+                    // ✅ Approved when ResultCode == "0"
+                    if (resultCode == "0") {
 
-                        val authCode =
-                            jsonObj.optString("AuthCode")
+                        val authCode = jsonObj.optString("AuthCode")
+                        val invoiceNumber = jsonObj.optString("InvoiceNumber")
 
-                        val invoiceNumber =
-                            jsonObj.optString("InvoiceNumber")
-
-                        val cardData =
-                            jsonObj.optJSONObject("CardData")
-
-                        val cardType =
-                            cardData?.optString("CardType") ?: ""
-
-                        val last4 =
-                            cardData?.optString("Last4") ?: ""
-
-                        val entryType =
-                            cardData?.optString("EntryType") ?: ""
+                        val cardData = jsonObj.optJSONObject("CardData")
+                        val cardType = cardData?.optString("CardType") ?: ""
+                        val last4 = cardData?.optString("Last4") ?: ""
+                        val entryType = cardData?.optString("EntryType") ?: ""
 
                         saveTransaction(
-                            paymentType,
-                            referenceId,
-                            cardType,
-                            last4,
-                            entryType,
-                            authCode,
-                            invoiceNumber
+                            paymentType = paymentType,
+                            referenceId = referenceId,
+                            cardBrand = cardType,
+                            last4 = last4,
+                            entryType = entryType,
+                            authCode = authCode,
+                            invoiceNumber = invoiceNumber
                         )
 
                         showApproved()
-
                     } else {
-                        showDeclined("Transaction Declined")
+                        showDeclined("Declined: $message")
                     }
                 }
             }
@@ -232,42 +208,8 @@ class PaymentActivity : AppCompatActivity() {
     // ===============================
     // CASH PROCESSING
     // ===============================
-    private fun getOrCreateOpenBatch(onResult: (String) -> Unit) {
 
-        db.collection("Batches")
-            .whereEqualTo("closed", false)
-            .limit(1)
-            .get()
-            .addOnSuccessListener { docs ->
-
-                if (!docs.isEmpty) {
-                    // ✅ Reuse existing open batch
-                    onResult(docs.documents[0].id)
-                    return@addOnSuccessListener
-                }
-
-                // ✅ No open batch → create new one
-                val newBatchId = "BATCH_${System.currentTimeMillis()}"
-
-                val batchMap = hashMapOf(
-                    "batchId" to newBatchId,
-                    "createdAt" to Date(),
-                    "closed" to false,
-                    "closedAt" to null,
-                    "totalSales" to 0.0,
-                    "count" to 0
-                )
-
-                db.collection("Batches")
-                    .document(newBatchId)
-                    .set(batchMap)
-                    .addOnSuccessListener {
-                        onResult(newBatchId)
-                    }
-            }
-    }
     private fun processCashPayment() {
-
         val referenceId = UUID.randomUUID().toString()
 
         saveTransaction(
@@ -284,7 +226,46 @@ class PaymentActivity : AppCompatActivity() {
     }
 
     // ===============================
-    // SAVE TRANSACTION
+    // BATCH LOGIC (ONE SOURCE OF TRUTH)
+    // ===============================
+
+    private fun getOrCreateOpenBatch(onBatchReady: (String) -> Unit) {
+
+        db.collection("Batches")
+            .whereEqualTo("closed", false)
+            .limit(1)
+            .get()
+            .addOnSuccessListener { snap ->
+
+                if (!snap.isEmpty) {
+                    val batchId = snap.documents.first().id
+                    onBatchReady(batchId)
+                } else {
+                    createNewBatch(onBatchReady)
+                }
+            }
+    }
+
+    private fun createNewBatch(onBatchReady: (String) -> Unit) {
+
+        val batchRef = db.collection("Batches").document()
+
+        val batchMap = hashMapOf(
+            "createdAt" to Date(),
+            "totalSales" to 0.0,
+            "transactionCount" to 0L,
+            "closed" to false,
+            "closedAt" to null
+        )
+
+        batchRef.set(batchMap)
+            .addOnSuccessListener {
+                onBatchReady(batchRef.id)
+            }
+    }
+
+    // ===============================
+    // SAVE TRANSACTION + CLOSE ORDER + UPDATE BATCH
     // ===============================
 
     private fun saveTransaction(
@@ -296,7 +277,6 @@ class PaymentActivity : AppCompatActivity() {
         authCode: String,
         invoiceNumber: String
     ) {
-
         val transactionMap = hashMapOf(
             "referenceId" to referenceId,
             "amount" to totalAmount,
@@ -316,31 +296,32 @@ class PaymentActivity : AppCompatActivity() {
             .add(transactionMap)
             .addOnSuccessListener { transactionDoc ->
 
-                // ✅ CLOSE THE ORDER
-                orderId?.let { oid ->
+                val oid = orderId
+                if (oid.isNullOrBlank()) {
+                    Log.e("PAYMENT", "Missing ORDER_ID, can't close order.")
+                    return@addOnSuccessListener
+                }
 
-                    getOrCreateOpenBatch { batchId ->
+                getOrCreateOpenBatch { batchId ->
 
-                        db.collection("Orders")
-                            .document(oid)
-                            .update(
-                                mapOf(
-                                    "status" to "CLOSED",
-                                    "closedAt" to Date(),
-                                    "paymentType" to paymentType,
-                                    "total" to totalAmount,
-                                    "transactionId" to transactionDoc.id,
-                                    "batchId" to batchId
-                                )
-                            )
+                    db.runBatch { batch ->
 
-                        // Optional: update batch totals
-                        db.collection("Batches")
-                            .document(batchId)
-                            .update(
-                                "totalSales",
-                                com.google.firebase.firestore.FieldValue.increment(totalAmount)
-                            )
+                        val orderRef = db.collection("Orders").document(oid)
+                        val batchRef = db.collection("Batches").document(batchId)
+
+                        batch.update(orderRef, mapOf(
+                            "status" to "CLOSED",
+                            "closedAt" to Date(),
+                            "paymentType" to paymentType,
+                            "total" to totalAmount,
+                            "transactionId" to transactionDoc.id,
+                            "batchId" to batchId
+                        ))
+
+                        batch.update(batchRef, mapOf(
+                            "totalSales" to FieldValue.increment(totalAmount),
+                            "transactionCount" to FieldValue.increment(1)
+                        ))
                     }
                 }
             }

@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -19,8 +20,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.*
 import java.util.concurrent.TimeUnit
 
 class OrderDetailActivity : AppCompatActivity() {
@@ -29,7 +29,6 @@ class OrderDetailActivity : AppCompatActivity() {
 
     private lateinit var recycler: RecyclerView
     private lateinit var txtEmptyItems: TextView
-
     private lateinit var btnCheckout: MaterialButton
     private lateinit var bottomActions: View
     private lateinit var btnVoid: MaterialButton
@@ -55,7 +54,6 @@ class OrderDetailActivity : AppCompatActivity() {
 
         recycler = findViewById(R.id.recyclerOrderItems)
         txtEmptyItems = findViewById(R.id.txtEmptyItems)
-
         btnCheckout = findViewById(R.id.btnCheckout)
         bottomActions = findViewById(R.id.bottomActions)
         btnVoid = findViewById(R.id.btnVoid)
@@ -80,7 +78,23 @@ class OrderDetailActivity : AppCompatActivity() {
         loadItems()
     }
 
+    override fun onResume() {
+        super.onResume()
+        loadHeader()
+    }
+
+    // ===============================
+    // LOAD HEADER
+    // ===============================
+
     private fun loadHeader() {
+
+        // Reset UI first
+        btnCheckout.visibility = View.GONE
+        bottomActions.visibility = View.GONE
+        btnVoid.visibility = View.GONE
+        btnRefund.visibility = View.GONE
+
         db.collection("Orders").document(orderId)
             .get()
             .addOnSuccessListener { doc ->
@@ -90,32 +104,44 @@ class OrderDetailActivity : AppCompatActivity() {
                 val status = doc.getString("status") ?: ""
                 currentBatchId = doc.getString("batchId")
 
-                btnCheckout.visibility = View.GONE
-                bottomActions.visibility = View.GONE
-                btnVoid.visibility = View.GONE
-                btnRefund.visibility = View.GONE
+                if (status == "OPEN") {
+                    btnCheckout.visibility = View.VISIBLE
+                    btnCheckout.setOnClickListener {
+                        val i = Intent(this, MenuActivity::class.java)
+                        i.putExtra("ORDER_ID", orderId)
+                        startActivity(i)
+                    }
+                }
 
                 if (status == "CLOSED") {
+
                     bottomActions.visibility = View.VISIBLE
                     btnRefund.visibility = View.VISIBLE
                     btnRefund.setOnClickListener { confirmRefund() }
 
-                    val batchId = currentBatchId
-                    if (!batchId.isNullOrBlank()) {
-                        db.collection("Batches")
-                            .document(batchId)
-                            .get()
-                            .addOnSuccessListener { batchDoc ->
-                                val batchClosed = batchDoc.getBoolean("closed") == true
-                                if (!batchClosed) {
-                                    btnVoid.visibility = View.VISIBLE
-                                    btnVoid.setOnClickListener { confirmVoid() }
-                                }
+                    val batchId = currentBatchId ?: return@addOnSuccessListener
+
+                    db.collection("Batches")
+                        .document(batchId)
+                        .get()
+                        .addOnSuccessListener { batchDoc ->
+
+                            val isClosed = batchDoc.getBoolean("closed") ?: true
+
+                            if (!isClosed) {
+                                btnVoid.visibility = View.VISIBLE
+                                btnVoid.setOnClickListener { confirmVoid() }
+                            } else {
+                                btnVoid.visibility = View.GONE
                             }
-                    }
+                        }
                 }
             }
     }
+
+    // ===============================
+    // LOAD ITEMS
+    // ===============================
 
     private fun loadItems() {
         db.collection("Orders").document(orderId)
@@ -135,6 +161,10 @@ class OrderDetailActivity : AppCompatActivity() {
                 }
             }
     }
+
+    // ===============================
+    // VOID
+    // ===============================
 
     private fun confirmVoid() {
 
@@ -210,8 +240,7 @@ class OrderDetailActivity : AppCompatActivity() {
             .writeTimeout(30, TimeUnit.SECONDS)
             .build()
 
-        val body = json.toString()
-            .toRequestBody("application/json".toMediaType())
+        val body = json.toString().toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
             .url("https://spinpos.net/v2/Payment/Void")
@@ -232,14 +261,15 @@ class OrderDetailActivity : AppCompatActivity() {
                 runOnUiThread {
 
                     if (!response.isSuccessful) {
-                        Toast.makeText(this@OrderDetailActivity,
+                        Toast.makeText(
+                            this@OrderDetailActivity,
                             "Void error ${response.code}: $responseText",
-                            Toast.LENGTH_LONG).show()
+                            Toast.LENGTH_LONG
+                        ).show()
                         return@runOnUiThread
                     }
 
-                    val jsonObj = JSONObject(responseText)
-                    val resultCode = jsonObj
+                    val resultCode = JSONObject(responseText)
                         .optJSONObject("GeneralResponse")
                         ?.optString("ResultCode")
 
@@ -255,24 +285,36 @@ class OrderDetailActivity : AppCompatActivity() {
 
     private fun finalizeVoid(transactionId: String) {
 
-        db.runBatch { batch ->
+        db.collection("Orders")
+            .document(orderId)
+            .get()
+            .addOnSuccessListener { orderDoc ->
 
-            val orderRef = db.collection("Orders").document(orderId)
-            val txRef = db.collection("Transactions").document(transactionId)
+                val batchId = orderDoc.getString("batchId") ?: return@addOnSuccessListener
+                val amount = orderDoc.getDouble("total") ?: 0.0
 
-            batch.update(txRef, "voided", true)
+                db.runBatch { batch ->
 
-            batch.update(orderRef, mapOf(
-                "status" to "VOIDED",
-                "voidedAt" to Date()
-            ))
-        }
-            .addOnSuccessListener {
-                Toast.makeText(this, "Sale Voided Successfully", Toast.LENGTH_LONG).show()
+                    val orderRef = db.collection("Orders").document(orderId)
+                    val txRef = db.collection("Transactions").document(transactionId)
+                    val batchRef = db.collection("Batches").document(batchId)
 
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    finish()
-                }, 500)
+                    batch.update(txRef, "voided", true)
+
+                    batch.update(orderRef, mapOf(
+                        "status" to "VOIDED",
+                        "voidedAt" to Date()
+                    ))
+
+                    batch.update(batchRef, mapOf(
+                        "totalSales" to FieldValue.increment(-amount),
+                        "transactionCount" to FieldValue.increment(-1)
+                    ))
+                }
+                    .addOnSuccessListener {
+                        Toast.makeText(this, "Sale Voided", Toast.LENGTH_LONG).show()
+                        finish()
+                    }
             }
     }
 
