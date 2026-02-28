@@ -19,7 +19,7 @@ import org.json.JSONObject
 import android.util.Log
 import java.util.*
 import com.ernesto.myapplication.data.SaleWithRefunds
-
+import com.google.firebase.firestore.FieldValue
 class TransactionActivity : AppCompatActivity() {
 
     private lateinit var recyclerView: RecyclerView
@@ -44,24 +44,33 @@ class TransactionActivity : AppCompatActivity() {
 
     // 🔥 LOAD + GROUP SALES WITH REFUNDS (CORRECT VERSION)
     private fun loadTransactions() {
+
         db.collection("Transactions")
-            .orderBy("timestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshots, error ->
 
                 if (error != null) {
-                    Toast.makeText(this, "Error loading transactions", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, error.message, Toast.LENGTH_LONG).show()
                     return@addSnapshotListener
                 }
+
+                if (snapshots == null) return@addSnapshotListener
 
                 transactionList.clear()
                 val allTransactions = mutableListOf<Transaction>()
 
-                snapshots?.forEach { doc ->
+                snapshots.forEach { doc ->
+
+                    val createdAt = doc.getDate("createdAt")
+                    val oldTimestamp = doc.getTimestamp("timestamp")?.toDate()
+
+                    val dateMillis = createdAt?.time
+                        ?: oldTimestamp?.time
+                        ?: 0L
 
                     val transaction = Transaction(
                         referenceId = doc.getString("referenceId") ?: "",
                         amountInCents = ((doc.getDouble("amount") ?: 0.0) * 100).toLong(),
-                        date = doc.getTimestamp("timestamp")?.toDate()?.time ?: 0L,
+                        date = dateMillis,
                         paymentType = doc.getString("paymentType") ?: "",
                         cardBrand = doc.getString("cardBrand") ?: "",
                         last4 = doc.getString("last4") ?: "",
@@ -74,6 +83,9 @@ class TransactionActivity : AppCompatActivity() {
                     allTransactions.add(transaction)
                 }
 
+                // Sort newest first
+                allTransactions.sortByDescending { it.date }
+
                 val sales = allTransactions.filter { it.type == "SALE" }
                 val refunds = allTransactions.filter { it.type == "REFUND" }
 
@@ -83,7 +95,6 @@ class TransactionActivity : AppCompatActivity() {
                         it.originalReferenceId == sale.referenceId
                     }
 
-                    // 🔥 ADD CORRECT OBJECT TYPE
                     transactionList.add(
                         SaleWithRefunds(
                             sale = sale,
@@ -185,7 +196,8 @@ class TransactionActivity : AppCompatActivity() {
         json: String,
         type: String,
         referenceId: String? = null,
-        refundAmount: Double? = null
+        refundAmount: Double? = null,
+        paymentType: String? = null
     ) {
 
         val client = OkHttpClient.Builder()
@@ -218,47 +230,90 @@ class TransactionActivity : AppCompatActivity() {
                 val responseText = response.body?.string() ?: ""
 
                 runOnUiThread {
-                    if (response.isSuccessful && responseText.contains("Approved")) {
 
-                        if (type == "VOID" && referenceId != null) {
-
-                            db.collection("Transactions")
-                                .whereEqualTo("referenceId", referenceId)
-                                .get()
-                                .addOnSuccessListener { documents ->
-                                    for (document in documents) {
-                                        db.collection("Transactions")
-                                            .document(document.id)
-                                            .update("voided", true)
-                                    }
-                                }
-                        }
-
-                        if (type == "REFUND" && referenceId != null && refundAmount != null) {
-
-                            val refundMap = hashMapOf(
-                                "referenceId" to UUID.randomUUID().toString(),
-                                "originalReferenceId" to referenceId,
-                                "amount" to refundAmount,
-                                "type" to "REFUND",
-                                "transaction.paymentType" to "",
-                                "cardBrand" to "",
-                                "last4" to "",
-                                "entryType" to "",
-                                "voided" to false,
-                                "settled" to false,
-                                "timestamp" to Date()
-                            )
-
-                            db.collection("Transactions").add(refundMap)
-                        }
-
+                    if (!response.isSuccessful || !responseText.contains("Approved")) {
                         Toast.makeText(
                             this@TransactionActivity,
-                            "$type APPROVED",
+                            "$type Declined",
                             Toast.LENGTH_LONG
                         ).show()
+                        return@runOnUiThread
                     }
+
+                    // ================= VOID =================
+                    if (type == "VOID" && referenceId != null) {
+
+                        db.collection("Transactions")
+                            .whereEqualTo("referenceId", referenceId)
+                            .get()
+                            .addOnSuccessListener { documents ->
+
+                                for (document in documents) {
+
+                                    val transactionDocId = document.id
+                                    val amount = document.getDouble("amount") ?: 0.0
+
+                                    // 1️⃣ mark transaction voided
+                                    db.collection("Transactions")
+                                        .document(transactionDocId)
+                                        .update("voided", true)
+
+                                    // 2️⃣ find order using transactionId
+                                    db.collection("Orders")
+                                        .whereEqualTo("transactionId", transactionDocId)
+                                        .get()
+                                        .addOnSuccessListener { orderDocs ->
+
+                                            for (orderDoc in orderDocs) {
+
+                                                val orderRef = orderDoc.reference
+                                                val batchId = orderDoc.getString("batchId") ?: continue
+                                                val batchRef = db.collection("Batches").document(batchId)
+
+                                                db.runBatch { batch ->
+
+                                                    batch.update(orderRef, mapOf(
+                                                        "status" to "VOIDED",
+                                                        "voidedAt" to Date()
+                                                    ))
+
+                                                    batch.update(batchRef, mapOf(
+                                                        "totalSales" to FieldValue.increment(-amount),
+                                                        "netTotal" to FieldValue.increment(-amount),
+                                                        "transactionCount" to FieldValue.increment(-1)
+                                                    ))
+                                                }
+                                            }
+                                        }
+                                }
+                            }
+                    }
+
+                    // ================= REFUND =================
+                    if (type == "REFUND" && referenceId != null && refundAmount != null) {
+
+                        val refundMap = hashMapOf(
+                            "referenceId" to UUID.randomUUID().toString(),
+                            "originalReferenceId" to referenceId,
+                            "amount" to refundAmount,
+                            "type" to "REFUND",
+                            "paymentType" to "",
+                            "cardBrand" to "",
+                            "last4" to "",
+                            "entryType" to "",
+                            "voided" to false,
+                            "settled" to false,
+                            "createdAt" to Date()
+                        )
+
+                        db.collection("Transactions").add(refundMap)
+                    }
+
+                    Toast.makeText(
+                        this@TransactionActivity,
+                        "$type APPROVED",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         })

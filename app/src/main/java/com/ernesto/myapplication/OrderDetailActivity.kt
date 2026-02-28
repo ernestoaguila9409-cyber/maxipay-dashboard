@@ -112,25 +112,45 @@ class OrderDetailActivity : AppCompatActivity() {
                         startActivity(i)
                     }
                 }
-
+                if (status == "VOIDED") {
+                    bottomActions.visibility = View.VISIBLE
+                    btnVoid.visibility = View.GONE
+                    btnRefund.visibility = View.GONE
+                    return@addOnSuccessListener
+                }
                 if (status == "CLOSED") {
 
                     bottomActions.visibility = View.VISIBLE
                     btnRefund.visibility = View.VISIBLE
                     btnRefund.setOnClickListener { confirmRefund() }
 
+                    val transactionId = doc.getString("transactionId") ?: return@addOnSuccessListener
                     val batchId = currentBatchId ?: return@addOnSuccessListener
 
-                    db.collection("Batches")
-                        .document(batchId)
+                    db.collection("Transactions")
+                        .document(transactionId)
                         .get()
-                        .addOnSuccessListener { batchDoc ->
+                        .addOnSuccessListener { txDoc ->
 
-                            val isClosed = batchDoc.getBoolean("closed") ?: true
+                            val isVoided = txDoc.getBoolean("voided") ?: false
 
-                            if (!isClosed) {
-                                btnVoid.visibility = View.VISIBLE
-                                btnVoid.setOnClickListener { confirmVoid() }
+                            if (!isVoided) {
+
+                                db.collection("Batches")
+                                    .document(batchId)
+                                    .get()
+                                    .addOnSuccessListener { batchDoc ->
+
+                                        val batchClosed = batchDoc.getBoolean("closed") ?: true
+
+                                        if (!batchClosed) {
+                                            btnVoid.visibility = View.VISIBLE
+                                            btnVoid.setOnClickListener { confirmVoid() }
+                                        } else {
+                                            btnVoid.visibility = View.GONE
+                                        }
+                                    }
+
                             } else {
                                 btnVoid.visibility = View.GONE
                             }
@@ -307,8 +327,9 @@ class OrderDetailActivity : AppCompatActivity() {
                     ))
 
                     batch.update(batchRef, mapOf(
-                        "totalSales" to FieldValue.increment(-amount),
-                        "transactionCount" to FieldValue.increment(-1)
+                        "totalSales" to FieldValue.increment(amount),
+                        "netTotal" to FieldValue.increment(amount),
+                        "transactionCount" to FieldValue.increment(1)
                     ))
                 }
                     .addOnSuccessListener {
@@ -319,13 +340,204 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun confirmRefund() {
+
         AlertDialog.Builder(this)
             .setTitle("Refund Order")
             .setMessage("Refund this order?")
-            .setPositiveButton("Refund") { _, _ ->
-                Toast.makeText(this, "Refund pressed", Toast.LENGTH_SHORT).show()
-            }
+            .setPositiveButton("Refund") { _, _ -> executeRefund() }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+    private fun executeRefund() {
+
+        db.collection("Orders")
+            .document(orderId)
+            .get()
+            .addOnSuccessListener { orderDoc ->
+
+                if (!orderDoc.exists()) return@addOnSuccessListener
+
+                // 🔴 1️⃣ Prevent double refund
+                val status = orderDoc.getString("status") ?: ""
+                if (status == "REFUNDED") {
+                    Toast.makeText(this, "Order already refunded", Toast.LENGTH_LONG).show()
+                    return@addOnSuccessListener
+                }
+
+                val transactionId = orderDoc.getString("transactionId")
+                    ?: return@addOnSuccessListener
+
+                db.collection("Transactions")
+                    .document(transactionId)
+                    .get()
+                    .addOnSuccessListener { txDoc ->
+
+                        val referenceId = txDoc.getString("referenceId")
+                            ?: return@addOnSuccessListener
+
+                        val paymentType = txDoc.getString("paymentType") ?: "Credit"
+                        val amount = txDoc.getDouble("amount") ?: 0.0
+
+                        callRefundApi(
+                            referenceId,
+                            paymentType,
+                            amount,
+                            transactionId
+                        )
+                    }
+            }
+    }
+    private fun callRefundApi(
+        referenceId: String,
+        paymentType: String,
+        amount: Double,
+        originalTransactionId: String
+    ) {
+
+        val json = JSONObject().apply {
+            put("Amount", amount)
+            put("PaymentType", paymentType)
+            put("ReferenceId", referenceId)
+            put("PrintReceipt", "No")
+            put("GetReceipt", "No")
+            put("CaptureSignature", false)
+            put("GetExtendedData", true)
+            put("CallbackInfo", JSONObject().apply { put("Url", "" )})
+            put("Tpn", "11881706541A")
+            put("Authkey", "Qt9N7CxhDs")
+        }
+
+        val body = json.toString().toRequestBody("application/json".toMediaType())
+
+        val request = Request.Builder()
+            .url("https://spinpos.net/v2/Payment/Return")
+            .post(body)
+            .build()
+
+        val client = OkHttpClient.Builder()
+            .connectTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(180, TimeUnit.SECONDS)   // 🔥 important
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+
+            override fun onFailure(call: Call, e: IOException) {
+                runOnUiThread {
+                    Toast.makeText(
+                        this@OrderDetailActivity,
+                        "Refund Failed: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+
+                val responseText = response.body?.string() ?: ""
+
+                runOnUiThread {
+
+                    if (!response.isSuccessful) {
+                        Toast.makeText(
+                            this@OrderDetailActivity,
+                            "Refund error ${response.code}: $responseText",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@runOnUiThread
+                    }
+
+                    try {
+                        val jsonResponse = JSONObject(responseText)
+                        val general = jsonResponse.optJSONObject("GeneralResponse")
+
+                        val resultCode = general?.optString("ResultCode") ?: ""
+
+                        if (resultCode == "0") {
+                            finalizeRefund(originalTransactionId, amount)
+                        } else {
+                            Toast.makeText(
+                                this@OrderDetailActivity,
+                                "Refund Declined",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+
+                    } catch (e: Exception) {
+                        Toast.makeText(
+                            this@OrderDetailActivity,
+                            "Refund parse error: $responseText",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }
+        })
+    }
+    private fun finalizeRefund(originalTransactionId: String, amount: Double) {
+
+        // 1️⃣ Find open batch
+        db.collection("Batches")
+            .whereEqualTo("closed", false)
+            .limit(1)
+            .get()
+            .addOnSuccessListener { batchSnap ->
+
+                if (batchSnap.isEmpty) {
+                    Toast.makeText(this, "Open a batch first", Toast.LENGTH_LONG).show()
+                    return@addOnSuccessListener
+                }
+
+                val openBatch = batchSnap.documents.first()
+                val openBatchId = openBatch.id
+
+                // 2️⃣ Get original sale transaction to extract referenceId
+                db.collection("Transactions")
+                    .document(originalTransactionId)
+                    .get()
+                    .addOnSuccessListener { originalTx ->
+
+                        val originalReferenceId =
+                            originalTx.getString("referenceId")
+                                ?: return@addOnSuccessListener
+
+                        val newRefundTxRef = db.collection("Transactions").document()
+
+                        db.runBatch { batch ->
+
+                            val orderRef = db.collection("Orders").document(orderId)
+                            val batchRef = db.collection("Batches").document(openBatchId)
+
+                            // ✅ Create refund transaction correctly
+                            batch.set(newRefundTxRef, mapOf(
+                                "orderId" to orderId,
+                                "type" to "REFUND",
+                                "amount" to amount,
+                                "originalReferenceId" to originalReferenceId, // 🔥 important
+                                "createdAt" to Date(),
+                                "batchId" to openBatchId,
+                                "voided" to false,
+                                "settled" to false
+                            ))
+
+                            // ✅ Update batch totals
+                            batch.update(batchRef, mapOf(
+                                "totalRefunds" to FieldValue.increment(amount),
+                                "netTotal" to FieldValue.increment(-amount),
+                                "transactionCount" to FieldValue.increment(1)
+                            ))
+
+                            // ✅ Update order status
+                            batch.update(orderRef, mapOf(
+                                "status" to "REFUNDED",
+                                "refundedAt" to Date()
+                            ))
+                        }
+                            .addOnSuccessListener {
+                                Toast.makeText(this, "Order Refunded", Toast.LENGTH_LONG).show()
+                                finish()
+                            }
+                    }
+            }
     }
 }

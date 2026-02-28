@@ -124,7 +124,7 @@ class MainActivity : AppCompatActivity() {
         val startOfDay = calendar.time
 
         db.collection("Transactions")
-            .whereGreaterThanOrEqualTo("timestamp", startOfDay)
+            .whereGreaterThanOrEqualTo("createdAt", startOfDay)
             .get()
             .addOnSuccessListener { documents ->
 
@@ -140,14 +140,17 @@ class MainActivity : AppCompatActivity() {
 
                     if (!voided && !settled) {
 
-                        if (type == "SALE") {
-                            total += amount
-                            count++
-                        }
+                        when (type) {
 
-                        if (type == "REFUND") {
-                            total -= amount
-                            count++
+                            "SALE" -> {
+                                total += amount
+                                count++
+                            }
+
+                            "REFUND" -> {
+                                total -= amount
+                                count++
+                            }
                         }
                     }
                 }
