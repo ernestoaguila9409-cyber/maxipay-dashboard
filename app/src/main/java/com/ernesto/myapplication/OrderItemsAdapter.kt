@@ -17,6 +17,7 @@ class OrderItemsAdapter(
         val base: TextView = view.findViewById(R.id.txtItemBase)
         val modifiers: TextView = view.findViewById(R.id.txtItemModifiers)
         val lineTotal: TextView = view.findViewById(R.id.txtItemLineTotal)
+        val payments: TextView = view.findViewById(R.id.txtItemPayments) // 🔥 NEW
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ItemVH {
@@ -38,13 +39,11 @@ class OrderItemsAdapter(
             ?: doc.getLong("quantity")
             ?: 1L).toInt()
 
-        // Base price (we will hide if 0)
         val basePrice = doc.getDouble("basePrice")
             ?: doc.getDouble("base")
-            ?: doc.getDouble("unitPrice") // fallback if you stored it as unitPrice
+            ?: doc.getDouble("unitPrice")
             ?: 0.0
 
-        // Line total (final price including modifiers)
         val line = doc.getDouble("lineTotal")
             ?: doc.getDouble("line")
             ?: doc.getDouble("total")
@@ -52,7 +51,7 @@ class OrderItemsAdapter(
 
         holder.nameQty.text = "$name (Qty: $qty)"
 
-        // ✅ Hide base if 0
+        // Base price
         if (basePrice > 0.0) {
             holder.base.visibility = View.VISIBLE
             holder.base.text = "Base: $${String.format(Locale.US, "%.2f", basePrice)}"
@@ -60,10 +59,8 @@ class OrderItemsAdapter(
             holder.base.visibility = View.GONE
         }
 
-        // Modifiers formatting (supports a few common structures)
+        // Modifiers
         val modsText = buildModifiersText(doc)
-
-        // ✅ Hide modifiers if empty
         if (modsText.isNullOrBlank()) {
             holder.modifiers.visibility = View.GONE
         } else {
@@ -72,11 +69,48 @@ class OrderItemsAdapter(
         }
 
         holder.lineTotal.text = "Line Total: $${String.format(Locale.US, "%.2f", line)}"
+
+        // ===============================
+        // 🔥 PAYMENT BREAKDOWN
+        // ===============================
+
+// ===============================
+// 🔥 PAYMENT BREAKDOWN
+// ===============================
+
+        val paymentsArray = doc.get("payments") as? List<Map<String, Any>>
+
+        if (!paymentsArray.isNullOrEmpty()) {
+
+            val totalsByType = mutableMapOf<String, Double>()
+            var grandTotal = 0.0
+
+            paymentsArray.forEach { payment ->
+
+                val type = payment["type"]?.toString() ?: return@forEach
+                val amount = (payment["amount"] as? Number)?.toDouble() ?: 0.0
+
+                totalsByType[type] = (totalsByType[type] ?: 0.0) + amount
+                grandTotal += amount
+            }
+
+            val lines = totalsByType.map { (type, amount) ->
+                "$type: $${String.format(Locale.US, "%.2f", amount)}"
+            }.toMutableList()
+
+            lines.add("")
+            lines.add("Total Collected: $${String.format(Locale.US, "%.2f", grandTotal)}")
+
+            holder.payments.visibility = View.VISIBLE
+            holder.payments.text = lines.joinToString("\n")
+
+        } else {
+            holder.payments.visibility = View.GONE
+        }
     }
 
     private fun buildModifiersText(doc: DocumentSnapshot): String? {
         val raw = doc.get("modifiers") as? List<*> ?: return null
-
         if (raw.isEmpty()) return null
 
         val lines = raw.mapNotNull { item ->

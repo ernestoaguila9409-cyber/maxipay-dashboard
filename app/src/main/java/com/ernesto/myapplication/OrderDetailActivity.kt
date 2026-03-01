@@ -26,7 +26,8 @@ import java.util.concurrent.TimeUnit
 class OrderDetailActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
-
+    private lateinit var txtHeaderEmployee: TextView
+    private lateinit var txtHeaderTime: TextView
     private lateinit var recycler: RecyclerView
     private lateinit var txtEmptyItems: TextView
     private lateinit var btnCheckout: MaterialButton
@@ -51,7 +52,8 @@ class OrderDetailActivity : AppCompatActivity() {
             finish()
             return
         }
-
+        txtHeaderEmployee = findViewById(R.id.txtHeaderEmployee)
+        txtHeaderTime = findViewById(R.id.txtHeaderTime)
         recycler = findViewById(R.id.recyclerOrderItems)
         txtEmptyItems = findViewById(R.id.txtEmptyItems)
         btnCheckout = findViewById(R.id.btnCheckout)
@@ -101,6 +103,19 @@ class OrderDetailActivity : AppCompatActivity() {
 
                 if (!doc.exists()) return@addOnSuccessListener
 
+                // ✅ HEADER DATA (MUST BE INSIDE HERE)
+                val employee = doc.getString("employeeName") ?: "Unknown"
+                txtHeaderEmployee.text = "Employee: $employee"
+
+                val createdAt = doc.getTimestamp("createdAt")
+                if (createdAt != null) {
+                    val date = createdAt.toDate()
+                    val format = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US)
+                    txtHeaderTime.text = format.format(date)
+                } else {
+                    txtHeaderTime.text = ""
+                }
+
                 val status = doc.getString("status") ?: ""
                 currentBatchId = doc.getString("batchId")
 
@@ -112,12 +127,14 @@ class OrderDetailActivity : AppCompatActivity() {
                         startActivity(i)
                     }
                 }
+
                 if (status == "VOIDED") {
                     bottomActions.visibility = View.VISIBLE
                     btnVoid.visibility = View.GONE
                     btnRefund.visibility = View.GONE
                     return@addOnSuccessListener
                 }
+
                 if (status == "CLOSED") {
 
                     bottomActions.visibility = View.VISIBLE
@@ -135,7 +152,6 @@ class OrderDetailActivity : AppCompatActivity() {
                             val isVoided = txDoc.getBoolean("voided") ?: false
 
                             if (!isVoided) {
-
                                 db.collection("Batches")
                                     .document(batchId)
                                     .get()
@@ -150,7 +166,6 @@ class OrderDetailActivity : AppCompatActivity() {
                                             btnVoid.visibility = View.GONE
                                         }
                                     }
-
                             } else {
                                 btnVoid.visibility = View.GONE
                             }
@@ -158,7 +173,6 @@ class OrderDetailActivity : AppCompatActivity() {
                 }
             }
     }
-
     // ===============================
     // LOAD ITEMS
     // ===============================
@@ -372,18 +386,25 @@ class OrderDetailActivity : AppCompatActivity() {
                     .get()
                     .addOnSuccessListener { txDoc ->
 
-                        val referenceId = txDoc.getString("referenceId")
-                            ?: return@addOnSuccessListener
-
                         val paymentType = txDoc.getString("paymentType") ?: "Credit"
                         val amount = txDoc.getDouble("amount") ?: 0.0
+                        val referenceId = txDoc.getString("referenceId")
 
-                        callRefundApi(
-                            referenceId,
-                            paymentType,
-                            amount,
-                            transactionId
-                        )
+                        // 🔥 CASH REFUND — DO NOT CALL PROCESSOR
+                        if (paymentType.equals("Cash", ignoreCase = true)) {
+                            finalizeRefund(transactionId, amount)
+                            return@addOnSuccessListener
+                        }
+
+                        // Only cards go to processor
+                        if (referenceId != null) {
+                            callRefundApi(
+                                referenceId,
+                                paymentType,
+                                amount,
+                                transactionId
+                            )
+                        }
                     }
             }
     }

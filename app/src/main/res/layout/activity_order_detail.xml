@@ -18,14 +18,16 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textStyle="bold"
-            android:textSize="18sp" />
+            android:textSize="18sp"
+            android:textColor="#333333"/>
 
         <TextView
             android:id="@+id/txtHeaderTime"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textSize="13sp"
-            android:layout_marginTop="4dp"/>
+            android:layout_marginTop="4dp"
+            android:textColor="#777777"/>
     </LinearLayout>
 
     <!-- ITEMS LIST -->
@@ -78,8 +80,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Refund"
-            android:visibility="gone"/>
+            android:text="Refund"/>
     </LinearLayout>
 
 </LinearLayout>
