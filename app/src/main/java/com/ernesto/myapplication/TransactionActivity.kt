@@ -91,9 +91,14 @@ class TransactionActivity : AppCompatActivity() {
 
                 sales.forEach { sale ->
 
-                    val relatedRefunds = refunds.filter {
-                        it.originalReferenceId == sale.referenceId
-                    }
+                    val relatedRefunds =
+                        if (sale.referenceId.isNullOrEmpty()) {
+                            emptyList()
+                        } else {
+                            refunds.filter {
+                                it.originalReferenceId == sale.referenceId
+                            }
+                        }
 
                     transactionList.add(
                         SaleWithRefunds(
