@@ -153,17 +153,6 @@ class PaymentActivity : AppCompatActivity() {
         progressBar.visibility = View.GONE
         txtStatus.text = "APPROVED ✅"
         txtSubStatus.text = "Transaction successful"
-
-        Handler(Looper.getMainLooper()).postDelayed({
-
-            if (remainingBalance <= 0.0) {
-                finish() // 👈 closes PaymentActivity
-            } else {
-                loadRemainingBalance()
-                setButtonsEnabled(true)
-            }
-
-        }, 1200)
     }
 
     private fun showDeclined(message: String) {
@@ -307,9 +296,15 @@ class PaymentActivity : AppCompatActivity() {
                         }
                             .addOnSuccessListener {
 
-                                // ✅ NOW SAFE TO FINISH ACTIVITY
-                                setResult(RESULT_OK)
-                                finish()
+                                remainingBalance = remaining
+
+                                if (remaining <= 0.0) {
+                                    setResult(RESULT_OK)
+                                    finish()   // only close when fully paid
+                                } else {
+                                    loadRemainingBalance()
+                                    setButtonsEnabled(true)
+                                }
                             }
                             .addOnFailureListener {
                                 Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
