@@ -155,8 +155,14 @@ class PaymentActivity : AppCompatActivity() {
         txtSubStatus.text = "Transaction successful"
 
         Handler(Looper.getMainLooper()).postDelayed({
-            loadRemainingBalance()
-            setButtonsEnabled(true)
+
+            if (remainingBalance <= 0.0) {
+                finish() // 👈 closes PaymentActivity
+            } else {
+                loadRemainingBalance()
+                setButtonsEnabled(true)
+            }
+
         }, 1200)
     }
 
@@ -259,36 +265,33 @@ class PaymentActivity : AppCompatActivity() {
             .add(transactionMap)
             .addOnSuccessListener {
 
-                val orderRef =
-                    db.collection("Orders").document(oid)
+                val orderRef = db.collection("Orders").document(oid)
 
                 orderRef.get().addOnSuccessListener { snap ->
 
-                    val orderTotal =
-                        snap.getDouble("total") ?: 0.0
-                    val currentPaid =
-                        snap.getDouble("totalPaid") ?: 0.0
+                    val orderTotal = snap.getDouble("total") ?: 0.0
+                    val currentPaid = snap.getDouble("totalPaid") ?: 0.0
 
-                    val newPaid =
-                        roundMoney(currentPaid + paymentAmount)
+                    val newPaid = roundMoney(currentPaid + paymentAmount)
+                    val remaining = roundMoney(orderTotal - newPaid)
 
-                    val remaining =
-                        roundMoney(orderTotal - newPaid)
                     applyPaymentToItems(
                         orderRef = orderRef,
                         amount = paymentAmount,
                         paymentType = paymentType
                     )
+
                     getOrCreateOpenBatch { batchId ->
+
+                        val batchRef = db.collection("Batches").document(batchId)
 
                         db.runBatch { batch ->
 
-                            val updates =
-                                mutableMapOf<String, Any>(
-                                    "batchId" to batchId,
-                                    "totalPaid" to newPaid,
-                                    "remainingBalance" to remaining
-                                )
+                            val updates = mutableMapOf<String, Any>(
+                                "batchId" to batchId,
+                                "totalPaid" to newPaid,
+                                "remainingBalance" to remaining
+                            )
 
                             if (remaining <= 0.0) {
                                 updates["status"] = "CLOSED"
@@ -297,15 +300,20 @@ class PaymentActivity : AppCompatActivity() {
 
                             batch.update(orderRef, updates)
 
-                            val batchRef =
-                                db.collection("Batches")
-                                    .document(batchId)
-
                             batch.update(batchRef, mapOf(
                                 "totalSales" to FieldValue.increment(paymentAmount),
                                 "transactionCount" to FieldValue.increment(1)
                             ))
                         }
+                            .addOnSuccessListener {
+
+                                // ✅ NOW SAFE TO FINISH ACTIVITY
+                                setResult(RESULT_OK)
+                                finish()
+                            }
+                            .addOnFailureListener {
+                                Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+                            }
                     }
                 }
             }
@@ -390,7 +398,34 @@ class PaymentActivity : AppCompatActivity() {
                 }
             }
     }
+    private fun deductStockForOrder(orderId: String) {
 
+        val orderRef = db.collection("Orders").document(orderId)
+
+        orderRef.collection("items").get()
+            .addOnSuccessListener { itemsSnap ->
+
+                db.runBatch { batch ->
+
+                    for (doc in itemsSnap.documents) {
+
+                        val itemId = doc.getString("itemId") ?: continue
+                        val quantity = doc.getLong("quantity") ?: 0L
+
+                        if (quantity <= 0) continue
+
+                        val menuItemRef =
+                            db.collection("MenuItems").document(itemId)
+
+                        batch.update(
+                            menuItemRef,
+                            "stock",
+                            FieldValue.increment(-quantity)
+                        )
+                    }
+                }
+            }
+    }
     private fun roundMoney(value: Double): Double {
         return BigDecimal(value)
             .setScale(2, RoundingMode.HALF_UP)
