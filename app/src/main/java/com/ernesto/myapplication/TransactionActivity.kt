@@ -60,24 +60,45 @@ class TransactionActivity : AppCompatActivity() {
 
                 snapshots.forEach { doc ->
 
+                    val type = doc.getString("type") ?: "SALE"
+
+                    // Ignore old SALE docs that don't have totalPaid
+                    if (type == "SALE" && !doc.contains("totalPaid")) {
+                        return@forEach
+                    }
+
                     val createdAt = doc.getDate("createdAt")
                     val oldTimestamp = doc.getTimestamp("timestamp")?.toDate()
 
-                    val dateMillis = createdAt?.time
-                        ?: oldTimestamp?.time
-                        ?: 0L
+                    val dateMillis = createdAt?.time ?: oldTimestamp?.time ?: 0L
+
+                    val amountValue = if (type == "SALE") {
+                        doc.getDouble("totalPaid") ?: 0.0
+                    } else {
+                        doc.getDouble("amount") ?: 0.0
+                    }
+
+                    val paymentsList = doc.get("payments") as? List<Map<String, Any>>
+                    val isMixed = (paymentsList?.size ?: 0) > 1
+
+                    val payments = doc.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                    val firstPayment = payments.firstOrNull()
+
+                    val amount = (doc.getDouble("totalPaid") ?: 0.0)
+                    val amountInCents = (amount * 100).toLong()
 
                     val transaction = Transaction(
-                        referenceId = doc.getString("referenceId") ?: "",
-                        amountInCents = ((doc.getDouble("amount") ?: 0.0) * 100).toLong(),
-                        date = dateMillis,
-                        paymentType = doc.getString("paymentType") ?: "",
-                        cardBrand = doc.getString("cardBrand") ?: "",
-                        last4 = doc.getString("last4") ?: "",
-                        entryType = doc.getString("entryType") ?: "",
+                        referenceId = doc.id,
+                        amountInCents = amountInCents,
+                        date = doc.getTimestamp("createdAt")?.toDate()?.time ?: 0L,
+                        paymentType = firstPayment?.get("paymentType") as? String ?: "",
+                        cardBrand = firstPayment?.get("cardBrand") as? String ?: "",
+                        last4 = firstPayment?.get("last4") as? String ?: "",
+                        entryType = firstPayment?.get("entryType") as? String ?: "",
                         voided = doc.getBoolean("voided") ?: false,
                         type = doc.getString("type") ?: "SALE",
-                        originalReferenceId = doc.getString("originalReferenceId") ?: ""
+                        originalReferenceId = doc.getString("originalReferenceId") ?: "",
+                        isMixed = false
                     )
 
                     allTransactions.add(transaction)
@@ -90,15 +111,9 @@ class TransactionActivity : AppCompatActivity() {
                 val refunds = allTransactions.filter { it.type == "REFUND" }
 
                 sales.forEach { sale ->
-
                     val relatedRefunds =
-                        if (sale.referenceId.isNullOrEmpty()) {
-                            emptyList()
-                        } else {
-                            refunds.filter {
-                                it.originalReferenceId == sale.referenceId
-                            }
-                        }
+                        if (sale.referenceId.isBlank()) emptyList()
+                        else refunds.filter { it.originalReferenceId == sale.referenceId }
 
                     transactionList.add(
                         SaleWithRefunds(
@@ -111,7 +126,6 @@ class TransactionActivity : AppCompatActivity() {
                 adapter.notifyDataSetChanged()
             }
     }
-
 
     private fun showTransactionOptions(transaction: Transaction) {
         AlertDialog.Builder(this)
@@ -256,7 +270,9 @@ class TransactionActivity : AppCompatActivity() {
                                 for (document in documents) {
 
                                     val transactionDocId = document.id
-                                    val amount = document.getDouble("amount") ?: 0.0
+                                    val amount = document.getDouble("totalPaid")
+                                        ?: document.getDouble("amount")
+                                        ?: 0.0
 
                                     // 1️⃣ mark transaction voided
                                     db.collection("Transactions")

@@ -144,8 +144,7 @@ class OrdersActivity : AppCompatActivity() {
                 val status = doc.getString("status") ?: "OPEN"
 
                 // 🔥 Your Firestore stores total as Double (ex: 0.04)
-                val totalDouble = doc.getDouble("total") ?: 0.0
-                val totalCents = (totalDouble * 100).toLong()
+                val totalCents = doc.getLong("totalInCents") ?: 0L
 
                 val employee = doc.getString("employeeName") ?: "—"
 

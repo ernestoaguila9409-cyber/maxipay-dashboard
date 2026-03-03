@@ -11,7 +11,7 @@
     import com.google.firebase.firestore.FirebaseFirestore
     import java.util.Date
     import java.util.Locale
-
+    import com.ernesto.myapplication.engine.OrderEngine
     data class CartItem(
         val itemId: String,
         val name: String,
@@ -28,7 +28,7 @@
 
         // key = lineKey (doc id in Orders/{orderId}/items)
         private val cartMap = mutableMapOf<String, CartItem>()
-
+        private lateinit var orderEngine: OrderEngine
         private lateinit var categoryContainer: LinearLayout
         private lateinit var itemContainer: GridLayout
         private lateinit var cartContainer: LinearLayout
@@ -61,7 +61,7 @@
         override fun onCreate(savedInstanceState: Bundle?) {
             super.onCreate(savedInstanceState)
             setContentView(R.layout.activity_menu)
-
+            orderEngine = OrderEngine(db)
             employeeName = intent.getStringExtra("employeeName") ?: ""
 
             categoryContainer = findViewById(R.id.categoryContainer)
@@ -81,15 +81,26 @@
             }
 
             btnCheckout.setOnClickListener {
+
                 if (cartMap.isEmpty()) {
                     Toast.makeText(this, "Cart is empty", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
 
-                val intent = Intent(this, PaymentActivity::class.java)
-                intent.putExtra("TOTAL_AMOUNT", totalAmount)
-                intent.putExtra("ORDER_ID", currentOrderId) // existing order id
-                paymentLauncher.launch(intent)
+                val oid = currentOrderId ?: return@setOnClickListener
+
+                orderEngine.recomputeOrderTotals(
+                    orderId = oid,
+                    onSuccess = {
+
+                        val intent = Intent(this, PaymentActivity::class.java)
+                        intent.putExtra("ORDER_ID", oid)
+                        paymentLauncher.launch(intent)
+                    },
+                    onFailure = {
+                        Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+                    }
+                )
             }
         }
 
@@ -121,7 +132,8 @@
                                 val itemId = doc.getString("itemId") ?: continue
                                 val name = doc.getString("name") ?: "Item"
                                 val qty = (doc.getLong("quantity") ?: 1L).toInt()
-                                val basePrice = doc.getDouble("basePrice") ?: 0.0
+                                val basePriceInCents = doc.getLong("basePriceInCents") ?: 0L
+                                val basePrice = basePriceInCents / 100.0
 
                                 val modifiers = parseModifiers(doc.get("modifiers"))
                                 val stock = 0L // not needed for display; stock is checked during deduction
@@ -408,49 +420,66 @@
             stock: Long,
             modifiers: List<Pair<String, Double>>
         ) {
-            ensureOrderThen {
 
-                val lineKey = cartKey(itemId, modifiers)
-                val existingItem = cartMap[lineKey]
+            orderEngine.ensureOrder(
+                currentOrderId = currentOrderId,
+                employeeName = employeeName,
+                onSuccess = { oid ->
 
-                val currentQtyInCart = existingItem?.quantity ?: 0
+                    currentOrderId = oid
 
-                // 🔥 STOCK CHECK
-                if (stock <= 0) {
-                    Toast.makeText(this, "Out of stock", Toast.LENGTH_SHORT).show()
-                    return@ensureOrderThen
-                }
+                    val lineKey = cartKey(itemId, modifiers)
+                    val existingItem = cartMap[lineKey]
+                    val currentQtyInCart = existingItem?.quantity ?: 0
 
-                if (currentQtyInCart + 1 > stock) {
-                    Toast.makeText(
-                        this,
-                        "Only $stock in stock",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    return@ensureOrderThen
-                }
+                    if (stock <= 0) {
+                        Toast.makeText(this, "Out of stock", Toast.LENGTH_SHORT).show()
+                        return@ensureOrder
+                    }
 
-                // ✅ SAFE TO ADD
-                if (existingItem != null) {
-                    existingItem.quantity += 1
-                    cartMap[lineKey] = existingItem
-                } else {
-                    cartMap[lineKey] = CartItem(
-                        itemId = itemId,
-                        name = name,
-                        quantity = 1,
-                        basePrice = basePrice,
-                        stock = stock,
-                        modifiers = modifiers
+                    if (currentQtyInCart + 1 > stock) {
+                        Toast.makeText(this, "Only $stock in stock", Toast.LENGTH_SHORT).show()
+                        return@ensureOrder
+                    }
+
+                    if (existingItem != null) {
+                        existingItem.quantity += 1
+                        cartMap[lineKey] = existingItem
+                    } else {
+                        cartMap[lineKey] = CartItem(
+                            itemId = itemId,
+                            name = name,
+                            quantity = 1,
+                            basePrice = basePrice,
+                            stock = stock,
+                            modifiers = modifiers
+                        )
+                    }
+
+                    refreshCart()
+
+                    val cartItem = cartMap[lineKey] ?: return@ensureOrder
+
+                    orderEngine.upsertLineItem(
+                        orderId = oid,
+                        lineKey = lineKey,
+                        input = OrderEngine.LineItemInput(
+                            itemId = cartItem.itemId,
+                            name = cartItem.name,
+                            quantity = cartItem.quantity,
+                            basePrice = cartItem.basePrice,
+                            modifiers = cartItem.modifiers
+                        ),
+                        onSuccess = {},
+                        onFailure = {
+                            Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+                        }
                     )
+                },
+                onFailure = {
+                    Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
                 }
-
-                refreshCart()
-
-                cartMap[lineKey]?.let {
-                    saveCartItemToOrder(lineKey, it)
-                }
-            }
+            )
         }
 
         private fun refreshCart() {
@@ -517,8 +546,25 @@
                     item.quantity += 1
                     cartMap[lineKey] = item
 
-                    saveCartItemToOrder(lineKey, item)
                     refreshCart()
+
+                    val oid = currentOrderId ?: return@setOnClickListener
+
+                    orderEngine.upsertLineItem(
+                        orderId = oid,
+                        lineKey = lineKey,
+                        input = OrderEngine.LineItemInput(
+                            itemId = item.itemId,
+                            name = item.name,
+                            quantity = item.quantity,
+                            basePrice = item.basePrice,
+                            modifiers = item.modifiers
+                        ),
+                        onSuccess = {},
+                        onFailure = {
+                            Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+                        }
+                    )
                 }
 
                 // 🔥 LONG PRESS TO REMOVE
@@ -528,9 +574,24 @@
                         .setMessage("Remove ${item.name} from cart?")
                         .setPositiveButton("Yes") { _, _ ->
                             cartMap.remove(lineKey)
-                            deleteOrderLine(lineKey)
                             refreshCart()
-                            updateOrderTotal()
+
+                            val oid = currentOrderId ?: return@setPositiveButton
+
+                            orderEngine.deleteLineItem(
+                                orderId = oid,
+                                lineKey = lineKey,
+                                onSuccess = {
+
+                                    if (cartMap.isEmpty()) {
+                                        deleteOrderIfEmpty()
+                                    }
+
+                                },
+                                onFailure = {
+                                    Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+                                }
+                            )
                         }
                         .setNegativeButton("No", null)
                         .show()
@@ -546,90 +607,6 @@
         // ----------------------------
         // FIRESTORE ORDER / ITEMS
         // ----------------------------
-
-        private fun ensureOrderThen(action: () -> Unit) {
-            // ✅ If we already have an order id (editing existing order), do NOT create a new one
-            if (currentOrderId != null) {
-                action()
-                return
-            }
-
-            val orderMap = hashMapOf(
-                "employeeName" to employeeName,
-                "status" to "OPEN",
-                "createdAt" to Date(),
-                "updatedAt" to Date(),
-                "total" to 0.0
-            )
-
-            db.collection("Orders")
-                .add(orderMap)
-                .addOnSuccessListener { doc ->
-                    currentOrderId = doc.id
-                    action()
-                }
-                .addOnFailureListener {
-                    Toast.makeText(this, "Failed to create order: ${it.message}", Toast.LENGTH_LONG).show()
-                }
-        }
-
-        private fun saveCartItemToOrder(lineKey: String, cartItem: CartItem) {
-            val modifiersTotal = cartItem.modifiers.sumOf { it.second }
-            val unitPrice = cartItem.basePrice + modifiersTotal
-            val lineTotal = unitPrice * cartItem.quantity
-
-            val itemMap = hashMapOf(
-                "itemId" to cartItem.itemId,
-                "name" to cartItem.name,
-                "quantity" to cartItem.quantity,
-                "basePrice" to cartItem.basePrice,
-                "modifiers" to cartItem.modifiers, // will store as {first,second}
-                "modifiersTotal" to modifiersTotal,
-                "unitPrice" to unitPrice,
-                "lineTotal" to lineTotal,
-                "updatedAt" to Date()
-            )
-
-            val orderId = currentOrderId ?: return
-
-            db.collection("Orders")
-                .document(orderId)
-                .collection("items")
-                .document(lineKey)
-                .set(itemMap)
-
-            updateOrderTotal()
-        }
-
-        private fun deleteOrderLine(lineKey: String) {
-            val orderId = currentOrderId ?: return
-            db.collection("Orders")
-                .document(orderId)
-                .collection("items")
-                .document(lineKey)
-                .delete()
-        }
-
-        private fun updateOrderTotal() {
-            val orderId = currentOrderId ?: return
-
-            var total = 0.0
-            for ((_, item) in cartMap) {
-                val modifiersTotal = item.modifiers.sumOf { it.second }
-                val unitPrice = item.basePrice + modifiersTotal
-                total += unitPrice * item.quantity
-            }
-
-            db.collection("Orders")
-                .document(orderId)
-                .update(
-                    mapOf(
-                        "total" to total,
-                        "updatedAt" to Date()
-                    )
-                )
-        }
-
         private fun cartKey(itemId: String, modifiers: List<Pair<String, Double>>): String {
             val sorted = modifiers.sortedBy { it.first + "|" + it.second }
             val modsKey = sorted.joinToString("|") { "${it.first}:${it.second}" }
@@ -644,7 +621,12 @@
             onSuccess: () -> Unit,
             onFailure: (String) -> Unit
         ) {
+
             db.runTransaction { transaction ->
+
+                // 1️⃣ READ ALL FIRST
+                val stockMap = mutableMapOf<String, Long>()
+
                 for ((_, cartItem) in cartMap) {
                     val itemRef = db.collection("MenuItems").document(cartItem.itemId)
                     val snapshot = transaction.get(itemRef)
@@ -654,9 +636,17 @@
                         throw Exception("Stock changed. Not enough inventory.")
                     }
 
+                    stockMap[cartItem.itemId] = currentStock
+                }
+
+                // 2️⃣ THEN WRITE
+                for ((_, cartItem) in cartMap) {
+                    val itemRef = db.collection("MenuItems").document(cartItem.itemId)
+                    val currentStock = stockMap[cartItem.itemId] ?: 0L
                     val newStock = currentStock - cartItem.quantity
                     transaction.update(itemRef, "stock", newStock)
                 }
+
                 null
             }
                 .addOnSuccessListener { onSuccess() }

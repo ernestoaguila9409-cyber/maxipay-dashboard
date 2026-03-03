@@ -44,7 +44,7 @@ class TransactionAdapter(
         val date = SimpleDateFormat("MM/dd/yyyy HH:mm", Locale.getDefault())
             .format(Date(sale.date))
 
-        // 🟢 Green dot for SALE
+        // Default green for SALE
         holder.statusDot.setBackgroundColor(
             context.getColor(android.R.color.holo_green_dark)
         )
@@ -52,8 +52,16 @@ class TransactionAdapter(
         holder.txtCard.text =
             "${sale.cardBrand} •••• ${sale.last4}"
 
+        val displayEntryType = when (sale.entryType) {
+            "Chip" -> "Chip"
+            "ChipContactless" -> "Contactless"
+            "Swipe" -> "Swipe"
+            "Manual" -> "Manual"
+            else -> sale.entryType
+        }
+
         holder.txtType.text =
-            "${sale.paymentType} • ${sale.entryType}"
+            "${sale.paymentType} • $displayEntryType"
 
         holder.txtAmount.text =
             String.format("$%.2f", netAmount)

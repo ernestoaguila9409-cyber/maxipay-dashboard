@@ -135,8 +135,13 @@ class MainActivity : AppCompatActivity() {
 
                     val voided = doc.getBoolean("voided") ?: false
                     val settled = doc.getBoolean("settled") ?: false
-                    val amount = doc.getDouble("amount") ?: 0.0
                     val type = doc.getString("type") ?: "SALE"
+
+                    val amount = if (type == "SALE") {
+                        doc.getDouble("totalPaid") ?: 0.0
+                    } else {
+                        doc.getDouble("amount") ?: 0.0
+                    }
 
                     if (!voided && !settled) {
 

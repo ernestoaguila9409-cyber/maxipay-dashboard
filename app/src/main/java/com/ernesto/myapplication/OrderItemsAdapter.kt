@@ -39,15 +39,15 @@ class OrderItemsAdapter(
             ?: doc.getLong("quantity")
             ?: 1L).toInt()
 
-        val basePrice = doc.getDouble("basePrice")
-            ?: doc.getDouble("base")
-            ?: doc.getDouble("unitPrice")
-            ?: 0.0
+        val basePriceInCents =
+            doc.getLong("basePriceInCents") ?: 0L
 
-        val line = doc.getDouble("lineTotal")
-            ?: doc.getDouble("line")
-            ?: doc.getDouble("total")
-            ?: 0.0
+        val basePrice = basePriceInCents / 100.0
+
+        val lineInCents =
+            doc.getLong("lineTotalInCents") ?: 0L
+
+        val line = lineInCents / 100.0
 
         holder.nameQty.text = "$name (Qty: $qty)"
 

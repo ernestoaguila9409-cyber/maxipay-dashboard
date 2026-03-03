@@ -5,7 +5,6 @@ import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -17,7 +16,8 @@ import java.math.RoundingMode
 import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.Locale
-
+import com.ernesto.myapplication.engine.PaymentEngine
+import android.util.Log
 class PaymentActivity : AppCompatActivity() {
 
     private var isMixMode = false
@@ -38,10 +38,13 @@ class PaymentActivity : AppCompatActivity() {
     private var paymentAmount = 0.0
 
     private val db = FirebaseFirestore.getInstance()
+    private lateinit var paymentEngine: PaymentEngine
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_payment)
+
+        paymentEngine = PaymentEngine(db)
 
         txtPaymentTotal = findViewById(R.id.txtPaymentTotal)
         btnCredit = findViewById(R.id.btnCredit)
@@ -86,10 +89,13 @@ class PaymentActivity : AppCompatActivity() {
 
         db.collection("Orders").document(oid).get()
             .addOnSuccessListener { snap ->
-                val remaining = snap.getDouble("remainingBalance")
-                    ?: snap.getDouble("total") ?: 0.0
 
-                remainingBalance = roundMoney(remaining)
+                val remainingInCents =
+                    snap.getLong("remainingInCents")
+                        ?: snap.getLong("totalInCents")
+                        ?: 0L
+
+                remainingBalance = remainingInCents / 100.0
 
                 txtPaymentTotal.text =
                     String.format(Locale.US, "Remaining: $%.2f", remainingBalance)
@@ -100,8 +106,11 @@ class PaymentActivity : AppCompatActivity() {
         paymentAmount = remainingBalance
         showWaitingStatus()
 
-        if (paymentType == "Cash") processCashPayment()
-        else processCardPayment(paymentType)
+        if (paymentType == "Cash") {
+            completePayment(paymentType)
+        } else {
+            processCardPayment(paymentType)
+        }
     }
 
     private fun showAmountDialog(paymentType: String) {
@@ -111,12 +120,21 @@ class PaymentActivity : AppCompatActivity() {
             android.text.InputType.TYPE_CLASS_NUMBER or
                     android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
 
-        input.hint = "Enter amount (Remaining: $remainingBalance)"
+        input.hint =
+            "Enter amount (Remaining: ${String.format(Locale.US, "%.2f", remainingBalance)})"
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Enter Amount")
             .setView(input)
-            .setPositiveButton("Confirm") { _, _ ->
+            .setPositiveButton("Confirm", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+
+            val confirmBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+
+            confirmBtn.setOnClickListener {
 
                 val entered = input.text.toString().toDoubleOrNull()
 
@@ -124,48 +142,29 @@ class PaymentActivity : AppCompatActivity() {
                     entered <= 0 ||
                     roundMoney(entered) > remainingBalance
                 ) {
-                    Toast.makeText(this,
+                    Toast.makeText(
+                        this,
                         "Invalid amount",
-                        Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return@setOnClickListener
                 }
 
                 paymentAmount = roundMoney(entered)
 
+                dialog.dismiss()  // 🔥 CLOSES DIALOG BEFORE PROCESSING
+
                 showWaitingStatus()
 
-                if (paymentType == "Cash") processCashPayment()
-                else processCardPayment(paymentType)
+                if (paymentType == "Cash") {
+                    completePayment("Cash")
+                } else {
+                    processCardPayment(paymentType)
+                }
             }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
+        }
 
-    private fun showWaitingStatus() {
-        statusContainer.visibility = View.VISIBLE
-        progressBar.visibility = View.VISIBLE
-        txtStatus.text = "Waiting..."
-        txtSubStatus.text = "Processing payment"
-        setButtonsEnabled(false)
-    }
-
-    private fun showApproved() {
-        progressBar.visibility = View.GONE
-        txtStatus.text = "APPROVED ✅"
-        txtSubStatus.text = "Transaction successful"
-    }
-
-    private fun showDeclined(message: String) {
-        progressBar.visibility = View.GONE
-        txtStatus.text = "DECLINED ❌"
-        txtSubStatus.text = message
-        setButtonsEnabled(true)
-    }
-
-    private fun setButtonsEnabled(enabled: Boolean) {
-        btnCredit.isEnabled = enabled
-        btnDebit.isEnabled = enabled
-        btnCash.isEnabled = enabled
+        dialog.show()
     }
 
     private fun processCardPayment(paymentType: String) {
@@ -207,22 +206,45 @@ class PaymentActivity : AppCompatActivity() {
             }
 
             override fun onResponse(call: Call, response: Response) {
+
                 val responseText = response.body?.string() ?: ""
+                Log.d("DEVAVOO_RAW", responseText)
 
                 runOnUiThread {
+
                     if (!response.isSuccessful) {
                         showDeclined("Server Error")
                         return@runOnUiThread
                     }
 
                     val jsonObj = JSONObject(responseText)
+
                     val resultCode = jsonObj
                         .optJSONObject("GeneralResponse")
                         ?.optString("ResultCode", "") ?: ""
 
                     if (resultCode == "0") {
-                        saveTransaction(paymentType)
-                        showApproved()
+
+                        // ✅ Extract correct fields from YOUR real response
+
+                        val authCode = jsonObj.optString("AuthCode", "")
+                        val terminalReference = jsonObj.optString("PNReferenceId", "")
+
+                        val cardData = jsonObj.optJSONObject("CardData")
+
+                        val cardBrand = cardData?.optString("CardType", "") ?: ""
+                        val entryType = cardData?.optString("EntryType", "") ?: ""
+                        val last4 = cardData?.optString("Last4", "") ?: ""
+
+                        completeCardPayment(
+                            paymentType = paymentType,
+                            authCode = authCode,
+                            cardBrand = cardBrand,
+                            last4 = last4,
+                            entryType = entryType,
+                            terminalReference = terminalReference
+                        )
+
                     } else {
                         showDeclined("Declined")
                     }
@@ -230,197 +252,109 @@ class PaymentActivity : AppCompatActivity() {
             }
         })
     }
-
-    private fun processCashPayment() {
-        saveTransaction("Cash")
-        showApproved()
-    }
-
-    private fun saveTransaction(paymentType: String) {
+    private fun completeCardPayment(
+        paymentType: String,
+        authCode: String,
+        cardBrand: String,
+        last4: String,
+        entryType: String,
+        terminalReference: String
+    ) {
 
         val oid = orderId ?: return
+        val amountInCents = (paymentAmount * 100).toLong()
 
-        val transactionMap = hashMapOf(
-            "orderId" to oid,
-            "amount" to paymentAmount,
-            "type" to "SALE",
-            "paymentType" to paymentType,
-            "timestamp" to Date(),
-            "voided" to false,
-            "settled" to false
-        )
+        paymentEngine.processPayment(
+            orderId = oid,
+            paymentType = paymentType,
+            amountInCents = amountInCents,
+            authCode = authCode,
+            cardBrand = cardBrand,
+            last4 = last4,
+            entryType = entryType,
+            terminalReference = terminalReference,
+            onSuccess = { remainingInCents ->
 
-        db.collection("Transactions")
-            .add(transactionMap)
-            .addOnSuccessListener {
+                remainingBalance = remainingInCents / 100.0
 
-                val orderRef = db.collection("Orders").document(oid)
-
-                orderRef.get().addOnSuccessListener { snap ->
-
-                    val orderTotal = snap.getDouble("total") ?: 0.0
-                    val currentPaid = snap.getDouble("totalPaid") ?: 0.0
-
-                    val newPaid = roundMoney(currentPaid + paymentAmount)
-                    val remaining = roundMoney(orderTotal - newPaid)
-
-                    applyPaymentToItems(
-                        orderRef = orderRef,
-                        amount = paymentAmount,
-                        paymentType = paymentType
-                    )
-
-                    getOrCreateOpenBatch { batchId ->
-
-                        val batchRef = db.collection("Batches").document(batchId)
-
-                        db.runBatch { batch ->
-
-                            val updates = mutableMapOf<String, Any>(
-                                "batchId" to batchId,
-                                "totalPaid" to newPaid,
-                                "remainingBalance" to remaining
-                            )
-
-                            if (remaining <= 0.0) {
-                                updates["status"] = "CLOSED"
-                                updates["closedAt"] = Date()
-                            }
-
-                            batch.update(orderRef, updates)
-
-                            batch.update(batchRef, mapOf(
-                                "totalSales" to FieldValue.increment(paymentAmount),
-                                "transactionCount" to FieldValue.increment(1)
-                            ))
-                        }
-                            .addOnSuccessListener {
-
-                                remainingBalance = remaining
-
-                                if (remaining <= 0.0) {
-                                    setResult(RESULT_OK)
-                                    finish()   // only close when fully paid
-                                } else {
-                                    loadRemainingBalance()
-                                    setButtonsEnabled(true)
-                                }
-                            }
-                            .addOnFailureListener {
-                                Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
-                            }
-                    }
-                }
-            }
-    }
-    private fun applyPaymentToItems(
-        orderRef: com.google.firebase.firestore.DocumentReference,
-        amount: Double,
-        paymentType: String
-    ) {
-        val itemsRef = orderRef.collection("items")
-
-        itemsRef.get().addOnSuccessListener { itemsSnap ->
-
-            var amountToApply = amount
-
-            db.runBatch { batch ->
-
-                for (doc in itemsSnap.documents) {
-
-                    val quantity = doc.getLong("quantity") ?: 0L
-                    val paidQty = doc.getLong("paidQuantity") ?: 0L
-                    val unitPrice = doc.getDouble("unitPrice") ?: 0.0
-
-                    val remainingQty = quantity - paidQty
-                    if (remainingQty <= 0 || amountToApply <= 0 || unitPrice <= 0) continue
-
-                    val unitsToApply = minOf(
-                        remainingQty.toInt(),
-                        (amountToApply / unitPrice).toInt()
-                    )
-
-                    if (unitsToApply <= 0) continue
-
-                    val prevPaidAmount = doc.getDouble("paidAmount") ?: 0.0
-                    val addedAmount = roundMoney(unitsToApply * unitPrice)
-
-                    val newPaidQty = paidQty + unitsToApply
-                    val newPaidAmount = roundMoney(prevPaidAmount + addedAmount)
-
-                    val paymentEntry = hashMapOf(
-                        "type" to paymentType,
-                        "quantity" to unitsToApply,
-                        "amount" to addedAmount,
-                        "timestamp" to Date()
-                    )
-
-                    val itemRef = doc.reference
-
-                    batch.update(itemRef, mapOf(
-                        "paidQuantity" to newPaidQty,
-                        "paidAmount" to newPaidAmount,
-                        "payments" to FieldValue.arrayUnion(paymentEntry)
-                    ))
-
-                    amountToApply = roundMoney(amountToApply - addedAmount)
-                }
-            }
-        }
-    }
-    private fun getOrCreateOpenBatch(onReady: (String) -> Unit) {
-
-        db.collection("Batches")
-            .whereEqualTo("closed", false)
-            .limit(1)
-            .get()
-            .addOnSuccessListener { snap ->
-
-                if (!snap.isEmpty) {
-                    onReady(snap.documents.first().id)
+                if (remainingInCents <= 0L) {
+                    setResult(RESULT_OK)
+                    finish()
                 } else {
-                    val newBatch =
-                        db.collection("Batches").document()
+                    txtPaymentTotal.text =
+                        String.format(Locale.US, "Remaining: $%.2f", remainingBalance)
+                    setButtonsEnabled(true)
+                }
+            },
+            onFailure = {
+                Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+                setButtonsEnabled(true)
+            }
+        )
+    }
+    private fun completePayment(paymentType: String) {
 
-                    newBatch.set(mapOf(
-                        "createdAt" to Date(),
-                        "totalSales" to 0.0,
-                        "transactionCount" to 0L,
-                        "closed" to false
-                    )).addOnSuccessListener {
-                        onReady(newBatch.id)
+        val oid = orderId ?: return
+        val amountInCents = (paymentAmount * 100).toLong()
+
+        paymentEngine.processPayment(
+            orderId = oid,
+            paymentType = paymentType,
+            amountInCents = amountInCents,
+            onSuccess = { remainingInCents ->
+
+                runOnUiThread {
+
+                    showApproved()
+
+                    remainingBalance = remainingInCents / 100.0
+
+                    if (remainingInCents <= 0L) {
+                        setResult(RESULT_OK)
+                        finish()
+                    } else {
+                        txtPaymentTotal.text =
+                            String.format(Locale.US, "Remaining: $%.2f", remainingBalance)
+
+                        progressBar.visibility = View.GONE
+                        setButtonsEnabled(true)
                     }
                 }
-            }
-    }
-    private fun deductStockForOrder(orderId: String) {
-
-        val orderRef = db.collection("Orders").document(orderId)
-
-        orderRef.collection("items").get()
-            .addOnSuccessListener { itemsSnap ->
-
-                db.runBatch { batch ->
-
-                    for (doc in itemsSnap.documents) {
-
-                        val itemId = doc.getString("itemId") ?: continue
-                        val quantity = doc.getLong("quantity") ?: 0L
-
-                        if (quantity <= 0) continue
-
-                        val menuItemRef =
-                            db.collection("MenuItems").document(itemId)
-
-                        batch.update(
-                            menuItemRef,
-                            "stock",
-                            FieldValue.increment(-quantity)
-                        )
-                    }
+            },
+            onFailure = {
+                runOnUiThread {
+                    showDeclined(it.message ?: "Payment failed")
+                    setButtonsEnabled(true)
                 }
             }
+        )
     }
+    private fun showApproved() {
+        progressBar.visibility = View.GONE
+        txtStatus.text = "APPROVED ✅"
+        txtSubStatus.text = "Transaction successful"
+    }
+    private fun showWaitingStatus() {
+        statusContainer.visibility = View.VISIBLE
+        progressBar.visibility = View.VISIBLE
+        txtStatus.text = "Waiting..."
+        txtSubStatus.text = "Processing payment"
+        setButtonsEnabled(false)
+    }
+
+    private fun showDeclined(message: String) {
+        progressBar.visibility = View.GONE
+        txtStatus.text = "DECLINED ❌"
+        txtSubStatus.text = message
+        setButtonsEnabled(true)
+    }
+
+    private fun setButtonsEnabled(enabled: Boolean) {
+        btnCredit.isEnabled = enabled
+        btnDebit.isEnabled = enabled
+        btnCash.isEnabled = enabled
+    }
+
     private fun roundMoney(value: Double): Double {
         return BigDecimal(value)
             .setScale(2, RoundingMode.HALF_UP)

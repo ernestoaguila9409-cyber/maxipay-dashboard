@@ -241,7 +241,8 @@ class OrderDetailActivity : AppCompatActivity() {
 
                         val referenceId = txDoc.getString("referenceId") ?: return@addOnSuccessListener
                         val paymentType = txDoc.getString("paymentType") ?: "Credit"
-                        val amount = txDoc.getDouble("amount") ?: 0.0
+                        val amountInCents = txDoc.getLong("amountInCents") ?: 0L
+                        val amount = amountInCents / 100.0
 
                         callVoidApi(referenceId, paymentType, amount, transactionId)
                     }
@@ -325,7 +326,8 @@ class OrderDetailActivity : AppCompatActivity() {
             .addOnSuccessListener { orderDoc ->
 
                 val batchId = orderDoc.getString("batchId") ?: return@addOnSuccessListener
-                val amount = orderDoc.getDouble("total") ?: 0.0
+                val amountInCents = orderDoc.getLong("totalInCents") ?: 0L
+                val amount = amountInCents / 100.0
 
                 db.runBatch { batch ->
 
@@ -371,38 +373,47 @@ class OrderDetailActivity : AppCompatActivity() {
 
                 if (!orderDoc.exists()) return@addOnSuccessListener
 
-                // 🔴 1️⃣ Prevent double refund
                 val status = orderDoc.getString("status") ?: ""
                 if (status == "REFUNDED") {
                     Toast.makeText(this, "Order already refunded", Toast.LENGTH_LONG).show()
                     return@addOnSuccessListener
                 }
 
-                val transactionId = orderDoc.getString("transactionId")
-                    ?: return@addOnSuccessListener
+                val transactionId =
+                    orderDoc.getString("transactionId")
+                        ?: return@addOnSuccessListener
 
                 db.collection("Transactions")
                     .document(transactionId)
                     .get()
                     .addOnSuccessListener { txDoc ->
 
-                        val paymentType = txDoc.getString("paymentType") ?: "Credit"
-                        val amount = txDoc.getDouble("amount") ?: 0.0
-                        val referenceId = txDoc.getString("referenceId")
+                        val paymentType =
+                            txDoc.getString("paymentType") ?: "Credit"
 
-                        // 🔥 CASH REFUND — DO NOT CALL PROCESSOR
+                        val amountInCents =
+                            txDoc.getLong("amountInCents") ?: 0L
+
+                        val referenceId =
+                            txDoc.getString("referenceId")
+
+                        // 🔥 CASH REFUND
                         if (paymentType.equals("Cash", ignoreCase = true)) {
-                            finalizeRefund(transactionId, amount)
+                            finalizeRefund(transactionId, amountInCents)
                             return@addOnSuccessListener
                         }
 
-                        // Only cards go to processor
+                        // 💳 CARD REFUND
                         if (referenceId != null) {
+
+                            val amountForApi = amountInCents / 100.0
+
                             callRefundApi(
-                                referenceId,
-                                paymentType,
-                                amount,
-                                transactionId
+                                referenceId = referenceId,
+                                paymentType = paymentType,
+                                amount = amountForApi,
+                                originalTransactionId = transactionId,
+                                amountInCents = amountInCents
                             )
                         }
                     }
@@ -412,7 +423,8 @@ class OrderDetailActivity : AppCompatActivity() {
         referenceId: String,
         paymentType: String,
         amount: Double,
-        originalTransactionId: String
+        originalTransactionId: String,
+        amountInCents: Long
     ) {
 
         val json = JSONObject().apply {
@@ -423,12 +435,13 @@ class OrderDetailActivity : AppCompatActivity() {
             put("GetReceipt", "No")
             put("CaptureSignature", false)
             put("GetExtendedData", true)
-            put("CallbackInfo", JSONObject().apply { put("Url", "" )})
+            put("CallbackInfo", JSONObject().apply { put("Url", "") })
             put("Tpn", "11881706541A")
             put("Authkey", "Qt9N7CxhDs")
         }
 
-        val body = json.toString().toRequestBody("application/json".toMediaType())
+        val body = json.toString()
+            .toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
             .url("https://spinpos.net/v2/Payment/Return")
@@ -437,7 +450,7 @@ class OrderDetailActivity : AppCompatActivity() {
 
         val client = OkHttpClient.Builder()
             .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(180, TimeUnit.SECONDS)   // 🔥 important
+            .readTimeout(180, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .build()
 
@@ -471,11 +484,10 @@ class OrderDetailActivity : AppCompatActivity() {
                     try {
                         val jsonResponse = JSONObject(responseText)
                         val general = jsonResponse.optJSONObject("GeneralResponse")
-
                         val resultCode = general?.optString("ResultCode") ?: ""
 
                         if (resultCode == "0") {
-                            finalizeRefund(originalTransactionId, amount)
+                            finalizeRefund(originalTransactionId, amountInCents)
                         } else {
                             Toast.makeText(
                                 this@OrderDetailActivity,
@@ -495,7 +507,10 @@ class OrderDetailActivity : AppCompatActivity() {
             }
         })
     }
-    private fun finalizeRefund(originalTransactionId: String, amount: Double) {
+    private fun finalizeRefund(
+        originalTransactionId: String,
+        amountInCents: Long
+    ) {
 
         // 1️⃣ Find open batch
         db.collection("Batches")
@@ -512,7 +527,7 @@ class OrderDetailActivity : AppCompatActivity() {
                 val openBatch = batchSnap.documents.first()
                 val openBatchId = openBatch.id
 
-                // 2️⃣ Get original sale transaction to extract referenceId
+                // 2️⃣ Get original sale transaction
                 db.collection("Transactions")
                     .document(originalTransactionId)
                     .get()
@@ -522,40 +537,51 @@ class OrderDetailActivity : AppCompatActivity() {
                             originalTx.getString("referenceId")
                                 ?: return@addOnSuccessListener
 
-                        val newRefundTxRef = db.collection("Transactions").document()
+                        val newRefundTxRef =
+                            db.collection("Transactions").document()
 
                         db.runBatch { batch ->
 
-                            val orderRef = db.collection("Orders").document(orderId)
-                            val batchRef = db.collection("Batches").document(openBatchId)
+                            val orderRef =
+                                db.collection("Orders").document(orderId)
 
-                            // ✅ Create refund transaction correctly
+                            val batchRef =
+                                db.collection("Batches").document(openBatchId)
+
+                            // ✅ CREATE REFUND TRANSACTION (CENTS ONLY)
                             batch.set(newRefundTxRef, mapOf(
                                 "orderId" to orderId,
                                 "type" to "REFUND",
-                                "amount" to amount,
-                                "originalReferenceId" to originalReferenceId, // 🔥 important
+                                "amountInCents" to amountInCents,
+                                "originalReferenceId" to originalReferenceId,
                                 "createdAt" to Date(),
                                 "batchId" to openBatchId,
                                 "voided" to false,
                                 "settled" to false
                             ))
 
-                            // ✅ Update batch totals
+                            // ✅ UPDATE BATCH TOTALS (CENTS ONLY)
                             batch.update(batchRef, mapOf(
-                                "totalRefunds" to FieldValue.increment(amount),
-                                "netTotal" to FieldValue.increment(-amount),
-                                "transactionCount" to FieldValue.increment(1)
+                                "totalRefundsInCents" to
+                                        FieldValue.increment(amountInCents),
+                                "netTotalInCents" to
+                                        FieldValue.increment(-amountInCents),
+                                "transactionCount" to
+                                        FieldValue.increment(1)
                             ))
 
-                            // ✅ Update order status
+                            // ✅ UPDATE ORDER STATUS
                             batch.update(orderRef, mapOf(
                                 "status" to "REFUNDED",
                                 "refundedAt" to Date()
                             ))
                         }
                             .addOnSuccessListener {
-                                Toast.makeText(this, "Order Refunded", Toast.LENGTH_LONG).show()
+                                Toast.makeText(
+                                    this,
+                                    "Order Refunded",
+                                    Toast.LENGTH_LONG
+                                ).show()
                                 finish()
                             }
                     }
