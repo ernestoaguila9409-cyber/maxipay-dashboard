@@ -10,7 +10,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
 import com.google.firebase.Timestamp
 import java.util.Locale
-
+import com.ernesto.myapplication.engine.MoneyUtils
 class OrdersAdapter(
     private val onOrderClick: (OrderRow) -> Unit,
     private val onOrderLongPress: (OrderRow) -> Boolean
@@ -80,17 +80,12 @@ class OrdersAdapter(
                 }
             }
 
-            txtTotal.text = centsToMoney(order.totalCents)
+            txtTotal.text = MoneyUtils.centsToDisplay(order.totalCents)
             txtEmployee.text = order.employeeName
             txtTime.text = formatTime(order.createdAt.toDate().time)
 
             imgSelected.visibility = if (isSelected) View.VISIBLE else View.GONE
             card.alpha = if (isSelected) 0.85f else 1f
-        }
-
-        private fun centsToMoney(cents: Long): String {
-            val dollars = cents / 100.0
-            return String.format(Locale.US, "$%.2f", dollars)
         }
 
         private fun formatTime(ms: Long): String {

@@ -12,6 +12,7 @@
     import java.util.Date
     import java.util.Locale
     import com.ernesto.myapplication.engine.OrderEngine
+    import com.ernesto.myapplication.engine.MoneyUtils
     data class CartItem(
         val itemId: String,
         val name: String,
@@ -109,34 +110,39 @@
         // ----------------------------
 
         private fun loadExistingOrderIntoCart(orderId: String) {
-            // (Optional) load employeeName from the order if you want
+
             db.collection("Orders").document(orderId)
                 .get()
                 .addOnSuccessListener { orderDoc ->
+
                     val nameFromOrder = orderDoc.getString("employeeName")
                     if (!nameFromOrder.isNullOrBlank()) {
                         employeeName = nameFromOrder
                     }
 
-                    // Load items
                     db.collection("Orders")
                         .document(orderId)
                         .collection("items")
                         .get()
                         .addOnSuccessListener { docs ->
+
                             cartMap.clear()
 
                             for (doc in docs.documents) {
+
                                 val lineKey = doc.id
 
                                 val itemId = doc.getString("itemId") ?: continue
                                 val name = doc.getString("name") ?: "Item"
                                 val qty = (doc.getLong("quantity") ?: 1L).toInt()
-                                val basePriceInCents = doc.getLong("basePriceInCents") ?: 0L
-                                val basePrice = basePriceInCents / 100.0
+
+                                val unitPriceInCents =
+                                    doc.getLong("unitPriceInCents") ?: 0L
+
+                                val basePrice = unitPriceInCents / 100.0
 
                                 val modifiers = parseModifiers(doc.get("modifiers"))
-                                val stock = 0L // not needed for display; stock is checked during deduction
+                                val stock = 0L
 
                                 cartMap[lineKey] = CartItem(
                                     itemId = itemId,
@@ -152,7 +158,6 @@
                         }
                 }
         }
-
         private fun parseModifiers(raw: Any?): List<Pair<String, Double>> {
             // Your Firestore stores modifiers as:
             // modifiers: [ {first:"Medium", second:0.02}, {first:"grande", second:0.02} ]
@@ -505,7 +510,7 @@
                     row.orientation = LinearLayout.HORIZONTAL
 
                     val nameView = TextView(this)
-                    nameView.text = "• ${modifier.first}"
+                    nameView.text = "   • ${modifier.first}"
                     nameView.layoutParams = LinearLayout.LayoutParams(
                         0,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -513,7 +518,7 @@
                     )
 
                     val priceView = TextView(this)
-                    priceView.text = "+$${String.format(Locale.US, "%.2f", modifier.second)}"
+                    priceView.text = "+${MoneyUtils.centsToDisplay((modifier.second * 100).toLong())}"
 
                     row.addView(nameView)
                     row.addView(priceView)
@@ -524,7 +529,7 @@
                 val lineTotal = unitPrice * item.quantity
 
                 val subtotalText = TextView(this)
-                subtotalText.text = "Line Total: $${String.format(Locale.US, "%.2f", lineTotal)}"
+                subtotalText.text = "Line Total: ${MoneyUtils.centsToDisplay((lineTotal * 100).toLong())}"
                 subtotalText.setTypeface(null, android.graphics.Typeface.BOLD)
                 itemLayout.addView(subtotalText)
 
@@ -602,7 +607,7 @@
                 totalAmount += lineTotal
             }
 
-            txtTotal.text = "Total: $${String.format(Locale.US, "%.2f", totalAmount)}"
+            txtTotal.text = "Total: ${MoneyUtils.centsToDisplay((totalAmount * 100).toLong())}"
         }
         // ----------------------------
         // FIRESTORE ORDER / ITEMS

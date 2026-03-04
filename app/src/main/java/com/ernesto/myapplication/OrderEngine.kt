@@ -66,6 +66,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
             "modifiersTotalInCents" to modifiersTotalInCents,
             "unitPriceInCents" to unitPriceInCents,
             "lineTotalInCents" to lineTotalInCents,
+            "modifiers" to input.modifiers,   // ⭐ ADD THIS LINE
             "updatedAt" to Date()
         )
 

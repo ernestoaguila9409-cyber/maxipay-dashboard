@@ -7,7 +7,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.DocumentSnapshot
 import java.util.Locale
-
+import com.ernesto.myapplication.engine.MoneyUtils
 class OrderItemsAdapter(
     private val items: List<DocumentSnapshot>
 ) : RecyclerView.Adapter<OrderItemsAdapter.ItemVH>() {
@@ -42,19 +42,16 @@ class OrderItemsAdapter(
         val basePriceInCents =
             doc.getLong("basePriceInCents") ?: 0L
 
-        val basePrice = basePriceInCents / 100.0
-
         val lineInCents =
             doc.getLong("lineTotalInCents") ?: 0L
-
-        val line = lineInCents / 100.0
 
         holder.nameQty.text = "$name (Qty: $qty)"
 
         // Base price
-        if (basePrice > 0.0) {
+        // Base price
+        if (basePriceInCents > 0L) {
             holder.base.visibility = View.VISIBLE
-            holder.base.text = "Base: $${String.format(Locale.US, "%.2f", basePrice)}"
+            holder.base.text = "Base: ${MoneyUtils.centsToDisplay(basePriceInCents)}"
         } else {
             holder.base.visibility = View.GONE
         }
@@ -68,7 +65,8 @@ class OrderItemsAdapter(
             holder.modifiers.text = modsText
         }
 
-        holder.lineTotal.text = "Line Total: $${String.format(Locale.US, "%.2f", line)}"
+        holder.lineTotal.text =
+            "Line Total: ${MoneyUtils.centsToDisplay(lineInCents)}"
 
         // ===============================
         // 🔥 PAYMENT BREAKDOWN
@@ -110,24 +108,44 @@ class OrderItemsAdapter(
     }
 
     private fun buildModifiersText(doc: DocumentSnapshot): String? {
+
         val raw = doc.get("modifiers") as? List<*> ?: return null
         if (raw.isEmpty()) return null
 
         val lines = raw.mapNotNull { item ->
-            val map = item as? Map<*, *> ?: return@mapNotNull null
 
-            val name = map["first"]?.toString() ?: return@mapNotNull null
-            val price = (map["second"] as? Number)?.toDouble() ?: 0.0
+            when (item) {
 
-            if (price > 0.0) {
-                "• $name (+$${String.format(Locale.US, "%.2f", price)})"
-            } else {
-                "• $name"
+                // Case 1: stored as Pair map {first, second}
+                is Map<*, *> -> {
+                    val name = item["first"]?.toString() ?: return@mapNotNull null
+                    val price = (item["second"] as? Number)?.toDouble() ?: 0.0
+
+                    if (price > 0)
+                        "   • $name (+$${String.format(Locale.US, "%.2f", price)})"
+                    else
+                        "   • $name"
+                }
+
+                // Case 2: stored as list ["Large", 0.01]
+                is List<*> -> {
+                    if (item.size < 2) return@mapNotNull null
+
+                    val name = item[0]?.toString() ?: return@mapNotNull null
+                    val price = (item[1] as? Number)?.toDouble() ?: 0.0
+
+                    if (price > 0)
+                        "   • $name (+$${String.format(Locale.US, "%.2f", price)})"
+                    else
+                        "   • $name"
+                }
+
+                else -> null
             }
         }
 
         if (lines.isEmpty()) return null
 
-        return "Modifiers:\n" + lines.joinToString("\n")
+        return lines.joinToString("\n")
     }
 }

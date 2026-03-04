@@ -62,43 +62,44 @@ class TransactionActivity : AppCompatActivity() {
 
                     val type = doc.getString("type") ?: "SALE"
 
-                    // Ignore old SALE docs that don't have totalPaid
-                    if (type == "SALE" && !doc.contains("totalPaid")) {
+                    if (type == "SALE" &&
+                        !doc.contains("totalPaid") &&
+                        !doc.contains("totalPaidInCents")
+                    ) {
                         return@forEach
                     }
 
-                    val createdAt = doc.getDate("createdAt")
+                    val createdAt = doc.getTimestamp("createdAt")?.toDate()
                     val oldTimestamp = doc.getTimestamp("timestamp")?.toDate()
 
                     val dateMillis = createdAt?.time ?: oldTimestamp?.time ?: 0L
 
-                    val amountValue = if (type == "SALE") {
-                        doc.getDouble("totalPaid") ?: 0.0
-                    } else {
-                        doc.getDouble("amount") ?: 0.0
-                    }
-
-                    val paymentsList = doc.get("payments") as? List<Map<String, Any>>
-                    val isMixed = (paymentsList?.size ?: 0) > 1
-
                     val payments = doc.get("payments") as? List<Map<String, Any>> ?: emptyList()
                     val firstPayment = payments.firstOrNull()
 
-                    val amount = (doc.getDouble("totalPaid") ?: 0.0)
-                    val amountInCents = (amount * 100).toLong()
+                    val paymentType = firstPayment?.get("paymentType")?.toString() ?: ""
+                    val cardBrand = firstPayment?.get("cardBrand")?.toString() ?: ""
+                    val last4 = firstPayment?.get("last4")?.toString() ?: ""
+                    val entryType = firstPayment?.get("entryType")?.toString() ?: ""
+
+                    val isMixed = payments.size > 1
+
+                    val amountInCents =
+                        doc.getLong("totalPaidInCents")
+                            ?: ((doc.getDouble("totalPaid") ?: 0.0) * 100).toLong()
 
                     val transaction = Transaction(
                         referenceId = doc.id,
                         amountInCents = amountInCents,
-                        date = doc.getTimestamp("createdAt")?.toDate()?.time ?: 0L,
-                        paymentType = firstPayment?.get("paymentType") as? String ?: "",
-                        cardBrand = firstPayment?.get("cardBrand") as? String ?: "",
-                        last4 = firstPayment?.get("last4") as? String ?: "",
-                        entryType = firstPayment?.get("entryType") as? String ?: "",
+                        date = dateMillis,
+                        paymentType = paymentType,
+                        cardBrand = cardBrand,
+                        last4 = last4,
+                        entryType = entryType,
                         voided = doc.getBoolean("voided") ?: false,
-                        type = doc.getString("type") ?: "SALE",
+                        type = type,
                         originalReferenceId = doc.getString("originalReferenceId") ?: "",
-                        isMixed = false
+                        isMixed = isMixed
                     )
 
                     allTransactions.add(transaction)

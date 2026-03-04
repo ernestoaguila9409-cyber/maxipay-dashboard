@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 import java.util.Locale
 import com.ernesto.myapplication.engine.PaymentEngine
 import android.util.Log
+import com.ernesto.myapplication.engine.MoneyUtils
 class PaymentActivity : AppCompatActivity() {
 
     private var isMixMode = false
@@ -95,10 +96,10 @@ class PaymentActivity : AppCompatActivity() {
                         ?: snap.getLong("totalInCents")
                         ?: 0L
 
-                remainingBalance = remainingInCents / 100.0
+                remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
                 txtPaymentTotal.text =
-                    String.format(Locale.US, "Remaining: $%.2f", remainingBalance)
+                    "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
             }
     }
 
@@ -275,14 +276,18 @@ class PaymentActivity : AppCompatActivity() {
             terminalReference = terminalReference,
             onSuccess = { remainingInCents ->
 
-                remainingBalance = remainingInCents / 100.0
+                // ✅ convert cents → double for internal logic
+                remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
                 if (remainingInCents <= 0L) {
                     setResult(RESULT_OK)
                     finish()
                 } else {
+
+                    // ✅ display using MoneyUtils
                     txtPaymentTotal.text =
-                        String.format(Locale.US, "Remaining: $%.2f", remainingBalance)
+                        "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
+
                     setButtonsEnabled(true)
                 }
             },
@@ -307,14 +312,17 @@ class PaymentActivity : AppCompatActivity() {
 
                     showApproved()
 
-                    remainingBalance = remainingInCents / 100.0
+                    // ✅ convert cents → double for internal logic
+                    remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
                     if (remainingInCents <= 0L) {
                         setResult(RESULT_OK)
                         finish()
                     } else {
+
+                        // ✅ display using MoneyUtils
                         txtPaymentTotal.text =
-                            String.format(Locale.US, "Remaining: $%.2f", remainingBalance)
+                            "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
 
                         progressBar.visibility = View.GONE
                         setButtonsEnabled(true)

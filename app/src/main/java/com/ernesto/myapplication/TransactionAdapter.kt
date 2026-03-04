@@ -49,8 +49,15 @@ class TransactionAdapter(
             context.getColor(android.R.color.holo_green_dark)
         )
 
-        holder.txtCard.text =
-            "${sale.cardBrand} •••• ${sale.last4}"
+        if (sale.paymentType.equals("Cash", true)) {
+
+            holder.txtCard.text = "Cash"
+
+        } else {
+
+            holder.txtCard.text = "${sale.cardBrand} •••• ${sale.last4}"
+
+        }
 
         val displayEntryType = when (sale.entryType) {
             "Chip" -> "Chip"
@@ -61,7 +68,11 @@ class TransactionAdapter(
         }
 
         holder.txtType.text =
-            "${sale.paymentType} • $displayEntryType"
+            if (sale.paymentType.equals("Cash", true)) {
+                "Cash Payment"
+            } else {
+                "${sale.paymentType} • $displayEntryType"
+            }
 
         holder.txtAmount.text =
             String.format("$%.2f", netAmount)
