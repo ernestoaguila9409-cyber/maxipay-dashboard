@@ -43,6 +43,7 @@ class PaymentEngine(private val db: FirebaseFirestore) {
             }
 
             val paymentEntry = hashMapOf(
+                "paymentId" to UUID.randomUUID().toString(),
                 "paymentType" to paymentType,
                 "amountInCents" to amountInCents,
                 "timestamp" to Date(),
@@ -55,27 +56,49 @@ class PaymentEngine(private val db: FirebaseFirestore) {
 
             if (saleId == null) {
 
-                transaction.set(saleRef, mapOf(
-                    "orderId" to orderId,
-                    "type" to "SALE",
-                    "totalPaidInCents" to newPaid,
-                    "payments" to listOf(paymentEntry),
-                    "status" to if (newRemaining <= 0L) "COMPLETED" else "OPEN",
-                    "createdAt" to Date(),
-                    "voided" to false,
-                    "settled" to false
-                ))
+                // First payment → create SALE
+                transaction.set(
+                    saleRef,
+                    mapOf(
+                        "orderId" to orderId,
+                        "type" to "SALE",
+                        "totalPaidInCents" to newPaid,
+                        "payments" to listOf(paymentEntry),
+                        "status" to if (newRemaining <= 0L) "COMPLETED" else "OPEN",
+                        "createdAt" to Date(),
+                        "voided" to false,
+                        "settled" to false
+                    )
+                )
 
-                transaction.update(orderRef, mapOf(
-                    "saleTransactionId" to saleRef.id
-                ))
+                transaction.update(
+                    orderRef,
+                    mapOf(
+                        "saleTransactionId" to saleRef.id
+                    )
+                )
+
+            } else {
+
+                // Second / third payment → append to payments array
+                transaction.update(
+                    saleRef,
+                    mapOf(
+                        "payments" to FieldValue.arrayUnion(paymentEntry),
+                        "totalPaidInCents" to newPaid,
+                        "status" to if (newRemaining <= 0L) "COMPLETED" else "OPEN"
+                    )
+                )
             }
 
-            transaction.update(orderRef, mapOf(
-                "totalPaidInCents" to newPaid,
-                "remainingInCents" to newRemaining,
-                "status" to if (newRemaining <= 0L) "CLOSED" else "OPEN"
-            ))
+            transaction.update(
+                orderRef,
+                mapOf(
+                    "totalPaidInCents" to newPaid,
+                    "remainingInCents" to newRemaining,
+                    "status" to if (newRemaining <= 0L) "CLOSED" else "OPEN"
+                )
+            )
 
             newRemaining
 
