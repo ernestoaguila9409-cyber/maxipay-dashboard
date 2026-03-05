@@ -106,19 +106,30 @@ class OrderDetailActivity : AppCompatActivity() {
                 if (!doc.exists()) return@addOnSuccessListener
 
                 // ✅ HEADER DATA (MUST BE INSIDE HERE)
+                val status = doc.getString("status") ?: ""
                 val employee = doc.getString("employeeName") ?: "Unknown"
-                txtHeaderEmployee.text = "Employee: $employee"
-
-                val createdAt = doc.getTimestamp("createdAt")
-                if (createdAt != null) {
-                    val date = createdAt.toDate()
-                    val format = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US)
-                    txtHeaderTime.text = format.format(date)
+                if (status == "VOIDED") {
+                    val voidedBy = doc.getString("voidedBy")?.takeIf { it.isNotBlank() } ?: "—"
+                    txtHeaderEmployee.text = "Voided by: $voidedBy"
+                    val voidedAt = doc.getTimestamp("voidedAt")
+                    if (voidedAt != null) {
+                        val format = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US)
+                        txtHeaderTime.text = format.format(voidedAt.toDate())
+                    } else {
+                        txtHeaderTime.text = ""
+                    }
                 } else {
-                    txtHeaderTime.text = ""
+                    txtHeaderEmployee.text = "Employee: $employee"
+                    val createdAt = doc.getTimestamp("createdAt")
+                    if (createdAt != null) {
+                        val date = createdAt.toDate()
+                        val format = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US)
+                        txtHeaderTime.text = format.format(date)
+                    } else {
+                        txtHeaderTime.text = ""
+                    }
                 }
 
-                val status = doc.getString("status") ?: ""
                 currentBatchId = doc.getString("batchId")
 
                 if (status == "OPEN") {
@@ -381,9 +392,11 @@ class OrderDetailActivity : AppCompatActivity() {
 
                     batch.update(txRef, "voided", true)
 
+                    val voidedBy = intent.getStringExtra("employeeName") ?: ""
                     batch.update(orderRef, mapOf(
                         "status" to "VOIDED",
-                        "voidedAt" to Date()
+                        "voidedAt" to Date(),
+                        "voidedBy" to voidedBy
                     ))
 
                     batch.update(batchRef, mapOf(

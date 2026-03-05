@@ -149,6 +149,12 @@ class OrdersActivity : AppCompatActivity() {
                 val totalCents = doc.getLong("totalInCents") ?: 0L
 
                 val employee = doc.getString("employeeName") ?: "—"
+                // For VOIDED orders show who performed the void (like refund shows refundedBy)
+                val displayEmployee = if (status == "VOIDED") {
+                    doc.getString("voidedBy")?.takeIf { it.isNotBlank() } ?: employee
+                } else {
+                    employee
+                }
 
                 val createdAt = doc.getTimestamp("createdAt") ?: Timestamp.now()
 
@@ -157,7 +163,7 @@ class OrdersActivity : AppCompatActivity() {
                         id = id,
                         status = status,
                         totalCents = totalCents,
-                        employeeName = employee,
+                        employeeName = displayEmployee,
                         createdAt = createdAt
                     )
                 )

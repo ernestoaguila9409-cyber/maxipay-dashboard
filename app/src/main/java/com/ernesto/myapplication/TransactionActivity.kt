@@ -150,12 +150,20 @@ class TransactionActivity : AppCompatActivity() {
             Toast.makeText(this, "This transaction has already been voided.", Toast.LENGTH_SHORT).show()
             return
         }
-        if (transaction.paymentType == "Cash") {
+        if (transaction.paymentType.equals("Cash", ignoreCase = true)) {
             // For cash: only allow local refund, no Devajoo/Z8 calls
             AlertDialog.Builder(this)
                 .setTitle("Cash Transaction")
                 .setMessage("Select an option for this cash payment.")
                 .setPositiveButton("Refund") { _, _ -> processCashRefund(transaction) }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } else if (transaction.paymentType.equals("Debit", ignoreCase = true)) {
+            // For debit: debit sales cannot be voided, only refunded even if batch is still open
+            AlertDialog.Builder(this)
+                .setTitle("Transaction Options")
+                .setMessage("Debit sale can only be refunded.")
+                .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
                 .setNegativeButton("Cancel", null)
                 .show()
         } else {
@@ -267,10 +275,13 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun createLocalRefund(original: Transaction, amount: Double) {
+        val refundAmountCents = (amount * 100).toLong()
+
         val refundMap = hashMapOf(
             "referenceId" to UUID.randomUUID().toString(),
             "originalReferenceId" to original.referenceId,
             "amount" to amount,
+            "amountInCents" to refundAmountCents,
             "type" to "REFUND",
             "paymentType" to "Cash",
             "cardBrand" to "",
@@ -278,12 +289,36 @@ class TransactionActivity : AppCompatActivity() {
             "entryType" to "",
             "voided" to false,
             "settled" to false,
-            "createdAt" to Date()
+            "createdAt" to Date(),
+            "refundedBy" to currentEmployeeName
         )
 
         db.collection("Transactions")
             .add(refundMap)
             .addOnSuccessListener {
+                // Mirror card refund behavior: update Order totals and status so it shows REFUNDED
+                db.collection("Transactions").document(original.referenceId).get()
+                    .addOnSuccessListener { saleDoc ->
+                        if (!saleDoc.exists()) return@addOnSuccessListener
+                        val orderId = saleDoc.getString("orderId") ?: return@addOnSuccessListener
+                        val orderRef = db.collection("Orders").document(orderId)
+                        orderRef.get()
+                            .addOnSuccessListener { orderDoc ->
+                                if (!orderDoc.exists()) return@addOnSuccessListener
+                                val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+                                val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
+                                val newTotalRefunded = currentRefunded + refundAmountCents
+                                val updates = mutableMapOf<String, Any>(
+                                    "totalRefundedInCents" to newTotalRefunded,
+                                    "refundedAt" to Date()
+                                )
+                                if (newTotalRefunded >= totalInCents) {
+                                    updates["status"] = "REFUNDED"
+                                }
+                                orderRef.update(updates)
+                            }
+                    }
+
                 Toast.makeText(this, "Cash refund saved", Toast.LENGTH_LONG).show()
             }
             .addOnFailureListener {
@@ -416,7 +451,8 @@ class TransactionActivity : AppCompatActivity() {
                                     orderRef.update(
                                         mapOf(
                                             "status" to "VOIDED",
-                                            "voidedAt" to Date()
+                                            "voidedAt" to Date(),
+                                            "voidedBy" to currentEmployeeName
                                         )
                                     ).addOnFailureListener { e ->
                                         android.util.Log.e("TX_API", "Failed to update Order to VOIDED", e)
