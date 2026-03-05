@@ -81,6 +81,13 @@ class TransactionActivity : AppCompatActivity() {
                     val cardBrand = firstPayment?.get("cardBrand")?.toString() ?: ""
                     val last4 = firstPayment?.get("last4")?.toString() ?: ""
                     val entryType = firstPayment?.get("entryType")?.toString() ?: ""
+                    // Dejavoo sale response fields for Void: referenceId, batchNumber, transactionNumber
+                    val gatewayRef = firstPayment?.get("referenceId")?.toString()
+                        ?: firstPayment?.get("terminalReference")?.toString() ?: ""
+                    val clientRef = firstPayment?.get("clientReferenceId")?.toString() ?: ""
+                    val batchNum = firstPayment?.get("batchNumber")?.toString() ?: ""
+                    val txNum = firstPayment?.get("transactionNumber")?.toString() ?: ""
+                    val invNum = firstPayment?.get("invoiceNumber")?.toString() ?: ""
 
                     val isMixed = payments.size > 1
 
@@ -90,6 +97,11 @@ class TransactionActivity : AppCompatActivity() {
 
                     val transaction = Transaction(
                         referenceId = doc.id,
+                        gatewayReferenceId = gatewayRef,
+                        clientReferenceId = clientRef,
+                        batchNumber = batchNum,
+                        transactionNumber = txNum,
+                        invoiceNumber = invNum,
                         amountInCents = amountInCents,
                         date = dateMillis,
                         paymentType = paymentType,
@@ -129,39 +141,66 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun showTransactionOptions(transaction: Transaction) {
-        AlertDialog.Builder(this)
-            .setTitle("Transaction Options")
-            .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
-            .setNegativeButton("Void") { _, _ -> processVoid(transaction) }
-            .setNeutralButton("Cancel", null)
-            .show()
+        if (transaction.paymentType == "Cash") {
+            // For cash: only allow local refund, no Devajoo/Z8 calls
+            AlertDialog.Builder(this)
+                .setTitle("Cash Transaction")
+                .setMessage("Select an option for this cash payment.")
+                .setPositiveButton("Refund") { _, _ -> processCashRefund(transaction) }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } else {
+            // For card: allow Void and partial Refund via terminal
+            AlertDialog.Builder(this)
+                .setTitle("Transaction Options")
+                .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
+                .setNegativeButton("Void") { _, _ -> processVoid(transaction) }
+                .setNeutralButton("Cancel", null)
+                .show()
+        }
     }
 
     private fun processVoid(transaction: Transaction) {
-
-        val amount = String.format("%.2f", transaction.amountInCents / 100.0)
-
-        val json = """
-        {
-          "Amount": "$amount",
-          "PaymentType": "${transaction.paymentType}",
-          "ReferenceId": "${transaction.referenceId}",
-          "PrintReceipt": "No",
-          "GetReceipt": "No",
-          "Tpn": "11881706541A",
-          "RegisterId": "134909005",
-          "Authkey": "Qt9N7CxhDs"
+        // Void must use exact Dejavoo sale response values: ReferenceId, BatchNumber, TransactionNumber
+        val referenceId = transaction.gatewayReferenceId.ifBlank { transaction.clientReferenceId }
+        if (referenceId.isBlank()) {
+            Toast.makeText(this, "Cannot void: no ReferenceId for this transaction.", Toast.LENGTH_LONG).show()
+            return
         }
-        """.trimIndent()
+
+        val amountNumber = transaction.amountInCents / 100.0
+
+        val json = org.json.JSONObject().apply {
+            put("Amount", amountNumber)
+            put("PaymentType", transaction.paymentType)
+            put("ReferenceId", referenceId)
+            put("PrintReceipt", "No")
+            put("GetReceipt", "No")
+            put("MerchantNumber", org.json.JSONObject.NULL)
+            put("CaptureSignature", false)
+            put("GetExtendedData", true)
+            put("CallbackInfo", org.json.JSONObject().apply { put("Url", "") })
+            put("Tpn", "11881706541A")
+            put("Authkey", "Qt9N7CxhDs")
+            put("SPInProxyTimeout", org.json.JSONObject.NULL)
+            put("CustomFields", org.json.JSONObject())
+            if (transaction.batchNumber.isNotBlank()) {
+                put("BatchNumber", transaction.batchNumber.toIntOrNull() ?: transaction.batchNumber)
+            }
+            if (transaction.transactionNumber.isNotBlank()) {
+                put("TransactionNumber", transaction.transactionNumber.toIntOrNull() ?: transaction.transactionNumber)
+            }
+        }.toString()
 
         sendApiRequest(
             url = "https://spinpos.net/v2/Payment/Void",
             json = json,
             type = "VOID",
-            referenceId = transaction.referenceId
+            referenceId = transaction.referenceId  // Firestore doc id for updating our DB
         )
     }
 
+    // Card refund: send request to Devajoo and, on approval, store refund transaction
     private fun processRefund(transaction: Transaction) {
 
         val fullAmount = transaction.amountInCents / 100.0
@@ -185,29 +224,80 @@ class TransactionActivity : AppCompatActivity() {
             .show()
     }
 
+    // Cash refund: local Firestore-only refund, no terminal call
+    private fun processCashRefund(transaction: Transaction) {
+
+        val fullAmount = transaction.amountInCents / 100.0
+
+        val input = EditText(this)
+        input.hint = "Enter refund amount (Max: $fullAmount)"
+
+        AlertDialog.Builder(this)
+            .setTitle("Cash Refund")
+            .setView(input)
+            .setPositiveButton("Refund") { _, _ ->
+                val entered = input.text.toString().toDoubleOrNull()
+
+                if (entered == null || entered <= 0 || entered > fullAmount) {
+                    Toast.makeText(this, "Invalid amount", Toast.LENGTH_SHORT).show()
+                } else {
+                    createLocalRefund(transaction, entered)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun createLocalRefund(original: Transaction, amount: Double) {
+        val refundMap = hashMapOf(
+            "referenceId" to UUID.randomUUID().toString(),
+            "originalReferenceId" to original.referenceId,
+            "amount" to amount,
+            "type" to "REFUND",
+            "paymentType" to "Cash",
+            "cardBrand" to "",
+            "last4" to "",
+            "entryType" to "",
+            "voided" to false,
+            "settled" to false,
+            "createdAt" to Date()
+        )
+
+        db.collection("Transactions")
+            .add(refundMap)
+            .addOnSuccessListener {
+                Toast.makeText(this, "Cash refund saved", Toast.LENGTH_LONG).show()
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to save refund: ${it.message}", Toast.LENGTH_LONG).show()
+            }
+    }
+
     private fun sendRefundRequest(transaction: Transaction, amount: Double) {
-
-        val formatted = String.format("%.2f", amount)
-
-        val json = """
-        {
-          "Amount": "$formatted",
-          "PaymentType": "${transaction.paymentType}",
-          "ReferenceId": "${transaction.referenceId}",
-          "PrintReceipt": "No",
-          "GetReceipt": "No",
-          "Tpn": "11881706541A",
-          "RegisterId": "134909005",
-          "Authkey": "Qt9N7CxhDs"
+        val refForGateway = transaction.gatewayReferenceId.ifBlank { transaction.clientReferenceId }
+        if (refForGateway.isBlank()) {
+            Toast.makeText(this, "Cannot refund: no gateway reference for this transaction.", Toast.LENGTH_LONG).show()
+            return
         }
-        """.trimIndent()
+
+        val json = org.json.JSONObject().apply {
+            put("Amount", amount)
+            put("PaymentType", transaction.paymentType)
+            put("ReferenceId", refForGateway)
+            put("PrintReceipt", "No")
+            put("GetReceipt", "No")
+            put("Tpn", "11881706541A")
+            put("RegisterId", "134909005")
+            put("Authkey", "Qt9N7CxhDs")
+        }.toString()
 
         sendApiRequest(
             url = "https://spinpos.net/v2/Payment/Return",
             json = json,
             type = "REFUND",
             referenceId = transaction.referenceId,
-            refundAmount = amount
+            refundAmount = amount,
+            paymentType = transaction.paymentType
         )
     }
 
@@ -219,6 +309,8 @@ class TransactionActivity : AppCompatActivity() {
         refundAmount: Double? = null,
         paymentType: String? = null
     ) {
+        Log.d("TX_API", "[$type] URL: $url")
+        Log.d("TX_API", "[$type] Request: $json")
 
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -236,6 +328,7 @@ class TransactionActivity : AppCompatActivity() {
         client.newCall(request).enqueue(object : Callback {
 
             override fun onFailure(call: Call, e: IOException) {
+                Log.e("TX_API", "[$type] Network error", e)
                 runOnUiThread {
                     Toast.makeText(
                         this@TransactionActivity,
@@ -248,70 +341,79 @@ class TransactionActivity : AppCompatActivity() {
             override fun onResponse(call: Call, response: Response) {
 
                 val responseText = response.body?.string() ?: ""
+                Log.d("TX_API", "[$type] HTTP ${response.code}")
+                Log.d("TX_API", "[$type] Response: $responseText")
 
                 runOnUiThread {
 
-                    if (!response.isSuccessful || !responseText.contains("Approved")) {
+                    // Same success check as PaymentActivity: GeneralResponse.ResultCode == "0"
+                    val approved = try {
+                        val obj = org.json.JSONObject(responseText)
+                        val resultCode = obj.optJSONObject("GeneralResponse")?.optString("ResultCode", "") ?: ""
+                        resultCode == "0"
+                    } catch (e: Exception) {
+                        false
+                    }
+
+                    if (!response.isSuccessful || !approved) {
+                        val reason = try {
+                            val gen = org.json.JSONObject(responseText).optJSONObject("GeneralResponse")
+                            gen?.optString("DetailedMessage", "")?.ifBlank { gen.optString("Message", "") } ?: ""
+                        } catch (e: Exception) { "" }
+                        val message = if (reason.isNotBlank()) "$type Declined: $reason" else "$type Declined"
+                        val hint = if (type == "VOID" && reason.contains("not found", ignoreCase = true))
+                            "\n(Use Refund if batch was already closed.)" else ""
+                        Log.w("TX_API", "[$type] Declined. Reason: $reason")
                         Toast.makeText(
                             this@TransactionActivity,
-                            "$type Declined",
+                            message + hint,
                             Toast.LENGTH_LONG
                         ).show()
                         return@runOnUiThread
                     }
 
                     // ================= VOID =================
+                    // referenceId here is our Firestore doc id (transaction.referenceId)
                     if (type == "VOID" && referenceId != null) {
 
-                        db.collection("Transactions")
-                            .whereEqualTo("referenceId", referenceId)
-                            .get()
-                            .addOnSuccessListener { documents ->
+                        val txRef = db.collection("Transactions").document(referenceId)
+                        txRef.get()
+                            .addOnSuccessListener { document ->
+                                if (!document.exists()) return@addOnSuccessListener
+                                val amount = document.getLong("totalPaidInCents")?.let { it / 100.0 }
+                                    ?: document.getDouble("totalPaid")
+                                    ?: document.getDouble("amount")
+                                    ?: 0.0
 
-                                for (document in documents) {
+                                // 1️⃣ mark transaction voided
+                                txRef.update("voided", true)
 
-                                    val transactionDocId = document.id
-                                    val amount = document.getDouble("totalPaid")
-                                        ?: document.getDouble("amount")
-                                        ?: 0.0
-
-                                    // 1️⃣ mark transaction voided
-                                    db.collection("Transactions")
-                                        .document(transactionDocId)
-                                        .update("voided", true)
-
-                                    // 2️⃣ find order using transactionId
-                                    db.collection("Orders")
-                                        .whereEqualTo("transactionId", transactionDocId)
-                                        .get()
-                                        .addOnSuccessListener { orderDocs ->
-
-                                            for (orderDoc in orderDocs) {
-
-                                                val orderRef = orderDoc.reference
-                                                val batchId = orderDoc.getString("batchId") ?: continue
-                                                val batchRef = db.collection("Batches").document(batchId)
-
-                                                db.runBatch { batch ->
-
-                                                    batch.update(orderRef, mapOf(
-                                                        "status" to "VOIDED",
-                                                        "voidedAt" to Date()
-                                                    ))
-
-                                                    batch.update(batchRef, mapOf(
-                                                        "totalSales" to FieldValue.increment(-amount),
-                                                        "netTotal" to FieldValue.increment(-amount),
-                                                        "transactionCount" to FieldValue.increment(-1)
-                                                    ))
-                                                }
+                                // 2️⃣ find order using transactionId (our Firestore doc id)
+                                db.collection("Orders")
+                                    .whereEqualTo("saleTransactionId", referenceId)
+                                    .get()
+                                    .addOnSuccessListener { orderDocs ->
+                                        for (orderDoc in orderDocs) {
+                                            val orderRef = orderDoc.reference
+                                            val batchId = orderDoc.getString("batchId") ?: continue
+                                            val batchRef = db.collection("Batches").document(batchId)
+                                            db.runBatch { batch ->
+                                                batch.update(orderRef, mapOf(
+                                                    "status" to "VOIDED",
+                                                    "voidedAt" to Date()
+                                                ))
+                                                batch.update(batchRef, mapOf(
+                                                    "totalSales" to FieldValue.increment(-amount),
+                                                    "netTotal" to FieldValue.increment(-amount),
+                                                    "transactionCount" to FieldValue.increment(-1)
+                                                ))
                                             }
                                         }
-                                }
+                                    }
                             }
                     }
 
-                    // ================= REFUND =================
+                    // ================= REFUND (CARD) =================
                     if (type == "REFUND" && referenceId != null && refundAmount != null) {
 
                         val refundMap = hashMapOf(
@@ -319,7 +421,7 @@ class TransactionActivity : AppCompatActivity() {
                             "originalReferenceId" to referenceId,
                             "amount" to refundAmount,
                             "type" to "REFUND",
-                            "paymentType" to "",
+                            "paymentType" to (paymentType ?: ""),
                             "cardBrand" to "",
                             "last4" to "",
                             "entryType" to "",

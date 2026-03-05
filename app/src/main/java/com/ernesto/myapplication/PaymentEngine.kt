@@ -16,7 +16,11 @@ class PaymentEngine(private val db: FirebaseFirestore) {
         cardBrand: String = "",
         last4: String = "",
         entryType: String = "",
-        terminalReference: String = "",
+        referenceId: String = "",
+        clientReferenceId: String = "",
+        batchNumber: String = "",
+        transactionNumber: String = "",
+        invoiceNumber: String = "",
 
         onSuccess: (Long) -> Unit,
         onFailure: (Exception) -> Unit
@@ -52,7 +56,11 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                 "cardBrand" to cardBrand,
                 "last4" to last4,
                 "entryType" to entryType,
-                "terminalReference" to terminalReference
+                "referenceId" to referenceId,
+                "clientReferenceId" to clientReferenceId,
+                "batchNumber" to batchNumber,
+                "transactionNumber" to transactionNumber,
+                "invoiceNumber" to invoiceNumber
             )
 
             if (saleId == null) {

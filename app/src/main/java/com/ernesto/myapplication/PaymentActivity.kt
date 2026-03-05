@@ -174,12 +174,12 @@ class PaymentActivity : AppCompatActivity() {
         val formattedAmount =
             String.format(Locale.US, "%.2f", paymentAmount)
 
-        val referenceId = UUID.randomUUID().toString()
+        val clientReferenceId = UUID.randomUUID().toString()
 
         val json = JSONObject().apply {
             put("Amount", formattedAmount)
             put("PaymentType", paymentType)
-            put("ReferenceId", referenceId)
+            put("ReferenceId", clientReferenceId)
             put("PrintReceipt", "No")
             put("GetReceipt", "No")
             put("Tpn", "11881706541A")
@@ -227,13 +227,21 @@ class PaymentActivity : AppCompatActivity() {
 
                     if (resultCode == "0") {
 
-                        // ✅ Extract correct fields from YOUR real response
-
                         val authCode = jsonObj.optString("AuthCode", "")
-                        val terminalReference = jsonObj.optString("PNReferenceId", "")
+                        // Void must use the exact ReferenceId returned by Dejavoo (often UUID format). Do not use PNReferenceId.
+                        val referenceId = jsonObj.optString("ReferenceId", "")
+                            .ifBlank { jsonObj.optJSONObject("GeneralResponse")?.optString("ReferenceId", "") ?: "" }
+                            .ifBlank { jsonObj.optJSONObject("Transaction")?.optString("ReferenceId", "") ?: "" }
+                            .ifBlank { clientReferenceId }
+                        val batchNumber = jsonObj.optString("BatchNumber", "")
+                            .ifBlank { jsonObj.optJSONObject("GeneralResponse")?.optString("BatchNumber", "") ?: "" }
+                        val transactionNumber = jsonObj.optString("TransactionNumber", "")
+                            .ifBlank { jsonObj.optJSONObject("GeneralResponse")?.optString("TransactionNumber", "") ?: "" }
+                        val invoiceNumber = jsonObj.optString("InvoiceNumber", "")
+
+                        Log.d("PAYMENT_SALE", "ReferenceId(saved for Void)=$referenceId BatchNumber=$batchNumber TransactionNumber=$transactionNumber topLevelRef=${jsonObj.optString("ReferenceId", "")} PNRef=${jsonObj.optString("PNReferenceId", "")}")
 
                         val cardData = jsonObj.optJSONObject("CardData")
-
                         val cardBrand = cardData?.optString("CardType", "") ?: ""
                         val entryType = cardData?.optString("EntryType", "") ?: ""
                         val last4 = cardData?.optString("Last4", "") ?: ""
@@ -244,7 +252,11 @@ class PaymentActivity : AppCompatActivity() {
                             cardBrand = cardBrand,
                             last4 = last4,
                             entryType = entryType,
-                            terminalReference = terminalReference
+                            referenceId = referenceId,
+                            clientReferenceId = clientReferenceId,
+                            batchNumber = batchNumber,
+                            transactionNumber = transactionNumber,
+                            invoiceNumber = invoiceNumber
                         )
 
                     } else {
@@ -260,7 +272,11 @@ class PaymentActivity : AppCompatActivity() {
         cardBrand: String,
         last4: String,
         entryType: String,
-        terminalReference: String
+        referenceId: String,
+        clientReferenceId: String,
+        batchNumber: String,
+        transactionNumber: String,
+        invoiceNumber: String = ""
     ) {
 
         val oid = orderId ?: return
@@ -275,7 +291,11 @@ class PaymentActivity : AppCompatActivity() {
             cardBrand = cardBrand,
             last4 = last4,
             entryType = entryType,
-            terminalReference = terminalReference,
+            referenceId = referenceId,
+            clientReferenceId = clientReferenceId,
+            batchNumber = batchNumber,
+            transactionNumber = transactionNumber,
+            invoiceNumber = invoiceNumber,
             onSuccess = { remainingInCents ->
 
                 // ✅ convert cents → double for internal logic
