@@ -56,7 +56,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnTransactions).setOnClickListener {
-            startActivity(Intent(this, TransactionActivity::class.java))
+            val intent = Intent(this, TransactionActivity::class.java)
+            intent.putExtra("employeeName", employeeName)
+            startActivity(intent)
         }
 
         findViewById<Button>(R.id.btnSettle).setOnClickListener {

@@ -24,6 +24,8 @@ data class Transaction(
     val entryType: String = "",
 
     val voided: Boolean = false,
+    /** True when the batch was closed; only Refund is allowed, not Void. */
+    val settled: Boolean = false,
 
     val type: String = "SALE",
     val originalReferenceId: String = "",

@@ -123,8 +123,10 @@ class OrdersActivity : AppCompatActivity() {
         var query: Query = db.collection("Orders")
             .orderBy("createdAt", Query.Direction.DESCENDING)
 
-        if (filter == "OPEN" || filter == "CLOSED") {
-            query = query.whereEqualTo("status", filter)
+        when (filter) {
+            "OPEN" -> query = query.whereEqualTo("status", "OPEN")
+            "CLOSED" -> query = query.whereIn("status", listOf("CLOSED", "VOIDED", "REFUNDED"))
+            else -> { /* ALL: no status filter */ }
         }
 
         listener = query.addSnapshotListener { snap, err ->

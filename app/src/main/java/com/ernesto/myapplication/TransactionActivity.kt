@@ -26,6 +26,7 @@ class TransactionActivity : AppCompatActivity() {
     private lateinit var adapter: TransactionAdapter
     private val transactionList = mutableListOf<SaleWithRefunds>()
     private val db = FirebaseFirestore.getInstance()
+    private var currentEmployeeName: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,6 +40,7 @@ class TransactionActivity : AppCompatActivity() {
         }
 
         recyclerView.adapter = adapter
+        currentEmployeeName = intent.getStringExtra("employeeName") ?: ""
         loadTransactions()
     }
 
@@ -91,9 +93,11 @@ class TransactionActivity : AppCompatActivity() {
 
                     val isMixed = payments.size > 1
 
-                    val amountInCents =
-                        doc.getLong("totalPaidInCents")
+                    val amountInCents = when (type) {
+                        "REFUND" -> ((doc.getDouble("amount") ?: 0.0) * 100).toLong()
+                        else -> doc.getLong("totalPaidInCents")
                             ?: ((doc.getDouble("totalPaid") ?: 0.0) * 100).toLong()
+                    }
 
                     val transaction = Transaction(
                         referenceId = doc.id,
@@ -109,6 +113,7 @@ class TransactionActivity : AppCompatActivity() {
                         last4 = last4,
                         entryType = entryType,
                         voided = doc.getBoolean("voided") ?: false,
+                        settled = doc.getBoolean("settled") ?: false,
                         type = type,
                         originalReferenceId = doc.getString("originalReferenceId") ?: "",
                         isMixed = isMixed
@@ -141,6 +146,10 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun showTransactionOptions(transaction: Transaction) {
+        if (transaction.voided) {
+            Toast.makeText(this, "This transaction has already been voided.", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (transaction.paymentType == "Cash") {
             // For cash: only allow local refund, no Devajoo/Z8 calls
             AlertDialog.Builder(this)
@@ -150,13 +159,22 @@ class TransactionActivity : AppCompatActivity() {
                 .setNegativeButton("Cancel", null)
                 .show()
         } else {
-            // For card: allow Void and partial Refund via terminal
-            AlertDialog.Builder(this)
-                .setTitle("Transaction Options")
-                .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
-                .setNegativeButton("Void") { _, _ -> processVoid(transaction) }
-                .setNeutralButton("Cancel", null)
-                .show()
+            // For card: Void only before batch close; after batch closed (settled) only Refund
+            if (transaction.settled) {
+                AlertDialog.Builder(this)
+                    .setTitle("Transaction Options")
+                    .setMessage("Batch already closed. Refund only.")
+                    .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            } else {
+                AlertDialog.Builder(this)
+                    .setTitle("Transaction Options")
+                    .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
+                    .setNegativeButton("Void") { _, _ -> processVoid(transaction) }
+                    .setNeutralButton("Cancel", null)
+                    .show()
+            }
         }
     }
 
@@ -297,7 +315,8 @@ class TransactionActivity : AppCompatActivity() {
             type = "REFUND",
             referenceId = transaction.referenceId,
             refundAmount = amount,
-            paymentType = transaction.paymentType
+            paymentType = transaction.paymentType,
+            refundedBy = currentEmployeeName
         )
     }
 
@@ -307,7 +326,8 @@ class TransactionActivity : AppCompatActivity() {
         type: String,
         referenceId: String? = null,
         refundAmount: Double? = null,
-        paymentType: String? = null
+        paymentType: String? = null,
+        refundedBy: String = ""
     ) {
         Log.d("TX_API", "[$type] URL: $url")
         Log.d("TX_API", "[$type] Request: $json")
@@ -373,7 +393,7 @@ class TransactionActivity : AppCompatActivity() {
                     }
 
                     // ================= VOID =================
-                    // referenceId here is our Firestore doc id (transaction.referenceId)
+                    // referenceId = Firestore Transactions doc id; use it to get orderId and update Order to VOIDED
                     if (type == "VOID" && referenceId != null) {
 
                         val txRef = db.collection("Transactions").document(referenceId)
@@ -384,42 +404,50 @@ class TransactionActivity : AppCompatActivity() {
                                     ?: document.getDouble("totalPaid")
                                     ?: document.getDouble("amount")
                                     ?: 0.0
+                                val orderId = document.getString("orderId") ?: ""
+                                val batchId = document.getString("batchId") ?: ""
 
                                 // 1️⃣ mark transaction voided
                                 txRef.update("voided", true)
 
-                                // 2️⃣ find order using transactionId (our Firestore doc id)
-                                db.collection("Orders")
-                                    .whereEqualTo("saleTransactionId", referenceId)
-                                    .get()
-                                    .addOnSuccessListener { orderDocs ->
-                                        for (orderDoc in orderDocs) {
-                                            val orderRef = orderDoc.reference
-                                            val batchId = orderDoc.getString("batchId") ?: continue
-                                            val batchRef = db.collection("Batches").document(batchId)
-                                            db.runBatch { batch ->
-                                                batch.update(orderRef, mapOf(
-                                                    "status" to "VOIDED",
-                                                    "voidedAt" to Date()
-                                                ))
-                                                batch.update(batchRef, mapOf(
-                                                    "totalSales" to FieldValue.increment(-amount),
-                                                    "netTotal" to FieldValue.increment(-amount),
-                                                    "transactionCount" to FieldValue.increment(-1)
-                                                ))
-                                            }
-                                        }
+                                // 2️⃣ update Order to VOIDED (use orderId from transaction doc so Order screen shows Voided)
+                                if (orderId.isNotBlank()) {
+                                    val orderRef = db.collection("Orders").document(orderId)
+                                    orderRef.update(
+                                        mapOf(
+                                            "status" to "VOIDED",
+                                            "voidedAt" to Date()
+                                        )
+                                    ).addOnFailureListener { e ->
+                                        android.util.Log.e("TX_API", "Failed to update Order to VOIDED", e)
                                     }
+                                }
+
+                                // 3️⃣ update batch totals
+                                if (batchId.isNotBlank()) {
+                                    val batchRef = db.collection("Batches").document(batchId)
+                                    batchRef.update(
+                                        mapOf(
+                                            "totalSales" to FieldValue.increment(-amount),
+                                            "netTotal" to FieldValue.increment(-amount),
+                                            "transactionCount" to FieldValue.increment(-1)
+                                        )
+                                    ).addOnFailureListener { e ->
+                                        android.util.Log.e("TX_API", "Failed to update Batch on void", e)
+                                    }
+                                }
                             }
                     }
 
                     // ================= REFUND (CARD) =================
                     if (type == "REFUND" && referenceId != null && refundAmount != null) {
 
+                        val refundAmountCents = (refundAmount * 100).toLong()
                         val refundMap = hashMapOf(
                             "referenceId" to UUID.randomUUID().toString(),
                             "originalReferenceId" to referenceId,
                             "amount" to refundAmount,
+                            "amountInCents" to refundAmountCents,
                             "type" to "REFUND",
                             "paymentType" to (paymentType ?: ""),
                             "cardBrand" to "",
@@ -427,10 +455,35 @@ class TransactionActivity : AppCompatActivity() {
                             "entryType" to "",
                             "voided" to false,
                             "settled" to false,
-                            "createdAt" to Date()
+                            "createdAt" to Date(),
+                            "refundedBy" to refundedBy
                         )
 
                         db.collection("Transactions").add(refundMap)
+                            .addOnSuccessListener {
+                                // Update Order so it shows REFUNDED on order screen and detail
+                                db.collection("Transactions").document(referenceId).get()
+                                    .addOnSuccessListener { saleDoc ->
+                                        if (!saleDoc.exists()) return@addOnSuccessListener
+                                        val orderId = saleDoc.getString("orderId") ?: return@addOnSuccessListener
+                                        val orderRef = db.collection("Orders").document(orderId)
+                                        orderRef.get()
+                                            .addOnSuccessListener { orderDoc ->
+                                                if (!orderDoc.exists()) return@addOnSuccessListener
+                                                val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+                                                val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
+                                                val newTotalRefunded = currentRefunded + refundAmountCents
+                                                val updates = mutableMapOf<String, Any>(
+                                                    "totalRefundedInCents" to newTotalRefunded,
+                                                    "refundedAt" to Date()
+                                                )
+                                                if (newTotalRefunded >= totalInCents) {
+                                                    updates["status"] = "REFUNDED"
+                                                }
+                                                orderRef.update(updates)
+                                            }
+                                    }
+                            }
                     }
 
                     Toast.makeText(

@@ -64,7 +64,7 @@ class OrdersAdapter(
 
             txtStatus.text = order.status
 
-            // ✅ Status color styling
+            // ✅ Status color styling (linked to Transaction screen: voided sales show as VOIDED here)
             when (order.status.uppercase()) {
                 "OPEN" -> {
                     txtStatus.setBackgroundColor(0xFFDFF5E3.toInt()) // light green
@@ -73,6 +73,14 @@ class OrdersAdapter(
                 "CLOSED" -> {
                     txtStatus.setBackgroundColor(0xFFFFE0E0.toInt()) // light red
                     txtStatus.setTextColor(0xFFB71C1C.toInt()) // dark red
+                }
+                "VOIDED" -> {
+                    txtStatus.setBackgroundColor(0xFFFFF3E0.toInt()) // light orange
+                    txtStatus.setTextColor(0xFFE65100.toInt()) // dark orange
+                }
+                "REFUNDED" -> {
+                    txtStatus.setBackgroundColor(0xFFE3F2FD.toInt()) // light blue
+                    txtStatus.setTextColor(0xFF1565C0.toInt()) // dark blue
                 }
                 else -> {
                     txtStatus.setBackgroundColor(0xFFE0E0E0.toInt())

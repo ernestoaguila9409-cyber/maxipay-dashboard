@@ -28,6 +28,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private val db = FirebaseFirestore.getInstance()
     private lateinit var txtHeaderEmployee: TextView
     private lateinit var txtHeaderTime: TextView
+    private lateinit var txtRefundHistory: TextView
     private lateinit var recycler: RecyclerView
     private lateinit var txtEmptyItems: TextView
     private lateinit var btnCheckout: MaterialButton
@@ -54,6 +55,7 @@ class OrderDetailActivity : AppCompatActivity() {
         }
         txtHeaderEmployee = findViewById(R.id.txtHeaderEmployee)
         txtHeaderTime = findViewById(R.id.txtHeaderTime)
+        txtRefundHistory = findViewById(R.id.txtRefundHistory)
         recycler = findViewById(R.id.recyclerOrderItems)
         txtEmptyItems = findViewById(R.id.txtEmptyItems)
         btnCheckout = findViewById(R.id.btnCheckout)
@@ -132,46 +134,88 @@ class OrderDetailActivity : AppCompatActivity() {
                     bottomActions.visibility = View.VISIBLE
                     btnVoid.visibility = View.GONE
                     btnRefund.visibility = View.GONE
+                    txtRefundHistory.visibility = View.GONE
                     return@addOnSuccessListener
                 }
 
-                if (status == "CLOSED") {
+                val saleTransactionId = doc.getString("saleTransactionId") ?: doc.getString("transactionId")
+                val totalInCents = doc.getLong("totalInCents") ?: 0L
+                val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
+                val isFullyRefunded = totalRefundedInCents >= totalInCents && totalInCents > 0L
 
-                    bottomActions.visibility = View.VISIBLE
-                    btnRefund.visibility = View.VISIBLE
-                    btnRefund.setOnClickListener { confirmRefund() }
-
-                    val transactionId = doc.getString("transactionId") ?: return@addOnSuccessListener
-                    val batchId = currentBatchId ?: return@addOnSuccessListener
-
-                    db.collection("Transactions")
-                        .document(transactionId)
-                        .get()
-                        .addOnSuccessListener { txDoc ->
-
-                            val isVoided = txDoc.getBoolean("voided") ?: false
-
-                            if (!isVoided) {
-                                db.collection("Batches")
-                                    .document(batchId)
-                                    .get()
-                                    .addOnSuccessListener { batchDoc ->
-
-                                        val batchClosed = batchDoc.getBoolean("closed") ?: true
-
-                                        if (!batchClosed) {
-                                            btnVoid.visibility = View.VISIBLE
-                                            btnVoid.setOnClickListener { confirmVoid() }
-                                        } else {
-                                            btnVoid.visibility = View.GONE
-                                        }
-                                    }
-                            } else {
-                                btnVoid.visibility = View.GONE
-                            }
+                loadRefundHistory(saleTransactionId) { totalFromRefunds ->
+                    val fullyRefunded = isFullyRefunded || (totalFromRefunds >= totalInCents && totalInCents > 0L)
+                    if (refundHistoryLines.isNotEmpty()) {
+                        txtRefundHistory.text = refundHistoryLines
+                        txtRefundHistory.visibility = View.VISIBLE
+                    } else {
+                        txtRefundHistory.visibility = View.GONE
+                    }
+                    if (status == "REFUNDED" || fullyRefunded) {
+                        bottomActions.visibility = View.VISIBLE
+                        btnVoid.visibility = View.GONE
+                        btnRefund.visibility = View.GONE
+                        return@loadRefundHistory
+                    }
+                    if (status == "CLOSED") {
+                        bottomActions.visibility = View.VISIBLE
+                        if (!fullyRefunded) {
+                            btnRefund.visibility = View.VISIBLE
+                            btnRefund.setOnClickListener { confirmRefund() }
+                        } else {
+                            btnRefund.visibility = View.GONE
                         }
+                        val batchId = currentBatchId ?: return@loadRefundHistory
+                        if (saleTransactionId == null) return@loadRefundHistory
+                        db.collection("Transactions").document(saleTransactionId).get()
+                            .addOnSuccessListener { txDoc ->
+                                val isVoided = txDoc.getBoolean("voided") ?: false
+                                if (!isVoided) {
+                                    db.collection("Batches").document(batchId).get()
+                                        .addOnSuccessListener { batchDoc ->
+                                            val batchClosed = batchDoc.getBoolean("closed") ?: true
+                                            btnVoid.visibility = if (!batchClosed) View.VISIBLE else View.GONE
+                                            if (!batchClosed) btnVoid.setOnClickListener { confirmVoid() }
+                                        }
+                                } else {
+                                    btnVoid.visibility = View.GONE
+                                }
+                            }
+                    }
                 }
             }
+    }
+
+    private var refundHistoryLines: String = ""
+
+    private fun loadRefundHistory(saleTransactionId: String?, onLoaded: (totalRefundedCents: Long) -> Unit) {
+        refundHistoryLines = ""
+        if (saleTransactionId.isNullOrBlank()) {
+            onLoaded(0L)
+            return
+        }
+        db.collection("Transactions")
+            .whereEqualTo("type", "REFUND")
+            .whereEqualTo("originalReferenceId", saleTransactionId)
+            .get()
+            .addOnSuccessListener { snap ->
+                var totalCents = 0L
+                val lines = mutableListOf<String>()
+                val dateFormat = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US)
+                for (refundDoc in snap.documents) {
+                    val amountCents = refundDoc.getLong("amountInCents")
+                        ?: ((refundDoc.getDouble("amount") ?: 0.0) * 100).toLong()
+                    totalCents += amountCents
+                    val amountStr = String.format(Locale.US, "%.2f", amountCents / 100.0)
+                    val by = refundDoc.getString("refundedBy")?.takeIf { it.isNotBlank() } ?: "—"
+                    val createdAt = refundDoc.getTimestamp("createdAt")?.toDate()
+                    val dateStr = if (createdAt != null) dateFormat.format(createdAt) else ""
+                    lines.add("🔵 Refund -$$amountStr by $by $dateStr")
+                }
+                refundHistoryLines = lines.joinToString("\n")
+                onLoaded(totalCents)
+            }
+            .addOnFailureListener { onLoaded(0L) }
     }
     // ===============================
     // LOAD ITEMS
@@ -379,42 +423,37 @@ class OrderDetailActivity : AppCompatActivity() {
                     return@addOnSuccessListener
                 }
 
-                val transactionId =
-                    orderDoc.getString("transactionId")
-                        ?: return@addOnSuccessListener
+                val transactionId = orderDoc.getString("saleTransactionId")
+                    ?: orderDoc.getString("transactionId")
+                    ?: return@addOnSuccessListener
 
                 db.collection("Transactions")
                     .document(transactionId)
                     .get()
                     .addOnSuccessListener { txDoc ->
 
-                        val paymentType =
-                            txDoc.getString("paymentType") ?: "Credit"
+                        val amountInCents = txDoc.getLong("totalPaidInCents") ?: 0L
+                        val payments = txDoc.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                        val firstPayment = payments.firstOrNull()
+                        val paymentType = firstPayment?.get("paymentType")?.toString() ?: "Credit"
+                        val referenceId = firstPayment?.get("referenceId")?.toString()
+                            ?: firstPayment?.get("terminalReference")?.toString()
 
-                        val amountInCents =
-                            txDoc.getLong("amountInCents") ?: 0L
-
-                        val referenceId =
-                            txDoc.getString("referenceId")
-
-                        // 🔥 CASH REFUND
                         if (paymentType.equals("Cash", ignoreCase = true)) {
                             finalizeRefund(transactionId, amountInCents)
                             return@addOnSuccessListener
                         }
 
-                        // 💳 CARD REFUND
-                        if (referenceId != null) {
-
-                            val amountForApi = amountInCents / 100.0
-
+                        if (!referenceId.isNullOrBlank()) {
                             callRefundApi(
                                 referenceId = referenceId,
                                 paymentType = paymentType,
-                                amount = amountForApi,
+                                amount = amountInCents / 100.0,
                                 originalTransactionId = transactionId,
                                 amountInCents = amountInCents
                             )
+                        } else {
+                            Toast.makeText(this, "Cannot refund: no reference for this transaction.", Toast.LENGTH_LONG).show()
                         }
                     }
             }
@@ -527,62 +566,52 @@ class OrderDetailActivity : AppCompatActivity() {
                 val openBatch = batchSnap.documents.first()
                 val openBatchId = openBatch.id
 
-                // 2️⃣ Get original sale transaction
-                db.collection("Transactions")
-                    .document(originalTransactionId)
-                    .get()
-                    .addOnSuccessListener { originalTx ->
+                val orderRef = db.collection("Orders").document(orderId)
+                orderRef.get()
+                    .addOnSuccessListener { orderDoc ->
+                        if (!orderDoc.exists()) return@addOnSuccessListener
+                        val employeeName = orderDoc.getString("employeeName") ?: ""
 
-                        val originalReferenceId =
-                            originalTx.getString("referenceId")
-                                ?: return@addOnSuccessListener
+                        val newRefundTxRef = db.collection("Transactions").document()
+                        val batchRef = db.collection("Batches").document(openBatchId)
 
-                        val newRefundTxRef =
-                            db.collection("Transactions").document()
-
-                        db.runBatch { batch ->
-
-                            val orderRef =
-                                db.collection("Orders").document(orderId)
-
-                            val batchRef =
-                                db.collection("Batches").document(openBatchId)
-
-                            // ✅ CREATE REFUND TRANSACTION (CENTS ONLY)
-                            batch.set(newRefundTxRef, mapOf(
-                                "orderId" to orderId,
-                                "type" to "REFUND",
-                                "amountInCents" to amountInCents,
-                                "originalReferenceId" to originalReferenceId,
-                                "createdAt" to Date(),
-                                "batchId" to openBatchId,
-                                "voided" to false,
-                                "settled" to false
-                            ))
-
-                            // ✅ UPDATE BATCH TOTALS (CENTS ONLY)
-                            batch.update(batchRef, mapOf(
-                                "totalRefundsInCents" to
-                                        FieldValue.increment(amountInCents),
-                                "netTotalInCents" to
-                                        FieldValue.increment(-amountInCents),
-                                "transactionCount" to
-                                        FieldValue.increment(1)
-                            ))
-
-                            // ✅ UPDATE ORDER STATUS
-                            batch.update(orderRef, mapOf(
-                                "status" to "REFUNDED",
-                                "refundedAt" to Date()
-                            ))
-                        }
+                        val refundDocData = mapOf(
+                            "orderId" to orderId,
+                            "type" to "REFUND",
+                            "amount" to (amountInCents / 100.0),
+                            "amountInCents" to amountInCents,
+                            "originalReferenceId" to originalTransactionId,
+                            "createdAt" to Date(),
+                            "batchId" to openBatchId,
+                            "voided" to false,
+                            "settled" to false,
+                            "refundedBy" to employeeName
+                        )
+                        db.collection("Transactions").document(newRefundTxRef.id).set(refundDocData)
                             .addOnSuccessListener {
-                                Toast.makeText(
-                                    this,
-                                    "Order Refunded",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                                finish()
+                                val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+                                val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
+                                val newTotalRefunded = currentRefunded + amountInCents
+                                val orderUpdates = mutableMapOf<String, Any>(
+                                    "totalRefundedInCents" to newTotalRefunded,
+                                    "refundedAt" to Date()
+                                )
+                                if (newTotalRefunded >= totalInCents) {
+                                    orderUpdates["status"] = "REFUNDED"
+                                }
+                                orderRef.update(orderUpdates)
+                                    .addOnSuccessListener {
+                                        db.collection("Batches").document(openBatchId)
+                                            .update(mapOf(
+                                                "totalRefundsInCents" to FieldValue.increment(amountInCents),
+                                                "netTotalInCents" to FieldValue.increment(-amountInCents),
+                                                "transactionCount" to FieldValue.increment(1)
+                                            ))
+                                            .addOnSuccessListener {
+                                                Toast.makeText(this, "Order Refunded", Toast.LENGTH_LONG).show()
+                                                finish()
+                                            }
+                                    }
                             }
                     }
             }
