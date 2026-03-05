@@ -5,8 +5,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
-import com.ernesto.myapplication.data.Transaction
 
 class BatchDetailsActivity : AppCompatActivity() {
 
@@ -48,44 +46,13 @@ class BatchDetailsActivity : AppCompatActivity() {
 
     private fun loadBatchTransactions() {
 
+        // Use the new Transactions schema (payments[] + totalPaidInCents) and
+        // aggregate amounts per payment type for this batch.
         db.collection("Transactions")
-            .whereEqualTo("batchId", batchId)
-            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .whereEqualTo("settled", true)
+            .whereEqualTo("voided", false)
             .get()
             .addOnSuccessListener { documents ->
-
-                if (documents.isEmpty) {
-                    Toast.makeText(
-                        this,
-                        "No transactions found",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    return@addOnSuccessListener
-                }
-
-                val allTransactions = mutableListOf<Transaction>()
-
-                for (doc in documents) {
-
-                    val transaction = Transaction(
-                        referenceId = doc.getString("referenceId") ?: "",
-                        amountInCents = ((doc.getDouble("amount") ?: 0.0) * 100).toLong(),
-                        date = doc.getTimestamp("timestamp")?.toDate()?.time ?: 0L,
-                        paymentType = doc.getString("paymentType") ?: "",
-                        cardBrand = doc.getString("cardBrand") ?: "",
-                        last4 = doc.getString("last4") ?: "",
-                        entryType = doc.getString("entryType") ?: "",
-                        voided = doc.getBoolean("voided") ?: false,
-                        type = doc.getString("type") ?: "SALE",
-                        originalReferenceId = doc.getString("originalReferenceId") ?: ""
-                    )
-
-                    allTransactions.add(transaction)
-                }
-
-                // ===============================
-                // CALCULATE TOTALS
-                // ===============================
 
                 var cashSales = 0.0
                 var creditSales = 0.0
@@ -94,33 +61,71 @@ class BatchDetailsActivity : AppCompatActivity() {
                 var cashRefunds = 0.0
                 var cardRefunds = 0.0
 
-                for (transaction in allTransactions) {
+                for (doc in documents) {
+                    val txBatchId = doc.getString("batchId") ?: ""
+                    if (txBatchId != batchId) continue
 
-                    val amount = transaction.amountInCents / 100.0
+                    val type = doc.getString("type") ?: "SALE"
 
-                    if (transaction.type == "SALE") {
-                        when (transaction.paymentType) {
-                            "Cash" -> cashSales += amount
-                            "Credit" -> creditSales += amount
-                            "Debit" -> debitSales += amount
+                    if (type == "SALE") {
+                        // New schema: payments array with per‑payment amounts and types
+                        val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
+                        if (payments.isNotEmpty()) {
+                            for (p in payments) {
+                                val map = p as? Map<*, *> ?: continue
+                                val paymentType =
+                                    map["paymentType"]?.toString() ?: ""
+                                val cents =
+                                    (map["amountInCents"] as? Number)?.toLong() ?: 0L
+                                val amount = cents / 100.0
+
+                                when (paymentType) {
+                                    "Cash" -> cashSales += amount
+                                    "Credit" -> creditSales += amount
+                                    "Debit" -> debitSales += amount
+                                }
+                            }
+                        } else {
+                            // Fallback: older flat schema with amount + paymentType
+                            val paymentType = doc.getString("paymentType") ?: ""
+                            val amount =
+                                doc.getDouble("totalPaid")
+                                    ?: doc.getDouble("amount")
+                                    ?: 0.0
+                            when (paymentType) {
+                                "Cash" -> cashSales += amount
+                                "Credit" -> creditSales += amount
+                                "Debit" -> debitSales += amount
+                            }
                         }
-                    }
+                    } else if (type == "REFUND") {
+                        val paymentType = doc.getString("paymentType") ?: ""
+                        val amount = doc.getDouble("amount") ?: 0.0
 
-                    if (transaction.type == "REFUND") {
-                        when (transaction.paymentType) {
+                        when (paymentType) {
                             "Cash" -> cashRefunds += amount
                             "Credit", "Debit" -> cardRefunds += amount
                         }
                     }
                 }
 
+                if (cashSales == 0.0 &&
+                    creditSales == 0.0 &&
+                    debitSales == 0.0 &&
+                    cashRefunds == 0.0 &&
+                    cardRefunds == 0.0
+                ) {
+                    Toast.makeText(
+                        this,
+                        "No transactions found",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return@addOnSuccessListener
+                }
+
                 val netCash = cashSales - cashRefunds
                 val netCard = (creditSales + debitSales) - cardRefunds
                 val batchNetTotal = netCash + netCard
-
-                // ===============================
-                // DISPLAY SUMMARY
-                // ===============================
 
                 txtCashSales.text = "Cash Sales: $${format(cashSales)}"
                 txtCreditSales.text = "Credit Sales: $${format(creditSales)}"

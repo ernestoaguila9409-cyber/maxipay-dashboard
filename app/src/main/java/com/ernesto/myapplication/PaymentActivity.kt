@@ -35,6 +35,7 @@ class PaymentActivity : AppCompatActivity() {
     private lateinit var txtStatus: TextView
 
     private var orderId: String? = null
+    private var batchId: String? = null
     private var remainingBalance = 0.0
     private var paymentAmount = 0.0
 
@@ -59,7 +60,7 @@ class PaymentActivity : AppCompatActivity() {
         txtStatus = findViewById(R.id.txtStatus)
 
         orderId = intent.getStringExtra("ORDER_ID")
-
+        batchId = intent.getStringExtra("BATCH_ID")
         loadRemainingBalance()
 
         btnMixMode.setOnClickListener {
@@ -267,6 +268,7 @@ class PaymentActivity : AppCompatActivity() {
 
         paymentEngine.processPayment(
             orderId = oid,
+            batchId = batchId ?: "",
             paymentType = paymentType,
             amountInCents = amountInCents,
             authCode = authCode,
@@ -304,6 +306,7 @@ class PaymentActivity : AppCompatActivity() {
 
         paymentEngine.processPayment(
             orderId = oid,
+            batchId = batchId ?: "",
             paymentType = paymentType,
             amountInCents = amountInCents,
             onSuccess = { remainingInCents ->

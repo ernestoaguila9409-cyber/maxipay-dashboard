@@ -100,7 +100,8 @@ class MainActivity : AppCompatActivity() {
                         "total" to 0.0,
                         "count" to 0,
                         "closed" to false,
-                        "createdAt" to Date()
+                        "createdAt" to Date(),
+                        "type" to "OPEN" // distinguish from settlement batches
                     )
 
                     db.collection("Batches")
@@ -114,48 +115,79 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadTodayStats() {
-
+        // 1. Start of today (midnight)
         val calendar = Calendar.getInstance()
         calendar.set(Calendar.HOUR_OF_DAY, 0)
         calendar.set(Calendar.MINUTE, 0)
         calendar.set(Calendar.SECOND, 0)
         calendar.set(Calendar.MILLISECOND, 0)
-
         val startOfDay = calendar.time
 
+        // We have mixed schemas:
+        // - New "SALE" docs use payments[] + totalPaidInCents + createdAt
+        // - Older or REFUND docs may use amount + timestamp/createdAt
+        // To keep logic simple and robust, read all Transactions and filter in memory.
         db.collection("Transactions")
-            .whereGreaterThanOrEqualTo("createdAt", startOfDay)
             .get()
             .addOnSuccessListener { documents ->
-
                 var total = 0.0
                 var count = 0
 
                 for (doc in documents) {
-
+                    // After settlement, we want dashboard stats to reset.
+                    // So ignore any transaction that is settled or voided.
                     val voided = doc.getBoolean("voided") ?: false
                     val settled = doc.getBoolean("settled") ?: false
+                    if (voided || settled) continue
+
                     val type = doc.getString("type") ?: "SALE"
 
-                    val amount = if (type == "SALE") {
-                        doc.getDouble("totalPaid") ?: 0.0
-                    } else {
-                        doc.getDouble("amount") ?: 0.0
-                    }
+                    if (type == "SALE") {
+                        // New schema: payments array with per‑payment timestamp + amountInCents
+                        val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
+                        var todaysCents = 0L
 
-                    if (!voided && !settled) {
+                        for (p in payments) {
+                            val map = p as? Map<*, *> ?: continue
+                            val ts = (map["timestamp"] as? com.google.firebase.Timestamp)?.toDate()
+                            if (ts == null || ts.before(startOfDay)) continue
 
-                        when (type) {
+                            val amountInCents = (map["amountInCents"] as? Number)?.toLong() ?: 0L
+                            todaysCents += amountInCents
+                        }
 
-                            "SALE" -> {
-                                total += amount
-                                count++
+                        // Fallback for older SALE docs without payments[]
+                        if (todaysCents == 0L) {
+                            val ts =
+                                doc.getTimestamp("timestamp")?.toDate()
+                                    ?: doc.getTimestamp("createdAt")?.toDate()
+                            if (ts != null && !ts.before(startOfDay)) {
+                                val amount = doc.getDouble("amount")
+                                    ?: doc.getDouble("totalPaid")
+                                    ?: 0.0
+                                if (amount > 0.0) {
+                                    total += amount
+                                    count++
+                                }
                             }
-
-                            "REFUND" -> {
-                                total -= amount
-                                count++
+                        } else {
+                            val amountToday = todaysCents / 100.0
+                            if (amountToday > 0.0) {
+                                total += amountToday
+                                count++ // count one sale if it had any payment today
                             }
+                        }
+                    } else if (type == "REFUND") {
+                        // Treat refunds as negative (only for open / unsettled refunds)
+                        val ts =
+                            doc.getTimestamp("createdAt")?.toDate()
+                                ?: doc.getTimestamp("timestamp")?.toDate()
+                        if (ts == null || ts.before(startOfDay)) continue
+
+                        val amount = doc.getDouble("amount") ?: 0.0
+                        if (amount > 0.0) {
+                            total -= amount
+                            count++
                         }
                     }
                 }

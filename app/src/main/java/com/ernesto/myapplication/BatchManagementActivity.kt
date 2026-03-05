@@ -9,6 +9,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -47,7 +48,7 @@ class BatchManagementActivity : AppCompatActivity() {
         }
     }
 
-    // 🔹 LOAD OPEN TRANSACTIONS
+    // 🔹 LOAD OPEN TRANSACTIONS (UNSETTLED, NOT VOIDED)
     private fun loadOpenBatch() {
         db.collection("Transactions")
             .whereEqualTo("settled", false)
@@ -55,7 +56,19 @@ class BatchManagementActivity : AppCompatActivity() {
             .get()
             .addOnSuccessListener { documents ->
                 openTransactionCount = documents.size()
-                txtOpenBatch.text = "Open Transactions: $openTransactionCount"
+
+                var openTotal = 0.0
+                for (doc in documents) {
+                    openTotal += computeNetAmount(doc)
+                }
+
+                txtOpenBatch.text = String.format(
+                    Locale.US,
+                    "Open Transactions: %d | Total: $%.2f",
+                    openTransactionCount,
+                    openTotal
+                )
+
                 btnCloseBatch.isEnabled = openTransactionCount > 0
             }
     }
@@ -239,13 +252,11 @@ class BatchManagementActivity : AppCompatActivity() {
 
                         for (tx in transactions) {
 
-                            val amount = tx.getDouble("amount") ?: 0.0
-                            val type = tx.getString("type") ?: "SALE"
-
-                            if (type == "SALE") totalSales += amount
-                            if (type == "REFUND") totalSales -= amount
-
-                            count++
+                            val net = computeNetAmount(tx)
+                            if (net != 0.0) {
+                                totalSales += net
+                                count++
+                            }
 
                             batchWrite.update(
                                 tx.reference,
@@ -262,7 +273,8 @@ class BatchManagementActivity : AppCompatActivity() {
                                 "closed" to true,
                                 "closedAt" to Date(),
                                 "totalSales" to totalSales,
-                                "transactionCount" to count
+                                "transactionCount" to count,
+                                "type" to "SETTLEMENT" // distinguish from OPEN batches
                             )
                         )
 
@@ -280,5 +292,29 @@ class BatchManagementActivity : AppCompatActivity() {
                             }
                     }
             }
+    }
+
+    // 🔹 Helper to compute net amount for a transaction document
+    // SALE  → positive amount
+    // REFUND → negative amount
+    private fun computeNetAmount(doc: DocumentSnapshot): Double {
+        val type = doc.getString("type") ?: "SALE"
+
+        return if (type == "SALE") {
+            // New schema: totalPaidInCents / totalPaid (multi‑payment)
+            val cents = doc.getLong("totalPaidInCents")
+            if (cents != null) {
+                cents / 100.0
+            } else {
+                doc.getDouble("totalPaid")
+                    ?: doc.getDouble("amount")
+                    ?: 0.0
+            }
+        } else if (type == "REFUND") {
+            // Refunds always store a positive amount; treat as negative
+            -(doc.getDouble("amount") ?: 0.0)
+        } else {
+            0.0
+        }
     }
 }

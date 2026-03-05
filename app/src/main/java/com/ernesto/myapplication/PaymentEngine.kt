@@ -8,6 +8,7 @@ class PaymentEngine(private val db: FirebaseFirestore) {
 
     fun processPayment(
         orderId: String,
+        batchId: String,
         paymentType: String,
         amountInCents: Long,
 
@@ -61,6 +62,7 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                     saleRef,
                     mapOf(
                         "orderId" to orderId,
+                        "batchId" to batchId,
                         "type" to "SALE",
                         "totalPaidInCents" to newPaid,
                         "payments" to listOf(paymentEntry),
