@@ -49,30 +49,60 @@ class TransactionAdapter(
             context.getColor(android.R.color.holo_green_dark)
         )
 
-        if (sale.paymentType.equals("Cash", true)) {
-
-            holder.txtCard.text = "Cash"
-
-        } else {
-
-            holder.txtCard.text = "${sale.cardBrand} •••• ${sale.last4}"
-
-        }
-
-        val displayEntryType = when (sale.entryType) {
-            "Chip" -> "Chip"
-            "ChipContactless" -> "Contactless"
-            "Swipe" -> "Swipe"
-            "Manual" -> "Manual"
-            else -> sale.entryType
-        }
-
-        holder.txtType.text =
-            if (sale.paymentType.equals("Cash", true)) {
-                "Cash Payment"
-            } else {
-                "${sale.paymentType} • $displayEntryType"
+        // Display all payment methods (loop through payments array)
+        val paymentLines = if (sale.payments.isNotEmpty()) {
+            sale.payments.map { p ->
+                val methodLabel = if (p.paymentType.equals("Cash", true)) {
+                    "Cash"
+                } else {
+                    if (p.cardBrand.isNotBlank() && p.last4.isNotBlank()) "${p.cardBrand} •••• ${p.last4}"
+                    else p.paymentType.ifBlank { "Card" }
+                }
+                val amountStr = String.format("$%.2f", p.amountInCents / 100.0)
+                "$methodLabel  $amountStr"
             }
+        } else {
+            // Fallback for older docs with single paymentType/cardBrand/last4
+            val methodLabel = if (sale.paymentType.equals("Cash", true)) {
+                "Cash"
+            } else {
+                if (sale.cardBrand.isNotBlank() && sale.last4.isNotBlank()) "${sale.cardBrand} •••• ${sale.last4}"
+                else sale.paymentType.ifBlank { "Card" }
+            }
+            val amountStr = String.format("$%.2f", sale.amountInCents / 100.0)
+            listOf("$methodLabel  $amountStr")
+        }
+        holder.txtCard.text = paymentLines.joinToString("\n")
+
+        val typeLines = if (sale.payments.isNotEmpty()) {
+            sale.payments.map { p ->
+                if (p.paymentType.equals("Cash", true)) {
+                    "Cash Payment"
+                } else {
+                    val displayEntryType = when (p.entryType) {
+                        "Chip" -> "Chip"
+                        "ChipContactless" -> "Contactless"
+                        "Swipe" -> "Swipe"
+                        "Manual" -> "Manual"
+                        else -> p.entryType
+                    }
+                    "${p.paymentType.ifBlank { "Credit" }} • $displayEntryType"
+                }
+            }
+        } else {
+            val displayEntryType = when (sale.entryType) {
+                "Chip" -> "Chip"
+                "ChipContactless" -> "Contactless"
+                "Swipe" -> "Swipe"
+                "Manual" -> "Manual"
+                else -> sale.entryType
+            }
+            listOf(
+                if (sale.paymentType.equals("Cash", true)) "Cash Payment"
+                else "${sale.paymentType} • $displayEntryType"
+            )
+        }
+        holder.txtType.text = typeLines.joinToString("\n")
 
         holder.txtAmount.text =
             String.format("$%.2f", netAmount)

@@ -17,6 +17,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import com.ernesto.myapplication.data.TransactionPayment
 import org.json.JSONObject
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -202,6 +203,7 @@ class OrderDetailActivity : AppCompatActivity() {
             .addOnSuccessListener { txDoc ->
                 val batchId = txDoc.getString("batchId")?.takeIf { it.isNotBlank() }
                 if (!batchId.isNullOrBlank()) {
+                    currentBatchId = batchId
                     loadBatchAndUpdateVoidButton(batchId)
                 } else {
                     btnVoid.visibility = View.GONE
@@ -333,43 +335,118 @@ class OrderDetailActivity : AppCompatActivity() {
             .document(orderId)
             .get()
             .addOnSuccessListener { orderDoc ->
-
                 val transactionId = orderDoc.getString("saleTransactionId")
                     ?: orderDoc.getString("transactionId")
-                    ?: return@addOnSuccessListener
+                    ?: run {
+                        Toast.makeText(this, "No transaction linked to this order.", Toast.LENGTH_LONG).show()
+                        return@addOnSuccessListener
+                    }
 
                 db.collection("Transactions")
                     .document(transactionId)
                     .get()
                     .addOnSuccessListener { txDoc ->
-                        val referenceId = getReferenceIdFromTransaction(txDoc)
-                            .takeIf { it.isNotBlank() } ?: return@addOnSuccessListener
-                        val paymentType = getPaymentTypeFromTransaction(txDoc).ifBlank { "Credit" }
-                        val amountInCents = txDoc.getLong("totalPaidInCents") ?: 0L
-                        val amount = amountInCents / 100.0
-                        val payments = txDoc.get("payments") as? List<*> ?: emptyList<Any>()
-                        val first = payments.firstOrNull() as? Map<*, *>
-                        val batchNumber = first?.get("batchNumber")?.toString() ?: ""
-                        val transactionNumber = first?.get("transactionNumber")?.toString() ?: ""
+                        if (!txDoc.exists()) {
+                            Toast.makeText(this, "Transaction not found.", Toast.LENGTH_LONG).show()
+                            return@addOnSuccessListener
+                        }
+                        @Suppress("UNCHECKED_CAST")
+                        val paymentsRaw = txDoc.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                        val payments = paymentsRaw.map { p ->
+                            val amountCents = (p["amountInCents"] as? Number)?.toLong() ?: 0L
+                            TransactionPayment(
+                                paymentType = p["paymentType"]?.toString() ?: "",
+                                cardBrand = p["cardBrand"]?.toString() ?: "",
+                                last4 = p["last4"]?.toString() ?: "",
+                                entryType = p["entryType"]?.toString() ?: "",
+                                amountInCents = amountCents,
+                                referenceId = p["referenceId"]?.toString() ?: p["terminalReference"]?.toString() ?: "",
+                                clientReferenceId = p["clientReferenceId"]?.toString() ?: "",
+                                batchNumber = (p["batchNumber"] as? Number)?.toString() ?: p["batchNumber"]?.toString() ?: "",
+                                transactionNumber = (p["transactionNumber"] as? Number)?.toString() ?: p["transactionNumber"]?.toString() ?: "",
+                                paymentId = p["paymentId"]?.toString() ?: ""
+                            )
+                        }.ifEmpty {
+                            val firstRef = getReferenceIdFromTransaction(txDoc)
+                            val firstType = getPaymentTypeFromTransaction(txDoc).ifBlank { "Credit" }
+                            val amountCents = txDoc.getLong("totalPaidInCents") ?: 0L
+                            listOf(
+                                TransactionPayment(
+                                    paymentType = firstType,
+                                    amountInCents = amountCents,
+                                    referenceId = firstRef,
+                                    clientReferenceId = txDoc.getString("clientReferenceId") ?: "",
+                                    batchNumber = txDoc.getString("batchNumber") ?: "",
+                                    transactionNumber = (txDoc.get("transactionNumber") as? Number)?.toString() ?: ""
+                                )
+                            )
+                        }
 
-                        callVoidApi(referenceId, paymentType, amount, transactionId, batchNumber, transactionNumber)
+                        val cashPayments = payments.filter { it.paymentType.equals("Cash", true) }
+                        val cardPayments = payments.filter { !it.paymentType.equals("Cash", true) }
+                        val totalCashCents = cashPayments.sumOf { it.amountInCents }
+                        val totalCashDollars = totalCashCents / 100.0
+
+                        if (totalCashCents > 0) {
+                            AlertDialog.Builder(this)
+                                .setTitle("Cash return required")
+                                .setMessage("Return $%.2f in cash to the customer before completing the void.".format(totalCashDollars))
+                                .setPositiveButton("I have returned the cash") { _, _ ->
+                                    runVoidSequence(transactionId, cardPayments)
+                                }
+                                .setNegativeButton("Cancel", null)
+                                .show()
+                        } else {
+                            runVoidSequence(transactionId, cardPayments)
+                        }
                     }
+                    .addOnFailureListener {
+                        Toast.makeText(this, "Failed to load transaction: ${it.message}", Toast.LENGTH_LONG).show()
+                    }
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to load order: ${it.message}", Toast.LENGTH_LONG).show()
             }
     }
 
-    private fun callVoidApi(
-        referenceId: String,
-        paymentType: String,
-        amount: Double,
-        transactionId: String,
-        batchNumber: String = "",
-        transactionNumber: String = ""
-    ) {
+    private fun runVoidSequence(txDocId: String, cardPayments: List<TransactionPayment>) {
+        if (cardPayments.isEmpty()) {
+            finalizeVoid(txDocId)
+            return
+        }
+        voidCardPaymentsSequentially(txDocId, cardPayments, 0)
+    }
 
+    private fun voidCardPaymentsSequentially(
+        txDocId: String,
+        cardPayments: List<TransactionPayment>,
+        index: Int
+    ) {
+        if (index >= cardPayments.size) {
+            finalizeVoid(txDocId)
+            return
+        }
+        val payment = cardPayments[index]
+        val refId = payment.referenceId.ifBlank { payment.clientReferenceId }
+        if (refId.isBlank()) {
+            Toast.makeText(this, "Cannot void: no ReferenceId for card payment.", Toast.LENGTH_LONG).show()
+            return
+        }
+        callVoidApiForPayment(payment, txDocId, cardPayments, index)
+    }
+
+    private fun callVoidApiForPayment(
+        payment: TransactionPayment,
+        transactionId: String,
+        cardPayments: List<TransactionPayment>,
+        index: Int
+    ) {
+        val refId = payment.referenceId.ifBlank { payment.clientReferenceId }
+        val amount = payment.amountInCents / 100.0
         val json = JSONObject().apply {
             put("Amount", amount)
-            put("PaymentType", paymentType)
-            put("ReferenceId", referenceId)
+            put("PaymentType", payment.paymentType.ifBlank { "Credit" })
+            put("ReferenceId", refId)
             put("PrintReceipt", "No")
             put("GetReceipt", "No")
             put("CaptureSignature", false)
@@ -377,11 +454,11 @@ class OrderDetailActivity : AppCompatActivity() {
             put("CallbackInfo", JSONObject().apply { put("Url", "") })
             put("Tpn", "11881706541A")
             put("Authkey", "Qt9N7CxhDs")
-            if (batchNumber.isNotBlank()) {
-                put("BatchNumber", batchNumber.toIntOrNull() ?: batchNumber)
+            if (payment.batchNumber.isNotBlank()) {
+                put("BatchNumber", payment.batchNumber.toIntOrNull() ?: payment.batchNumber)
             }
-            if (transactionNumber.isNotBlank()) {
-                put("TransactionNumber", transactionNumber.toIntOrNull() ?: transactionNumber)
+            if (payment.transactionNumber.isNotBlank()) {
+                put("TransactionNumber", payment.transactionNumber.toIntOrNull() ?: payment.transactionNumber)
             }
         }
 
@@ -390,27 +467,21 @@ class OrderDetailActivity : AppCompatActivity() {
             .readTimeout(120, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .build()
-
         val body = json.toString().toRequestBody("application/json".toMediaType())
-
         val request = Request.Builder()
             .url("https://spinpos.net/v2/Payment/Void")
             .post(body)
             .build()
 
         client.newCall(request).enqueue(object : Callback {
-
             override fun onFailure(call: Call, e: IOException) {
                 runOnUiThread {
                     Toast.makeText(this@OrderDetailActivity, "Void Failed: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
-
             override fun onResponse(call: Call, response: Response) {
                 val responseText = response.body?.string() ?: ""
-
                 runOnUiThread {
-
                     if (!response.isSuccessful) {
                         Toast.makeText(
                             this@OrderDetailActivity,
@@ -419,13 +490,11 @@ class OrderDetailActivity : AppCompatActivity() {
                         ).show()
                         return@runOnUiThread
                     }
-
                     val resultCode = JSONObject(responseText)
                         .optJSONObject("GeneralResponse")
                         ?.optString("ResultCode")
-
                     if (resultCode == "0") {
-                        finalizeVoid(transactionId)
+                        voidCardPaymentsSequentially(transactionId, cardPayments, index + 1)
                     } else {
                         Toast.makeText(this@OrderDetailActivity, "Void Declined", Toast.LENGTH_LONG).show()
                     }
@@ -435,7 +504,6 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun finalizeVoid(transactionId: String) {
-
         db.collection("Orders")
             .document(orderId)
             .get()
@@ -461,16 +529,25 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun runFinalizeVoidBatch(transactionId: String, orderDoc: DocumentSnapshot, batchId: String) {
-                val amountInCents = orderDoc.getLong("totalInCents") ?: 0L
-                val amount = amountInCents / 100.0
+        val txRef = db.collection("Transactions").document(transactionId)
+        txRef.get()
+            .addOnSuccessListener { txDoc ->
+                if (!txDoc.exists()) return@addOnSuccessListener
+                val amount = txDoc.getLong("totalPaidInCents")?.let { it / 100.0 }
+                    ?: txDoc.getDouble("totalPaid") ?: txDoc.getDouble("amount") ?: 0.0
+                @Suppress("UNCHECKED_CAST")
+                val paymentsRaw = txDoc.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                val updatedPayments = paymentsRaw.map { p ->
+                    val mutable = p.toMutableMap()
+                    mutable["status"] = "VOIDED"
+                    mutable
+                }
 
                 db.runBatch { batch ->
-
                     val orderRef = db.collection("Orders").document(orderId)
-                    val txRef = db.collection("Transactions").document(transactionId)
                     val batchRef = db.collection("Batches").document(batchId)
 
-                    batch.update(txRef, "voided", true)
+                    batch.update(txRef, mapOf("voided" to true, "payments" to updatedPayments))
 
                     val voidedBy = intent.getStringExtra("employeeName")?.takeIf { it.isNotBlank() }
                         ?: SessionEmployee.getEmployeeName(this@OrderDetailActivity)
@@ -481,15 +558,16 @@ class OrderDetailActivity : AppCompatActivity() {
                     ))
 
                     batch.update(batchRef, mapOf(
-                        "totalSales" to FieldValue.increment(amount),
-                        "netTotal" to FieldValue.increment(amount),
-                        "transactionCount" to FieldValue.increment(1)
+                        "totalSales" to FieldValue.increment(-amount),
+                        "netTotal" to FieldValue.increment(-amount),
+                        "transactionCount" to FieldValue.increment(-1)
                     ))
                 }
                     .addOnSuccessListener {
                         Toast.makeText(this, "Sale Voided", Toast.LENGTH_LONG).show()
-                        finish()
+                        loadHeader()
                     }
+            }
     }
 
     private fun confirmRefund() {

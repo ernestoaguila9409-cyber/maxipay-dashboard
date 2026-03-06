@@ -1,7 +1,11 @@
 package com.ernesto.myapplication
 
+import android.app.DatePickerDialog
 import android.os.Bundle
+import android.view.LayoutInflater
 import android.widget.EditText
+import android.widget.ImageButton
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -10,6 +14,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.ernesto.myapplication.data.Transaction
+import com.ernesto.myapplication.data.TransactionPayment
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -23,16 +28,25 @@ import com.google.firebase.firestore.FieldValue
 class TransactionActivity : AppCompatActivity() {
 
     private lateinit var recyclerView: RecyclerView
+    private lateinit var btnFilter: ImageButton
+    private lateinit var btnConfiguration: android.widget.Button
     private lateinit var adapter: TransactionAdapter
     private val transactionList = mutableListOf<SaleWithRefunds>()
+    private val allSalesWithRefunds = mutableListOf<SaleWithRefunds>()
     private val db = FirebaseFirestore.getInstance()
     private var currentEmployeeName: String = ""
+
+    private var typeFilter: String = "ALL" // ALL, VOID, REFUND, CASH, CREDIT_DEBIT
+    private var dateFromMillis: Long? = null
+    private var dateToMillis: Long? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_transaction)
 
         recyclerView = findViewById(R.id.recyclerTransactions)
+        btnFilter = findViewById(R.id.btnFilter)
+        btnConfiguration = findViewById(R.id.btnConfiguration)
         recyclerView.layoutManager = LinearLayoutManager(this)
 
         adapter = TransactionAdapter(transactionList) { transaction ->
@@ -41,6 +55,7 @@ class TransactionActivity : AppCompatActivity() {
 
         recyclerView.adapter = adapter
         currentEmployeeName = intent.getStringExtra("employeeName") ?: ""
+        btnFilter.setOnClickListener { showFilterDialog() }
         loadTransactions()
     }
 
@@ -76,20 +91,36 @@ class TransactionActivity : AppCompatActivity() {
 
                     val dateMillis = createdAt?.time ?: oldTimestamp?.time ?: 0L
 
-                    val payments = doc.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                    val paymentsRaw = doc.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                    val payments = paymentsRaw.map { p ->
+                        val amountCents = (p["amountInCents"] as? Number)?.toLong() ?: 0L
+                        TransactionPayment(
+                            paymentType = p["paymentType"]?.toString() ?: "",
+                            cardBrand = p["cardBrand"]?.toString() ?: "",
+                            last4 = p["last4"]?.toString() ?: "",
+                            entryType = p["entryType"]?.toString() ?: "",
+                            amountInCents = amountCents,
+                            referenceId = p["referenceId"]?.toString() ?: p["terminalReference"]?.toString() ?: "",
+                            clientReferenceId = p["clientReferenceId"]?.toString() ?: "",
+                            batchNumber = (p["batchNumber"] as? Number)?.toString() ?: p["batchNumber"]?.toString() ?: "",
+                            transactionNumber = (p["transactionNumber"] as? Number)?.toString() ?: p["transactionNumber"]?.toString() ?: "",
+                            paymentId = p["paymentId"]?.toString() ?: ""
+                        )
+                    }
                     val firstPayment = payments.firstOrNull()
 
-                    val paymentType = firstPayment?.get("paymentType")?.toString() ?: ""
-                    val cardBrand = firstPayment?.get("cardBrand")?.toString() ?: ""
-                    val last4 = firstPayment?.get("last4")?.toString() ?: ""
-                    val entryType = firstPayment?.get("entryType")?.toString() ?: ""
-                    // Dejavoo sale response fields for Void: referenceId, batchNumber, transactionNumber
-                    val gatewayRef = firstPayment?.get("referenceId")?.toString()
-                        ?: firstPayment?.get("terminalReference")?.toString() ?: ""
-                    val clientRef = firstPayment?.get("clientReferenceId")?.toString() ?: ""
-                    val batchNum = firstPayment?.get("batchNumber")?.toString() ?: ""
-                    val txNum = firstPayment?.get("transactionNumber")?.toString() ?: ""
-                    val invNum = firstPayment?.get("invoiceNumber")?.toString() ?: ""
+                    val paymentType = firstPayment?.paymentType ?: ""
+                    val cardBrand = firstPayment?.cardBrand ?: ""
+                    val last4 = firstPayment?.last4 ?: ""
+                    val entryType = firstPayment?.entryType ?: ""
+                    // Dejavoo sale response fields for Void: referenceId, batchNumber, transactionNumber (from first payment)
+                    val firstRaw = paymentsRaw.firstOrNull()
+                    val gatewayRef = firstRaw?.get("referenceId")?.toString()
+                        ?: firstRaw?.get("terminalReference")?.toString() ?: ""
+                    val clientRef = firstRaw?.get("clientReferenceId")?.toString() ?: ""
+                    val batchNum = firstRaw?.get("batchNumber")?.toString() ?: ""
+                    val txNum = firstRaw?.get("transactionNumber")?.toString() ?: ""
+                    val invNum = firstRaw?.get("invoiceNumber")?.toString() ?: ""
 
                     val isMixed = payments.size > 1
 
@@ -116,7 +147,8 @@ class TransactionActivity : AppCompatActivity() {
                         settled = doc.getBoolean("settled") ?: false,
                         type = type,
                         originalReferenceId = doc.getString("originalReferenceId") ?: "",
-                        isMixed = isMixed
+                        isMixed = isMixed,
+                        payments = payments
                     )
 
                     allTransactions.add(transaction)
@@ -128,12 +160,13 @@ class TransactionActivity : AppCompatActivity() {
                 val sales = allTransactions.filter { it.type == "SALE" }
                 val refunds = allTransactions.filter { it.type == "REFUND" }
 
+                allSalesWithRefunds.clear()
                 sales.forEach { sale ->
                     val relatedRefunds =
                         if (sale.referenceId.isBlank()) emptyList()
                         else refunds.filter { it.originalReferenceId == sale.referenceId }
 
-                    transactionList.add(
+                    allSalesWithRefunds.add(
                         SaleWithRefunds(
                             sale = sale,
                             refunds = relatedRefunds
@@ -141,8 +174,108 @@ class TransactionActivity : AppCompatActivity() {
                     )
                 }
 
+                transactionList.clear()
+                transactionList.addAll(applyTransactionFilter(allSalesWithRefunds))
                 adapter.notifyDataSetChanged()
             }
+    }
+
+    private fun applyTransactionFilter(list: List<SaleWithRefunds>): List<SaleWithRefunds> {
+        var result = list
+        if (dateFromMillis != null) {
+            result = result.filter { it.sale.date >= dateFromMillis!! }
+        }
+        if (dateToMillis != null) {
+            result = result.filter { it.sale.date <= dateToMillis!! }
+        }
+        result = when (typeFilter) {
+            "VOID" -> result.filter { it.sale.voided }
+            "REFUND" -> result.filter { it.refunds.isNotEmpty() }
+            "CASH" -> result.filter { swr ->
+                val p = swr.sale.payments
+                if (p.isNotEmpty()) p.all { it.paymentType.equals("Cash", true) }
+                else swr.sale.paymentType.equals("Cash", true)
+            }
+            "CREDIT_DEBIT" -> result.filter { swr ->
+                val p = swr.sale.payments
+                if (p.isNotEmpty()) p.any { it.paymentType.equals("Credit", true) || it.paymentType.equals("Debit", true) }
+                else swr.sale.paymentType.equals("Credit", true) || swr.sale.paymentType.equals("Debit", true)
+            }
+            else -> result
+        }
+        return result
+    }
+
+    private fun showFilterDialog() {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_transaction_filter, null)
+        val radioAll = view.findViewById<android.widget.RadioButton>(R.id.radioAll)
+        val radioVoid = view.findViewById<android.widget.RadioButton>(R.id.radioVoid)
+        val radioRefund = view.findViewById<android.widget.RadioButton>(R.id.radioRefund)
+        val radioCash = view.findViewById<android.widget.RadioButton>(R.id.radioCash)
+        val radioCreditDebit = view.findViewById<android.widget.RadioButton>(R.id.radioCreditDebit)
+        val txtDateFrom = view.findViewById<TextView>(R.id.txtDateFrom)
+        val txtDateTo = view.findViewById<TextView>(R.id.txtDateTo)
+
+        when (typeFilter) {
+            "VOID" -> radioVoid.isChecked = true
+            "REFUND" -> radioRefund.isChecked = true
+            "CASH" -> radioCash.isChecked = true
+            "CREDIT_DEBIT" -> radioCreditDebit.isChecked = true
+            else -> radioAll.isChecked = true
+        }
+
+        val dateFormat = java.text.SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+        fun formatDate(ms: Long?) = if (ms != null) dateFormat.format(ms) else "Any"
+        txtDateFrom.text = "From: ${formatDate(dateFromMillis)}"
+        txtDateTo.text = "To: ${formatDate(dateToMillis)}"
+
+        txtDateFrom.setOnClickListener {
+            val cal = Calendar.getInstance()
+            dateFromMillis?.let { cal.timeInMillis = it }
+            DatePickerDialog(this, { _, y, m, d ->
+                cal.set(y, m, d, 0, 0, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                dateFromMillis = cal.timeInMillis
+                txtDateFrom.text = "From: ${formatDate(dateFromMillis)}"
+            }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+        }
+        txtDateTo.setOnClickListener {
+            val cal = Calendar.getInstance()
+            dateToMillis?.let { cal.timeInMillis = it }
+            DatePickerDialog(this, { _, y, m, d ->
+                cal.set(y, m, d, 23, 59, 59)
+                cal.set(Calendar.MILLISECOND, 999)
+                dateToMillis = cal.timeInMillis
+                txtDateTo.text = "To: ${formatDate(dateToMillis)}"
+            }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+        }
+
+        val dialog = AlertDialog.Builder(this).setView(view).create()
+
+        view.findViewById<android.widget.Button>(R.id.btnFilterClear).setOnClickListener {
+            typeFilter = "ALL"
+            dateFromMillis = null
+            dateToMillis = null
+            dialog.dismiss()
+            transactionList.clear()
+            transactionList.addAll(applyTransactionFilter(allSalesWithRefunds))
+            adapter.notifyDataSetChanged()
+        }
+        view.findViewById<android.widget.Button>(R.id.btnFilterApply).setOnClickListener {
+            val checkedId = view.findViewById<android.widget.RadioGroup>(R.id.radioGroupType).checkedRadioButtonId
+            typeFilter = when (checkedId) {
+                R.id.radioVoid -> "VOID"
+                R.id.radioRefund -> "REFUND"
+                R.id.radioCash -> "CASH"
+                R.id.radioCreditDebit -> "CREDIT_DEBIT"
+                else -> "ALL"
+            }
+            dialog.dismiss()
+            transactionList.clear()
+            transactionList.addAll(applyTransactionFilter(allSalesWithRefunds))
+            adapter.notifyDataSetChanged()
+        }
+        dialog.show()
     }
 
     private fun showTransactionOptions(transaction: Transaction) {
@@ -150,56 +283,136 @@ class TransactionActivity : AppCompatActivity() {
             Toast.makeText(this, "This transaction has already been voided.", Toast.LENGTH_SHORT).show()
             return
         }
-        if (transaction.paymentType.equals("Cash", ignoreCase = true)) {
-            // For cash: only allow local refund, no Devajoo/Z8 calls
+        val payments = transaction.payments.ifEmpty { null }
+        val hasCard = payments?.any { p ->
+            !p.paymentType.equals("Cash", true) && !p.paymentType.equals("Debit", true)
+        } ?: (!transaction.paymentType.equals("Cash", true) && !transaction.paymentType.equals("Debit", true))
+        val allCash = payments?.all { it.paymentType.equals("Cash", true) }
+            ?: transaction.paymentType.equals("Cash", true)
+        val debitOnly = if (payments != null) {
+            payments.any { it.paymentType.equals("Debit", true) } && !hasCard
+        } else {
+            transaction.paymentType.equals("Debit", true)
+        }
+
+        if (transaction.settled) {
             AlertDialog.Builder(this)
-                .setTitle("Cash Transaction")
-                .setMessage("Select an option for this cash payment.")
-                .setPositiveButton("Refund") { _, _ -> processCashRefund(transaction) }
+                .setTitle("Transaction Options")
+                .setMessage("Batch already closed. Refund only.")
+                .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
                 .setNegativeButton("Cancel", null)
                 .show()
-        } else if (transaction.paymentType.equals("Debit", ignoreCase = true)) {
-            // For debit: debit sales cannot be voided, only refunded even if batch is still open
+            return
+        }
+        if (debitOnly) {
             AlertDialog.Builder(this)
                 .setTitle("Transaction Options")
                 .setMessage("Debit sale can only be refunded.")
                 .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
                 .setNegativeButton("Cancel", null)
                 .show()
-        } else {
-            // For card: Void only before batch close; after batch closed (settled) only Refund
-            if (transaction.settled) {
-                AlertDialog.Builder(this)
-                    .setTitle("Transaction Options")
-                    .setMessage("Batch already closed. Refund only.")
-                    .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-            } else {
-                AlertDialog.Builder(this)
-                    .setTitle("Transaction Options")
-                    .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
-                    .setNegativeButton("Void") { _, _ -> processVoid(transaction) }
-                    .setNeutralButton("Cancel", null)
-                    .show()
-            }
+            return
         }
+        if (allCash) {
+            AlertDialog.Builder(this)
+                .setTitle("Cash Transaction")
+                .setMessage("Select an option for this cash payment.")
+                .setPositiveButton("Refund") { _, _ -> processCashRefund(transaction) }
+                .setNegativeButton("Void") { _, _ -> processVoid(transaction) }
+                .setNeutralButton("Cancel", null)
+                .show()
+            return
+        }
+        // Has card (and possibly cash): allow Refund or Void when batch is open
+        AlertDialog.Builder(this)
+            .setTitle("Transaction Options")
+            .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
+            .setNegativeButton("Void") { _, _ -> processVoid(transaction) }
+            .setNeutralButton("Cancel", null)
+            .show()
     }
 
     private fun processVoid(transaction: Transaction) {
-        // Void must use exact Dejavoo sale response values: ReferenceId, BatchNumber, TransactionNumber
-        val referenceId = transaction.gatewayReferenceId.ifBlank { transaction.clientReferenceId }
-        if (referenceId.isBlank()) {
-            Toast.makeText(this, "Cannot void: no ReferenceId for this transaction.", Toast.LENGTH_LONG).show()
+        // VOID allowed only when batch is still open (settled == false means batch not closed)
+        if (transaction.settled) {
+            Toast.makeText(this, "Batch already closed. Cannot void. Use Refund instead.", Toast.LENGTH_LONG).show()
             return
         }
+        val payments = transaction.payments.ifEmpty {
+            // Fallback: single payment from legacy fields
+            listOf(
+                TransactionPayment(
+                    paymentType = transaction.paymentType,
+                    cardBrand = transaction.cardBrand,
+                    last4 = transaction.last4,
+                    entryType = transaction.entryType,
+                    amountInCents = transaction.amountInCents,
+                    referenceId = transaction.gatewayReferenceId,
+                    clientReferenceId = transaction.clientReferenceId,
+                    batchNumber = transaction.batchNumber,
+                    transactionNumber = transaction.transactionNumber
+                )
+            )
+        }
+        val cashPayments = payments.filter { it.paymentType.equals("Cash", true) }
+        val cardPayments = payments.filter { !it.paymentType.equals("Cash", true) }
+        val totalCashCents = cashPayments.sumOf { it.amountInCents }
+        val totalCashDollars = totalCashCents / 100.0
 
-        val amountNumber = transaction.amountInCents / 100.0
+        if (totalCashCents > 0) {
+            AlertDialog.Builder(this)
+                .setTitle("Cash return required")
+                .setMessage("Return $%.2f in cash to the customer before completing the void.".format(totalCashDollars))
+                .setPositiveButton("I have returned the cash") { _, _ ->
+                    runVoidSequence(transaction.referenceId, cardPayments)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } else {
+            runVoidSequence(transaction.referenceId, cardPayments)
+        }
+    }
 
+    private fun runVoidSequence(txDocId: String, cardPayments: List<TransactionPayment>) {
+        if (cardPayments.isEmpty()) {
+            doFinalVoidUpdate(txDocId)
+            Toast.makeText(this, "VOID APPROVED", Toast.LENGTH_LONG).show()
+            return
+        }
+        voidCardPaymentsSequentially(txDocId, cardPayments, 0)
+    }
+
+    private fun voidCardPaymentsSequentially(
+        txDocId: String,
+        cardPayments: List<TransactionPayment>,
+        index: Int
+    ) {
+        if (index >= cardPayments.size) {
+            doFinalVoidUpdate(txDocId)
+            runOnUiThread { Toast.makeText(this, "VOID APPROVED", Toast.LENGTH_LONG).show() }
+            return
+        }
+        val payment = cardPayments[index]
+        val refId = payment.referenceId.ifBlank { payment.clientReferenceId }
+        if (refId.isBlank()) {
+            Toast.makeText(this, "Cannot void: no ReferenceId for card payment.", Toast.LENGTH_LONG).show()
+            return
+        }
+        sendVoidRequestForOnePayment(payment, txDocId, cardPayments, index)
+    }
+
+    private fun sendVoidRequestForOnePayment(
+        payment: TransactionPayment,
+        txDocId: String,
+        cardPayments: List<TransactionPayment>,
+        index: Int
+    ) {
+        val refId = payment.referenceId.ifBlank { payment.clientReferenceId }
+        val amountNumber = payment.amountInCents / 100.0
         val json = org.json.JSONObject().apply {
             put("Amount", amountNumber)
-            put("PaymentType", transaction.paymentType)
-            put("ReferenceId", referenceId)
+            put("PaymentType", payment.paymentType.ifBlank { "Credit" })
+            put("ReferenceId", refId)
             put("PrintReceipt", "No")
             put("GetReceipt", "No")
             put("MerchantNumber", org.json.JSONObject.NULL)
@@ -210,20 +423,97 @@ class TransactionActivity : AppCompatActivity() {
             put("Authkey", "Qt9N7CxhDs")
             put("SPInProxyTimeout", org.json.JSONObject.NULL)
             put("CustomFields", org.json.JSONObject())
-            if (transaction.batchNumber.isNotBlank()) {
-                put("BatchNumber", transaction.batchNumber.toIntOrNull() ?: transaction.batchNumber)
+            if (payment.batchNumber.isNotBlank()) {
+                put("BatchNumber", payment.batchNumber.toIntOrNull() ?: payment.batchNumber)
             }
-            if (transaction.transactionNumber.isNotBlank()) {
-                put("TransactionNumber", transaction.transactionNumber.toIntOrNull() ?: transaction.transactionNumber)
+            if (payment.transactionNumber.isNotBlank()) {
+                put("TransactionNumber", payment.transactionNumber.toIntOrNull() ?: payment.transactionNumber)
             }
         }.toString()
 
-        sendApiRequest(
-            url = "https://spinpos.net/v2/Payment/Void",
-            json = json,
-            type = "VOID",
-            referenceId = transaction.referenceId  // Firestore doc id for updating our DB
-        )
+        val client = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(180, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+        val body = json.toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url("https://spinpos.net/v2/Payment/Void")
+            .post(body)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e("TX_API", "[VOID] Network error", e)
+                runOnUiThread {
+                    Toast.makeText(this@TransactionActivity, "VOID Failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+            override fun onResponse(call: Call, response: Response) {
+                val responseText = response.body?.string() ?: ""
+                Log.d("TX_API", "[VOID] HTTP ${response.code} Response: $responseText")
+                val approved = try {
+                    val obj = org.json.JSONObject(responseText)
+                    obj.optJSONObject("GeneralResponse")?.optString("ResultCode", "") == "0"
+                } catch (e: Exception) { false }
+                runOnUiThread {
+                    if (!response.isSuccessful || !approved) {
+                        val reason = try {
+                            val gen = org.json.JSONObject(responseText).optJSONObject("GeneralResponse")
+                            gen?.optString("DetailedMessage", "")?.ifBlank { gen?.optString("Message", "") } ?: ""
+                        } catch (e: Exception) { "" }
+                        val msg = if (reason.isNotBlank()) "VOID Declined: $reason" else "VOID Declined"
+                        Toast.makeText(this@TransactionActivity, msg, Toast.LENGTH_LONG).show()
+                        return@runOnUiThread
+                    }
+                    voidCardPaymentsSequentially(txDocId, cardPayments, index + 1)
+                }
+            }
+        })
+    }
+
+    private fun doFinalVoidUpdate(txDocId: String) {
+        val txRef = db.collection("Transactions").document(txDocId)
+        txRef.get()
+            .addOnSuccessListener { document ->
+                if (!document.exists()) return@addOnSuccessListener
+                @Suppress("UNCHECKED_CAST")
+                val paymentsRaw = document.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                val updatedPayments = paymentsRaw.map { p ->
+                    val mutable = p.toMutableMap()
+                    mutable["status"] = "VOIDED"
+                    mutable
+                }
+                val amount = document.getLong("totalPaidInCents")?.let { it / 100.0 }
+                    ?: document.getDouble("totalPaid") ?: document.getDouble("amount") ?: 0.0
+                val orderId = document.getString("orderId") ?: ""
+                val batchId = document.getString("batchId") ?: ""
+
+                txRef.update("voided", true, "payments", updatedPayments)
+
+                if (orderId.isNotBlank()) {
+                    db.collection("Orders").document(orderId).update(
+                        mapOf(
+                            "status" to "VOIDED",
+                            "voidedAt" to Date(),
+                            "voidedBy" to currentEmployeeName
+                        )
+                    ).addOnFailureListener { e ->
+                        Log.e("TX_API", "Failed to update Order to VOIDED", e)
+                    }
+                }
+                if (batchId.isNotBlank()) {
+                    db.collection("Batches").document(batchId).update(
+                        mapOf(
+                            "totalSales" to FieldValue.increment(-amount),
+                            "netTotal" to FieldValue.increment(-amount),
+                            "transactionCount" to FieldValue.increment(-1)
+                        )
+                    ).addOnFailureListener { e ->
+                        Log.e("TX_API", "Failed to update Batch on void", e)
+                    }
+                }
+            }
     }
 
     // Card refund: send request to Devajoo and, on approval, store refund transaction
@@ -425,54 +715,6 @@ class TransactionActivity : AppCompatActivity() {
                             Toast.LENGTH_LONG
                         ).show()
                         return@runOnUiThread
-                    }
-
-                    // ================= VOID =================
-                    // referenceId = Firestore Transactions doc id; use it to get orderId and update Order to VOIDED
-                    if (type == "VOID" && referenceId != null) {
-
-                        val txRef = db.collection("Transactions").document(referenceId)
-                        txRef.get()
-                            .addOnSuccessListener { document ->
-                                if (!document.exists()) return@addOnSuccessListener
-                                val amount = document.getLong("totalPaidInCents")?.let { it / 100.0 }
-                                    ?: document.getDouble("totalPaid")
-                                    ?: document.getDouble("amount")
-                                    ?: 0.0
-                                val orderId = document.getString("orderId") ?: ""
-                                val batchId = document.getString("batchId") ?: ""
-
-                                // 1️⃣ mark transaction voided
-                                txRef.update("voided", true)
-
-                                // 2️⃣ update Order to VOIDED (use orderId from transaction doc so Order screen shows Voided)
-                                if (orderId.isNotBlank()) {
-                                    val orderRef = db.collection("Orders").document(orderId)
-                                    orderRef.update(
-                                        mapOf(
-                                            "status" to "VOIDED",
-                                            "voidedAt" to Date(),
-                                            "voidedBy" to currentEmployeeName
-                                        )
-                                    ).addOnFailureListener { e ->
-                                        android.util.Log.e("TX_API", "Failed to update Order to VOIDED", e)
-                                    }
-                                }
-
-                                // 3️⃣ update batch totals
-                                if (batchId.isNotBlank()) {
-                                    val batchRef = db.collection("Batches").document(batchId)
-                                    batchRef.update(
-                                        mapOf(
-                                            "totalSales" to FieldValue.increment(-amount),
-                                            "netTotal" to FieldValue.increment(-amount),
-                                            "transactionCount" to FieldValue.increment(-1)
-                                        )
-                                    ).addOnFailureListener { e ->
-                                        android.util.Log.e("TX_API", "Failed to update Batch on void", e)
-                                    }
-                                }
-                            }
                     }
 
                     // ================= REFUND (CARD) =================

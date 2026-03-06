@@ -1,5 +1,20 @@
 package com.ernesto.myapplication.data
 
+/** Single payment entry within a transaction (one element of the Firestore payments array). */
+data class TransactionPayment(
+    val paymentType: String = "",
+    val cardBrand: String = "",
+    val last4: String = "",
+    val entryType: String = "",
+    val amountInCents: Long = 0L,
+    /** Terminal/gateway reference for this payment; required for Card Void API. */
+    val referenceId: String = "",
+    val clientReferenceId: String = "",
+    val batchNumber: String = "",
+    val transactionNumber: String = "",
+    val paymentId: String = ""
+)
+
 data class Transaction(
     val id: String = "",
 
@@ -30,5 +45,8 @@ data class Transaction(
     val type: String = "SALE",
     val originalReferenceId: String = "",
 
-    val isMixed: Boolean = false
+    val isMixed: Boolean = false,
+
+    /** All payment methods for this transaction (from Firestore payments array). */
+    val payments: List<TransactionPayment> = emptyList()
 )

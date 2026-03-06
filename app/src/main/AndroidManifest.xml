@@ -25,6 +25,16 @@
             android:exported="false" />
 
         <activity
+            android:name=".ConfigurationActivity"
+            android:exported="false"
+            android:parentActivityName=".SideMenuActivity" />
+
+        <activity
+            android:name=".PaymentMethodsActivity"
+            android:exported="false"
+            android:parentActivityName=".ConfigurationActivity" />
+
+        <activity
             android:name=".LoginActivity"
             android:exported="true">
             <intent-filter>

@@ -63,6 +63,8 @@ class PaymentActivity : AppCompatActivity() {
         batchId = intent.getStringExtra("BATCH_ID")
         ensureBatchIdThenLoadBalance()
 
+        updateMixPaymentsVisibility()
+
         btnMixMode.setOnClickListener {
             isMixMode = !isMixMode
             btnMixMode.text =
@@ -84,6 +86,18 @@ class PaymentActivity : AppCompatActivity() {
             if (isMixMode) showAmountDialog("Cash")
             else processFullPayment("Cash")
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateMixPaymentsVisibility()
+    }
+
+    private fun updateMixPaymentsVisibility() {
+        btnMixMode.visibility = if (MixPaymentsConfig.isEnabled(this)) View.VISIBLE else View.GONE
+        btnCredit.visibility = if (PaymentMethodsConfig.isCreditEnabled(this)) View.VISIBLE else View.GONE
+        btnDebit.visibility = if (PaymentMethodsConfig.isDebitEnabled(this)) View.VISIBLE else View.GONE
+        btnCash.visibility = if (PaymentMethodsConfig.isCashEnabled(this)) View.VISIBLE else View.GONE
     }
 
     /**

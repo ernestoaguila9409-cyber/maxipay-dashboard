@@ -33,5 +33,12 @@ class SideMenuActivity : AppCompatActivity() {
             intent.putExtra("employeeName", intent.getStringExtra("employeeName"))
             startActivity(intent)
         }
+
+        val btnConfiguration = findViewById<Button>(R.id.btnConfiguration)
+        btnConfiguration.setOnClickListener {
+            val intent = Intent(this, ConfigurationActivity::class.java)
+            intent.putExtra("employeeName", intent.getStringExtra("employeeName"))
+            startActivity(intent)
+        }
     }
 }
