@@ -41,9 +41,12 @@ class OrdersActivity : AppCompatActivity() {
     // Selection mode
     private var selectionMode = false
 
+    private var currentEmployeeName: String = ""
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_orders)
+        currentEmployeeName = intent.getStringExtra("employeeName") ?: ""
 
         recyclerOrders = findViewById(R.id.recyclerOrders)
         btnMultiDelete = findViewById(R.id.btnMultiDelete)
@@ -60,6 +63,7 @@ class OrdersActivity : AppCompatActivity() {
                 } else {
                     val intent = Intent(this, OrderDetailActivity::class.java)
                     intent.putExtra("orderId", order.id)
+                    intent.putExtra("employeeName", currentEmployeeName)
                     startActivity(intent)
                 }
             },

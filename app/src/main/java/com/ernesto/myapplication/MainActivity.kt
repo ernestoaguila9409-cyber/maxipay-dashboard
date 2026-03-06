@@ -23,8 +23,17 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        val employeeName = intent.getStringExtra("employeeName") ?: ""
+        val employeeRole = intent.getStringExtra("employeeRole") ?: ""
+        if (employeeName.isNotBlank()) {
+            SessionEmployee.setEmployeeName(this, employeeName)
+        }
+
         findViewById<ImageButton>(R.id.btnHamburger).setOnClickListener {
-            startActivity(Intent(this, SideMenuActivity::class.java))
+            val intent = Intent(this, SideMenuActivity::class.java)
+            intent.putExtra("employeeName", employeeName)
+            intent.putExtra("employeeRole", employeeRole)
+            startActivity(intent)
         }
         findViewById<ImageButton>(R.id.btnModifiers).setOnClickListener {
             startActivity(Intent(this, GlobalModifierActivity::class.java))
@@ -35,9 +44,6 @@ class MainActivity : AppCompatActivity() {
             intent.putExtra("batchId", currentBatchId)
             startActivity(intent)
         }
-
-        val employeeName = intent.getStringExtra("employeeName") ?: ""
-        val employeeRole = intent.getStringExtra("employeeRole") ?: ""
 
         val txtLoggedUser = findViewById<TextView>(R.id.txtLoggedUser)
         txtLoggedUser.text = "Logged in as: $employeeName ($employeeRole)"

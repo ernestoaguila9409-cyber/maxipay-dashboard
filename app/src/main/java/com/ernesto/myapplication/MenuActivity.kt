@@ -682,6 +682,7 @@ class MenuActivity : AppCompatActivity() {
                             intent.flags =
                                 Intent.FLAG_ACTIVITY_CLEAR_TOP or
                                         Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            intent.putExtra("employeeName", employeeName)
 
                             startActivity(intent)
                             finish()

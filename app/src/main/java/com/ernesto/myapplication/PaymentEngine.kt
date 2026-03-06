@@ -81,12 +81,9 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                     )
                 )
 
-                transaction.update(
-                    orderRef,
-                    mapOf(
-                        "saleTransactionId" to saleRef.id
-                    )
-                )
+                val orderUpdates = mutableMapOf<String, Any>("saleTransactionId" to saleRef.id)
+                if (batchId.isNotBlank()) orderUpdates["batchId"] = batchId
+                transaction.update(orderRef, orderUpdates)
 
             } else {
 
@@ -101,14 +98,13 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                 )
             }
 
-            transaction.update(
-                orderRef,
-                mapOf(
-                    "totalPaidInCents" to newPaid,
-                    "remainingInCents" to newRemaining,
-                    "status" to if (newRemaining <= 0L) "CLOSED" else "OPEN"
-                )
+            val orderUpdates = mutableMapOf<String, Any>(
+                "totalPaidInCents" to newPaid,
+                "remainingInCents" to newRemaining,
+                "status" to if (newRemaining <= 0L) "CLOSED" else "OPEN"
             )
+            if (batchId.isNotBlank()) orderUpdates["batchId"] = batchId
+            transaction.update(orderRef, orderUpdates)
 
             newRemaining
 

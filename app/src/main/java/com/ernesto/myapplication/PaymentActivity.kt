@@ -61,7 +61,7 @@ class PaymentActivity : AppCompatActivity() {
 
         orderId = intent.getStringExtra("ORDER_ID")
         batchId = intent.getStringExtra("BATCH_ID")
-        loadRemainingBalance()
+        ensureBatchIdThenLoadBalance()
 
         btnMixMode.setOnClickListener {
             isMixMode = !isMixMode
@@ -86,6 +86,28 @@ class PaymentActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * If BATCH_ID was not passed in the intent, resolve the current open batch from Firestore
+     * so the order is updated with the correct batchId when a transaction is approved.
+     */
+    private fun ensureBatchIdThenLoadBalance() {
+        if (!batchId.isNullOrBlank()) {
+            loadRemainingBalance()
+            return
+        }
+        db.collection("Batches")
+            .whereEqualTo("closed", false)
+            .limit(1)
+            .get()
+            .addOnSuccessListener { snap ->
+                batchId = snap.documents.firstOrNull()?.id
+                loadRemainingBalance()
+            }
+            .addOnFailureListener {
+                loadRemainingBalance()
+            }
+    }
+
     private fun loadRemainingBalance() {
         val oid = orderId ?: return
 
@@ -105,6 +127,10 @@ class PaymentActivity : AppCompatActivity() {
     }
 
     private fun processFullPayment(paymentType: String) {
+        if (batchId.isNullOrBlank()) {
+            Toast.makeText(this, "Open a batch first", Toast.LENGTH_LONG).show()
+            return
+        }
         paymentAmount = remainingBalance
         showWaitingStatus()
 
@@ -280,11 +306,17 @@ class PaymentActivity : AppCompatActivity() {
     ) {
 
         val oid = orderId ?: return
+        val bid = batchId?.takeIf { it.isNotBlank() }
+        if (bid.isNullOrBlank()) {
+            Toast.makeText(this, "Open a batch first", Toast.LENGTH_LONG).show()
+            setButtonsEnabled(true)
+            return
+        }
         val amountInCents = (paymentAmount * 100).toLong()
 
         paymentEngine.processPayment(
             orderId = oid,
-            batchId = batchId ?: "",
+            batchId = bid,
             paymentType = paymentType,
             amountInCents = amountInCents,
             authCode = authCode,
@@ -322,11 +354,17 @@ class PaymentActivity : AppCompatActivity() {
     private fun completePayment(paymentType: String) {
 
         val oid = orderId ?: return
+        val bid = batchId?.takeIf { it.isNotBlank() }
+        if (bid.isNullOrBlank()) {
+            Toast.makeText(this, "Open a batch first", Toast.LENGTH_LONG).show()
+            setButtonsEnabled(true)
+            return
+        }
         val amountInCents = (paymentAmount * 100).toLong()
 
         paymentEngine.processPayment(
             orderId = oid,
-            batchId = batchId ?: "",
+            batchId = bid,
             paymentType = paymentType,
             amountInCents = amountInCents,
             onSuccess = { remainingInCents ->

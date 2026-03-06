@@ -176,28 +176,69 @@ class OrderDetailActivity : AppCompatActivity() {
                         } else {
                             btnRefund.visibility = View.GONE
                         }
-                        val batchId = currentBatchId ?: return@loadRefundHistory
-                        if (saleTransactionId == null) return@loadRefundHistory
-                        db.collection("Transactions").document(saleTransactionId).get()
-                            .addOnSuccessListener { txDoc ->
-                                val isVoided = txDoc.getBoolean("voided") ?: false
-                                if (!isVoided) {
-                                    db.collection("Batches").document(batchId).get()
-                                        .addOnSuccessListener { batchDoc ->
-                                            val batchClosed = batchDoc.getBoolean("closed") ?: true
-                                            btnVoid.visibility = if (!batchClosed) View.VISIBLE else View.GONE
-                                            if (!batchClosed) btnVoid.setOnClickListener { confirmVoid() }
-                                        }
-                                } else {
-                                    btnVoid.visibility = View.GONE
-                                }
-                            }
+                        resolveBatchAndShowVoid(saleTransactionId)
                     }
                 }
             }
     }
 
     private var refundHistoryLines: String = ""
+
+    /**
+     * For CLOSED orders: resolve batchId (from order or transaction), load Batch doc,
+     * then show VOID button only when batch.closed == false (transaction not settled).
+     */
+    private fun resolveBatchAndShowVoid(saleTransactionId: String?) {
+        val batchIdFromOrder = currentBatchId?.takeIf { it.isNotBlank() }
+        if (!batchIdFromOrder.isNullOrBlank()) {
+            loadBatchAndUpdateVoidButton(batchIdFromOrder)
+            return
+        }
+        if (saleTransactionId.isNullOrBlank()) {
+            btnVoid.visibility = View.GONE
+            return
+        }
+        db.collection("Transactions").document(saleTransactionId).get()
+            .addOnSuccessListener { txDoc ->
+                val batchId = txDoc.getString("batchId")?.takeIf { it.isNotBlank() }
+                if (!batchId.isNullOrBlank()) {
+                    loadBatchAndUpdateVoidButton(batchId)
+                } else {
+                    btnVoid.visibility = View.GONE
+                }
+            }
+            .addOnFailureListener { btnVoid.visibility = View.GONE }
+    }
+
+    private fun loadBatchAndUpdateVoidButton(batchId: String) {
+        db.collection("Batches").document(batchId).get()
+            .addOnSuccessListener { batchDoc ->
+                val batchClosed = batchDoc.getBoolean("closed") ?: true
+                if (!batchClosed) {
+                    btnVoid.visibility = View.VISIBLE
+                    btnVoid.setOnClickListener { confirmVoid() }
+                } else {
+                    btnVoid.visibility = View.GONE
+                }
+            }
+            .addOnFailureListener { btnVoid.visibility = View.GONE }
+    }
+
+    private fun getPaymentTypeFromTransaction(txDoc: DocumentSnapshot): String {
+        val payments = txDoc.get("payments") as? List<*> ?: emptyList<Any>()
+        val first = payments.firstOrNull() as? Map<*, *>
+        return (first?.get("paymentType")?.toString()?.takeIf { it.isNotBlank() }
+            ?: txDoc.getString("paymentType")?.takeIf { it.isNotBlank() }).orEmpty()
+    }
+
+    private fun getReferenceIdFromTransaction(txDoc: DocumentSnapshot): String {
+        val payments = txDoc.get("payments") as? List<*> ?: emptyList<Any>()
+        val first = payments.firstOrNull() as? Map<*, *>
+        return first?.get("referenceId")?.toString()?.takeIf { it.isNotBlank() }
+            ?: first?.get("terminalReference")?.toString()?.takeIf { it.isNotBlank() }
+            ?: txDoc.getString("referenceId")?.takeIf { it.isNotBlank() }
+            ?: ""
+    }
 
     private fun loadRefundHistory(saleTransactionId: String?, onLoaded: (totalRefundedCents: Long) -> Unit) {
         refundHistoryLines = ""
@@ -293,19 +334,25 @@ class OrderDetailActivity : AppCompatActivity() {
             .get()
             .addOnSuccessListener { orderDoc ->
 
-                val transactionId = orderDoc.getString("transactionId") ?: return@addOnSuccessListener
+                val transactionId = orderDoc.getString("saleTransactionId")
+                    ?: orderDoc.getString("transactionId")
+                    ?: return@addOnSuccessListener
 
                 db.collection("Transactions")
                     .document(transactionId)
                     .get()
                     .addOnSuccessListener { txDoc ->
-
-                        val referenceId = txDoc.getString("referenceId") ?: return@addOnSuccessListener
-                        val paymentType = txDoc.getString("paymentType") ?: "Credit"
-                        val amountInCents = txDoc.getLong("amountInCents") ?: 0L
+                        val referenceId = getReferenceIdFromTransaction(txDoc)
+                            .takeIf { it.isNotBlank() } ?: return@addOnSuccessListener
+                        val paymentType = getPaymentTypeFromTransaction(txDoc).ifBlank { "Credit" }
+                        val amountInCents = txDoc.getLong("totalPaidInCents") ?: 0L
                         val amount = amountInCents / 100.0
+                        val payments = txDoc.get("payments") as? List<*> ?: emptyList<Any>()
+                        val first = payments.firstOrNull() as? Map<*, *>
+                        val batchNumber = first?.get("batchNumber")?.toString() ?: ""
+                        val transactionNumber = first?.get("transactionNumber")?.toString() ?: ""
 
-                        callVoidApi(referenceId, paymentType, amount, transactionId)
+                        callVoidApi(referenceId, paymentType, amount, transactionId, batchNumber, transactionNumber)
                     }
             }
     }
@@ -314,7 +361,9 @@ class OrderDetailActivity : AppCompatActivity() {
         referenceId: String,
         paymentType: String,
         amount: Double,
-        transactionId: String
+        transactionId: String,
+        batchNumber: String = "",
+        transactionNumber: String = ""
     ) {
 
         val json = JSONObject().apply {
@@ -328,6 +377,12 @@ class OrderDetailActivity : AppCompatActivity() {
             put("CallbackInfo", JSONObject().apply { put("Url", "") })
             put("Tpn", "11881706541A")
             put("Authkey", "Qt9N7CxhDs")
+            if (batchNumber.isNotBlank()) {
+                put("BatchNumber", batchNumber.toIntOrNull() ?: batchNumber)
+            }
+            if (transactionNumber.isNotBlank()) {
+                put("TransactionNumber", transactionNumber.toIntOrNull() ?: transactionNumber)
+            }
         }
 
         val client = OkHttpClient.Builder()
@@ -385,8 +440,27 @@ class OrderDetailActivity : AppCompatActivity() {
             .document(orderId)
             .get()
             .addOnSuccessListener { orderDoc ->
+                var batchId = orderDoc.getString("batchId")?.takeIf { it.isNotBlank() }
+                if (batchId.isNullOrBlank()) {
+                    db.collection("Transactions").document(transactionId).get()
+                        .addOnSuccessListener { txDoc ->
+                            batchId = txDoc.getString("batchId")?.takeIf { it.isNotBlank() }
+                            if (!batchId.isNullOrBlank()) {
+                                runFinalizeVoidBatch(transactionId, orderDoc, batchId!!)
+                            } else {
+                                Toast.makeText(this, "Cannot void: batch not found", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        .addOnFailureListener {
+                            Toast.makeText(this, "Cannot void: ${it.message}", Toast.LENGTH_LONG).show()
+                        }
+                    return@addOnSuccessListener
+                }
+                runFinalizeVoidBatch(transactionId, orderDoc, batchId!!)
+            }
+    }
 
-                val batchId = orderDoc.getString("batchId") ?: return@addOnSuccessListener
+    private fun runFinalizeVoidBatch(transactionId: String, orderDoc: DocumentSnapshot, batchId: String) {
                 val amountInCents = orderDoc.getLong("totalInCents") ?: 0L
                 val amount = amountInCents / 100.0
 
@@ -398,7 +472,8 @@ class OrderDetailActivity : AppCompatActivity() {
 
                     batch.update(txRef, "voided", true)
 
-                    val voidedBy = intent.getStringExtra("employeeName") ?: ""
+                    val voidedBy = intent.getStringExtra("employeeName")?.takeIf { it.isNotBlank() }
+                        ?: SessionEmployee.getEmployeeName(this@OrderDetailActivity)
                     batch.update(orderRef, mapOf(
                         "status" to "VOIDED",
                         "voidedAt" to Date(),
@@ -415,7 +490,6 @@ class OrderDetailActivity : AppCompatActivity() {
                         Toast.makeText(this, "Sale Voided", Toast.LENGTH_LONG).show()
                         finish()
                     }
-            }
     }
 
     private fun confirmRefund() {
@@ -636,12 +710,13 @@ class OrderDetailActivity : AppCompatActivity() {
                 orderRef.get()
                     .addOnSuccessListener { orderDoc ->
                         if (!orderDoc.exists()) return@addOnSuccessListener
-                        val employeeName = orderDoc.getString("employeeName") ?: ""
+                        val employeeName = intent.getStringExtra("employeeName")?.takeIf { it.isNotBlank() }
+                            ?: SessionEmployee.getEmployeeName(this@OrderDetailActivity)
 
                         val newRefundTxRef = db.collection("Transactions").document()
                         val batchRef = db.collection("Batches").document(openBatchId)
 
-                        val refundDocData = mutableMapOf<String, Any>(
+                        val refundDocData = mapOf(
                             "orderId" to orderId,
                             "type" to "REFUND",
                             "amount" to (amountInCents / 100.0),
@@ -653,7 +728,6 @@ class OrderDetailActivity : AppCompatActivity() {
                             "settled" to false,
                             "refundedBy" to employeeName
                         )
-                        refundedItemName?.takeIf { it.isNotBlank() }?.let { refundDocData["refundedItemName"] = it }
                         db.collection("Transactions").document(newRefundTxRef.id).set(refundDocData)
                             .addOnSuccessListener {
                                 val totalInCents = orderDoc.getLong("totalInCents") ?: 0L

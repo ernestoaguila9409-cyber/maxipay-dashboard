@@ -73,6 +73,8 @@ class LoginActivity : AppCompatActivity() {
                     val name = employee.getString("name") ?: ""
                     val role = employee.getString("role") ?: ""
 
+                    SessionEmployee.setEmployeeName(this, name)
+
                     val intent = Intent(this, MainActivity::class.java)
                     intent.putExtra("employeeName", name)
                     intent.putExtra("employeeRole", role)

@@ -15,6 +15,8 @@ class SideMenuActivity : AppCompatActivity() {
         if (!orderIdFromDetail.isNullOrBlank()) {
             val i = Intent(this, MainActivity::class.java) // <-- this is your 2nd picture screen in most setups
             i.putExtra("ORDER_ID", orderIdFromDetail)
+            i.putExtra("employeeName", intent.getStringExtra("employeeName"))
+            i.putExtra("employeeRole", intent.getStringExtra("employeeRole"))
             // Optional: tell MainActivity we're editing an existing order
             i.putExtra("MODE", "EDIT_ORDER")
             startActivity(i)
@@ -27,7 +29,9 @@ class SideMenuActivity : AppCompatActivity() {
 
         val btnOrders = findViewById<Button>(R.id.btnOrders)
         btnOrders.setOnClickListener {
-            startActivity(Intent(this, OrdersActivity::class.java))
+            val intent = Intent(this, OrdersActivity::class.java)
+            intent.putExtra("employeeName", intent.getStringExtra("employeeName"))
+            startActivity(intent)
         }
     }
 }
