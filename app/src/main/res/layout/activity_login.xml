@@ -1,34 +1,134 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:gravity="center"
+    android:background="@drawable/bg_login_gradient"
+    android:gravity="center_horizontal"
     android:orientation="vertical"
-    android:padding="24dp">
+    android:padding="32dp">
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Enter PIN"
-        android:textSize="24sp"
+        android:layout_marginTop="48dp"
+        android:text="ENTER PASSCODE"
+        android:textColor="@android:color/white"
+        android:textSize="22sp"
         android:textStyle="bold"
-        android:layout_marginBottom="20dp"/>
+        android:letterSpacing="0.1" />
 
-    <EditText
-        android:id="@+id/etPin"
-        android:layout_width="200dp"
-        android:layout_height="wrap_content"
-        android:hint="PIN"
-        android:inputType="numberPassword"
-        android:maxLength="4"
-        android:gravity="center"/>
-
-    <Button
-        android:id="@+id/btnLogin"
+    <!-- 4 PIN dots -->
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Login"
-        android:layout_marginTop="16dp"/>
+        android:layout_marginTop="32dp"
+        android:orientation="horizontal"
+        android:gravity="center">
+
+        <ImageView
+            android:id="@+id/pinDot0"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginHorizontal="12dp"
+            android:background="@drawable/pin_dot_empty"
+            android:contentDescription="PIN digit 1" />
+
+        <ImageView
+            android:id="@+id/pinDot1"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginHorizontal="12dp"
+            android:background="@drawable/pin_dot_empty"
+            android:contentDescription="PIN digit 2" />
+
+        <ImageView
+            android:id="@+id/pinDot2"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginHorizontal="12dp"
+            android:background="@drawable/pin_dot_empty"
+            android:contentDescription="PIN digit 3" />
+
+        <ImageView
+            android:id="@+id/pinDot3"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginHorizontal="12dp"
+            android:background="@drawable/pin_dot_empty"
+            android:contentDescription="PIN digit 4" />
+    </LinearLayout>
+
+    <!-- Numeric keypad -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="48dp"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <Button android:id="@+id/key1" style="@style/PinKeyButton" android:text="1" />
+            <Button android:id="@+id/key2" style="@style/PinKeyButton" android:text="2" />
+            <Button android:id="@+id/key3" style="@style/PinKeyButton" android:text="3" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <Button android:id="@+id/key4" style="@style/PinKeyButton" android:text="4" />
+            <Button android:id="@+id/key5" style="@style/PinKeyButton" android:text="5" />
+            <Button android:id="@+id/key6" style="@style/PinKeyButton" android:text="6" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <Button android:id="@+id/key7" style="@style/PinKeyButton" android:text="7" />
+            <Button android:id="@+id/key8" style="@style/PinKeyButton" android:text="8" />
+            <Button android:id="@+id/key9" style="@style/PinKeyButton" android:text="9" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <Button
+                android:id="@+id/keyBack"
+                style="@style/PinKeyButton"
+                android:text="⌫"
+                android:visibility="visible" />
+            <Button android:id="@+id/key0" style="@style/PinKeyButton" android:text="0" />
+            <Button
+                android:id="@+id/keyPlaceholder"
+                style="@style/PinKeyButton"
+                android:visibility="invisible"
+                android:text="" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/btnCancel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:background="@android:color/transparent"
+        android:text="Cancel"
+        android:textColor="#81D4FA"
+        android:textSize="16sp" />
 
 </LinearLayout>

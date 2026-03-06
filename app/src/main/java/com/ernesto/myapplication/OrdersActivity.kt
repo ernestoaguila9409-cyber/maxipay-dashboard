@@ -147,6 +147,7 @@ class OrdersActivity : AppCompatActivity() {
 
                 // 🔥 Your Firestore stores total as Double (ex: 0.04)
                 val totalCents = doc.getLong("totalInCents") ?: 0L
+                val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
 
                 val employee = doc.getString("employeeName") ?: "—"
                 // For VOIDED orders show who performed the void (like refund shows refundedBy)
@@ -163,6 +164,7 @@ class OrdersActivity : AppCompatActivity() {
                         id = id,
                         status = status,
                         totalCents = totalCents,
+                        totalRefundedInCents = totalRefundedInCents,
                         employeeName = displayEmployee,
                         createdAt = createdAt
                     )

@@ -57,6 +57,7 @@ class OrdersAdapter(
         private val txtStatus: TextView = itemView.findViewById(R.id.txtStatus)
         private val txtTotal: TextView = itemView.findViewById(R.id.txtTotal)
         private val txtEmployee: TextView = itemView.findViewById(R.id.txtEmployee)
+        private val txtRefund: TextView = itemView.findViewById(R.id.txtRefund)
         private val txtTime: TextView = itemView.findViewById(R.id.txtTime)
         private val imgSelected: ImageView = itemView.findViewById(R.id.imgSelected)
 
@@ -88,7 +89,15 @@ class OrdersAdapter(
                 }
             }
 
-            txtTotal.text = MoneyUtils.centsToDisplay(order.totalCents)
+            // Show net total (original minus refunds); show refund line when there's a partial/full refund
+            val hasRefund = order.totalRefundedInCents > 0L
+            txtTotal.text = MoneyUtils.centsToDisplay(order.netCents)
+            if (hasRefund) {
+                txtRefund.visibility = View.VISIBLE
+                txtRefund.text = "Refund -${MoneyUtils.centsToDisplay(order.totalRefundedInCents)}"
+            } else {
+                txtRefund.visibility = View.GONE
+            }
             txtEmployee.text = order.employeeName
             txtTime.text = formatTime(order.createdAt.toDate().time)
 

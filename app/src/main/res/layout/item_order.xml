@@ -57,6 +57,15 @@
                 android:layout_marginTop="6dp"/>
 
             <TextView
+                android:id="@+id/txtRefund"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textSize="13sp"
+                android:textColor="#1565C0"
+                android:visibility="gone"/>
+
+            <TextView
                 android:id="@+id/txtTime"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

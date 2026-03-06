@@ -9,7 +9,8 @@ import com.google.firebase.firestore.DocumentSnapshot
 import java.util.Locale
 import com.ernesto.myapplication.engine.MoneyUtils
 class OrderItemsAdapter(
-    private val items: List<DocumentSnapshot>
+    private val items: List<DocumentSnapshot>,
+    private val onItemClick: ((DocumentSnapshot) -> Unit)? = null
 ) : RecyclerView.Adapter<OrderItemsAdapter.ItemVH>() {
 
     class ItemVH(view: View) : RecyclerView.ViewHolder(view) {
@@ -30,6 +31,10 @@ class OrderItemsAdapter(
 
     override fun onBindViewHolder(holder: ItemVH, position: Int) {
         val doc = items[position]
+
+        holder.itemView.setOnClickListener {
+            onItemClick?.invoke(doc)
+        }
 
         val name = doc.getString("name")
             ?: doc.getString("itemName")
