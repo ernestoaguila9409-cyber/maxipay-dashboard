@@ -681,10 +681,11 @@ class OrderDetailActivity : AppCompatActivity() {
         finishAfter: Boolean = true,
         refundedItemName: String? = null
     ) {
-
+        // Debit refunds use the same flow as credit (Credit Return); do not send Debit Return (Z8)
+        val requestPaymentType = if (paymentType.equals("Debit", true)) "Credit" else paymentType
         val json = JSONObject().apply {
             put("Amount", amount)
-            put("PaymentType", paymentType)
+            put("PaymentType", requestPaymentType)
             put("ReferenceId", referenceId)
             put("PrintReceipt", "No")
             put("GetReceipt", "No")

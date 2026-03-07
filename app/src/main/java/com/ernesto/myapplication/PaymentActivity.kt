@@ -1,5 +1,6 @@
 package com.ernesto.myapplication
 
+import android.content.Intent
 import android.os.*
 import android.view.View
 import android.widget.*
@@ -24,6 +25,7 @@ class PaymentActivity : AppCompatActivity() {
     private var isMixMode = false
 
     private lateinit var btnMixMode: Button
+    private lateinit var btnSplitPayments: Button
     private lateinit var btnCredit: Button
     private lateinit var btnDebit: Button
     private lateinit var btnCash: Button
@@ -53,6 +55,7 @@ class PaymentActivity : AppCompatActivity() {
         btnDebit = findViewById(R.id.btnDebit)
         btnCash = findViewById(R.id.btnCash)
         btnMixMode = findViewById(R.id.btnMixMode)
+        btnSplitPayments = findViewById(R.id.btnSplitPayments)
 
         statusContainer = findViewById(R.id.statusContainer)
         progressBar = findViewById(R.id.progressBar)
@@ -85,6 +88,13 @@ class PaymentActivity : AppCompatActivity() {
         btnCash.setOnClickListener {
             if (isMixMode) showAmountDialog("Cash")
             else processFullPayment("Cash")
+        }
+
+        btnSplitPayments.setOnClickListener {
+            val intent = Intent(this, SplitPaymentActivity::class.java)
+            intent.putExtra("ORDER_ID", orderId)
+            intent.putExtra("REMAINING", remainingBalance)
+            startActivity(intent)
         }
     }
 

@@ -669,23 +669,12 @@ class MenuActivity : AppCompatActivity() {
             .get()
             .addOnSuccessListener { docs ->
                 if (docs.isEmpty) {
-
                     db.collection("Orders")
                         .document(orderId)
                         .delete()
                         .addOnSuccessListener {
-
                             currentOrderId = null
-
-                            // 🔥 Go directly to Orders list
-                            val intent = Intent(this, OrdersActivity::class.java)
-                            intent.flags =
-                                Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                            intent.putExtra("employeeName", employeeName)
-
-                            startActivity(intent)
-                            finish()
+                            // Stay on Take Payment screen with empty cart (no navigation)
                         }
                 }
             }

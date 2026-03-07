@@ -72,6 +72,10 @@ class OrdersActivity : AppCompatActivity() {
         adapter = OrdersAdapter(
             onOrderClick = { order ->
                 if (selectionMode) {
+                    if (order.status != "OPEN") {
+                        Toast.makeText(this, "Only open orders can be deleted.", Toast.LENGTH_SHORT).show()
+                        return@OrdersAdapter
+                    }
                     adapter.toggleSelected(order.id)
                     updateDeleteButtonState()
                 } else {
@@ -84,7 +88,7 @@ class OrdersActivity : AppCompatActivity() {
             onOrderLongPress = { order ->
                 if (!selectionMode) {
                     selectionMode = true
-                    adapter.toggleSelected(order.id)
+                    if (order.status == "OPEN") adapter.toggleSelected(order.id)
                     updateDeleteButtonState()
                     true
                 } else {
@@ -99,7 +103,6 @@ class OrdersActivity : AppCompatActivity() {
         btnMultiDelete.setOnClickListener {
             if (!selectionMode) {
                 selectionMode = true
-
                 updateDeleteButtonState()
             } else {
                 val selected = adapter.getSelectedIds()
@@ -108,7 +111,19 @@ class OrdersActivity : AppCompatActivity() {
                     adapter.clearSelection()
                     updateDeleteButtonState()
                 } else {
-                    deleteSelectedOrders(selected)
+                    // Only open orders can be deleted
+                    val openOrderIds = orders.filter { it.status == "OPEN" }.map { it.id }.toSet()
+                    val toDelete = selected.intersect(openOrderIds)
+                    val skipped = selected.size - toDelete.size
+                    if (toDelete.isEmpty()) {
+                        Toast.makeText(this, "Only open orders can be deleted. Select open orders.", Toast.LENGTH_SHORT).show()
+                        return@setOnClickListener
+                    }
+                    if (skipped > 0) {
+                        adapter.clearSelection()
+                        toDelete.forEach { adapter.toggleSelected(it) }
+                    }
+                    deleteSelectedOrders(toDelete)
                 }
             }
         }
@@ -301,6 +316,7 @@ class OrdersActivity : AppCompatActivity() {
     }
 
     private fun deleteSelectedOrders(selectedIds: Set<String>) {
+        // selectedIds are already restricted to OPEN orders by caller
         lifecycleScope.launch {
             try {
                 btnMultiDelete.isEnabled = false
@@ -311,7 +327,7 @@ class OrdersActivity : AppCompatActivity() {
                     }
                 }
 
-                Toast.makeText(this@OrdersActivity, "Deleted ${selectedIds.size} orders", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@OrdersActivity, "Deleted ${selectedIds.size} order(s)", Toast.LENGTH_SHORT).show()
 
                 selectionMode = false
                 adapter.clearSelection()

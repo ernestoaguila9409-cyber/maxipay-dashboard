@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Filter orders"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:paddingBottom="16dp"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Status"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:paddingBottom="8dp"/>
+
+    <RadioGroup
+        android:id="@+id/radioGroupStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <RadioButton
+            android:id="@+id/radioAll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="All"/>
+
+        <RadioButton
+            android:id="@+id/radioOpen"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Open"/>
+
+        <RadioButton
+            android:id="@+id/radioClosed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Closed"/>
+
+        <RadioButton
+            android:id="@+id/radioVoided"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Voided"/>
+
+        <RadioButton
+            android:id="@+id/radioRefundedFully"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Refunded fully"/>
+
+        <RadioButton
+            android:id="@+id/radioPartiallyRefunded"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Partially refunded"/>
+    </RadioGroup>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Date range"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:paddingTop="20dp"
+        android:paddingBottom="8dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/txtDateFrom"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:padding="12dp"
+            android:background="@android:drawable/btn_dropdown"
+            android:text="From: Any"
+            android:textSize="14sp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=" – "
+            android:paddingHorizontal="8dp"/>
+
+        <TextView
+            android:id="@+id/txtDateTo"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:padding="12dp"
+            android:background="@android:drawable/btn_dropdown"
+            android:text="To: Any"
+            android:textSize="14sp"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="end"
+        android:paddingTop="24dp">
+
+        <Button
+            android:id="@+id/btnFilterClear"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Clear"/>
+
+        <Button
+            android:id="@+id/btnFilterApply"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Apply"
+            android:layout_marginStart="12dp"/>
+    </LinearLayout>
+</LinearLayout>

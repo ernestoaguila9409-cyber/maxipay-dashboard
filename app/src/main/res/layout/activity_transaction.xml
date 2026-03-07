@@ -24,14 +24,6 @@
             android:textSize="18sp"
             android:textStyle="bold"/>
 
-        <Button
-            android:id="@+id/btnConfiguration"
-            style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Configuration"
-            android:layout_marginEnd="8dp"/>
-
         <ImageButton
             android:id="@+id/btnFilter"
             android:layout_width="40dp"

@@ -55,6 +55,10 @@
         <activity
             android:name=".PaymentActivity"
             android:exported="false" />
+        <activity
+            android:name=".SplitPaymentActivity"
+            android:exported="false"
+            android:parentActivityName=".PaymentActivity" />
 
         <activity
             android:name=".EmployeesActivity"

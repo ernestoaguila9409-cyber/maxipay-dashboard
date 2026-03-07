@@ -29,7 +29,6 @@ class TransactionActivity : AppCompatActivity() {
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var btnFilter: ImageButton
-    private lateinit var btnConfiguration: android.widget.Button
     private lateinit var adapter: TransactionAdapter
     private val transactionList = mutableListOf<SaleWithRefunds>()
     private val allSalesWithRefunds = mutableListOf<SaleWithRefunds>()
@@ -46,7 +45,6 @@ class TransactionActivity : AppCompatActivity() {
 
         recyclerView = findViewById(R.id.recyclerTransactions)
         btnFilter = findViewById(R.id.btnFilter)
-        btnConfiguration = findViewById(R.id.btnConfiguration)
         recyclerView.layoutManager = LinearLayoutManager(this)
 
         adapter = TransactionAdapter(transactionList) { transaction ->
@@ -623,9 +621,11 @@ class TransactionActivity : AppCompatActivity() {
             return
         }
 
+        // Debit refunds use the same flow as credit (Credit Return); do not send Debit Return (Z8)
+        val returnPaymentType = if (transaction.paymentType.equals("Debit", true)) "Credit" else transaction.paymentType
         val json = org.json.JSONObject().apply {
             put("Amount", amount)
-            put("PaymentType", transaction.paymentType)
+            put("PaymentType", returnPaymentType)
             put("ReferenceId", refForGateway)
             put("PrintReceipt", "No")
             put("GetReceipt", "No")
