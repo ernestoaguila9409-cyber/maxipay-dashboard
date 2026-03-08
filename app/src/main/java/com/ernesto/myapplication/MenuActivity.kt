@@ -45,6 +45,7 @@ class MenuActivity : AppCompatActivity() {
     private var totalAmount = 0.0
     private var enabledTaxes = mutableListOf<Triple<String, String, Double>>()
     private var employeeName: String = ""
+    private var orderType: String = ""
     private var currentOrderId: String? = null
 
     private val paymentLauncher =
@@ -73,6 +74,7 @@ class MenuActivity : AppCompatActivity() {
         setContentView(R.layout.activity_menu)
         orderEngine = OrderEngine(db)
         employeeName = intent.getStringExtra("employeeName") ?: ""
+        orderType = intent.getStringExtra("orderType") ?: ""
 
         categoryContainer = findViewById(R.id.categoryContainer)
         itemContainer = findViewById(R.id.itemContainer)
@@ -515,6 +517,7 @@ class MenuActivity : AppCompatActivity() {
         orderEngine.ensureOrder(
             currentOrderId = currentOrderId,
             employeeName = employeeName,
+            orderType = orderType,
             onSuccess = { oid ->
 
                 currentOrderId = oid

@@ -17,6 +17,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
     fun ensureOrder(
         currentOrderId: String?,
         employeeName: String,
+        orderType: String = "",
         onSuccess: (orderId: String) -> Unit,
         onFailure: (Exception) -> Unit
     ) {
@@ -32,7 +33,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
             "updatedAt" to Date(),
             "totalInCents" to 0L,
             "totalPaidInCents" to 0L,
-            "remainingInCents" to 0L
+            "remainingInCents" to 0L,
+            "orderType" to orderType
         )
 
         db.collection("Orders")

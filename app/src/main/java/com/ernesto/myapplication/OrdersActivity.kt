@@ -14,7 +14,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -31,9 +31,8 @@ class OrdersActivity : AppCompatActivity() {
     private lateinit var btnMultiDelete: ImageButton
     private lateinit var btnFilter: ImageButton
 
-    private lateinit var chipAll: Chip
-    private lateinit var chipOpen: Chip
-    private lateinit var chipClosed: Chip
+    private lateinit var chipGroupStatus: ChipGroup
+    private lateinit var chipGroupOrderType: ChipGroup
 
     private val db: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
 
@@ -48,6 +47,7 @@ class OrdersActivity : AppCompatActivity() {
 
     // Advanced filter (from filter dialog)
     private var statusFilter: String = "ALL" // ALL, OPEN, CLOSED, VOIDED, REFUNDED_FULLY, PARTIALLY_REFUNDED
+    private var orderTypeFilter: String = "ALL" // ALL, DINE_IN, TO_GO
     private var dateFromMillis: Long? = null
     private var dateToMillis: Long? = null
 
@@ -70,9 +70,8 @@ class OrdersActivity : AppCompatActivity() {
         btnMultiDelete = findViewById(R.id.btnMultiDelete)
         btnFilter = findViewById(R.id.btnFilter)
 
-        chipAll = findViewById(R.id.chipAll)
-        chipOpen = findViewById(R.id.chipOpen)
-        chipClosed = findViewById(R.id.chipClosed)
+        chipGroupStatus = findViewById(R.id.chipGroupFilter)
+        chipGroupOrderType = findViewById(R.id.chipGroupOrderType)
 
         adapter = OrdersAdapter(
             onOrderClick = { order ->
@@ -133,9 +132,30 @@ class OrdersActivity : AppCompatActivity() {
             }
         }
 
-        chipAll.setOnClickListener { setFilter("ALL") }
-        chipOpen.setOnClickListener { setFilter("OPEN") }
-        chipClosed.setOnClickListener { setFilter("CLOSED") }
+        chipGroupStatus.setOnCheckedStateChangeListener { _, checkedIds ->
+            val checkedId = checkedIds.firstOrNull()
+            statusFilter = when (checkedId) {
+                R.id.chipOpen -> "OPEN"
+                R.id.chipClosed -> "NOT_OPEN"
+                else -> "ALL"
+            }
+            filter = when (checkedId) {
+                R.id.chipOpen -> "OPEN"
+                R.id.chipClosed -> "CLOSED"
+                else -> "ALL"
+            }
+            applyAndRefresh()
+        }
+
+        chipGroupOrderType.setOnCheckedStateChangeListener { _, checkedIds ->
+            val checkedId = checkedIds.firstOrNull()
+            orderTypeFilter = when (checkedId) {
+                R.id.chipDineIn -> "DINE_IN"
+                R.id.chipToGo -> "TO_GO"
+                else -> "ALL"
+            }
+            applyAndRefresh()
+        }
 
         btnFilter.setOnClickListener { showFilterDialog() }
     }
@@ -151,12 +171,6 @@ class OrdersActivity : AppCompatActivity() {
         listener = null
     }
 
-    private fun setFilter(newFilter: String) {
-        filter = newFilter
-        statusFilter = newFilter
-        startListening()
-    }
-
     private fun startListening() {
         listener?.remove()
         listener = null
@@ -167,18 +181,6 @@ class OrdersActivity : AppCompatActivity() {
             query = query.whereEqualTo("batchId", filterBatchId)
         }
         query = query.orderBy("createdAt", Query.Direction.DESCENDING)
-
-        when (statusFilter) {
-            "OPEN" -> query = query.whereEqualTo("status", "OPEN")
-            "CLOSED", "VOIDED", "REFUNDED_FULLY", "PARTIALLY_REFUNDED" -> {
-                when (statusFilter) {
-                    "VOIDED" -> query = query.whereEqualTo("status", "VOIDED")
-                    "PARTIALLY_REFUNDED" -> query = query.whereEqualTo("status", "CLOSED")
-                    else -> query = query.whereIn("status", listOf("CLOSED", "VOIDED", "REFUNDED"))
-                }
-            }
-            else -> { /* ALL: no status filter */ }
-        }
 
         if (dateFromMillis != null) {
             query = query.whereGreaterThanOrEqualTo("createdAt", Timestamp(java.util.Date(dateFromMillis!!)))
@@ -207,6 +209,7 @@ class OrdersActivity : AppCompatActivity() {
                     employee
                 }
                 val createdAt = doc.getTimestamp("createdAt") ?: Timestamp.now()
+                val orderType = doc.getString("orderType") ?: ""
                 allOrders.add(
                     OrderRow(
                         id = id,
@@ -214,13 +217,14 @@ class OrdersActivity : AppCompatActivity() {
                         totalCents = totalCents,
                         totalRefundedInCents = totalRefundedInCents,
                         employeeName = displayEmployee,
-                        createdAt = createdAt
+                        createdAt = createdAt,
+                        orderType = orderType
                     )
                 )
             }
 
             orders.clear()
-            orders.addAll(applyStatusFilter(allOrders))
+            orders.addAll(applyFilters(allOrders))
             adapter.submit(orders)
             updateDeleteButtonState()
 
@@ -234,9 +238,24 @@ class OrdersActivity : AppCompatActivity() {
         }
     }
 
+    private fun applyAndRefresh() {
+        orders.clear()
+        orders.addAll(applyFilters(allOrders))
+        adapter.submit(orders)
+    }
+
+    private fun applyFilters(list: List<OrderRow>): List<OrderRow> {
+        var result = applyStatusFilter(list)
+        if (orderTypeFilter != "ALL") {
+            result = result.filter { it.orderType == orderTypeFilter }
+        }
+        return result
+    }
+
     private fun applyStatusFilter(list: List<OrderRow>): List<OrderRow> {
         return when (statusFilter) {
             "OPEN" -> list.filter { it.status == "OPEN" }
+            "NOT_OPEN" -> list.filter { it.status != "OPEN" }
             "CLOSED" -> list.filter { it.status == "CLOSED" && it.totalRefundedInCents == 0L }
             "VOIDED" -> list.filter { it.status == "VOIDED" }
             "REFUNDED_FULLY" -> list.filter { it.status == "REFUNDED" || it.totalRefundedInCents >= it.totalCents }
@@ -296,15 +315,16 @@ class OrdersActivity : AppCompatActivity() {
             .create()
 
         view.findViewById<android.widget.Button>(R.id.btnFilterClear).setOnClickListener {
+            val datesChanged = dateFromMillis != null || dateToMillis != null
             statusFilter = "ALL"
+            orderTypeFilter = "ALL"
             dateFromMillis = null
             dateToMillis = null
             filter = "ALL"
-            chipAll.isChecked = true
-            chipOpen.isChecked = false
-            chipClosed.isChecked = false
+            chipGroupStatus.check(R.id.chipAll)
+            chipGroupOrderType.clearCheck()
             dialog.dismiss()
-            startListening()
+            if (datesChanged) startListening() else applyAndRefresh()
         }
         view.findViewById<android.widget.Button>(R.id.btnFilterApply).setOnClickListener {
             val checkedId = view.findViewById<android.widget.RadioGroup>(R.id.radioGroupStatus).checkedRadioButtonId
@@ -317,9 +337,11 @@ class OrdersActivity : AppCompatActivity() {
                 else -> "ALL"
             }
             filter = if (statusFilter in listOf("ALL", "OPEN", "CLOSED")) statusFilter else "ALL"
-            chipAll.isChecked = (filter == "ALL")
-            chipOpen.isChecked = (filter == "OPEN")
-            chipClosed.isChecked = (filter == "CLOSED")
+            when (filter) {
+                "OPEN" -> chipGroupStatus.check(R.id.chipOpen)
+                "CLOSED" -> chipGroupStatus.check(R.id.chipClosed)
+                else -> chipGroupStatus.check(R.id.chipAll)
+            }
             dialog.dismiss()
             startListening()
         }

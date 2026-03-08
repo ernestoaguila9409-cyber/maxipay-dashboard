@@ -23,10 +23,12 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            app:singleSelection="true">
+            app:singleSelection="true"
+            app:selectionRequired="true">
 
             <com.google.android.material.chip.Chip
                 android:id="@+id/chipAll"
+                style="@style/Widget.MaterialComponents.Chip.Choice"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="All"
@@ -35,6 +37,7 @@
 
             <com.google.android.material.chip.Chip
                 android:id="@+id/chipOpen"
+                style="@style/Widget.MaterialComponents.Chip.Choice"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Open"
@@ -42,6 +45,7 @@
 
             <com.google.android.material.chip.Chip
                 android:id="@+id/chipClosed"
+                style="@style/Widget.MaterialComponents.Chip.Choice"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Closed"
@@ -66,6 +70,35 @@
             android:background="@android:color/transparent"
             android:contentDescription="Delete Orders"/>
     </LinearLayout>
+
+    <!-- Order type filter row -->
+    <com.google.android.material.chip.ChipGroup
+        android:id="@+id/chipGroupOrderType"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="8dp"
+        app:singleSelection="true"
+        app:selectionRequired="false">
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chipDineIn"
+            style="@style/Widget.MaterialComponents.Chip.Choice"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Dine In"
+            app:checkedIconVisible="false"/>
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chipToGo"
+            style="@style/Widget.MaterialComponents.Chip.Choice"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="To-Go"
+            app:checkedIconVisible="false"/>
+
+    </com.google.android.material.chip.ChipGroup>
 
     <!-- Orders List -->
     <androidx.recyclerview.widget.RecyclerView

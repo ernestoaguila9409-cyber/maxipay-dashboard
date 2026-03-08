@@ -1,5 +1,6 @@
 package com.ernesto.myapplication
 
+import android.graphics.drawable.GradientDrawable
 import android.text.format.DateFormat
 import android.view.LayoutInflater
 import android.view.View
@@ -57,6 +58,7 @@ class OrdersAdapter(
         private val txtStatus: TextView = itemView.findViewById(R.id.txtStatus)
         private val txtTotal: TextView = itemView.findViewById(R.id.txtTotal)
         private val txtEmployee: TextView = itemView.findViewById(R.id.txtEmployee)
+        private val txtOrderType: TextView = itemView.findViewById(R.id.txtOrderType)
         private val txtRefund: TextView = itemView.findViewById(R.id.txtRefund)
         private val txtTime: TextView = itemView.findViewById(R.id.txtTime)
         private val imgSelected: ImageView = itemView.findViewById(R.id.imgSelected)
@@ -99,6 +101,22 @@ class OrdersAdapter(
                 txtRefund.visibility = View.GONE
             }
             txtEmployee.text = order.employeeName
+
+            if (order.orderType.isNotBlank()) {
+                txtOrderType.visibility = View.VISIBLE
+                val isDineIn = order.orderType == "DINE_IN"
+                txtOrderType.text = if (isDineIn) "DINE IN" else "TO-GO"
+                val bgColor = if (isDineIn) 0xFF1B5E20.toInt() else 0xFFE65100.toInt()
+                val badge = GradientDrawable().apply {
+                    setColor(bgColor)
+                    cornerRadius = 8f
+                }
+                txtOrderType.background = badge
+                txtOrderType.setTextColor(0xFFFFFFFF.toInt())
+            } else {
+                txtOrderType.visibility = View.GONE
+            }
+
             txtTime.text = formatTime(order.createdAt.toDate().time)
 
             imgSelected.visibility = if (isSelected) View.VISIBLE else View.GONE

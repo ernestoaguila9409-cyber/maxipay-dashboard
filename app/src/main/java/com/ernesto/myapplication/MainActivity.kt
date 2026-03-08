@@ -54,11 +54,19 @@ class MainActivity : AppCompatActivity() {
 
         ensureOpenBatch()
 
-        // TAKE PAYMENT → OPEN MENU
-        findViewById<Button>(R.id.btnTakePayment).setOnClickListener {
+        findViewById<android.view.View>(R.id.btnDineIn).setOnClickListener {
             val intent = Intent(this, MenuActivity::class.java)
             intent.putExtra("batchId", currentBatchId)
-            intent.putExtra("employeeName", employeeName)  // ✅ ADD THIS
+            intent.putExtra("employeeName", employeeName)
+            intent.putExtra("orderType", "DINE_IN")
+            startActivity(intent)
+        }
+
+        findViewById<android.view.View>(R.id.btnToGo).setOnClickListener {
+            val intent = Intent(this, MenuActivity::class.java)
+            intent.putExtra("batchId", currentBatchId)
+            intent.putExtra("employeeName", employeeName)
+            intent.putExtra("orderType", "TO_GO")
             startActivity(intent)
         }
 

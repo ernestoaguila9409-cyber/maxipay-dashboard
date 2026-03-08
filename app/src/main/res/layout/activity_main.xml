@@ -32,12 +32,74 @@
             android:text="Logged in as:"
             android:layout_marginBottom="8dp"/>
 
-        <Button
-            android:id="@+id/btnTakePayment"
-            android:layout_width="220dp"
+        <LinearLayout
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="TAKE PAYMENT"
-            android:layout_marginBottom="16dp"/>
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="16dp">
+
+            <LinearLayout
+                android:id="@+id/btnDineIn"
+                android:layout_width="105dp"
+                android:layout_height="105dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/bg_order_type_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:layout_marginEnd="10dp"
+                android:padding="12dp">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_dine_in"
+                    android:contentDescription="Dine In"
+                    app:tint="@android:color/white"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="DINE IN"
+                    android:textColor="@android:color/white"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="6dp"/>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/btnToGo"
+                android:layout_width="105dp"
+                android:layout_height="105dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/bg_order_type_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:layout_marginStart="10dp"
+                android:padding="12dp">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_to_go"
+                    android:contentDescription="To Go"
+                    app:tint="@android:color/white"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="TO-GO"
+                    android:textColor="@android:color/white"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="6dp"/>
+            </LinearLayout>
+
+        </LinearLayout>
 
         <Button
             android:id="@+id/btnTransactions"
