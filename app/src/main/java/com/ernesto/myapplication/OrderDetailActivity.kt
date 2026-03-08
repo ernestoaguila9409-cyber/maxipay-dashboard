@@ -20,10 +20,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import com.ernesto.myapplication.data.TransactionPayment
 import org.json.JSONObject
 import java.io.IOException
+import android.widget.LinearLayout
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.Locale
+import com.ernesto.myapplication.engine.MoneyUtils
 
 class OrderDetailActivity : AppCompatActivity() {
 
@@ -37,6 +39,10 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var bottomActions: View
     private lateinit var btnVoid: MaterialButton
     private lateinit var btnRefund: MaterialButton
+    private lateinit var orderSummaryContainer: LinearLayout
+    private lateinit var txtSubtotal: TextView
+    private lateinit var txtOrderTotal: TextView
+    private lateinit var taxBreakdownContainer: LinearLayout
 
     private lateinit var adapter: OrderItemsAdapter
     private val itemDocs = mutableListOf<DocumentSnapshot>()
@@ -64,6 +70,10 @@ class OrderDetailActivity : AppCompatActivity() {
         bottomActions = findViewById(R.id.bottomActions)
         btnVoid = findViewById(R.id.btnVoid)
         btnRefund = findViewById(R.id.btnRefund)
+        orderSummaryContainer = findViewById(R.id.orderSummaryContainer)
+        txtSubtotal = findViewById(R.id.txtSubtotal)
+        txtOrderTotal = findViewById(R.id.txtOrderTotal)
+        taxBreakdownContainer = findViewById(R.id.taxBreakdownContainer)
 
         recycler.layoutManager = LinearLayoutManager(this)
         adapter = OrderItemsAdapter(itemDocs) { itemDoc -> onOrderItemClick(itemDoc) }
@@ -134,6 +144,8 @@ class OrderDetailActivity : AppCompatActivity() {
 
                 currentBatchId = doc.getString("batchId")
 
+                displayOrderSummary(doc)
+
                 if (status == "OPEN") {
                     btnCheckout.visibility = View.VISIBLE
                     btnCheckout.setOnClickListener {
@@ -178,6 +190,57 @@ class OrderDetailActivity : AppCompatActivity() {
                     }
                 }
             }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun displayOrderSummary(orderDoc: DocumentSnapshot) {
+        val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+        val taxBreakdown = orderDoc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
+
+        if (totalInCents <= 0L) {
+            orderSummaryContainer.visibility = View.GONE
+            return
+        }
+
+        var taxTotalCents = 0L
+        taxBreakdownContainer.removeAllViews()
+
+        for (entry in taxBreakdown) {
+            val name = entry["name"]?.toString() ?: "Tax"
+            val amountCents = (entry["amountInCents"] as? Number)?.toLong() ?: 0L
+            taxTotalCents += amountCents
+
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = 4 }
+            }
+            val labelView = TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                text = name
+                textSize = 14f
+                setTextColor(0xFF555555.toInt())
+            }
+            val amountView = TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                text = MoneyUtils.centsToDisplay(amountCents)
+                textSize = 14f
+                setTextColor(0xFF555555.toInt())
+            }
+            row.addView(labelView)
+            row.addView(amountView)
+            taxBreakdownContainer.addView(row)
+        }
+
+        val subtotalCents = totalInCents - taxTotalCents
+        txtSubtotal.text = MoneyUtils.centsToDisplay(subtotalCents)
+        txtOrderTotal.text = MoneyUtils.centsToDisplay(totalInCents)
+        orderSummaryContainer.visibility = View.VISIBLE
     }
 
     private var refundHistoryLines: String = ""
@@ -637,27 +700,66 @@ class OrderDetailActivity : AppCompatActivity() {
                                 Toast.makeText(this, "This item has already been refunded.", Toast.LENGTH_SHORT).show()
                                 return@addOnSuccessListener
                             }
-                            proceedWithItemRefundDialog(orderDoc, itemDoc, lineKey)
+                            val refundedNameAmountKeys = refundSnap.documents
+                                .filter { it.getString("refundedLineKey")?.isNotBlank() != true }
+                                .mapNotNull { ref ->
+                                    val refName = ref.getString("refundedItemName")?.trim()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                                    val refAmount = ref.getLong("amountInCents") ?: return@mapNotNull null
+                                    "$refName|$refAmount"
+                                }.toSet()
+                            proceedWithItemRefundDialog(orderDoc, itemDoc, lineKey, refundedLineKeys, refundedNameAmountKeys)
                         }
                 } else {
-                    proceedWithItemRefundDialog(orderDoc, itemDoc, lineKey)
+                    proceedWithItemRefundDialog(orderDoc, itemDoc, lineKey, emptySet(), emptySet())
                 }
             }
     }
 
-    private fun proceedWithItemRefundDialog(orderDoc: DocumentSnapshot, itemDoc: DocumentSnapshot, lineKey: String) {
+    private fun proceedWithItemRefundDialog(
+        orderDoc: DocumentSnapshot,
+        itemDoc: DocumentSnapshot,
+        lineKey: String,
+        refundedLineKeys: Set<String>,
+        refundedNameAmountKeys: Set<String>
+    ) {
         val lineTotalInCents = itemDoc.getLong("lineTotalInCents") ?: 0L
         if (lineTotalInCents <= 0L) {
             Toast.makeText(this, "This item has no amount to refund.", Toast.LENGTH_SHORT).show()
             return
         }
         val itemName = itemDoc.getString("name") ?: itemDoc.getString("itemName") ?: "Item"
-        val amountStr = String.format(Locale.US, "%.2f", lineTotalInCents / 100.0)
+
+        val otherUnrefundedItems = itemDocs.filter { doc ->
+            if (doc.id == lineKey) return@filter false
+            if (doc.id in refundedLineKeys) return@filter false
+            val docName = (doc.getString("name") ?: doc.getString("itemName") ?: "").trim()
+            val docLineCents = doc.getLong("lineTotalInCents") ?: 0L
+            if ("$docName|$docLineCents" in refundedNameAmountKeys) return@filter false
+            true
+        }
+
+        val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+        val totalRefundedInCents = orderDoc.getLong("totalRefundedInCents") ?: 0L
+        val remainingBalance = totalInCents - totalRefundedInCents
+
+        val refundAmount = if (otherUnrefundedItems.isEmpty() && remainingBalance > lineTotalInCents) {
+            remainingBalance
+        } else {
+            lineTotalInCents
+        }
+
+        val amountStr = String.format(Locale.US, "%.2f", refundAmount / 100.0)
+        val message = if (refundAmount > lineTotalInCents) {
+            "Refund \"$itemName\" for \$$amountStr? (includes tax/fees)"
+        } else {
+            "Refund \"$itemName\" for \$$amountStr?"
+        }
+
         AlertDialog.Builder(this)
             .setTitle("Refund item")
-            .setMessage("Refund \"$itemName\" for \$$amountStr?")
+            .setMessage(message)
             .setPositiveButton("Refund") { _, _ ->
-                executeRefundForAmount(lineTotalInCents, finishAfter = false, refundedItemName = itemName, refundedLineKey = lineKey)
+                executeRefundForAmount(refundAmount, finishAfter = false, refundedItemName = itemName, refundedLineKey = lineKey)
             }
             .setNegativeButton("Cancel", null)
             .show()

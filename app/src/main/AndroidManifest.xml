@@ -40,6 +40,11 @@
             android:parentActivityName=".ConfigurationActivity" />
 
         <activity
+            android:name=".PaymentTerminalActivity"
+            android:exported="false"
+            android:parentActivityName=".ConfigurationActivity" />
+
+        <activity
             android:name=".AddTaxActivity"
             android:exported="false"
             android:parentActivityName=".TaxesAndFeesActivity" />
