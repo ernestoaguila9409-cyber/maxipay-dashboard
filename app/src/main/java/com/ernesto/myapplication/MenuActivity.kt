@@ -24,7 +24,8 @@ data class CartItem(
     var quantity: Int,
     val basePrice: Double,
     val stock: Long,
-    val modifiers: List<Pair<String, Double>>
+    val modifiers: List<Pair<String, Double>>,
+    val guestNumber: Int = 0
 )
 
 class MenuActivity : AppCompatActivity() {
@@ -41,12 +42,18 @@ class MenuActivity : AppCompatActivity() {
     private lateinit var cartTaxSummary: LinearLayout
     private lateinit var txtTotal: TextView
     private lateinit var btnCheckout: Button
+    private lateinit var guestScrollView: HorizontalScrollView
+    private lateinit var guestTabContainer: LinearLayout
+    private var selectedGuest: Int = 0
 
     private var totalAmount = 0.0
     private var enabledTaxes = mutableListOf<Triple<String, String, Double>>()
     private var employeeName: String = ""
     private var orderType: String = ""
     private var currentOrderId: String? = null
+    private var tableId: String? = null
+    private var tableName: String? = null
+    private var guestCount: Int = 0
 
     private val paymentLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -75,6 +82,9 @@ class MenuActivity : AppCompatActivity() {
         orderEngine = OrderEngine(db)
         employeeName = intent.getStringExtra("employeeName") ?: ""
         orderType = intent.getStringExtra("orderType") ?: ""
+        tableId = intent.getStringExtra("tableId")
+        tableName = intent.getStringExtra("tableName")
+        guestCount = intent.getIntExtra("guestCount", 0)
 
         categoryContainer = findViewById(R.id.categoryContainer)
         itemContainer = findViewById(R.id.itemContainer)
@@ -85,6 +95,21 @@ class MenuActivity : AppCompatActivity() {
 
         // ✅ IMPORTANT: if we came from OrderDetail "Checkout", we are editing an existing order
         currentOrderId = intent.getStringExtra("ORDER_ID")
+
+        guestScrollView = findViewById(R.id.guestScrollView)
+        guestTabContainer = findViewById(R.id.guestTabContainer)
+
+        val txtTableHeader = findViewById<TextView>(R.id.txtTableHeader)
+        if (!tableName.isNullOrBlank()) {
+            val guestLabel = if (guestCount > 0) " • $guestCount guest${if (guestCount > 1) "s" else ""}" else ""
+            txtTableHeader.text = "$tableName$guestLabel"
+            txtTableHeader.visibility = View.VISIBLE
+        }
+
+        if (guestCount > 0) {
+            selectedGuest = 1
+            buildGuestTabs()
+        }
 
         loadCategories()
         loadEnabledTaxes()
@@ -178,6 +203,7 @@ class MenuActivity : AppCompatActivity() {
 
                             val modifiers = parseModifiers(doc.get("modifiers"))
                             val stock = 0L
+                            val guest = (doc.getLong("guestNumber") ?: 0L).toInt()
 
                             cartMap[lineKey] = CartItem(
                                 itemId = itemId,
@@ -185,7 +211,8 @@ class MenuActivity : AppCompatActivity() {
                                 quantity = qty,
                                 basePrice = basePrice,
                                 stock = stock,
-                                modifiers = modifiers
+                                modifiers = modifiers,
+                                guestNumber = guest
                             )
                         }
 
@@ -206,6 +233,54 @@ class MenuActivity : AppCompatActivity() {
             out.add(name to price)
         }
         return out
+    }
+
+    // ----------------------------
+    // GUEST TABS
+    // ----------------------------
+
+    private fun buildGuestTabs() {
+        guestTabContainer.removeAllViews()
+        guestScrollView.visibility = View.VISIBLE
+
+        for (g in 1..guestCount) {
+            val btn = Button(this)
+            btn.text = "Guest $g"
+            btn.textSize = 12f
+            btn.isAllCaps = false
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            params.setMargins(0, 0, 8, 0)
+            btn.layoutParams = params
+
+            styleGuestTab(btn, g == selectedGuest)
+
+            btn.setOnClickListener {
+                selectedGuest = g
+                refreshGuestTabStyles()
+                refreshCart()
+            }
+            guestTabContainer.addView(btn)
+        }
+    }
+
+    private fun styleGuestTab(btn: Button, isSelected: Boolean) {
+        if (isSelected) {
+            btn.setBackgroundColor(Color.parseColor("#6A4FB3"))
+            btn.setTextColor(Color.WHITE)
+        } else {
+            btn.setBackgroundColor(Color.parseColor("#E0E0E0"))
+            btn.setTextColor(Color.parseColor("#333333"))
+        }
+    }
+
+    private fun refreshGuestTabStyles() {
+        for (i in 0 until guestTabContainer.childCount) {
+            val btn = guestTabContainer.getChildAt(i) as? Button ?: continue
+            styleGuestTab(btn, i + 1 == selectedGuest)
+        }
     }
 
     // ----------------------------
@@ -518,11 +593,15 @@ class MenuActivity : AppCompatActivity() {
             currentOrderId = currentOrderId,
             employeeName = employeeName,
             orderType = orderType,
+            tableId = tableId,
+            tableName = tableName,
+            guestCount = if (guestCount > 0) guestCount else null,
             onSuccess = { oid ->
 
                 currentOrderId = oid
 
-                val lineKey = cartKey(itemId, modifiers)
+                val guest = selectedGuest
+                val lineKey = cartKey(itemId, modifiers, guest)
                 val existingItem = cartMap[lineKey]
                 val currentQtyInCart = existingItem?.quantity ?: 0
 
@@ -546,7 +625,8 @@ class MenuActivity : AppCompatActivity() {
                         quantity = 1,
                         basePrice = basePrice,
                         stock = stock,
-                        modifiers = modifiers
+                        modifiers = modifiers,
+                        guestNumber = guest
                     )
                 }
 
@@ -562,7 +642,8 @@ class MenuActivity : AppCompatActivity() {
                         name = cartItem.name,
                         quantity = cartItem.quantity,
                         basePrice = cartItem.basePrice,
-                        modifiers = cartItem.modifiers
+                        modifiers = cartItem.modifiers,
+                        guestNumber = cartItem.guestNumber
                     ),
                     onSuccess = {},
                     onFailure = {
@@ -580,122 +661,127 @@ class MenuActivity : AppCompatActivity() {
         cartContainer.removeAllViews()
         totalAmount = 0.0
 
-        for ((lineKey, item) in cartMap) {
+        val entries = cartMap.entries.toList()
+        val grouped = if (guestCount > 0) {
+            entries.groupBy { it.value.guestNumber }
+        } else {
+            mapOf(0 to entries)
+        }
 
-            val itemLayout = LinearLayout(this)
-            itemLayout.orientation = LinearLayout.VERTICAL
-            itemLayout.setPadding(0, 0, 0, 24)
+        val sortedKeys = grouped.keys.sorted()
 
-            val nameText = TextView(this)
-            nameText.text = "${item.name} (Qty: ${item.quantity})"
-            nameText.textSize = 16f
-            nameText.setTypeface(null, android.graphics.Typeface.BOLD)
-            itemLayout.addView(nameText)
+        for (gKey in sortedKeys) {
+            val items = grouped[gKey] ?: continue
 
-            val modifiersTotal = item.modifiers.sumOf { it.second }
-
-            for (modifier in item.modifiers) {
-                val row = LinearLayout(this)
-                row.orientation = LinearLayout.HORIZONTAL
-
-                val nameView = TextView(this)
-                nameView.text = "   • ${modifier.first}"
-                nameView.setTextColor(Color.parseColor("#2E7D32"))
-                nameView.layoutParams = LinearLayout.LayoutParams(
-                    0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    1f
-                )
-
-                val priceView = TextView(this)
-                priceView.text = "+${MoneyUtils.centsToDisplay((modifier.second * 100).toLong())}"
-                priceView.setTextColor(Color.parseColor("#2E7D32"))
-
-                row.addView(nameView)
-                row.addView(priceView)
-                itemLayout.addView(row)
+            if (guestCount > 0 && gKey > 0) {
+                val guestHeader = TextView(this)
+                guestHeader.text = "— Guest $gKey —"
+                guestHeader.textSize = 14f
+                guestHeader.setTypeface(null, Typeface.BOLD)
+                guestHeader.setTextColor(Color.parseColor("#6A4FB3"))
+                guestHeader.setPadding(0, 16, 0, 8)
+                cartContainer.addView(guestHeader)
             }
 
-            val unitPrice = item.basePrice + modifiersTotal
-            val lineTotal = unitPrice * item.quantity
+            for ((lineKey, item) in items) {
+                val itemLayout = LinearLayout(this)
+                itemLayout.orientation = LinearLayout.VERTICAL
+                itemLayout.setPadding(0, 0, 0, 24)
 
-            val subtotalText = TextView(this)
-            subtotalText.text = "Line Total: ${MoneyUtils.centsToDisplay((lineTotal * 100).toLong())}"
-            subtotalText.setTypeface(null, android.graphics.Typeface.BOLD)
-            itemLayout.addView(subtotalText)
+                val nameText = TextView(this)
+                nameText.text = "${item.name} (Qty: ${item.quantity})"
+                nameText.textSize = 16f
+                nameText.setTypeface(null, Typeface.BOLD)
+                itemLayout.addView(nameText)
 
-            // 🔥 TAP TO INCREASE QUANTITY
-            itemLayout.setOnClickListener {
+                val modifiersTotal = item.modifiers.sumOf { it.second }
 
-                val currentStock = item.stock
-                val currentQty = item.quantity
+                for (modifier in item.modifiers) {
+                    val row = LinearLayout(this)
+                    row.orientation = LinearLayout.HORIZONTAL
 
-                if (currentStock > 0 && currentQty + 1 > currentStock) {
-                    Toast.makeText(
-                        this,
-                        "Only $currentStock in stock",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    return@setOnClickListener
+                    val nameView = TextView(this)
+                    nameView.text = "   • ${modifier.first}"
+                    nameView.setTextColor(Color.parseColor("#2E7D32"))
+                    nameView.layoutParams = LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                    )
+
+                    val priceView = TextView(this)
+                    priceView.text = "+${MoneyUtils.centsToDisplay((modifier.second * 100).toLong())}"
+                    priceView.setTextColor(Color.parseColor("#2E7D32"))
+
+                    row.addView(nameView)
+                    row.addView(priceView)
+                    itemLayout.addView(row)
                 }
 
-                item.quantity += 1
-                cartMap[lineKey] = item
+                val unitPrice = item.basePrice + modifiersTotal
+                val lineTotal = unitPrice * item.quantity
 
-                refreshCart()
+                val subtotalText = TextView(this)
+                subtotalText.text = "Line Total: ${MoneyUtils.centsToDisplay((lineTotal * 100).toLong())}"
+                subtotalText.setTypeface(null, Typeface.BOLD)
+                itemLayout.addView(subtotalText)
 
-                val oid = currentOrderId ?: return@setOnClickListener
+                itemLayout.setOnClickListener {
+                    val currentStock = item.stock
+                    val currentQty = item.quantity
 
-                orderEngine.upsertLineItem(
-                    orderId = oid,
-                    lineKey = lineKey,
-                    input = OrderEngine.LineItemInput(
-                        itemId = item.itemId,
-                        name = item.name,
-                        quantity = item.quantity,
-                        basePrice = item.basePrice,
-                        modifiers = item.modifiers
-                    ),
-                    onSuccess = {},
-                    onFailure = {
-                        Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+                    if (currentStock > 0 && currentQty + 1 > currentStock) {
+                        Toast.makeText(this, "Only $currentStock in stock", Toast.LENGTH_SHORT).show()
+                        return@setOnClickListener
                     }
-                )
+
+                    item.quantity += 1
+                    cartMap[lineKey] = item
+                    refreshCart()
+
+                    val oid = currentOrderId ?: return@setOnClickListener
+                    orderEngine.upsertLineItem(
+                        orderId = oid,
+                        lineKey = lineKey,
+                        input = OrderEngine.LineItemInput(
+                            itemId = item.itemId,
+                            name = item.name,
+                            quantity = item.quantity,
+                            basePrice = item.basePrice,
+                            modifiers = item.modifiers,
+                            guestNumber = item.guestNumber
+                        ),
+                        onSuccess = {},
+                        onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
+                    )
+                }
+
+                itemLayout.setOnLongClickListener {
+                    AlertDialog.Builder(this)
+                        .setTitle("Remove Item")
+                        .setMessage("Remove ${item.name} from cart?")
+                        .setPositiveButton("Yes") { _, _ ->
+                            cartMap.remove(lineKey)
+                            refreshCart()
+
+                            val oid = currentOrderId ?: return@setPositiveButton
+                            orderEngine.deleteLineItem(
+                                orderId = oid,
+                                lineKey = lineKey,
+                                onSuccess = {
+                                    if (cartMap.isEmpty()) deleteOrderIfEmpty()
+                                },
+                                onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
+                            )
+                        }
+                        .setNegativeButton("No", null)
+                        .show()
+                    true
+                }
+
+                cartContainer.addView(itemLayout)
+                totalAmount += lineTotal
             }
-
-            // 🔥 LONG PRESS TO REMOVE
-            itemLayout.setOnLongClickListener {
-                AlertDialog.Builder(this)
-                    .setTitle("Remove Item")
-                    .setMessage("Remove ${item.name} from cart?")
-                    .setPositiveButton("Yes") { _, _ ->
-                        cartMap.remove(lineKey)
-                        refreshCart()
-
-                        val oid = currentOrderId ?: return@setPositiveButton
-
-                        orderEngine.deleteLineItem(
-                            orderId = oid,
-                            lineKey = lineKey,
-                            onSuccess = {
-
-                                if (cartMap.isEmpty()) {
-                                    deleteOrderIfEmpty()
-                                }
-
-                            },
-                            onFailure = {
-                                Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
-                            }
-                        )
-                    }
-                    .setNegativeButton("No", null)
-                    .show()
-                true
-            }
-
-            cartContainer.addView(itemLayout)
-            totalAmount += lineTotal
         }
 
         val subtotal = totalAmount
@@ -723,10 +809,11 @@ class MenuActivity : AppCompatActivity() {
     // ----------------------------
     // FIRESTORE ORDER / ITEMS
     // ----------------------------
-    private fun cartKey(itemId: String, modifiers: List<Pair<String, Double>>): String {
+    private fun cartKey(itemId: String, modifiers: List<Pair<String, Double>>, guest: Int = 0): String {
         val sorted = modifiers.sortedBy { it.first + "|" + it.second }
         val modsKey = sorted.joinToString("|") { "${it.first}:${it.second}" }
-        return "${itemId}__${modsKey}"
+        val guestPart = if (guest > 0) "__G${guest}" else ""
+        return "${itemId}__${modsKey}${guestPart}"
     }
 
     // ----------------------------

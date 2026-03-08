@@ -10,7 +10,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
         val name: String,
         val quantity: Int,
         val basePrice: Double,
-        val modifiers: List<Pair<String, Double>>
+        val modifiers: List<Pair<String, Double>>,
+        val guestNumber: Int = 0
     )
 
     /** Create an order if orderId is null; otherwise keep existing orderId */
@@ -18,6 +19,9 @@ class OrderEngine(private val db: FirebaseFirestore) {
         currentOrderId: String?,
         employeeName: String,
         orderType: String = "",
+        tableId: String? = null,
+        tableName: String? = null,
+        guestCount: Int? = null,
         onSuccess: (orderId: String) -> Unit,
         onFailure: (Exception) -> Unit
     ) {
@@ -26,7 +30,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
             return
         }
 
-        val orderMap = hashMapOf(
+        val orderMap = hashMapOf<String, Any>(
             "employeeName" to employeeName,
             "status" to "OPEN",
             "createdAt" to Date(),
@@ -36,6 +40,10 @@ class OrderEngine(private val db: FirebaseFirestore) {
             "remainingInCents" to 0L,
             "orderType" to orderType
         )
+
+        if (!tableId.isNullOrBlank()) orderMap["tableId"] = tableId
+        if (!tableName.isNullOrBlank()) orderMap["tableName"] = tableName
+        if (guestCount != null && guestCount > 0) orderMap["guestCount"] = guestCount
 
         db.collection("Orders")
             .add(orderMap)
@@ -60,7 +68,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
 
         val lineTotalInCents = unitPriceInCents * input.quantity
 
-        val itemMap = hashMapOf(
+        val itemMap = hashMapOf<String, Any>(
             "itemId" to input.itemId,
             "name" to input.name,
             "quantity" to input.quantity,
@@ -68,9 +76,10 @@ class OrderEngine(private val db: FirebaseFirestore) {
             "modifiersTotalInCents" to modifiersTotalInCents,
             "unitPriceInCents" to unitPriceInCents,
             "lineTotalInCents" to lineTotalInCents,
-            "modifiers" to input.modifiers,   // ⭐ ADD THIS LINE
+            "modifiers" to input.modifiers,
             "updatedAt" to Date()
         )
+        if (input.guestNumber > 0) itemMap["guestNumber"] = input.guestNumber
 
         val orderRef = db.collection("Orders").document(orderId)
 

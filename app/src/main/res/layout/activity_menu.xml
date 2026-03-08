@@ -50,6 +50,32 @@
         android:elevation="2dp">
 
         <TextView
+            android:id="@+id/txtTableHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:textColor="#6A4FB3"
+            android:textStyle="bold"
+            android:visibility="gone"
+            android:paddingBottom="4dp"/>
+
+        <HorizontalScrollView
+            android:id="@+id/guestScrollView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:visibility="gone"
+            android:paddingBottom="6dp">
+
+            <LinearLayout
+                android:id="@+id/guestTabContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"/>
+
+        </HorizontalScrollView>
+
+        <TextView
             android:text="Cart"
             android:textSize="18sp"
             android:textStyle="bold"

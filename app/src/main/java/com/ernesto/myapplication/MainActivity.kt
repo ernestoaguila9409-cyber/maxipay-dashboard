@@ -55,10 +55,9 @@ class MainActivity : AppCompatActivity() {
         ensureOpenBatch()
 
         findViewById<android.view.View>(R.id.btnDineIn).setOnClickListener {
-            val intent = Intent(this, MenuActivity::class.java)
+            val intent = Intent(this, TableSelectionActivity::class.java)
             intent.putExtra("batchId", currentBatchId)
             intent.putExtra("employeeName", employeeName)
-            intent.putExtra("orderType", "DINE_IN")
             startActivity(intent)
         }
 
