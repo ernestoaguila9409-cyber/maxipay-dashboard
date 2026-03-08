@@ -1,24 +1,55 @@
 package com.ernesto.myapplication
 
+import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.card.MaterialCardView
 import com.google.firebase.firestore.DocumentSnapshot
 import java.util.Locale
 import com.ernesto.myapplication.engine.MoneyUtils
+
 class OrderItemsAdapter(
     private val items: List<DocumentSnapshot>,
     private val onItemClick: ((DocumentSnapshot) -> Unit)? = null
 ) : RecyclerView.Adapter<OrderItemsAdapter.ItemVH>() {
+
+    private var refundedLineKeys: Set<String> = emptySet()
+    private var refundedNameAmountKeys: Set<String> = emptySet()
+    private var refundedLineKeyToEmployee: Map<String, String> = emptyMap()
+    private var refundedNameAmountToEmployee: Map<String, String> = emptyMap()
+    private var refundedLineKeyToDate: Map<String, String> = emptyMap()
+    private var refundedNameAmountToDate: Map<String, String> = emptyMap()
+
+    fun setRefundedKeys(
+        lineKeys: Set<String>,
+        nameAmountKeys: Set<String>,
+        lineKeyToEmployee: Map<String, String> = emptyMap(),
+        nameAmountToEmployee: Map<String, String> = emptyMap(),
+        lineKeyToDate: Map<String, String> = emptyMap(),
+        nameAmountToDate: Map<String, String> = emptyMap()
+    ) {
+        refundedLineKeys = lineKeys
+        refundedNameAmountKeys = nameAmountKeys
+        refundedLineKeyToEmployee = lineKeyToEmployee
+        refundedNameAmountToEmployee = nameAmountToEmployee
+        refundedLineKeyToDate = lineKeyToDate
+        refundedNameAmountToDate = nameAmountToDate
+        notifyDataSetChanged()
+    }
 
     class ItemVH(view: View) : RecyclerView.ViewHolder(view) {
         val nameQty: TextView = view.findViewById(R.id.txtItemNameQty)
         val base: TextView = view.findViewById(R.id.txtItemBase)
         val modifiers: TextView = view.findViewById(R.id.txtItemModifiers)
         val lineTotal: TextView = view.findViewById(R.id.txtItemLineTotal)
-        val payments: TextView = view.findViewById(R.id.txtItemPayments) // 🔥 NEW
+        val payments: TextView = view.findViewById(R.id.txtItemPayments)
+        val card: MaterialCardView = view as MaterialCardView
+        val refundedByRow: View = view.findViewById(R.id.refundedByRow)
+        val refundedBy: TextView = view.findViewById(R.id.txtRefundedBy)
+        val refundedDate: TextView = view.findViewById(R.id.txtRefundedDate)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ItemVH {
@@ -49,6 +80,25 @@ class OrderItemsAdapter(
 
         val lineInCents =
             doc.getLong("lineTotalInCents") ?: 0L
+
+        val lineKey = doc.id
+        val nameAmountKey = "$name|$lineInCents"
+        val isRefunded = lineKey in refundedLineKeys || nameAmountKey in refundedNameAmountKeys
+        val refundedByEmployee = refundedLineKeyToEmployee[lineKey] ?: refundedNameAmountToEmployee[nameAmountKey]
+
+        holder.card.setCardBackgroundColor(
+            if (isRefunded) Color.parseColor("#BBDEFB") else Color.WHITE
+        )
+        val refundedDateStr = refundedLineKeyToDate[lineKey] ?: refundedNameAmountToDate[nameAmountKey]
+        if (isRefunded && (!refundedByEmployee.isNullOrBlank() || !refundedDateStr.isNullOrBlank())) {
+            holder.refundedByRow.visibility = View.VISIBLE
+            holder.refundedBy.text = if (!refundedByEmployee.isNullOrBlank()) "Refunded by: $refundedByEmployee" else ""
+            holder.refundedBy.visibility = if (refundedByEmployee.isNullOrBlank()) View.GONE else View.VISIBLE
+            holder.refundedDate.text = refundedDateStr ?: ""
+            holder.refundedDate.visibility = if (refundedDateStr.isNullOrBlank()) View.GONE else View.VISIBLE
+        } else {
+            holder.refundedByRow.visibility = View.GONE
+        }
 
         holder.nameQty.text = "$name (Qty: $qty)"
 

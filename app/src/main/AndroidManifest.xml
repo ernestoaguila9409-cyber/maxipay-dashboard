@@ -35,6 +35,16 @@
             android:parentActivityName=".ConfigurationActivity" />
 
         <activity
+            android:name=".TaxesAndFeesActivity"
+            android:exported="false"
+            android:parentActivityName=".ConfigurationActivity" />
+
+        <activity
+            android:name=".AddTaxActivity"
+            android:exported="false"
+            android:parentActivityName=".TaxesAndFeesActivity" />
+
+        <activity
             android:name=".LoginActivity"
             android:exported="true">
             <intent-filter>

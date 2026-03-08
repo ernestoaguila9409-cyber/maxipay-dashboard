@@ -41,14 +41,16 @@ class TransactionActivity : AppCompatActivity() {
     private var last4Filter: String? = null // last 4 digits of card to filter by, null = any
     private var filterBatchId: String? = null // when set, show only transactions in this (open) batch
     private var currentTransactionNoBatch: Boolean = false // true when "Current Transaction" but no open batch → show empty
+    private var showUnsettledAndTodayRefunds: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_transaction)
 
         val currentTransactionView = intent.getBooleanExtra("CURRENT_TRANSACTION", false)
+        showUnsettledAndTodayRefunds = intent.getBooleanExtra("SHOW_UNSETTLED_AND_TODAY_REFUNDS", false)
         filterBatchId = intent.getStringExtra("BATCH_ID")?.takeIf { it.isNotBlank() }
-        currentTransactionNoBatch = currentTransactionView && filterBatchId == null
+        currentTransactionNoBatch = currentTransactionView && filterBatchId == null && !showUnsettledAndTodayRefunds
 
         recyclerView = findViewById(R.id.recyclerTransactions)
         val txtTitle = findViewById<TextView>(R.id.txtTitle)
@@ -82,10 +84,31 @@ class TransactionActivity : AppCompatActivity() {
                 transactionList.clear()
                 val allTransactions = mutableListOf<Transaction>()
 
+                val startOfToday = if (showUnsettledAndTodayRefunds) {
+                    val cal = Calendar.getInstance()
+                    cal.set(Calendar.HOUR_OF_DAY, 0)
+                    cal.set(Calendar.MINUTE, 0)
+                    cal.set(Calendar.SECOND, 0)
+                    cal.set(Calendar.MILLISECOND, 0)
+                    cal.time
+                } else null
+
                 snapshots.forEach { doc ->
 
                     if (currentTransactionNoBatch) return@forEach
-                    if (filterBatchId != null) {
+
+                    if (showUnsettledAndTodayRefunds) {
+                        val voided = doc.getBoolean("voided") ?: false
+                        if (voided) return@forEach
+                        val settled = doc.getBoolean("settled") ?: false
+                        val docType = doc.getString("type") ?: "SALE"
+                        if (docType == "SALE" && settled) return@forEach
+                        if (docType == "REFUND") {
+                            val ts = doc.getTimestamp("createdAt")?.toDate()
+                                ?: doc.getTimestamp("timestamp")?.toDate()
+                            if (ts == null || ts.before(startOfToday)) return@forEach
+                        }
+                    } else if (filterBatchId != null) {
                         val docBatchId = doc.getString("batchId")?.takeIf { it.isNotBlank() }
                         if (docBatchId != filterBatchId) return@forEach
                     }
@@ -122,10 +145,10 @@ class TransactionActivity : AppCompatActivity() {
                     }
                     val firstPayment = payments.firstOrNull()
 
-                    val paymentType = firstPayment?.paymentType ?: ""
-                    val cardBrand = firstPayment?.cardBrand ?: ""
-                    val last4 = firstPayment?.last4 ?: ""
-                    val entryType = firstPayment?.entryType ?: ""
+                    val paymentType = firstPayment?.paymentType ?: doc.getString("paymentType") ?: ""
+                    val cardBrand = firstPayment?.cardBrand ?: doc.getString("cardBrand") ?: ""
+                    val last4 = firstPayment?.last4 ?: doc.getString("last4") ?: ""
+                    val entryType = firstPayment?.entryType ?: doc.getString("entryType") ?: ""
                     // Dejavoo sale response fields for Void: referenceId, batchNumber, transactionNumber (from first payment)
                     val firstRaw = paymentsRaw.firstOrNull()
                     val gatewayRef = firstRaw?.get("referenceId")?.toString()
@@ -158,6 +181,7 @@ class TransactionActivity : AppCompatActivity() {
                         entryType = entryType,
                         voided = doc.getBoolean("voided") ?: false,
                         settled = doc.getBoolean("settled") ?: false,
+                        batchId = doc.getString("batchId") ?: "",
                         type = type,
                         originalReferenceId = doc.getString("originalReferenceId") ?: "",
                         isMixed = isMixed,
@@ -174,10 +198,13 @@ class TransactionActivity : AppCompatActivity() {
                 val refunds = allTransactions.filter { it.type == "REFUND" }
 
                 allSalesWithRefunds.clear()
+                val attachedRefundIds = mutableSetOf<String>()
                 sales.forEach { sale ->
                     val relatedRefunds =
                         if (sale.referenceId.isBlank()) emptyList()
                         else refunds.filter { it.originalReferenceId == sale.referenceId }
+
+                    relatedRefunds.forEach { attachedRefundIds.add(it.referenceId) }
 
                     allSalesWithRefunds.add(
                         SaleWithRefunds(
@@ -187,11 +214,22 @@ class TransactionActivity : AppCompatActivity() {
                     )
                 }
 
+                // Orphan refunds (parent sale was filtered out, e.g. settled)
+                // shown as standalone entries so they appear in "Current Transaction"
+                if (showUnsettledAndTodayRefunds) {
+                    refunds.filter { it.referenceId !in attachedRefundIds }.forEach { orphan ->
+                        allSalesWithRefunds.add(
+                            SaleWithRefunds(sale = orphan, refunds = emptyList())
+                        )
+                    }
+                    allSalesWithRefunds.sortByDescending { it.sale.date }
+                }
+
                 transactionList.clear()
                 transactionList.addAll(applyTransactionFilter(allSalesWithRefunds))
                 adapter.notifyDataSetChanged()
 
-                if ((currentTransactionNoBatch || filterBatchId != null) && transactionList.isEmpty()) {
+                if ((currentTransactionNoBatch || (filterBatchId != null && !showUnsettledAndTodayRefunds)) && transactionList.isEmpty()) {
                     AlertDialog.Builder(this)
                         .setMessage("NO TRANSACTIONS AT THE MOMENT")
                         .setPositiveButton("OK") { _, _ -> finish() }
@@ -330,10 +368,13 @@ class TransactionActivity : AppCompatActivity() {
         }
 
         if (transaction.settled) {
+            // Cash refunds are local-only (no gateway); card refunds need gateway reference
             AlertDialog.Builder(this)
                 .setTitle("Transaction Options")
                 .setMessage("Batch already closed. Refund only.")
-                .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
+                .setPositiveButton("Refund") { _, _ ->
+                    if (allCash) processCashRefund(transaction) else processRefund(transaction)
+                }
                 .setNegativeButton("Cancel", null)
                 .show()
             return

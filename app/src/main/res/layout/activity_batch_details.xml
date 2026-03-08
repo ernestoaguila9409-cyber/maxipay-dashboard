@@ -67,6 +67,17 @@
                 android:textSize="16sp"
                 android:textColor="#D32F2F"/>
 
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="16dp"/>
+
+            <!-- Taxes collected (populated dynamically) -->
+            <LinearLayout
+                android:id="@+id/taxBreakdownContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"/>
+
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"

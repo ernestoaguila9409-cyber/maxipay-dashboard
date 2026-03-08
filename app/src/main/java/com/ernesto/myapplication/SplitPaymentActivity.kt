@@ -2,11 +2,17 @@ package com.ernesto.myapplication
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.Gravity
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.google.firebase.firestore.FirebaseFirestore
+import com.ernesto.myapplication.engine.MoneyUtils
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.Locale
@@ -16,6 +22,17 @@ class SplitPaymentActivity : AppCompatActivity() {
     private var orderId: String? = null
     private var batchId: String? = null
     private var remainingBalance = 0.0
+
+    private val db = FirebaseFirestore.getInstance()
+
+    // Split-by-items state
+    private data class OrderLineItem(val lineKey: String, val name: String, val quantity: Int, val lineTotalInCents: Long)
+    private var orderItems = emptyList<OrderLineItem>()
+    private var totalRemainingInCents = 0L
+    private var currentPerson = 1
+    private var assignedLineKeys = mutableSetOf<String>()
+    private var personAmountsInCents = mutableListOf<Long>()
+    private var byItemsMode = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,13 +49,174 @@ class SplitPaymentActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnByItems).setOnClickListener {
-            Toast.makeText(this, "By items", Toast.LENGTH_SHORT).show()
-            // TODO: implement by items flow
+            startSplitByItems()
         }
 
         findViewById<Button>(R.id.btnCancel).setOnClickListener {
             finish()
         }
+    }
+
+    private fun startSplitByItems() {
+        val oid = orderId
+        if (oid == null || oid.isBlank()) {
+            Toast.makeText(this, "No order", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (remainingBalance <= 0) {
+            Toast.makeText(this, "No remaining balance to split", Toast.LENGTH_SHORT).show()
+            return
+        }
+        db.collection("Orders").document(oid).collection("items")
+            .get()
+            .addOnSuccessListener { snap ->
+                val items = snap.documents.mapNotNull { doc ->
+                    val name = doc.getString("name") ?: return@mapNotNull null
+                    val qty = (doc.getLong("quantity") ?: 1L).toInt()
+                    val lineTotalInCents = doc.getLong("lineTotalInCents") ?: 0L
+                    if (lineTotalInCents <= 0L) return@mapNotNull null
+                    OrderLineItem(doc.id, name, qty, lineTotalInCents)
+                }
+                if (items.isEmpty()) {
+                    Toast.makeText(this, "Order has no items", Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+                orderItems = items
+                totalRemainingInCents = (remainingBalance * 100).toLong()
+                currentPerson = 1
+                assignedLineKeys.clear()
+                personAmountsInCents.clear()
+                byItemsMode = true
+                setContentView(R.layout.activity_split_by_items)
+                supportActionBar?.title = "Split by items"
+                setupSplitByItemsListeners()
+                buildPersonStep()
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to load order items", Toast.LENGTH_SHORT).show()
+            }
+    }
+
+    private fun setupSplitByItemsListeners() {
+        findViewById<Button>(R.id.btnDonePerson).setOnClickListener { onDoneWithPerson() }
+        findViewById<Button>(R.id.btnSplitByItemsCancel).setOnClickListener {
+            byItemsMode = false
+            setContentView(R.layout.activity_split_payment)
+            supportActionBar?.title = "Split Payments"
+            findViewById<Button>(R.id.btnSplitEvenly).setOnClickListener { showSplitNumberDialog() }
+            findViewById<Button>(R.id.btnByItems).setOnClickListener { startSplitByItems() }
+            findViewById<Button>(R.id.btnCancel).setOnClickListener { finish() }
+        }
+    }
+
+    private fun buildPersonStep() {
+        val txtPersonStep = findViewById<TextView>(R.id.txtPersonStep)
+        val txtRemaining = findViewById<TextView>(R.id.txtRemaining)
+        val itemsContainer = findViewById<LinearLayout>(R.id.itemsContainer)
+        val btnDone = findViewById<Button>(R.id.btnDonePerson)
+
+        txtPersonStep.text = "Person $currentPerson – Select items to pay"
+        txtRemaining.text = "Remaining: ${MoneyUtils.centsToDisplay(totalRemainingInCents)}"
+
+        itemsContainer.removeAllViews()
+        val unassigned = orderItems.filter { it.lineKey !in assignedLineKeys }
+        for (item in unassigned) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, 12, 0, 12)
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val cb = CheckBox(this).apply {
+                tag = item.lineKey
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+            val label = TextView(this).apply {
+                text = "${item.name} (Qty: ${item.quantity})"
+                setPadding(16, 0, 16, 0)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val price = TextView(this).apply {
+                text = MoneyUtils.centsToDisplay(item.lineTotalInCents)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+            row.addView(cb)
+            row.addView(label)
+            row.addView(price)
+            itemsContainer.addView(row)
+        }
+        btnDone.isEnabled = true
+        btnDone.visibility = android.view.View.VISIBLE
+    }
+
+    private fun onDoneWithPerson() {
+        val itemsContainer = findViewById<LinearLayout>(R.id.itemsContainer)
+        var selectedCents = 0L
+        val selectedKeys = mutableListOf<String>()
+        for (i in 0 until itemsContainer.childCount) {
+            val row = itemsContainer.getChildAt(i) as? LinearLayout ?: continue
+            val cb = row.getChildAt(0) as? CheckBox ?: continue
+            if (cb.isChecked) {
+                val lineKey = cb.tag as? String ?: continue
+                val item = orderItems.find { it.lineKey == lineKey } ?: continue
+                selectedCents += item.lineTotalInCents
+                selectedKeys.add(lineKey)
+            }
+        }
+        if (selectedKeys.isEmpty()) {
+            Toast.makeText(this, "Select at least one item", Toast.LENGTH_SHORT).show()
+            return
+        }
+        assignedLineKeys.addAll(selectedKeys)
+        personAmountsInCents.add(selectedCents)
+        totalRemainingInCents -= selectedCents
+        if (totalRemainingInCents <= 0L) {
+            showAllAssignedAndPay()
+            return
+        }
+        currentPerson++
+        buildPersonStep()
+    }
+
+    private fun showAllAssignedAndPay() {
+        val txtPersonStep = findViewById<TextView>(R.id.txtPersonStep)
+        val txtRemaining = findViewById<TextView>(R.id.txtRemaining)
+        val itemsContainer = findViewById<LinearLayout>(R.id.itemsContainer)
+        val btnDone = findViewById<Button>(R.id.btnDonePerson)
+
+        txtPersonStep.text = "All assigned"
+        txtRemaining.text = "Remaining: $0.00"
+        itemsContainer.removeAllViews()
+        btnDone.visibility = android.view.View.GONE
+
+        val firstShareCents = personAmountsInCents.firstOrNull() ?: 0L
+        val firstShareDollars = firstShareCents / 100.0
+        val msg = buildString {
+            personAmountsInCents.forEachIndexed { index, cents ->
+                append("Person ${index + 1} pays ${MoneyUtils.centsToDisplay(cents)}\n")
+            }
+            append("\nPay first share now?")
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Split complete")
+            .setMessage(msg)
+            .setPositiveButton("Pay Person 1's share") { _, _ ->
+                goToPayOneShare(firstShareDollars, personAmountsInCents.size)
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                byItemsMode = false
+                setContentView(R.layout.activity_split_payment)
+                supportActionBar?.title = "Split Payments"
+                findViewById<Button>(R.id.btnSplitEvenly).setOnClickListener { showSplitNumberDialog() }
+                findViewById<Button>(R.id.btnByItems).setOnClickListener { startSplitByItems() }
+                findViewById<Button>(R.id.btnCancel).setOnClickListener { finish() }
+            }
+            .show()
     }
 
     private fun showSplitNumberDialog() {

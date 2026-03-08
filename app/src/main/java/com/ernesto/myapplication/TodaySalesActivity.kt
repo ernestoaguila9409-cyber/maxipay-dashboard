@@ -10,6 +10,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.*
+import java.util.concurrent.Executors
 
 class TodaySalesActivity : AppCompatActivity() {
 
@@ -30,21 +31,11 @@ class TodaySalesActivity : AppCompatActivity() {
         txtTodayCount = findViewById(R.id.txtTodayCount)
 
         findViewById<Button>(R.id.btnViewTransactions).setOnClickListener {
-            db.collection("Batches")
-                .whereEqualTo("closed", false)
-                .limit(1)
-                .get()
-                .addOnSuccessListener { snap ->
-                    val batchId = snap.documents.firstOrNull()?.id
-                    val intent = Intent(this, TransactionActivity::class.java)
-                    intent.putExtra("employeeName", SessionEmployee.getEmployeeName(this))
-                    intent.putExtra("CURRENT_TRANSACTION", true)
-                    if (batchId != null) intent.putExtra("BATCH_ID", batchId)
-                    startActivity(intent)
-                }
-                .addOnFailureListener {
-                    Toast.makeText(this, "Could not load batch", Toast.LENGTH_SHORT).show()
-                }
+            val intent = Intent(this, TransactionActivity::class.java)
+            intent.putExtra("employeeName", SessionEmployee.getEmployeeName(this))
+            intent.putExtra("CURRENT_TRANSACTION", true)
+            intent.putExtra("SHOW_UNSETTLED_AND_TODAY_REFUNDS", true)
+            startActivity(intent)
         }
 
         findViewById<Button>(R.id.btnCurrentOrder).setOnClickListener {
@@ -96,24 +87,27 @@ class TodaySalesActivity : AppCompatActivity() {
         db.collection("Transactions")
             .get()
             .addOnSuccessListener { documents ->
-                var total = 0.0
-                var count = 0
+                val startOfDayCopy = startOfDay
+                Executors.newSingleThreadExecutor().execute {
+                    var total = 0.0
+                    var count = 0
 
-                for (doc in documents) {
+                    for (doc in documents) {
                     val voided = doc.getBoolean("voided") ?: false
+                    if (voided) continue
                     val settled = doc.getBoolean("settled") ?: false
-                    if (voided || settled) continue
 
                     val type = doc.getString("type") ?: "SALE"
 
                     if (type == "SALE") {
+                        if (settled) continue
                         val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
                         var todaysCents = 0L
 
                         for (p in payments) {
                             val map = p as? Map<*, *> ?: continue
                             val ts = (map["timestamp"] as? com.google.firebase.Timestamp)?.toDate()
-                            if (ts == null || ts.before(startOfDay)) continue
+                            if (ts == null || ts.before(startOfDayCopy)) continue
 
                             val amountInCents = (map["amountInCents"] as? Number)?.toLong() ?: 0L
                             todaysCents += amountInCents
@@ -123,7 +117,7 @@ class TodaySalesActivity : AppCompatActivity() {
                             val ts =
                                 doc.getTimestamp("timestamp")?.toDate()
                                     ?: doc.getTimestamp("createdAt")?.toDate()
-                            if (ts != null && !ts.before(startOfDay)) {
+                            if (ts != null && !ts.before(startOfDayCopy)) {
                                 val amount = doc.getDouble("amount")
                                     ?: doc.getDouble("totalPaid")
                                     ?: 0.0
@@ -140,10 +134,11 @@ class TodaySalesActivity : AppCompatActivity() {
                             }
                         }
                     } else if (type == "REFUND") {
+                        if (settled) continue
                         val ts =
                             doc.getTimestamp("createdAt")?.toDate()
                                 ?: doc.getTimestamp("timestamp")?.toDate()
-                        if (ts == null || ts.before(startOfDay)) continue
+                        if (ts == null || ts.before(startOfDayCopy)) continue
 
                         val amount = doc.getDouble("amount") ?: 0.0
                         if (amount > 0.0) {
@@ -153,8 +148,15 @@ class TodaySalesActivity : AppCompatActivity() {
                     }
                 }
 
-                txtTodayTotal.text = String.format(Locale.US, "Today: $%.2f", total)
-                txtTodayCount.text = "Transactions: $count"
+                    val finalTotal = total
+                    val finalCount = count
+                    runOnUiThread {
+                        if (!isDestroyed) {
+                            txtTodayTotal.text = String.format(Locale.US, "Today: $%.2f", finalTotal)
+                            txtTodayCount.text = "Transactions: $finalCount"
+                        }
+                    }
+                }
             }
     }
 }

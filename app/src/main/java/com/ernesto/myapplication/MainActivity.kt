@@ -8,6 +8,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.*
+import java.util.concurrent.Executors
 import com.ernesto.myapplication.ModifierManagementActivity
 
 class MainActivity : AppCompatActivity() {
@@ -142,19 +143,20 @@ class MainActivity : AppCompatActivity() {
         db.collection("Transactions")
             .get()
             .addOnSuccessListener { documents ->
-                var total = 0.0
-                var count = 0
+                val startOfDayCopy = startOfDay
+                Executors.newSingleThreadExecutor().execute {
+                    var total = 0.0
+                    var count = 0
 
-                for (doc in documents) {
-                    // After settlement, we want dashboard stats to reset.
-                    // So ignore any transaction that is settled or voided.
+                    for (doc in documents) {
                     val voided = doc.getBoolean("voided") ?: false
+                    if (voided) continue
                     val settled = doc.getBoolean("settled") ?: false
-                    if (voided || settled) continue
 
                     val type = doc.getString("type") ?: "SALE"
 
                     if (type == "SALE") {
+                        if (settled) continue
                         // New schema: payments array with per‑payment timestamp + amountInCents
                         val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
                         var todaysCents = 0L
@@ -162,7 +164,7 @@ class MainActivity : AppCompatActivity() {
                         for (p in payments) {
                             val map = p as? Map<*, *> ?: continue
                             val ts = (map["timestamp"] as? com.google.firebase.Timestamp)?.toDate()
-                            if (ts == null || ts.before(startOfDay)) continue
+                            if (ts == null || ts.before(startOfDayCopy)) continue
 
                             val amountInCents = (map["amountInCents"] as? Number)?.toLong() ?: 0L
                             todaysCents += amountInCents
@@ -173,7 +175,7 @@ class MainActivity : AppCompatActivity() {
                             val ts =
                                 doc.getTimestamp("timestamp")?.toDate()
                                     ?: doc.getTimestamp("createdAt")?.toDate()
-                            if (ts != null && !ts.before(startOfDay)) {
+                                if (ts != null && !ts.before(startOfDayCopy)) {
                                 val amount = doc.getDouble("amount")
                                     ?: doc.getDouble("totalPaid")
                                     ?: 0.0
@@ -190,11 +192,11 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                     } else if (type == "REFUND") {
-                        // Treat refunds as negative (only for open / unsettled refunds)
+                        if (settled) continue
                         val ts =
                             doc.getTimestamp("createdAt")?.toDate()
                                 ?: doc.getTimestamp("timestamp")?.toDate()
-                        if (ts == null || ts.before(startOfDay)) continue
+                        if (ts == null || ts.before(startOfDayCopy)) continue
 
                         val amount = doc.getDouble("amount") ?: 0.0
                         if (amount > 0.0) {
@@ -204,8 +206,15 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                txtTodayTotal.text = String.format(Locale.US, "Today: $%.2f", total)
-                txtTodayCount.text = "Transactions: $count"
+                    val finalTotal = total
+                    val finalCount = count
+                    runOnUiThread {
+                        if (!isDestroyed) {
+                            txtTodayTotal.text = String.format(Locale.US, "Today: $%.2f", finalTotal)
+                            txtTodayCount.text = "Transactions: $finalCount"
+                        }
+                    }
+                }
             }
     }
 }

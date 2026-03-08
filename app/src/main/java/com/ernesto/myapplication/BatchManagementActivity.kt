@@ -231,65 +231,81 @@ class BatchManagementActivity : AppCompatActivity() {
             .addOnSuccessListener { batchSnap ->
 
                 if (batchSnap.isEmpty) {
-                    Toast.makeText(this, "No open batch found", Toast.LENGTH_SHORT).show()
+                    val newBatchId = "BATCH_${System.currentTimeMillis()}"
+                    val batchData = hashMapOf(
+                        "batchId" to newBatchId,
+                        "total" to 0.0,
+                        "count" to 0,
+                        "closed" to false,
+                        "createdAt" to Date(),
+                        "type" to "OPEN"
+                    )
+                    db.collection("Batches").document(newBatchId).set(batchData)
+                        .addOnSuccessListener { settleOpenBatch(newBatchId) }
+                        .addOnFailureListener {
+                            Toast.makeText(this, "Failed to create batch: ${it.message}", Toast.LENGTH_SHORT).show()
+                        }
                     return@addOnSuccessListener
                 }
 
-                val batchDoc = batchSnap.documents.first()
-                val batchRef = db.collection("Batches").document(batchDoc.id)
-                val batchId = batchDoc.id
+                val batchId = batchSnap.documents.first().id
+                settleOpenBatch(batchId)
+            }
+    }
 
-                db.collection("Transactions")
-                    .whereEqualTo("settled", false)
-                    .whereEqualTo("voided", false)
-                    .get()
-                    .addOnSuccessListener { transactions ->
+    private fun settleOpenBatch(batchId: String) {
+        val batchRef = db.collection("Batches").document(batchId)
 
-                        val batchWrite = db.batch()
+        db.collection("Transactions")
+            .whereEqualTo("settled", false)
+            .whereEqualTo("voided", false)
+            .get()
+            .addOnSuccessListener { transactions ->
 
-                        var totalSales = 0.0
-                        var count = 0
+                val batchWrite = db.batch()
 
-                        for (tx in transactions) {
+                var totalSales = 0.0
+                var count = 0
 
-                            val net = computeNetAmount(tx)
-                            if (net != 0.0) {
-                                totalSales += net
-                                count++
-                            }
+                for (tx in transactions) {
 
-                            batchWrite.update(
-                                tx.reference,
-                                mapOf(
-                                    "settled" to true,
-                                    "batchId" to batchId
-                                )
-                            )
-                        }
+                    val net = computeNetAmount(tx)
+                    if (net != 0.0) {
+                        totalSales += net
+                        count++
+                    }
 
-                        batchWrite.update(
-                            batchRef,
-                            mapOf(
-                                "closed" to true,
-                                "closedAt" to Date(),
-                                "totalSales" to totalSales,
-                                "transactionCount" to count,
-                                "type" to "SETTLEMENT" // distinguish from OPEN batches
-                            )
+                    batchWrite.update(
+                        tx.reference,
+                        mapOf(
+                            "settled" to true,
+                            "batchId" to batchId
                         )
+                    )
+                }
 
-                        batchWrite.commit()
-                            .addOnSuccessListener {
+                batchWrite.update(
+                    batchRef,
+                    mapOf(
+                        "closed" to true,
+                        "closedAt" to Date(),
+                        "totalSales" to totalSales,
+                        "transactionCount" to count,
+                        "type" to "SETTLEMENT"
+                    )
+                )
 
-                                Toast.makeText(
-                                    this,
-                                    "Batch Closed Successfully",
-                                    Toast.LENGTH_LONG
-                                ).show()
+                batchWrite.commit()
+                    .addOnSuccessListener {
 
-                                loadOpenBatch()
-                                loadClosedBatches()
-                            }
+                        Toast.makeText(
+                            this,
+                            "Batch Closed Successfully",
+                            Toast.LENGTH_LONG
+                        ).show()
+
+                        loadOpenBatch()
+                        loadClosedBatches()
                     }
             }
     }

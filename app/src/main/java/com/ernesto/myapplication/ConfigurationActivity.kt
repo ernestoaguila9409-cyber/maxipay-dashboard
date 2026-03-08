@@ -15,6 +15,10 @@ class ConfigurationActivity : AppCompatActivity() {
         findViewById<android.view.View>(R.id.optionPaymentMethods).setOnClickListener {
             startActivity(Intent(this, PaymentMethodsActivity::class.java))
         }
+
+        findViewById<android.view.View>(R.id.optionTaxesAndFees).setOnClickListener {
+            startActivity(Intent(this, TaxesAndFeesActivity::class.java))
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {

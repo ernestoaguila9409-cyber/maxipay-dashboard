@@ -23,6 +23,7 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
+import java.util.Locale
 
 class OrderDetailActivity : AppCompatActivity() {
 
@@ -155,14 +156,10 @@ class OrderDetailActivity : AppCompatActivity() {
                 val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
                 val isFullyRefunded = totalRefundedInCents >= totalInCents && totalInCents > 0L
 
-                loadRefundHistory(saleTransactionId) { totalFromRefunds ->
+                loadRefundHistory(saleTransactionId) { totalFromRefunds, refundedLineKeys, refundedNameAmountKeys, lineKeyToEmployee, nameAmountToEmployee, lineKeyToDate, nameAmountToDate ->
                     val fullyRefunded = isFullyRefunded || (totalFromRefunds >= totalInCents && totalInCents > 0L)
-                    if (refundHistoryLines.isNotEmpty()) {
-                        txtRefundHistory.text = refundHistoryLines
-                        txtRefundHistory.visibility = View.VISIBLE
-                    } else {
-                        txtRefundHistory.visibility = View.GONE
-                    }
+                    txtRefundHistory.visibility = View.GONE
+                    adapter.setRefundedKeys(refundedLineKeys, refundedNameAmountKeys, lineKeyToEmployee, nameAmountToEmployee, lineKeyToDate, nameAmountToDate)
                     if (status == "REFUNDED" || fullyRefunded) {
                         bottomActions.visibility = View.VISIBLE
                         btnVoid.visibility = View.GONE
@@ -253,40 +250,48 @@ class OrderDetailActivity : AppCompatActivity() {
             ?: ""
     }
 
-    private fun loadRefundHistory(saleTransactionId: String?, onLoaded: (totalRefundedCents: Long) -> Unit) {
+    private fun loadRefundHistory(saleTransactionId: String?, onLoaded: (totalRefundedCents: Long, refundedLineKeys: Set<String>, refundedNameAmountKeys: Set<String>, refundedLineKeyToEmployee: Map<String, String>, refundedNameAmountToEmployee: Map<String, String>, refundedLineKeyToDate: Map<String, String>, refundedNameAmountToDate: Map<String, String>) -> Unit) {
         refundHistoryLines = ""
         if (saleTransactionId.isNullOrBlank()) {
-            onLoaded(0L)
+            onLoaded(0L, emptySet(), emptySet(), emptyMap(), emptyMap(), emptyMap(), emptyMap())
             return
         }
+        val dateFormat = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US)
         db.collection("Transactions")
             .whereEqualTo("type", "REFUND")
             .whereEqualTo("originalReferenceId", saleTransactionId)
             .get()
             .addOnSuccessListener { snap ->
                 var totalCents = 0L
-                val lines = mutableListOf<String>()
-                val dateFormat = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US)
+                val refundedLineKeys = mutableSetOf<String>()
+                val refundedNameAmountKeys = mutableSetOf<String>()
+                val refundedLineKeyToEmployee = mutableMapOf<String, String>()
+                val refundedNameAmountToEmployee = mutableMapOf<String, String>()
+                val refundedLineKeyToDate = mutableMapOf<String, String>()
+                val refundedNameAmountToDate = mutableMapOf<String, String>()
                 for (refundDoc in snap.documents) {
                     val amountCents = refundDoc.getLong("amountInCents")
                         ?: ((refundDoc.getDouble("amount") ?: 0.0) * 100).toLong()
                     totalCents += amountCents
-                    val amountStr = String.format(Locale.US, "%.2f", amountCents / 100.0)
-                    val by = refundDoc.getString("refundedBy")?.takeIf { it.isNotBlank() } ?: "—"
+                    val employee = refundDoc.getString("refundedBy")?.trim()?.takeIf { it.isNotBlank() } ?: "—"
                     val createdAt = refundDoc.getTimestamp("createdAt")?.toDate()
                     val dateStr = if (createdAt != null) dateFormat.format(createdAt) else ""
-                    val itemName = refundDoc.getString("refundedItemName")?.takeIf { it.isNotBlank() }
-                    val line = if (itemName != null) {
-                        "🔵 Refund $itemName -$$amountStr by $by $dateStr"
-                    } else {
-                        "🔵 Refund -$$amountStr by $by $dateStr"
+                    refundDoc.getString("refundedLineKey")?.takeIf { it.isNotBlank() }?.let { key ->
+                        refundedLineKeys.add(key)
+                        refundedLineKeyToEmployee[key] = employee
+                        refundedLineKeyToDate[key] = dateStr
                     }
-                    lines.add(line)
+                    val itemName = refundDoc.getString("refundedItemName")?.trim()?.takeIf { it.isNotBlank() }
+                    if (itemName != null && refundDoc.getString("refundedLineKey")?.isNotBlank() != true) {
+                        val nameAmountKey = "$itemName|$amountCents"
+                        refundedNameAmountKeys.add(nameAmountKey)
+                        refundedNameAmountToEmployee[nameAmountKey] = employee
+                        refundedNameAmountToDate[nameAmountKey] = dateStr
+                    }
                 }
-                refundHistoryLines = lines.joinToString("\n")
-                onLoaded(totalCents)
+                onLoaded(totalCents, refundedLineKeys, refundedNameAmountKeys, refundedLineKeyToEmployee, refundedNameAmountToEmployee, refundedLineKeyToDate, refundedNameAmountToDate)
             }
-            .addOnFailureListener { onLoaded(0L) }
+            .addOnFailureListener { onLoaded(0L, emptySet(), emptySet(), emptyMap(), emptyMap(), emptyMap(), emptyMap()) }
     }
     // ===============================
     // LOAD ITEMS
@@ -592,6 +597,7 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun onOrderItemClick(itemDoc: DocumentSnapshot) {
+        val lineKey = itemDoc.id
         db.collection("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 if (!orderDoc.exists()) return@addOnSuccessListener
@@ -606,25 +612,58 @@ class OrderDetailActivity : AppCompatActivity() {
                     Toast.makeText(this, "Order is already fully refunded.", Toast.LENGTH_SHORT).show()
                     return@addOnSuccessListener
                 }
-                val lineTotalInCents = itemDoc.getLong("lineTotalInCents") ?: 0L
-                if (lineTotalInCents <= 0L) {
-                    Toast.makeText(this, "This item has no amount to refund.", Toast.LENGTH_SHORT).show()
-                    return@addOnSuccessListener
+                val saleTransactionId = orderDoc.getString("saleTransactionId") ?: orderDoc.getString("transactionId")
+                if (!saleTransactionId.isNullOrBlank()) {
+                    db.collection("Transactions")
+                        .whereEqualTo("type", "REFUND")
+                        .whereEqualTo("originalReferenceId", saleTransactionId)
+                        .get()
+                        .addOnSuccessListener { refundSnap ->
+                            val refundedLineKeys = refundSnap.documents
+                                .mapNotNull { it.getString("refundedLineKey")?.takeIf { k -> k.isNotBlank() } }
+                                .toSet()
+                            if (lineKey in refundedLineKeys) {
+                                Toast.makeText(this, "This item has already been refunded.", Toast.LENGTH_SHORT).show()
+                                return@addOnSuccessListener
+                            }
+                            val lineTotalInCents = itemDoc.getLong("lineTotalInCents") ?: 0L
+                            val itemName = itemDoc.getString("name") ?: itemDoc.getString("itemName") ?: ""
+                            val alreadyRefundedByNameAndAmount = refundSnap.documents.any { ref ->
+                                ref.getString("refundedLineKey")?.isNotBlank() != true &&
+                                ref.getLong("amountInCents") == lineTotalInCents &&
+                                ref.getString("refundedItemName")?.trim() == itemName.trim()
+                            }
+                            if (alreadyRefundedByNameAndAmount) {
+                                Toast.makeText(this, "This item has already been refunded.", Toast.LENGTH_SHORT).show()
+                                return@addOnSuccessListener
+                            }
+                            proceedWithItemRefundDialog(orderDoc, itemDoc, lineKey)
+                        }
+                } else {
+                    proceedWithItemRefundDialog(orderDoc, itemDoc, lineKey)
                 }
-                val itemName = itemDoc.getString("name") ?: itemDoc.getString("itemName") ?: "Item"
-                val amountStr = String.format(Locale.US, "%.2f", lineTotalInCents / 100.0)
-                AlertDialog.Builder(this)
-                    .setTitle("Refund item")
-                    .setMessage("Refund \"$itemName\" for \$$amountStr?")
-                    .setPositiveButton("Refund") { _, _ ->
-                        executeRefundForAmount(lineTotalInCents, finishAfter = false, refundedItemName = itemName)
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .show()
             }
     }
 
-    private fun executeRefundForAmount(amountInCents: Long?, finishAfter: Boolean, refundedItemName: String? = null) {
+    private fun proceedWithItemRefundDialog(orderDoc: DocumentSnapshot, itemDoc: DocumentSnapshot, lineKey: String) {
+        val lineTotalInCents = itemDoc.getLong("lineTotalInCents") ?: 0L
+        if (lineTotalInCents <= 0L) {
+            Toast.makeText(this, "This item has no amount to refund.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val itemName = itemDoc.getString("name") ?: itemDoc.getString("itemName") ?: "Item"
+        val amountStr = String.format(Locale.US, "%.2f", lineTotalInCents / 100.0)
+        AlertDialog.Builder(this)
+            .setTitle("Refund item")
+            .setMessage("Refund \"$itemName\" for \$$amountStr?")
+            .setPositiveButton("Refund") { _, _ ->
+                executeRefundForAmount(lineTotalInCents, finishAfter = false, refundedItemName = itemName, refundedLineKey = lineKey)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun executeRefundForAmount(amountInCents: Long?, finishAfter: Boolean, refundedItemName: String? = null, refundedLineKey: String? = null) {
 
         db.collection("Orders")
             .document(orderId)
@@ -663,7 +702,7 @@ class OrderDetailActivity : AppCompatActivity() {
                             ?: firstPayment?.get("terminalReference")?.toString()
 
                         if (paymentType.equals("Cash", ignoreCase = true)) {
-                            finalizeRefund(transactionId, refundAmountInCents, finishAfter, refundedItemName)
+                            finalizeRefund(transactionId, refundAmountInCents, finishAfter, refundedItemName, refundedLineKey)
                             return@addOnSuccessListener
                         }
 
@@ -675,7 +714,8 @@ class OrderDetailActivity : AppCompatActivity() {
                                 originalTransactionId = transactionId,
                                 amountInCents = refundAmountInCents,
                                 finishAfter = finishAfter,
-                                refundedItemName = refundedItemName
+                                refundedItemName = refundedItemName,
+                                refundedLineKey = refundedLineKey
                             )
                         } else {
                             Toast.makeText(this, "Cannot refund: no reference for this transaction.", Toast.LENGTH_LONG).show()
@@ -690,7 +730,8 @@ class OrderDetailActivity : AppCompatActivity() {
         originalTransactionId: String,
         amountInCents: Long,
         finishAfter: Boolean = true,
-        refundedItemName: String? = null
+        refundedItemName: String? = null,
+        refundedLineKey: String? = null
     ) {
         // Debit refunds use the same flow as credit (Credit Return); do not send Debit Return (Z8)
         val requestPaymentType = if (paymentType.equals("Debit", true)) "Credit" else paymentType
@@ -754,7 +795,7 @@ class OrderDetailActivity : AppCompatActivity() {
                         val resultCode = general?.optString("ResultCode") ?: ""
 
                         if (resultCode == "0") {
-                            finalizeRefund(originalTransactionId, amountInCents, finishAfter, refundedItemName)
+                            finalizeRefund(originalTransactionId, amountInCents, finishAfter, refundedItemName, refundedLineKey)
                         } else {
                             Toast.makeText(
                                 this@OrderDetailActivity,
@@ -778,7 +819,8 @@ class OrderDetailActivity : AppCompatActivity() {
         originalTransactionId: String,
         amountInCents: Long,
         finishAfter: Boolean = true,
-        refundedItemName: String? = null
+        refundedItemName: String? = null,
+        refundedLineKey: String? = null
     ) {
 
         // 1️⃣ Find open batch
@@ -806,18 +848,20 @@ class OrderDetailActivity : AppCompatActivity() {
                         val newRefundTxRef = db.collection("Transactions").document()
                         val batchRef = db.collection("Batches").document(openBatchId)
 
-                        val refundDocData = mapOf(
-                            "orderId" to orderId,
-                            "type" to "REFUND",
-                            "amount" to (amountInCents / 100.0),
-                            "amountInCents" to amountInCents,
-                            "originalReferenceId" to originalTransactionId,
-                            "createdAt" to Date(),
-                            "batchId" to openBatchId,
-                            "voided" to false,
-                            "settled" to false,
-                            "refundedBy" to employeeName
-                        )
+                        val refundDocData = buildMap<String, Any> {
+                            put("orderId", orderId)
+                            put("type", "REFUND")
+                            put("amount", amountInCents / 100.0)
+                            put("amountInCents", amountInCents)
+                            put("originalReferenceId", originalTransactionId)
+                            put("createdAt", Date())
+                            put("batchId", openBatchId)
+                            put("voided", false)
+                            put("settled", false)
+                            put("refundedBy", employeeName)
+                            refundedItemName?.takeIf { it.isNotBlank() }?.let { put("refundedItemName", it) }
+                            refundedLineKey?.takeIf { it.isNotBlank() }?.let { put("refundedLineKey", it) }
+                        }
                         db.collection("Transactions").document(newRefundTxRef.id).set(refundDocData)
                             .addOnSuccessListener {
                                 val totalInCents = orderDoc.getLong("totalInCents") ?: 0L

@@ -2,7 +2,12 @@ package com.ernesto.myapplication
 
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Bundle
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
 import android.view.View
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
@@ -31,12 +36,14 @@ class MenuActivity : AppCompatActivity() {
     private val cartMap = mutableMapOf<String, CartItem>()
     private lateinit var orderEngine: OrderEngine
     private lateinit var categoryContainer: LinearLayout
-    private lateinit var itemContainer: GridLayout
+    private lateinit var itemContainer: LinearLayout
     private lateinit var cartContainer: LinearLayout
+    private lateinit var cartTaxSummary: LinearLayout
     private lateinit var txtTotal: TextView
     private lateinit var btnCheckout: Button
 
     private var totalAmount = 0.0
+    private var enabledTaxes = mutableListOf<Triple<String, String, Double>>()
     private var employeeName: String = ""
     private var currentOrderId: String? = null
 
@@ -70,6 +77,7 @@ class MenuActivity : AppCompatActivity() {
         categoryContainer = findViewById(R.id.categoryContainer)
         itemContainer = findViewById(R.id.itemContainer)
         cartContainer = findViewById(R.id.cartContainer)
+        cartTaxSummary = findViewById(R.id.cartTaxSummary)
         txtTotal = findViewById(R.id.txtTotal)
         btnCheckout = findViewById(R.id.btnCheckout)
 
@@ -77,6 +85,7 @@ class MenuActivity : AppCompatActivity() {
         currentOrderId = intent.getStringExtra("ORDER_ID")
 
         loadCategories()
+        loadEnabledTaxes()
 
         // ✅ Load existing order items into cart if ORDER_ID was provided
         currentOrderId?.let { existingOrderId ->
@@ -105,6 +114,27 @@ class MenuActivity : AppCompatActivity() {
                 }
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        loadEnabledTaxes()
+    }
+
+    private fun loadEnabledTaxes() {
+        db.collection("Taxes")
+            .whereEqualTo("enabled", true)
+            .get()
+            .addOnSuccessListener { snap ->
+                enabledTaxes.clear()
+                for (doc in snap.documents) {
+                    val name = doc.getString("name") ?: continue
+                    val type = doc.getString("type") ?: continue
+                    val amount = doc.getDouble("amount") ?: doc.getLong("amount")?.toDouble() ?: continue
+                    enabledTaxes.add(Triple(name, type, amount))
+                }
+                refreshCart()
+            }
     }
 
     // ----------------------------
@@ -242,10 +272,11 @@ class MenuActivity : AppCompatActivity() {
                         }
                     }
 
-                    val params = GridLayout.LayoutParams()
-                    params.width = 0
-                    params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                    params.setMargins(16, 16, 16, 16)
+                    val params = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
+                    params.setMargins(0, 8, 0, 8)
                     button.layoutParams = params
 
                     itemContainer.addView(button)
@@ -288,6 +319,49 @@ class MenuActivity : AppCompatActivity() {
         val selectedCountPerGroup = mutableMapOf<String, Int>()
         val requiredGroups = mutableSetOf<String>()
 
+        val orderIndex = groupIds.withIndex().associate { it.value to it.index }
+        val fetchedGroups = mutableListOf<GroupInfo>()
+        var pending = groupIds.size
+
+        for (groupId in groupIds) {
+            db.collection("ModifierGroups")
+                .document(groupId)
+                .get()
+                .addOnSuccessListener { groupDoc ->
+                    val groupName = groupDoc.getString("name") ?: ""
+                    val isRequired = groupDoc.getBoolean("required") ?: false
+                    val maxSelection = groupDoc.getLong("maxSelection")?.toInt() ?: 1
+                    if (groupName.isNotEmpty()) {
+                        synchronized(fetchedGroups) {
+                            fetchedGroups.add(GroupInfo(groupId, groupName, isRequired, maxSelection))
+                        }
+                        if (isRequired) requiredGroups.add(groupId)
+                    }
+                    pending--
+                    if (pending == 0) {
+                        // Required first, then optional; preserve original order within each
+                        val sorted = fetchedGroups.sortedWith(
+                            compareBy<GroupInfo> { !it.isRequired }.thenBy { orderIndex[it.groupId] ?: 0 }
+                        )
+                        buildAndShowModifierDialog(
+                            itemId, name, basePrice, stock,
+                            sorted, requiredGroups, selectedModifiers, selectedCountPerGroup
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun buildAndShowModifierDialog(
+        itemId: String,
+        name: String,
+        basePrice: Double,
+        stock: Long,
+        sortedGroups: List<GroupInfo>,
+        requiredGroups: Set<String>,
+        selectedModifiers: MutableList<Pair<String, Double>>,
+        selectedCountPerGroup: MutableMap<String, Int>
+    ) {
         val mainLayout = LinearLayout(this)
         mainLayout.orientation = LinearLayout.VERTICAL
         mainLayout.setPadding(40, 40, 40, 40)
@@ -302,128 +376,128 @@ class MenuActivity : AppCompatActivity() {
         dialog.setOnShowListener {
             val addButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             addButton.setOnClickListener {
-
                 for (requiredGroup in requiredGroups) {
                     if ((selectedCountPerGroup[requiredGroup] ?: 0) == 0) {
                         Toast.makeText(this, "Please select required options.", Toast.LENGTH_SHORT).show()
                         return@setOnClickListener
                     }
                 }
-
                 addToCart(itemId, name, basePrice, stock, selectedModifiers)
                 dialog.dismiss()
             }
         }
 
-        for (groupId in groupIds) {
-            db.collection("ModifierGroups")
-                .document(groupId)
+        for (group in sortedGroups) {
+            val (groupId, groupName, isRequired, maxSelection) = group
+
+            val groupContainer = LinearLayout(this)
+            groupContainer.orientation = LinearLayout.VERTICAL
+            groupContainer.setPadding(0, 40, 0, 40)
+
+            val title = TextView(this)
+            title.text = groupName
+            title.textSize = 18f
+            title.setTypeface(null, Typeface.BOLD)
+
+            val subtitle = TextView(this)
+            val subtitleFull =
+                if (isRequired) "Required • Select up to $maxSelection"
+                else "Optional • Select up to $maxSelection"
+            val spannable = SpannableString(subtitleFull)
+            if (isRequired) {
+                spannable.setSpan(StyleSpan(Typeface.BOLD), 0, 8, 0)
+                spannable.setSpan(RelativeSizeSpan(1.25f), 0, 8, 0)
+                spannable.setSpan(ForegroundColorSpan(Color.parseColor("#1A1A1A")), 0, 8, 0)
+                spannable.setSpan(ForegroundColorSpan(Color.GRAY), 8, subtitleFull.length, 0)
+            } else {
+                spannable.setSpan(ForegroundColorSpan(Color.GRAY), 0, subtitleFull.length, 0)
+            }
+            subtitle.text = spannable
+            subtitle.setPadding(0, 8, 0, 16)
+
+            groupContainer.addView(title)
+            groupContainer.addView(subtitle)
+
+            val divider = View(this)
+            divider.setBackgroundColor(Color.LTGRAY)
+            divider.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                2
+            )
+            groupContainer.addView(divider)
+
+            mainLayout.addView(groupContainer)
+
+            db.collection("ModifierOptions")
+                .whereEqualTo("groupId", groupId)
                 .get()
-                .addOnSuccessListener { groupDoc ->
+                .addOnSuccessListener { options ->
+                    if (maxSelection == 1) {
+                        val radioGroup = RadioGroup(this)
+                        radioGroup.orientation = RadioGroup.VERTICAL
+                        groupContainer.addView(radioGroup)
 
-                    val groupName = groupDoc.getString("name") ?: return@addOnSuccessListener
-                    val isRequired = groupDoc.getBoolean("required") ?: false
-                    val maxSelection = groupDoc.getLong("maxSelection")?.toInt() ?: 1
+                        for (doc in options) {
+                            val optionName = doc.getString("name") ?: continue
+                            val optionPrice = doc.getDouble("price") ?: 0.0
 
-                    if (isRequired) requiredGroups.add(groupId)
+                            val radioButton = RadioButton(this)
+                            radioButton.text = "$optionName +$${String.format(Locale.US, "%.2f", optionPrice)}"
+                            radioGroup.addView(radioButton)
 
-                    val groupContainer = LinearLayout(this)
-                    groupContainer.orientation = LinearLayout.VERTICAL
-                    groupContainer.setPadding(0, 40, 0, 40)
-
-                    val title = TextView(this)
-                    title.text = groupName
-                    title.textSize = 18f
-                    title.setTypeface(null, android.graphics.Typeface.BOLD)
-
-                    val subtitle = TextView(this)
-                    subtitle.text =
-                        if (isRequired) "Required • Select up to $maxSelection"
-                        else "Optional • Select up to $maxSelection"
-                    subtitle.setTextColor(Color.GRAY)
-                    subtitle.setPadding(0, 8, 0, 16)
-
-                    groupContainer.addView(title)
-                    groupContainer.addView(subtitle)
-
-                    val divider = View(this)
-                    divider.setBackgroundColor(Color.LTGRAY)
-                    divider.layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        2
-                    )
-                    groupContainer.addView(divider)
-
-                    mainLayout.addView(groupContainer)
-
-                    db.collection("ModifierOptions")
-                        .whereEqualTo("groupId", groupId)
-                        .get()
-                        .addOnSuccessListener { options ->
-
-                            if (maxSelection == 1) {
-
-                                val radioGroup = RadioGroup(this)
-                                radioGroup.orientation = RadioGroup.VERTICAL
-                                groupContainer.addView(radioGroup)
-
-                                for (doc in options) {
-                                    val optionName = doc.getString("name") ?: continue
-                                    val optionPrice = doc.getDouble("price") ?: 0.0
-
-                                    val radioButton = RadioButton(this)
-                                    radioButton.text = "$optionName +$${String.format(Locale.US, "%.2f", optionPrice)}"
-                                    radioGroup.addView(radioButton)
-
-                                    radioButton.setOnClickListener {
-                                        selectedModifiers.removeAll { it.first == optionName }
-                                        selectedModifiers.add(optionName to optionPrice)
-                                        selectedCountPerGroup[groupId] = 1
-                                    }
-                                }
-
-                            } else {
-
-                                selectedCountPerGroup[groupId] = 0
-
-                                for (doc in options) {
-                                    val optionName = doc.getString("name") ?: continue
-                                    val optionPrice = doc.getDouble("price") ?: 0.0
-
-                                    val checkBox = CheckBox(this)
-                                    checkBox.text = "$optionName +$${String.format(Locale.US, "%.2f", optionPrice)}"
-                                    groupContainer.addView(checkBox)
-
-                                    checkBox.setOnCheckedChangeListener { _, isChecked ->
-                                        var count = selectedCountPerGroup[groupId] ?: 0
-
-                                        if (isChecked) {
-                                            if (count >= maxSelection) {
-                                                checkBox.isChecked = false
-                                                Toast.makeText(
-                                                    this,
-                                                    "Maximum $maxSelection selections allowed",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                                return@setOnCheckedChangeListener
-                                            }
-                                            selectedModifiers.add(optionName to optionPrice)
-                                            count++
-                                        } else {
-                                            selectedModifiers.remove(optionName to optionPrice)
-                                            count--
-                                        }
-
-                                        selectedCountPerGroup[groupId] = count
-                                    }
-                                }
+                            radioButton.setOnClickListener {
+                                selectedModifiers.removeAll { it.first == optionName }
+                                selectedModifiers.add(optionName to optionPrice)
+                                selectedCountPerGroup[groupId] = 1
                             }
                         }
+                    } else {
+                        selectedCountPerGroup[groupId] = 0
+
+                        for (doc in options) {
+                            val optionName = doc.getString("name") ?: continue
+                            val optionPrice = doc.getDouble("price") ?: 0.0
+
+                            val checkBox = CheckBox(this)
+                            checkBox.text = "$optionName +$${String.format(Locale.US, "%.2f", optionPrice)}"
+                            groupContainer.addView(checkBox)
+
+                            checkBox.setOnCheckedChangeListener { _, isChecked ->
+                                var count = selectedCountPerGroup[groupId] ?: 0
+
+                                if (isChecked) {
+                                    if (count >= maxSelection) {
+                                        checkBox.isChecked = false
+                                        Toast.makeText(
+                                            this,
+                                            "Maximum $maxSelection selections allowed",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        return@setOnCheckedChangeListener
+                                    }
+                                    selectedModifiers.add(optionName to optionPrice)
+                                    count++
+                                } else {
+                                    selectedModifiers.remove(optionName to optionPrice)
+                                    count--
+                                }
+
+                                selectedCountPerGroup[groupId] = count
+                            }
+                        }
+                    }
                 }
         }
 
         dialog.show()
     }
+
+    private data class GroupInfo(
+        val groupId: String,
+        val groupName: String,
+        val isRequired: Boolean,
+        val maxSelection: Int
+    )
 
     // ----------------------------
     // CART LOGIC (separate lines by modifiers)
@@ -522,6 +596,7 @@ class MenuActivity : AppCompatActivity() {
 
                 val nameView = TextView(this)
                 nameView.text = "   • ${modifier.first}"
+                nameView.setTextColor(Color.parseColor("#2E7D32"))
                 nameView.layoutParams = LinearLayout.LayoutParams(
                     0,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -530,6 +605,7 @@ class MenuActivity : AppCompatActivity() {
 
                 val priceView = TextView(this)
                 priceView.text = "+${MoneyUtils.centsToDisplay((modifier.second * 100).toLong())}"
+                priceView.setTextColor(Color.parseColor("#2E7D32"))
 
                 row.addView(nameView)
                 row.addView(priceView)
@@ -618,6 +694,26 @@ class MenuActivity : AppCompatActivity() {
             totalAmount += lineTotal
         }
 
+        val subtotal = totalAmount
+        cartTaxSummary.removeAllViews()
+
+        val subtotalLabel = TextView(this)
+        subtotalLabel.text = "Subtotal: ${MoneyUtils.centsToDisplay((subtotal * 100).toLong())}"
+        subtotalLabel.textSize = 14f
+        subtotalLabel.setTypeface(null, android.graphics.Typeface.BOLD)
+        cartTaxSummary.addView(subtotalLabel)
+
+        for ((name, type, amount) in enabledTaxes) {
+            val taxAmount = if (type == "PERCENTAGE") subtotal * amount / 100.0 else amount
+            totalAmount += taxAmount
+            val taxLine = TextView(this)
+            val label = if (type == "PERCENTAGE") "$name (${String.format(Locale.US, "%.1f", amount)}%)" else name
+            taxLine.text = "$label: ${MoneyUtils.centsToDisplay((taxAmount * 100).toLong())}"
+            taxLine.textSize = 13f
+            taxLine.setTextColor(Color.parseColor("#5D4E7B"))
+            cartTaxSummary.addView(taxLine)
+        }
+
         txtTotal.text = "Total: ${MoneyUtils.centsToDisplay((totalAmount * 100).toLong())}"
     }
     // ----------------------------
@@ -692,6 +788,7 @@ class MenuActivity : AppCompatActivity() {
         cartMap.clear()
         totalAmount = 0.0
         cartContainer.removeAllViews()
+        cartTaxSummary.removeAllViews()
         txtTotal.text = "Total: $0.00"
     }
 }

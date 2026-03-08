@@ -1,6 +1,8 @@
 package com.ernesto.myapplication
 
 import android.os.Bundle
+import android.view.Gravity
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -17,6 +19,7 @@ class BatchDetailsActivity : AppCompatActivity() {
     private lateinit var txtDebitSales: TextView
     private lateinit var txtCashRefunds: TextView
     private lateinit var txtCardRefunds: TextView
+    private lateinit var taxBreakdownContainer: LinearLayout
     private lateinit var txtNetCash: TextView
     private lateinit var txtNetCard: TextView
     private lateinit var txtBatchTotal: TextView
@@ -34,6 +37,7 @@ class BatchDetailsActivity : AppCompatActivity() {
         txtDebitSales = findViewById(R.id.txtDebitSales)
         txtCashRefunds = findViewById(R.id.txtCashRefunds)
         txtCardRefunds = findViewById(R.id.txtCardRefunds)
+        taxBreakdownContainer = findViewById(R.id.taxBreakdownContainer)
         txtNetCash = findViewById(R.id.txtNetCash)
         txtNetCard = findViewById(R.id.txtNetCard)
         txtBatchTotal = findViewById(R.id.txtBatchTotal)
@@ -61,6 +65,8 @@ class BatchDetailsActivity : AppCompatActivity() {
                 var cashRefunds = 0.0
                 var cardRefunds = 0.0
 
+                val orderIds = mutableSetOf<String>()
+
                 for (doc in documents) {
                     val txBatchId = doc.getString("batchId") ?: ""
                     if (txBatchId != batchId) continue
@@ -68,6 +74,7 @@ class BatchDetailsActivity : AppCompatActivity() {
                     val type = doc.getString("type") ?: "SALE"
 
                     if (type == "SALE") {
+                        doc.getString("orderId")?.takeIf { it.isNotBlank() }?.let { orderIds.add(it) }
                         // New schema: payments array with per‑payment amounts and types
                         val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
                         if (payments.isNotEmpty()) {
@@ -134,6 +141,8 @@ class BatchDetailsActivity : AppCompatActivity() {
                 txtCashRefunds.text = "Cash Refunds: -$${format(cashRefunds)}"
                 txtCardRefunds.text = "Card Refunds: -$${format(cardRefunds)}"
 
+                loadAndDisplayTaxBreakdown(orderIds.toList())
+
                 txtNetCash.text = "Net Cash: $${format(netCash)}"
                 txtNetCard.text = "Net Card: $${format(netCard)}"
 
@@ -146,6 +155,67 @@ class BatchDetailsActivity : AppCompatActivity() {
                     Toast.LENGTH_SHORT
                 ).show()
             }
+    }
+
+    private fun loadAndDisplayTaxBreakdown(orderIds: List<String>) {
+        taxBreakdownContainer.removeAllViews()
+        if (orderIds.isEmpty()) return
+
+        val taxTotals = mutableMapOf<String, Long>()
+        var pending = orderIds.size
+
+        fun maybeDisplayTaxes() {
+            pending--
+            if (pending == 0) {
+                if (taxTotals.isNotEmpty()) {
+                    val header = TextView(this).apply {
+                        text = "Taxes collected:"
+                        textSize = 14f
+                        setPadding(0, 8, 0, 4)
+                    }
+                    taxBreakdownContainer.addView(header)
+                }
+                for ((taxName, amountCents) in taxTotals.toSortedMap()) {
+                    val row = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                    }
+                    row.layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { setMargins(0, 4, 0, 4) }
+                    val label = TextView(this).apply {
+                        text = "$taxName:"
+                        textSize = 16f
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    }
+                    val amount = TextView(this).apply {
+                        text = "$${format(amountCents.toDouble() / 100.0)}"
+                        textSize = 16f
+                        gravity = Gravity.END
+                    }
+                    row.addView(label)
+                    row.addView(amount)
+                    taxBreakdownContainer.addView(row)
+                }
+            }
+        }
+
+        for (oid in orderIds) {
+            db.collection("Orders").document(oid).get()
+                .addOnSuccessListener { snap ->
+                    val breakdown = snap.get("taxBreakdown") as? List<*>
+                    if (breakdown != null) {
+                        for (item in breakdown) {
+                            val map = item as? Map<*, *> ?: continue
+                            val name = map["name"]?.toString() ?: continue
+                            val cents = (map["amountInCents"] as? Number)?.toLong() ?: 0L
+                            taxTotals[name] = (taxTotals[name] ?: 0L) + cents
+                        }
+                    }
+                    maybeDisplayTaxes()
+                }
+                .addOnFailureListener { maybeDisplayTaxes() }
+        }
     }
 
     private fun format(value: Double): String {

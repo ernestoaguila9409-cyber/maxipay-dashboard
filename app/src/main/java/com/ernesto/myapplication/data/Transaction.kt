@@ -42,6 +42,9 @@ data class Transaction(
     /** True when the batch was closed; only Refund is allowed, not Void. */
     val settled: Boolean = false,
 
+    /** Batch this transaction belongs to (for refunds to inherit). */
+    val batchId: String = "",
+
     val type: String = "SALE",
     val originalReferenceId: String = "",
 

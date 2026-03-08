@@ -99,7 +99,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
             .addOnFailureListener { e -> onFailure(e) }
     }
 
-    /** Recompute total from items subcollection; update total + remainingBalance + status deterministically */
+    /** Recompute total from items subcollection + taxes; update total + remainingBalance + status deterministically */
     fun recomputeOrderTotals(
         orderId: String,
         onSuccess: () -> Unit,
@@ -111,34 +111,66 @@ class OrderEngine(private val db: FirebaseFirestore) {
             .get()
             .addOnSuccessListener { itemsSnap ->
 
-                var newTotalInCents = 0L
+                var subtotalInCents = 0L
 
                 for (doc in itemsSnap.documents) {
                     val lineTotal =
                         doc.getLong("lineTotalInCents") ?: 0L
 
-                    newTotalInCents += lineTotal
+                    subtotalInCents += lineTotal
                 }
 
-                db.runTransaction { trx ->
+                // Fetch enabled taxes and apply them to get the final total
+                db.collection("Taxes")
+                    .whereEqualTo("enabled", true)
+                    .get()
+                    .addOnSuccessListener { taxesSnap ->
+                        var newTotalInCents = subtotalInCents
+                        val subtotalDollars = subtotalInCents / 100.0
+                        val taxBreakdown = mutableListOf<Map<String, Any>>()
 
-                    val orderSnap = trx.get(orderRef)
+                        for (doc in taxesSnap.documents) {
+                            val name = doc.getString("name") ?: continue
+                            val type = doc.getString("type") ?: continue
+                            val amount = doc.getDouble("amount") ?: doc.getLong("amount")?.toDouble() ?: continue
+                            val taxAmount = if (type == "PERCENTAGE") {
+                                subtotalDollars * amount / 100.0
+                            } else {
+                                amount
+                            }
+                            val taxCents = (taxAmount * 100).toLong()
+                            newTotalInCents += taxCents
+                            taxBreakdown.add(mapOf(
+                                "name" to name,
+                                "amountInCents" to taxCents
+                            ))
+                        }
 
-                    val totalPaidInCents =
-                        orderSnap.getLong("totalPaidInCents") ?: 0L
+                        db.runTransaction { trx ->
 
-                    val remainingInCents =
-                        (newTotalInCents - totalPaidInCents)
-                            .coerceAtLeast(0L)
+                            val orderSnap = trx.get(orderRef)
 
-                    trx.update(orderRef, mapOf(
-                        "totalInCents" to newTotalInCents,
-                        "remainingInCents" to remainingInCents,
-                        "status" to if (remainingInCents > 0L) "OPEN" else "CLOSED",
-                        "updatedAt" to Date()
-                    ))
-                }
-                    .addOnSuccessListener { onSuccess() }
+                            val totalPaidInCents =
+                                orderSnap.getLong("totalPaidInCents") ?: 0L
+
+                            val remainingInCents =
+                                (newTotalInCents - totalPaidInCents)
+                                    .coerceAtLeast(0L)
+
+                            val updates = mutableMapOf<String, Any>(
+                                "totalInCents" to newTotalInCents,
+                                "remainingInCents" to remainingInCents,
+                                "status" to if (remainingInCents > 0L) "OPEN" else "CLOSED",
+                                "updatedAt" to Date()
+                            )
+                            if (taxBreakdown.isNotEmpty()) {
+                                updates["taxBreakdown"] = taxBreakdown
+                            }
+                            trx.update(orderRef, updates)
+                        }
+                            .addOnSuccessListener { onSuccess() }
+                            .addOnFailureListener { e -> onFailure(e) }
+                    }
                     .addOnFailureListener { e -> onFailure(e) }
             }
             .addOnFailureListener { e -> onFailure(e) }

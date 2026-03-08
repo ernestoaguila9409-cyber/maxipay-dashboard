@@ -58,6 +58,31 @@
             android:layout_marginTop="4dp"
             android:visibility="gone"/>
 
+        <!-- Refunded by + date (right-aligned, shown only for refunded items) -->
+        <LinearLayout
+            android:id="@+id/refundedByRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="end"
+            android:layout_marginTop="6dp"
+            android:visibility="gone">
+            <TextView
+                android:id="@+id/txtRefundedBy"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="#1565C0"
+                android:textStyle="italic"/>
+            <TextView
+                android:id="@+id/txtRefundedDate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textColor="#1565C0"
+                android:layout_marginTop="2dp"/>
+        </LinearLayout>
+
     </LinearLayout>
 
 </com.google.android.material.card.MaterialCardView>
