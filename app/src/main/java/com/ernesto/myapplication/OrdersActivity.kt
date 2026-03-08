@@ -55,11 +55,16 @@ class OrdersActivity : AppCompatActivity() {
     private var selectionMode = false
 
     private var currentEmployeeName: String = ""
+    private var filterBatchId: String? = null
+    private var currentOrderView: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_orders)
         currentEmployeeName = intent.getStringExtra("employeeName") ?: ""
+        currentOrderView = intent.getBooleanExtra("CURRENT_ORDER", false)
+        filterBatchId = intent.getStringExtra("BATCH_ID")?.takeIf { it.isNotBlank() }
+        if (currentOrderView) title = "Current Order"
 
         recyclerOrders = findViewById(R.id.recyclerOrders)
         btnMultiDelete = findViewById(R.id.btnMultiDelete)
@@ -157,7 +162,11 @@ class OrdersActivity : AppCompatActivity() {
         listener = null
 
         var query: Query = db.collection("Orders")
-            .orderBy("createdAt", Query.Direction.DESCENDING)
+
+        if (filterBatchId != null) {
+            query = query.whereEqualTo("batchId", filterBatchId)
+        }
+        query = query.orderBy("createdAt", Query.Direction.DESCENDING)
 
         when (statusFilter) {
             "OPEN" -> query = query.whereEqualTo("status", "OPEN")
@@ -214,7 +223,14 @@ class OrdersActivity : AppCompatActivity() {
             orders.addAll(applyStatusFilter(allOrders))
             adapter.submit(orders)
             updateDeleteButtonState()
-            Toast.makeText(this, "Orders: ${orders.size}", Toast.LENGTH_SHORT).show()
+
+            if (currentOrderView && orders.isEmpty()) {
+                AlertDialog.Builder(this)
+                    .setMessage("NO ORDERS AT THE MOMENT")
+                    .setPositiveButton("OK") { _, _ -> finish() }
+                    .setCancelable(false)
+                    .show()
+            }
         }
     }
 

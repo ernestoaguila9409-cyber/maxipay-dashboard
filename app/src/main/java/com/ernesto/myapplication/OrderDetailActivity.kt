@@ -186,22 +186,22 @@ class OrderDetailActivity : AppCompatActivity() {
     private var refundHistoryLines: String = ""
 
     /**
-     * For CLOSED orders: resolve batchId (from order or transaction), load Batch doc,
-     * then show VOID button only when batch.closed == false (transaction not settled).
+     * For CLOSED orders: load transaction to check if all-cash (then no Void), then resolve batchId
+     * and show VOID button only when batch.closed == false and payment was not all cash.
      */
     private fun resolveBatchAndShowVoid(saleTransactionId: String?) {
-        val batchIdFromOrder = currentBatchId?.takeIf { it.isNotBlank() }
-        if (!batchIdFromOrder.isNullOrBlank()) {
-            loadBatchAndUpdateVoidButton(batchIdFromOrder)
-            return
-        }
         if (saleTransactionId.isNullOrBlank()) {
             btnVoid.visibility = View.GONE
             return
         }
         db.collection("Transactions").document(saleTransactionId).get()
             .addOnSuccessListener { txDoc ->
+                if (isTransactionAllCash(txDoc)) {
+                    btnVoid.visibility = View.GONE
+                    return@addOnSuccessListener
+                }
                 val batchId = txDoc.getString("batchId")?.takeIf { it.isNotBlank() }
+                    ?: currentBatchId?.takeIf { it.isNotBlank() }
                 if (!batchId.isNullOrBlank()) {
                     currentBatchId = batchId
                     loadBatchAndUpdateVoidButton(batchId)
@@ -210,6 +210,17 @@ class OrderDetailActivity : AppCompatActivity() {
                 }
             }
             .addOnFailureListener { btnVoid.visibility = View.GONE }
+    }
+
+    private fun isTransactionAllCash(txDoc: DocumentSnapshot): Boolean {
+        val payments = txDoc.get("payments") as? List<*> ?: emptyList<Any>()
+        if (payments.isEmpty()) {
+            val legacyType = txDoc.getString("paymentType")?.takeIf { it.isNotBlank() } ?: ""
+            return legacyType.equals("Cash", true)
+        }
+        return payments.all { p ->
+            (p as? Map<*, *>)?.get("paymentType")?.toString()?.equals("Cash", true) == true
+        }
     }
 
     private fun loadBatchAndUpdateVoidButton(batchId: String) {

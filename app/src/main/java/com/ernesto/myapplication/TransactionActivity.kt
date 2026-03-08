@@ -38,12 +38,21 @@ class TransactionActivity : AppCompatActivity() {
     private var typeFilter: String = "ALL" // ALL, VOID, REFUND, CASH, CREDIT_DEBIT
     private var dateFromMillis: Long? = null
     private var dateToMillis: Long? = null
+    private var last4Filter: String? = null // last 4 digits of card to filter by, null = any
+    private var filterBatchId: String? = null // when set, show only transactions in this (open) batch
+    private var currentTransactionNoBatch: Boolean = false // true when "Current Transaction" but no open batch → show empty
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_transaction)
 
+        val currentTransactionView = intent.getBooleanExtra("CURRENT_TRANSACTION", false)
+        filterBatchId = intent.getStringExtra("BATCH_ID")?.takeIf { it.isNotBlank() }
+        currentTransactionNoBatch = currentTransactionView && filterBatchId == null
+
         recyclerView = findViewById(R.id.recyclerTransactions)
+        val txtTitle = findViewById<TextView>(R.id.txtTitle)
+        txtTitle.text = if (currentTransactionView) "Current Transaction" else "Transactions"
         btnFilter = findViewById(R.id.btnFilter)
         recyclerView.layoutManager = LinearLayoutManager(this)
 
@@ -74,6 +83,12 @@ class TransactionActivity : AppCompatActivity() {
                 val allTransactions = mutableListOf<Transaction>()
 
                 snapshots.forEach { doc ->
+
+                    if (currentTransactionNoBatch) return@forEach
+                    if (filterBatchId != null) {
+                        val docBatchId = doc.getString("batchId")?.takeIf { it.isNotBlank() }
+                        if (docBatchId != filterBatchId) return@forEach
+                    }
 
                     val type = doc.getString("type") ?: "SALE"
 
@@ -175,6 +190,14 @@ class TransactionActivity : AppCompatActivity() {
                 transactionList.clear()
                 transactionList.addAll(applyTransactionFilter(allSalesWithRefunds))
                 adapter.notifyDataSetChanged()
+
+                if ((currentTransactionNoBatch || filterBatchId != null) && transactionList.isEmpty()) {
+                    AlertDialog.Builder(this)
+                        .setMessage("NO TRANSACTIONS AT THE MOMENT")
+                        .setPositiveButton("OK") { _, _ -> finish() }
+                        .setCancelable(false)
+                        .show()
+                }
             }
     }
 
@@ -185,6 +208,15 @@ class TransactionActivity : AppCompatActivity() {
         }
         if (dateToMillis != null) {
             result = result.filter { it.sale.date <= dateToMillis!! }
+        }
+        val last4 = last4Filter?.trim()?.takeIf { it.isNotEmpty() }
+        if (last4 != null) {
+            result = result.filter { swr ->
+                swr.sale.payments.any { p ->
+                    val digits = p.last4.trim()
+                    digits == last4 || (digits.length >= last4.length && digits.endsWith(last4))
+                }
+            }
         }
         result = when (typeFilter) {
             "VOID" -> result.filter { it.sale.voided }
@@ -213,6 +245,8 @@ class TransactionActivity : AppCompatActivity() {
         val radioCreditDebit = view.findViewById<android.widget.RadioButton>(R.id.radioCreditDebit)
         val txtDateFrom = view.findViewById<TextView>(R.id.txtDateFrom)
         val txtDateTo = view.findViewById<TextView>(R.id.txtDateTo)
+        val edtLast4 = view.findViewById<EditText>(R.id.edtLast4)
+        edtLast4.setText(last4Filter ?: "")
 
         when (typeFilter) {
             "VOID" -> radioVoid.isChecked = true
@@ -254,6 +288,7 @@ class TransactionActivity : AppCompatActivity() {
             typeFilter = "ALL"
             dateFromMillis = null
             dateToMillis = null
+            last4Filter = null
             dialog.dismiss()
             transactionList.clear()
             transactionList.addAll(applyTransactionFilter(allSalesWithRefunds))
@@ -268,6 +303,7 @@ class TransactionActivity : AppCompatActivity() {
                 R.id.radioCreditDebit -> "CREDIT_DEBIT"
                 else -> "ALL"
             }
+            last4Filter = edtLast4.text.toString().trim().takeIf { it.isNotEmpty() }
             dialog.dismiss()
             transactionList.clear()
             transactionList.addAll(applyTransactionFilter(allSalesWithRefunds))
@@ -316,8 +352,7 @@ class TransactionActivity : AppCompatActivity() {
                 .setTitle("Cash Transaction")
                 .setMessage("Select an option for this cash payment.")
                 .setPositiveButton("Refund") { _, _ -> processCashRefund(transaction) }
-                .setNegativeButton("Void") { _, _ -> processVoid(transaction) }
-                .setNeutralButton("Cancel", null)
+                .setNegativeButton("Cancel", null)
                 .show()
             return
         }

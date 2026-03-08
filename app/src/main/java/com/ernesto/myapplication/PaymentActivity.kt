@@ -41,6 +41,10 @@ class PaymentActivity : AppCompatActivity() {
     private var remainingBalance = 0.0
     private var paymentAmount = 0.0
 
+    private var splitPayAmount = -1.0
+    private var splitTotalCount = 0
+    private var splitPaymentsDone = 0
+
     private val db = FirebaseFirestore.getInstance()
     private lateinit var paymentEngine: PaymentEngine
 
@@ -93,6 +97,7 @@ class PaymentActivity : AppCompatActivity() {
         btnSplitPayments.setOnClickListener {
             val intent = Intent(this, SplitPaymentActivity::class.java)
             intent.putExtra("ORDER_ID", orderId)
+            intent.putExtra("BATCH_ID", batchId)
             intent.putExtra("REMAINING", remainingBalance)
             startActivity(intent)
         }
@@ -101,6 +106,7 @@ class PaymentActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateMixPaymentsVisibility()
+        loadRemainingBalance()
     }
 
     private fun updateMixPaymentsVisibility() {
@@ -145,9 +151,85 @@ class PaymentActivity : AppCompatActivity() {
 
                 remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
+                if (remainingInCents <= 0L) {
+                    setResult(RESULT_OK)
+                    finish()
+                    return@addOnSuccessListener
+                }
+
                 txtPaymentTotal.text =
                     "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
+
+                showSplitPayShareDialogIfNeeded()
             }
+    }
+
+    private fun showSplitPayShareDialogIfNeeded() {
+        val amount = intent.getDoubleExtra("SPLIT_PAY_AMOUNT", -1.0)
+        if (amount <= 0) return
+        intent.removeExtra("SPLIT_PAY_AMOUNT")
+        val totalCount = intent.getIntExtra("SPLIT_TOTAL_COUNT", 0)
+        intent.removeExtra("SPLIT_TOTAL_COUNT")
+
+        splitPayAmount = amount
+        splitTotalCount = totalCount.coerceAtLeast(1)
+        splitPaymentsDone = 0
+        showSplitPayShareDialog(amount, 1)
+    }
+
+    private fun showSplitPayShareDialog(amount: Double, shareNumber: Int) {
+        val title = if (splitTotalCount > 1) "Pay your share ($shareNumber of $splitTotalCount)" else "Pay your share"
+        showSplitPayShareDialogWithTitle(amount, title)
+    }
+
+    private fun showSplitPayShareDialogWithTitle(amount: Double, title: String) {
+        val actualAmount = if (remainingBalance > 0 && amount > 0) {
+            minOf(amount, roundMoney(remainingBalance))
+        } else return
+        if (actualAmount <= 0) return
+
+        val formatted = String.format(Locale.US, "%.2f", actualAmount)
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage("Amount: $$formatted")
+            .setPositiveButton("Credit") { _, _ ->
+                paymentAmount = actualAmount
+                showWaitingStatus()
+                processCardPayment("Credit")
+            }
+            .setNeutralButton("Debit") { _, _ ->
+                paymentAmount = actualAmount
+                showWaitingStatus()
+                processCardPayment("Debit")
+            }
+            .setNegativeButton("Cash") { _, _ ->
+                paymentAmount = actualAmount
+                showWaitingStatus()
+                completePayment("Cash")
+            }
+            .setCancelable(true)
+            .show()
+    }
+
+    private fun scheduleNextSplitDialogIfNeeded() {
+        if (remainingBalance <= 0 || splitPayAmount <= 0) {
+            splitPayAmount = -1.0
+            splitTotalCount = 0
+            splitPaymentsDone = 0
+            return
+        }
+        splitPaymentsDone++
+        val nextShare = splitPaymentsDone + 1
+        val amount = minOf(splitPayAmount, roundMoney(remainingBalance))
+        if (amount <= 0) return
+        val title = if (nextShare <= splitTotalCount) {
+            "Pay your share ($nextShare of $splitTotalCount)"
+        } else {
+            "Pay remaining balance"
+        }
+        Handler(Looper.getMainLooper()).postDelayed({
+            showSplitPayShareDialogWithTitle(amount, title)
+        }, 1500)
     }
 
     private fun processFullPayment(paymentType: String) {
@@ -354,24 +436,30 @@ class PaymentActivity : AppCompatActivity() {
             invoiceNumber = invoiceNumber,
             onSuccess = { remainingInCents ->
 
-                // ✅ convert cents → double for internal logic
-                remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
+                runOnUiThread {
+                    // ✅ convert cents → double for internal logic
+                    remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
-                if (remainingInCents <= 0L) {
-                    setResult(RESULT_OK)
-                    finish()
-                } else {
-
-                    // ✅ display using MoneyUtils
-                    txtPaymentTotal.text =
-                        "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
-
-                    setButtonsEnabled(true)
+                    if (remainingInCents <= 0L) {
+                        splitPayAmount = -1.0
+                        splitTotalCount = 0
+                        splitPaymentsDone = 0
+                        setResult(RESULT_OK)
+                        finish()
+                    } else {
+                        // ✅ display using MoneyUtils
+                        txtPaymentTotal.text =
+                            "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
+                        setButtonsEnabled(true)
+                        scheduleNextSplitDialogIfNeeded()
+                    }
                 }
             },
             onFailure = {
-                Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
-                setButtonsEnabled(true)
+                runOnUiThread {
+                    Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+                    setButtonsEnabled(true)
+                }
             }
         )
     }
@@ -401,6 +489,9 @@ class PaymentActivity : AppCompatActivity() {
                     remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
                     if (remainingInCents <= 0L) {
+                        splitPayAmount = -1.0
+                        splitTotalCount = 0
+                        splitPaymentsDone = 0
                         setResult(RESULT_OK)
                         finish()
                     } else {
@@ -411,6 +502,7 @@ class PaymentActivity : AppCompatActivity() {
 
                         progressBar.visibility = View.GONE
                         setButtonsEnabled(true)
+                        scheduleNextSplitDialogIfNeeded()
                     }
                 }
             },

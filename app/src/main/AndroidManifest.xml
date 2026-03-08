@@ -74,6 +74,11 @@
             android:name=".TransactionActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".TodaySalesActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
+
         <activity android:name=".ModifierManagementActivity" />
         <activity android:name=".GlobalModifierActivity" />
         <activity android:name=".AssignModifierToItemActivity" />

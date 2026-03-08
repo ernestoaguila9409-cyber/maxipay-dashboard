@@ -71,6 +71,10 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, BatchManagementActivity::class.java))
         }
 
+        findViewById<android.view.View>(R.id.todaySalesArea).setOnClickListener {
+            startActivity(Intent(this, TodaySalesActivity::class.java))
+        }
+
         findViewById<Button>(R.id.btnEmployees).setOnClickListener {
             startActivity(Intent(this, EmployeesActivity::class.java))
         }

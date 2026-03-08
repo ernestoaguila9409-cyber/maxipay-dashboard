@@ -61,6 +61,25 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:text="Card last 4 digits"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:paddingTop="20dp"
+        android:paddingBottom="8dp"/>
+
+    <EditText
+        android:id="@+id/edtLast4"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:inputType="number"
+        android:maxLength="4"
+        android:hint="e.g. 1182 (leave blank for any)"
+        android:padding="12dp"
+        android:background="@android:drawable/btn_dropdown"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
         android:text="Date range"
         android:textSize="14sp"
         android:textStyle="bold"

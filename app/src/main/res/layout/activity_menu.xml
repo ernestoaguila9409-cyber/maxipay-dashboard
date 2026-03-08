@@ -1,79 +1,81 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
-    android:orientation="vertical"
+    android:orientation="horizontal"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#F5F5F5">
 
-    <!-- Categories -->
-    <HorizontalScrollView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="12dp">
+    <!-- LEFT PANEL – Categories (vertical, scrollable) -->
+    <ScrollView
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:background="#FFFFFF"
+        android:elevation="2dp">
 
         <LinearLayout
             android:id="@+id/categoryContainer"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"/>
-    </HorizontalScrollView>
-
-    <!-- Content Row -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="horizontal">
-
-        <!-- Items Grid -->
-        <GridLayout
-            android:id="@+id/itemContainer"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="2"
-            android:columnCount="2"
-            android:padding="12dp"/>
-
-        <!-- Cart Panel -->
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
             android:orientation="vertical"
-            android:background="#FFFFFF"
-            android:padding="12dp">
+            android:padding="8dp"/>
+    </ScrollView>
 
-            <TextView
-                android:text="Cart"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"/>
+    <!-- CENTER PANEL – Menu items grid -->
+    <GridLayout
+        android:id="@+id/itemContainer"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="2"
+        android:columnCount="2"
+        android:padding="12dp"/>
+
+    <!-- RIGHT PANEL – Cart -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:background="#FFFFFF"
+        android:padding="12dp"
+        android:elevation="2dp">
+
+        <TextView
+            android:text="Cart"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true">
 
             <LinearLayout
                 android:id="@+id/cartContainer"
                 android:orientation="vertical"
                 android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"/>
-
-            <TextView
-                android:id="@+id/txtTotal"
-                android:text="Total: $0.00"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"/>
+        </ScrollView>
 
-            <Button
-                android:id="@+id/btnCheckout"
-                android:text="Checkout"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"/>
+        <TextView
+            android:id="@+id/txtTotal"
+            android:text="Total: $0.00"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
 
-        </LinearLayout>
+        <Button
+            android:id="@+id/btnCheckout"
+            android:text="Checkout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"/>
 
     </LinearLayout>
 

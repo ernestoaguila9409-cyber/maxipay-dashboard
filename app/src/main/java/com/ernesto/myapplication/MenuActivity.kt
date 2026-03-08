@@ -191,7 +191,16 @@ class MenuActivity : AppCompatActivity() {
 
                     val button = Button(this)
                     button.text = name
+                    button.setBackgroundColor(Color.parseColor("#E8E8E8"))
+                    button.setTextColor(Color.DKGRAY)
                     button.setOnClickListener { loadItems(categoryId) }
+
+                    val params = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
+                    params.setMargins(0, 4, 0, 4)
+                    button.layoutParams = params
 
                     categoryContainer.addView(button)
                 }

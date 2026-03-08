@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#F5F5F5">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:backgroundTint="#FFFFFF"
+        android:title="Today's Sales"
+        android:titleTextColor="@android:color/black" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="24dp"
+        android:layout_marginTop="32dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Sales total (today)"
+            android:textSize="14sp"
+            android:textColor="#666666"/>
+
+        <TextView
+            android:id="@+id/txtTodayTotal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Today: $0.00"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Number of transactions"
+            android:textSize="14sp"
+            android:textColor="#666666"
+            android:layout_marginTop="24dp"/>
+
+        <TextView
+            android:id="@+id/txtTodayCount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Transactions: 0"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp"/>
+
+        <Button
+            android:id="@+id/btnViewTransactions"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Current Transaction"
+            android:layout_marginTop="32dp"/>
+
+        <Button
+            android:id="@+id/btnCurrentOrder"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Current Order"
+            android:layout_marginTop="12dp"/>
+    </LinearLayout>
+</LinearLayout>
