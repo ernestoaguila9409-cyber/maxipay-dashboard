@@ -19,6 +19,8 @@ class LoginActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_login)
 
+        TerminalPrefs.initFromFirestore()
+
         fun onPinChanged() {
             updateDots()
             if (pinBuilder.length == maxPinLength && !isLoggingIn) {

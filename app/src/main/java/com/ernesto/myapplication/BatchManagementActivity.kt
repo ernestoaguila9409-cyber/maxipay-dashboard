@@ -136,14 +136,18 @@ class BatchManagementActivity : AppCompatActivity() {
             .replace("-", "")
             .take(12)
 
+        val tpn = TerminalPrefs.getTpn(this)
+        val registerId = TerminalPrefs.getRegisterId(this)
+        val authKey = TerminalPrefs.getAuthKey(this)
+
         val json = """
 {
   "ReferenceId": "$referenceId",
   "GetReceipt": false,
   "SettlementType": "Close",
-  "Tpn": "11881706541A",
-  "RegisterId": "134909005",
-  "Authkey": "Qt9N7CxhDs",
+  "Tpn": "$tpn",
+  "RegisterId": "$registerId",
+  "Authkey": "$authKey",
   "SPInProxyTimeout": null,
   "CustomFields": {}
 }

@@ -314,9 +314,9 @@ class PaymentActivity : AppCompatActivity() {
             put("ReferenceId", clientReferenceId)
             put("PrintReceipt", "No")
             put("GetReceipt", "No")
-            put("Tpn", "11881706541A")
-            put("RegisterId", "134909005")
-            put("Authkey", "Qt9N7CxhDs")
+            put("Tpn", TerminalPrefs.getTpn(this@PaymentActivity))
+            put("RegisterId", TerminalPrefs.getRegisterId(this@PaymentActivity))
+            put("Authkey", TerminalPrefs.getAuthKey(this@PaymentActivity))
         }
 
         val client = OkHttpClient.Builder()

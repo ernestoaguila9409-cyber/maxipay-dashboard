@@ -531,8 +531,8 @@ class OrderDetailActivity : AppCompatActivity() {
             put("CaptureSignature", false)
             put("GetExtendedData", true)
             put("CallbackInfo", JSONObject().apply { put("Url", "") })
-            put("Tpn", "11881706541A")
-            put("Authkey", "Qt9N7CxhDs")
+            put("Tpn", TerminalPrefs.getTpn(this@OrderDetailActivity))
+            put("Authkey", TerminalPrefs.getAuthKey(this@OrderDetailActivity))
             if (payment.batchNumber.isNotBlank()) {
                 put("BatchNumber", payment.batchNumber.toIntOrNull() ?: payment.batchNumber)
             }
@@ -846,8 +846,8 @@ class OrderDetailActivity : AppCompatActivity() {
             put("CaptureSignature", false)
             put("GetExtendedData", true)
             put("CallbackInfo", JSONObject().apply { put("Url", "") })
-            put("Tpn", "11881706541A")
-            put("Authkey", "Qt9N7CxhDs")
+            put("Tpn", TerminalPrefs.getTpn(this@OrderDetailActivity))
+            put("Authkey", TerminalPrefs.getAuthKey(this@OrderDetailActivity))
         }
 
         val body = json.toString()

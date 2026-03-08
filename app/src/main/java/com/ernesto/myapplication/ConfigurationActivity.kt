@@ -21,7 +21,11 @@ class ConfigurationActivity : AppCompatActivity() {
         }
 
         findViewById<android.view.View>(R.id.optionPaymentTerminal).setOnClickListener {
-            startActivity(Intent(this, PaymentTerminalActivity::class.java))
+            startActivity(Intent(this, TerminalListActivity::class.java))
+        }
+
+        findViewById<android.view.View>(R.id.optionTableMapping).setOnClickListener {
+            startActivity(Intent(this, TableLayoutActivity::class.java))
         }
     }
 

@@ -493,8 +493,8 @@ class TransactionActivity : AppCompatActivity() {
             put("CaptureSignature", false)
             put("GetExtendedData", true)
             put("CallbackInfo", org.json.JSONObject().apply { put("Url", "") })
-            put("Tpn", "11881706541A")
-            put("Authkey", "Qt9N7CxhDs")
+            put("Tpn", TerminalPrefs.getTpn(this@TransactionActivity))
+            put("Authkey", TerminalPrefs.getAuthKey(this@TransactionActivity))
             put("SPInProxyTimeout", org.json.JSONObject.NULL)
             put("CustomFields", org.json.JSONObject())
             if (payment.batchNumber.isNotBlank()) {
@@ -705,9 +705,9 @@ class TransactionActivity : AppCompatActivity() {
             put("ReferenceId", refForGateway)
             put("PrintReceipt", "No")
             put("GetReceipt", "No")
-            put("Tpn", "11881706541A")
-            put("RegisterId", "134909005")
-            put("Authkey", "Qt9N7CxhDs")
+            put("Tpn", TerminalPrefs.getTpn(this@TransactionActivity))
+            put("RegisterId", TerminalPrefs.getRegisterId(this@TransactionActivity))
+            put("Authkey", TerminalPrefs.getAuthKey(this@TransactionActivity))
         }.toString()
 
         sendApiRequest(
