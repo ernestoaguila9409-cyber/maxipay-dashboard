@@ -123,11 +123,12 @@ class MenuActivity : AppCompatActivity() {
 
     private fun loadEnabledTaxes() {
         db.collection("Taxes")
-            .whereEqualTo("enabled", true)
             .get()
             .addOnSuccessListener { snap ->
                 enabledTaxes.clear()
                 for (doc in snap.documents) {
+                    val enabled = doc.getBoolean("enabled") ?: true
+                    if (!enabled) continue
                     val name = doc.getString("name") ?: continue
                     val type = doc.getString("type") ?: continue
                     val amount = doc.getDouble("amount") ?: doc.getLong("amount")?.toDouble() ?: continue
