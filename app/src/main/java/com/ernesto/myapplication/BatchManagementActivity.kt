@@ -14,6 +14,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import android.util.Log
 import org.json.JSONObject
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -48,6 +49,8 @@ class BatchManagementActivity : AppCompatActivity() {
         }
     }
 
+    private var hasOpenPreAuths = false
+
     // 🔹 LOAD OPEN TRANSACTIONS (UNSETTLED, NOT VOIDED)
     private fun loadOpenBatch() {
         db.collection("Transactions")
@@ -55,21 +58,31 @@ class BatchManagementActivity : AppCompatActivity() {
             .whereEqualTo("voided", false)
             .get()
             .addOnSuccessListener { documents ->
-                openTransactionCount = documents.size()
-
+                var settleable = 0
                 var openTotal = 0.0
+                var preAuthCount = 0
+
                 for (doc in documents) {
-                    openTotal += computeNetAmount(doc)
+                    val type = doc.getString("type") ?: "SALE"
+                    if (type == "PRE_AUTH") {
+                        preAuthCount++
+                    } else {
+                        settleable++
+                        openTotal += computeNetAmount(doc)
+                    }
                 }
 
-                txtOpenBatch.text = String.format(
-                    Locale.US,
-                    "Open Transactions: %d | Total: $%.2f",
-                    openTransactionCount,
-                    openTotal
-                )
+                openTransactionCount = settleable
+                hasOpenPreAuths = preAuthCount > 0
 
-                btnCloseBatch.isEnabled = openTransactionCount > 0
+                val label = StringBuilder()
+                label.append(String.format(Locale.US, "Open Transactions: %d | Total: $%.2f", settleable, openTotal))
+                if (preAuthCount > 0) {
+                    label.append(String.format(Locale.US, "\nOpen Pre-Auths: %d (capture or void before closing)", preAuthCount))
+                }
+                txtOpenBatch.text = label.toString()
+
+                btnCloseBatch.isEnabled = settleable > 0
             }
     }
 
@@ -118,6 +131,15 @@ class BatchManagementActivity : AppCompatActivity() {
 
     // 🔹 CONFIRM CLOSE
     private fun confirmCloseBatch() {
+        if (hasOpenPreAuths) {
+            AlertDialog.Builder(this)
+                .setTitle("Open Pre-Auths")
+                .setMessage("There are uncaptured pre-authorizations. Capture or void all open bar tabs before closing the batch.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+
         AlertDialog.Builder(this)
             .setTitle("Close Batch")
             .setMessage("Are you sure you want to close the open batch?")
@@ -131,27 +153,21 @@ class BatchManagementActivity : AppCompatActivity() {
     // 🔥 SEND SETTLEMENT REQUEST TO Z8
     private fun sendSettleRequest() {
 
-        val referenceId = UUID.randomUUID()
-            .toString()
-            .replace("-", "")
-            .take(12)
-
         val tpn = TerminalPrefs.getTpn(this)
         val registerId = TerminalPrefs.getRegisterId(this)
         val authKey = TerminalPrefs.getAuthKey(this)
 
-        val json = """
-{
-  "ReferenceId": "$referenceId",
-  "GetReceipt": false,
-  "SettlementType": "Close",
-  "Tpn": "$tpn",
-  "RegisterId": "$registerId",
-  "Authkey": "$authKey",
-  "SPInProxyTimeout": null,
-  "CustomFields": {}
-}
-""".trimIndent()
+        val jsonObj = JSONObject().apply {
+            put("PrintReceipt", false)
+            put("GetReceipt", false)
+            put("SettlementType", "Force")
+            put("Tpn", tpn)
+            put("RegisterId", registerId)
+            put("Authkey", authKey)
+        }
+        val json = jsonObj.toString()
+
+        Log.d("SETTLE_REQUEST", json)
 
         val client = OkHttpClient.Builder()
             .connectTimeout(60, TimeUnit.SECONDS)
@@ -171,6 +187,7 @@ class BatchManagementActivity : AppCompatActivity() {
         client.newCall(request).enqueue(object : Callback {
 
             override fun onFailure(call: Call, e: IOException) {
+                Log.e("SETTLE_ERROR", "Network error: ${e.message}", e)
                 runOnUiThread {
                     Toast.makeText(
                         this@BatchManagementActivity,
@@ -183,40 +200,54 @@ class BatchManagementActivity : AppCompatActivity() {
             override fun onResponse(call: Call, response: Response) {
 
                 val responseText = response.body?.string() ?: ""
+                Log.d("SETTLE_RESPONSE", responseText)
 
                 runOnUiThread {
 
                     try {
 
                         val jsonObject = JSONObject(responseText)
-                        val resultCode = jsonObject
-                            .getJSONObject("GeneralResponse")
-                            .getString("ResultCode")
+                        val generalResponse = jsonObject.optJSONObject("GeneralResponse")
+                        val resultCode = generalResponse?.optString("ResultCode", "-1") ?: "-1"
+                        val resultText = generalResponse?.optString("DetailedMessage", "") ?: ""
 
-                        if (resultCode == "0") {
+                        val settleDetails = jsonObject.optJSONArray("SettleDetails")
+                        val hostApproved = settleDetails?.let { arr ->
+                            (0 until arr.length()).any { arr.getJSONObject(it).optString("HostStatus") == "0" }
+                        } ?: false
+
+                        if (resultCode == "0" || hostApproved) {
+
+                            val msg = if (hostApproved && resultCode != "0") {
+                                val detail = settleDetails?.optJSONObject(0)?.optString("DetailedMessage", "") ?: ""
+                                "Z8 Batch Closed Successfully" + if (detail.isNotBlank()) "\n($detail)" else ""
+                            } else {
+                                "Z8 Batch Closed Successfully"
+                            }
 
                             Toast.makeText(
                                 this@BatchManagementActivity,
-                                "Z8 Batch Closed Successfully",
+                                msg,
                                 Toast.LENGTH_LONG
                             ).show()
 
                             closeBatchInFirebase()
 
                         } else {
-
+                            val msg = if (resultText.isNotBlank()) resultText else "Code: $resultCode"
+                            Log.w("SETTLE_ERROR", "Settlement declined – $msg\n$responseText")
                             Toast.makeText(
                                 this@BatchManagementActivity,
-                                "Settlement Failed\n$responseText",
+                                "Settlement Failed: $msg",
                                 Toast.LENGTH_LONG
                             ).show()
                         }
 
                     } catch (e: Exception) {
-
+                        Log.e("SETTLE_ERROR", "Parse error: ${e.message}\n$responseText", e)
                         Toast.makeText(
                             this@BatchManagementActivity,
-                            "Settlement Parse Error\n$responseText",
+                            "Settlement Parse Error: ${e.message}",
                             Toast.LENGTH_LONG
                         ).show()
                     }
@@ -320,7 +351,7 @@ class BatchManagementActivity : AppCompatActivity() {
     private fun computeNetAmount(doc: DocumentSnapshot): Double {
         val type = doc.getString("type") ?: "SALE"
 
-        return if (type == "SALE") {
+        return if (type == "SALE" || type == "CAPTURE") {
             // New schema: totalPaidInCents / totalPaid (multi‑payment)
             val cents = doc.getLong("totalPaidInCents")
             if (cents != null) {

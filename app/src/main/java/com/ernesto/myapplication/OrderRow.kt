@@ -9,7 +9,8 @@ data class OrderRow(
     val totalRefundedInCents: Long = 0L,
     val employeeName: String,
     val createdAt: Timestamp,
-    val orderType: String = ""
+    val orderType: String = "",
+    val preAuthAmountCents: Long = 0L
 ) {
     val netCents: Long get() = (totalCents - totalRefundedInCents).coerceAtLeast(0L)
 }

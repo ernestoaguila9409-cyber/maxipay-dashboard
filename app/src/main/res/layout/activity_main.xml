@@ -33,11 +33,16 @@
             android:layout_marginBottom="8dp"/>
 
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center"
             android:layout_marginBottom="16dp">
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"/>
 
             <LinearLayout
                 android:id="@+id/btnDineIn"
@@ -49,7 +54,6 @@
                 android:clickable="true"
                 android:focusable="true"
                 android:foreground="?attr/selectableItemBackground"
-                android:layout_marginEnd="10dp"
                 android:padding="12dp">
 
                 <ImageView
@@ -69,6 +73,11 @@
                     android:layout_marginTop="6dp"/>
             </LinearLayout>
 
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"/>
+
             <LinearLayout
                 android:id="@+id/btnToGo"
                 android:layout_width="105dp"
@@ -79,7 +88,6 @@
                 android:clickable="true"
                 android:focusable="true"
                 android:foreground="?attr/selectableItemBackground"
-                android:layout_marginStart="10dp"
                 android:padding="12dp">
 
                 <ImageView
@@ -99,6 +107,11 @@
                     android:layout_marginTop="6dp"/>
             </LinearLayout>
 
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"/>
+
             <LinearLayout
                 android:id="@+id/btnBar"
                 android:layout_width="105dp"
@@ -109,7 +122,6 @@
                 android:clickable="true"
                 android:focusable="true"
                 android:foreground="?attr/selectableItemBackground"
-                android:layout_marginStart="10dp"
                 android:padding="12dp">
 
                 <ImageView
@@ -128,6 +140,11 @@
                     android:textStyle="bold"
                     android:layout_marginTop="6dp"/>
             </LinearLayout>
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"/>
 
         </LinearLayout>
 

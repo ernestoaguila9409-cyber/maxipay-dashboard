@@ -169,9 +169,8 @@ class MainActivity : AppCompatActivity() {
 
                     val type = doc.getString("type") ?: "SALE"
 
-                    if (type == "SALE") {
+                    if (type == "SALE" || type == "CAPTURE") {
                         if (settled) continue
-                        // New schema: payments array with per‑payment timestamp + amountInCents
                         val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
                         var todaysCents = 0L
 

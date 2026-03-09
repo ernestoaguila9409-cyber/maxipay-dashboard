@@ -64,7 +64,7 @@ class OrdersActivity : AppCompatActivity() {
         currentEmployeeName = intent.getStringExtra("employeeName") ?: ""
         currentOrderView = intent.getBooleanExtra("CURRENT_ORDER", false)
         filterBatchId = intent.getStringExtra("BATCH_ID")?.takeIf { it.isNotBlank() }
-        if (currentOrderView) title = "Current Order"
+        if (currentOrderView) title = "Closed Order"
 
         recyclerOrders = findViewById(R.id.recyclerOrders)
         btnMultiDelete = findViewById(R.id.btnMultiDelete)
@@ -215,6 +215,8 @@ class OrdersActivity : AppCompatActivity() {
                         }
                         val createdAt = doc.getTimestamp("createdAt") ?: Timestamp.now()
                         val orderType = doc.getString("orderType") ?: ""
+                        val preAuthAmount = doc.getDouble("preAuthAmount") ?: 0.0
+                        val preAuthAmountCents = Math.round(preAuthAmount * 100)
                         result.add(
                             OrderRow(
                                 id = id,
@@ -223,15 +225,22 @@ class OrdersActivity : AppCompatActivity() {
                                 totalRefundedInCents = totalRefundedInCents,
                                 employeeName = displayEmployee,
                                 createdAt = createdAt,
-                                orderType = orderType
+                                orderType = orderType,
+                                preAuthAmountCents = preAuthAmountCents
                             )
                         )
                     }
                     result
                 }
 
+                val filtered = if (currentOrderView) {
+                    parsed.filter { !(it.preAuthAmountCents > 0L && it.status.uppercase() == "OPEN") }
+                } else {
+                    parsed
+                }
+
                 allOrders.clear()
-                allOrders.addAll(parsed)
+                allOrders.addAll(filtered)
                 orders.clear()
                 orders.addAll(applyFilters(allOrders))
                 adapter.submit(orders)

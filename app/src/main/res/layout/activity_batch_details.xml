@@ -71,6 +71,17 @@
                 android:layout_width="match_parent"
                 android:layout_height="16dp"/>
 
+            <!-- Order Type Breakdown (populated dynamically) -->
+            <LinearLayout
+                android:id="@+id/orderTypeBreakdownContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"/>
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="16dp"/>
+
             <!-- Taxes collected (populated dynamically) -->
             <LinearLayout
                 android:id="@+id/taxBreakdownContainer"

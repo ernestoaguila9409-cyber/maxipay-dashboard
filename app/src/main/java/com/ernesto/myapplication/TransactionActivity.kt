@@ -40,6 +40,7 @@ class TransactionActivity : AppCompatActivity() {
     private var dateToMillis: Long? = null
     private var last4Filter: String? = null // last 4 digits of card to filter by, null = any
     private var filterBatchId: String? = null // when set, show only transactions in this (open) batch
+    private var currentTransactionView: Boolean = false
     private var currentTransactionNoBatch: Boolean = false // true when "Current Transaction" but no open batch → show empty
     private var showUnsettledAndTodayRefunds: Boolean = false
 
@@ -47,14 +48,14 @@ class TransactionActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_transaction)
 
-        val currentTransactionView = intent.getBooleanExtra("CURRENT_TRANSACTION", false)
+        currentTransactionView = intent.getBooleanExtra("CURRENT_TRANSACTION", false)
         showUnsettledAndTodayRefunds = intent.getBooleanExtra("SHOW_UNSETTLED_AND_TODAY_REFUNDS", false)
         filterBatchId = intent.getStringExtra("BATCH_ID")?.takeIf { it.isNotBlank() }
         currentTransactionNoBatch = currentTransactionView && filterBatchId == null && !showUnsettledAndTodayRefunds
 
         recyclerView = findViewById(R.id.recyclerTransactions)
         val txtTitle = findViewById<TextView>(R.id.txtTitle)
-        txtTitle.text = if (currentTransactionView) "Current Transaction" else "Transactions"
+        txtTitle.text = if (currentTransactionView) "Closed Transaction" else "Transactions"
         btnFilter = findViewById(R.id.btnFilter)
         recyclerView.layoutManager = LinearLayoutManager(this)
 
@@ -199,7 +200,11 @@ class TransactionActivity : AppCompatActivity() {
                 // Sort newest first
                 allTransactions.sortByDescending { it.date }
 
-                val sales = allTransactions.filter { it.type == "SALE" || it.type == "PRE_AUTH" || it.type == "CAPTURE" }
+                val sales = if (currentTransactionView) {
+                    allTransactions.filter { it.type == "SALE" || it.type == "CAPTURE" }
+                } else {
+                    allTransactions.filter { it.type == "SALE" || it.type == "PRE_AUTH" || it.type == "CAPTURE" }
+                }
                 val refunds = allTransactions.filter { it.type == "REFUND" }
 
                 allSalesWithRefunds.clear()

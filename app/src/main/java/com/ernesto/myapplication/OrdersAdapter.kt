@@ -59,6 +59,7 @@ class OrdersAdapter(
         private val txtTotal: TextView = itemView.findViewById(R.id.txtTotal)
         private val txtEmployee: TextView = itemView.findViewById(R.id.txtEmployee)
         private val txtOrderType: TextView = itemView.findViewById(R.id.txtOrderType)
+        private val txtPreAuth: TextView = itemView.findViewById(R.id.txtPreAuth)
         private val txtRefund: TextView = itemView.findViewById(R.id.txtRefund)
         private val txtTime: TextView = itemView.findViewById(R.id.txtTime)
         private val imgSelected: ImageView = itemView.findViewById(R.id.imgSelected)
@@ -101,6 +102,14 @@ class OrdersAdapter(
                 txtRefund.visibility = View.GONE
             }
             txtEmployee.text = order.employeeName
+
+            if (order.preAuthAmountCents > 0L) {
+                txtPreAuth.visibility = View.VISIBLE
+                val label = if (order.status.uppercase() == "CLOSED") "PostAuth" else "PreAuth"
+                txtPreAuth.text = "$label ${MoneyUtils.centsToDisplay(order.preAuthAmountCents)}"
+            } else {
+                txtPreAuth.visibility = View.GONE
+            }
 
             if (order.orderType.isNotBlank()) {
                 txtOrderType.visibility = View.VISIBLE

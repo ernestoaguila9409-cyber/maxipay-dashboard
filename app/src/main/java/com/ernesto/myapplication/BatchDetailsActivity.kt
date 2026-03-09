@@ -20,6 +20,7 @@ class BatchDetailsActivity : AppCompatActivity() {
     private lateinit var txtCashRefunds: TextView
     private lateinit var txtCardRefunds: TextView
     private lateinit var taxBreakdownContainer: LinearLayout
+    private lateinit var orderTypeBreakdownContainer: LinearLayout
     private lateinit var txtNetCash: TextView
     private lateinit var txtNetCard: TextView
     private lateinit var txtBatchTotal: TextView
@@ -38,6 +39,7 @@ class BatchDetailsActivity : AppCompatActivity() {
         txtCashRefunds = findViewById(R.id.txtCashRefunds)
         txtCardRefunds = findViewById(R.id.txtCardRefunds)
         taxBreakdownContainer = findViewById(R.id.taxBreakdownContainer)
+        orderTypeBreakdownContainer = findViewById(R.id.orderTypeBreakdownContainer)
         txtNetCash = findViewById(R.id.txtNetCash)
         txtNetCard = findViewById(R.id.txtNetCard)
         txtBatchTotal = findViewById(R.id.txtBatchTotal)
@@ -66,6 +68,7 @@ class BatchDetailsActivity : AppCompatActivity() {
                 var cardRefunds = 0.0
 
                 val orderIds = mutableSetOf<String>()
+                val orderAmounts = mutableMapOf<String, Double>()
 
                 for (doc in documents) {
                     val txBatchId = doc.getString("batchId") ?: ""
@@ -73,9 +76,11 @@ class BatchDetailsActivity : AppCompatActivity() {
 
                     val type = doc.getString("type") ?: "SALE"
 
-                    if (type == "SALE") {
-                        doc.getString("orderId")?.takeIf { it.isNotBlank() }?.let { orderIds.add(it) }
-                        // New schema: payments array with per‑payment amounts and types
+                    if (type == "SALE" || type == "CAPTURE") {
+                        val orderId = doc.getString("orderId")?.takeIf { it.isNotBlank() }
+                        orderId?.let { orderIds.add(it) }
+
+                        var txTotal = 0.0
                         val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
                         if (payments.isNotEmpty()) {
                             for (p in payments) {
@@ -85,6 +90,7 @@ class BatchDetailsActivity : AppCompatActivity() {
                                 val cents =
                                     (map["amountInCents"] as? Number)?.toLong() ?: 0L
                                 val amount = cents / 100.0
+                                txTotal += amount
 
                                 when (paymentType) {
                                     "Cash" -> cashSales += amount
@@ -93,17 +99,21 @@ class BatchDetailsActivity : AppCompatActivity() {
                                 }
                             }
                         } else {
-                            // Fallback: older flat schema with amount + paymentType
                             val paymentType = doc.getString("paymentType") ?: ""
                             val amount =
                                 doc.getDouble("totalPaid")
                                     ?: doc.getDouble("amount")
                                     ?: 0.0
+                            txTotal = amount
                             when (paymentType) {
                                 "Cash" -> cashSales += amount
                                 "Credit" -> creditSales += amount
                                 "Debit" -> debitSales += amount
                             }
+                        }
+
+                        if (orderId != null && txTotal > 0.0) {
+                            orderAmounts[orderId] = (orderAmounts[orderId] ?: 0.0) + txTotal
                         }
                     } else if (type == "REFUND") {
                         val paymentType = doc.getString("paymentType") ?: ""
@@ -141,6 +151,7 @@ class BatchDetailsActivity : AppCompatActivity() {
                 txtCashRefunds.text = "Cash Refunds: -$${format(cashRefunds)}"
                 txtCardRefunds.text = "Card Refunds: -$${format(cardRefunds)}"
 
+                loadAndDisplayOrderTypeBreakdown(orderAmounts)
                 loadAndDisplayTaxBreakdown(orderIds.toList())
 
                 txtNetCash.text = "Net Cash: $${format(netCash)}"
@@ -155,6 +166,77 @@ class BatchDetailsActivity : AppCompatActivity() {
                     Toast.LENGTH_SHORT
                 ).show()
             }
+    }
+
+    private fun loadAndDisplayOrderTypeBreakdown(orderAmounts: Map<String, Double>) {
+        orderTypeBreakdownContainer.removeAllViews()
+        if (orderAmounts.isEmpty()) return
+
+        val typeTotals = mutableMapOf<String, Double>()
+        var pending = orderAmounts.size
+
+        fun maybeDisplay() {
+            pending--
+            if (pending > 0) return
+
+            if (typeTotals.isEmpty()) return
+
+            val header = TextView(this).apply {
+                text = "Sales by Order Type:"
+                textSize = 14f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setPadding(0, 0, 0, 8)
+            }
+            orderTypeBreakdownContainer.addView(header)
+
+            val displayOrder = listOf("DINE_IN", "TO_GO", "BAR_TAB", "BAR")
+            val allKeys = typeTotals.keys.sortedBy { key -> displayOrder.indexOf(key).let { if (it == -1) 99 else it } }
+
+            for (key in allKeys) {
+                val amount = typeTotals[key] ?: continue
+                val label = when (key) {
+                    "DINE_IN" -> "Dine In"
+                    "TO_GO" -> "To-Go"
+                    "BAR_TAB" -> "Bar Tab"
+                    "BAR" -> "Bar"
+                    else -> key
+                }
+
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { setMargins(0, 4, 0, 4) }
+                }
+                val txtLabel = TextView(this).apply {
+                    text = "$label:"
+                    textSize = 16f
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                }
+                val txtAmount = TextView(this).apply {
+                    text = "$${format(amount)}"
+                    textSize = 16f
+                    gravity = Gravity.END
+                }
+                row.addView(txtLabel)
+                row.addView(txtAmount)
+                orderTypeBreakdownContainer.addView(row)
+            }
+        }
+
+        for ((orderId, amount) in orderAmounts) {
+            db.collection("Orders").document(orderId).get()
+                .addOnSuccessListener { snap ->
+                    val orderType = snap.getString("orderType") ?: "OTHER"
+                    typeTotals[orderType] = (typeTotals[orderType] ?: 0.0) + amount
+                    maybeDisplay()
+                }
+                .addOnFailureListener {
+                    typeTotals["OTHER"] = (typeTotals["OTHER"] ?: 0.0) + amount
+                    maybeDisplay()
+                }
+        }
     }
 
     private fun loadAndDisplayTaxBreakdown(orderIds: List<String>) {

@@ -58,14 +58,14 @@
             android:id="@+id/btnViewTransactions"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Current Transaction"
+            android:text="Closed Transaction"
             android:layout_marginTop="32dp"/>
 
         <Button
             android:id="@+id/btnCurrentOrder"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Current Order"
+            android:text="Closed Order"
             android:layout_marginTop="12dp"/>
     </LinearLayout>
 </LinearLayout>

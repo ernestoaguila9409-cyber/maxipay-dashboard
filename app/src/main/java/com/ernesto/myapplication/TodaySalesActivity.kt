@@ -99,7 +99,7 @@ class TodaySalesActivity : AppCompatActivity() {
 
                     val type = doc.getString("type") ?: "SALE"
 
-                    if (type == "SALE") {
+                    if (type == "SALE" || type == "CAPTURE") {
                         if (settled) continue
                         val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
                         var todaysCents = 0L
