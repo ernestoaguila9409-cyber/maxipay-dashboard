@@ -39,6 +39,8 @@ class TransactionAdapter(
         val context = holder.itemView.context
 
         val isStandaloneRefund = sale.type == "REFUND"
+        val isPreAuth = sale.type == "PRE_AUTH"
+        val isPostAuth = sale.type == "CAPTURE"
 
         val saleAmount = sale.amountInCents / 100.0
         val totalRefunded = refunds.sumOf { kotlin.math.abs(it.amountInCents) } / 100.0
@@ -47,7 +49,11 @@ class TransactionAdapter(
         val date = SimpleDateFormat("MM/dd/yyyy HH:mm", Locale.getDefault())
             .format(Date(sale.date))
 
-        if (isStandaloneRefund) {
+        if (isPreAuth) {
+            holder.statusDot.setBackgroundColor(Color.parseColor("#6A4FB3"))
+        } else if (isPostAuth) {
+            holder.statusDot.setBackgroundColor(context.getColor(android.R.color.holo_green_dark))
+        } else if (isStandaloneRefund) {
             holder.statusDot.setBackgroundColor(Color.parseColor("#2196F3"))
         } else {
             holder.statusDot.setBackgroundColor(
@@ -55,7 +61,31 @@ class TransactionAdapter(
             )
         }
 
-        if (isStandaloneRefund) {
+        if (isPreAuth) {
+            val first = sale.payments.firstOrNull()
+            val methodLabel = if (first != null && first.cardBrand.isNotBlank() && first.last4.isNotBlank()) {
+                "${first.cardBrand} •••• ${first.last4}"
+            } else if (sale.cardBrand.isNotBlank() && sale.last4.isNotBlank()) {
+                "${sale.cardBrand} •••• ${sale.last4}"
+            } else {
+                "Card"
+            }
+            holder.txtCard.text = "Pre Auth  $methodLabel  ${String.format("$%.2f", saleAmount)}"
+            holder.txtType.text = "Bar Tab Pre-Authorization"
+            holder.txtAmount.text = String.format("$%.2f", saleAmount)
+        } else if (isPostAuth) {
+            val first = sale.payments.firstOrNull()
+            val methodLabel = if (first != null && first.cardBrand.isNotBlank() && first.last4.isNotBlank()) {
+                "${first.cardBrand} •••• ${first.last4}"
+            } else if (sale.cardBrand.isNotBlank() && sale.last4.isNotBlank()) {
+                "${sale.cardBrand} •••• ${sale.last4}"
+            } else {
+                "Card"
+            }
+            holder.txtCard.text = "Post Auth  $methodLabel  ${String.format("$%.2f", saleAmount)}"
+            holder.txtType.text = "Bar Tab Captured"
+            holder.txtAmount.text = String.format("$%.2f", saleAmount)
+        } else if (isStandaloneRefund) {
             val methodLabel = if (sale.paymentType.equals("Cash", true)) "Cash" else {
                 if (sale.cardBrand.isNotBlank() && sale.last4.isNotBlank()) "${sale.cardBrand} •••• ${sale.last4}"
                 else sale.paymentType.ifBlank { "Card" }

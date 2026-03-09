@@ -108,6 +108,35 @@
             android:textColor="@android:color/darker_gray"/>
     </LinearLayout>
 
+    <!-- Clickable option: opens Bar Tab Configuration screen -->
+    <LinearLayout
+        android:id="@+id/optionBarTabConfig"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@android:color/white"
+        android:padding="16dp"
+        android:layout_marginTop="12dp"
+        android:clickable="true"
+        android:focusable="true">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="BAR TAB CONFIGURATION"
+            android:textSize="16sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="›"
+            android:textSize="24sp"
+            android:textColor="@android:color/darker_gray"/>
+    </LinearLayout>
+
     <!-- Clickable option: opens Table Mapping Setup screen -->
     <LinearLayout
         android:id="@+id/optionTableMapping"

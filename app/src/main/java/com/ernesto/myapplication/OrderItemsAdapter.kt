@@ -11,10 +11,20 @@ import com.google.firebase.firestore.DocumentSnapshot
 import java.util.Locale
 import com.ernesto.myapplication.engine.MoneyUtils
 
+sealed class OrderListItem {
+    data class GuestHeader(val guestNumber: Int) : OrderListItem()
+    data class Item(val doc: DocumentSnapshot) : OrderListItem()
+}
+
 class OrderItemsAdapter(
-    private val items: List<DocumentSnapshot>,
+    private val listItems: MutableList<OrderListItem>,
     private val onItemClick: ((DocumentSnapshot) -> Unit)? = null
-) : RecyclerView.Adapter<OrderItemsAdapter.ItemVH>() {
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+
+    companion object {
+        private const val TYPE_HEADER = 0
+        private const val TYPE_ITEM = 1
+    }
 
     private var refundedLineKeys: Set<String> = emptySet()
     private var refundedNameAmountKeys: Set<String> = emptySet()
@@ -40,6 +50,10 @@ class OrderItemsAdapter(
         notifyDataSetChanged()
     }
 
+    class HeaderVH(view: View) : RecyclerView.ViewHolder(view) {
+        val txtHeader: TextView = view.findViewById(R.id.txtGuestHeader)
+    }
+
     class ItemVH(view: View) : RecyclerView.ViewHolder(view) {
         val nameQty: TextView = view.findViewById(R.id.txtItemNameQty)
         val base: TextView = view.findViewById(R.id.txtItemBase)
@@ -52,17 +66,32 @@ class OrderItemsAdapter(
         val refundedDate: TextView = view.findViewById(R.id.txtRefundedDate)
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ItemVH {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_order_item, parent, false)
-        return ItemVH(view)
+    override fun getItemViewType(position: Int): Int = when (listItems[position]) {
+        is OrderListItem.GuestHeader -> TYPE_HEADER
+        is OrderListItem.Item -> TYPE_ITEM
     }
 
-    override fun getItemCount() = items.size
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        val inflater = LayoutInflater.from(parent.context)
+        return if (viewType == TYPE_HEADER) {
+            HeaderVH(inflater.inflate(R.layout.item_guest_header, parent, false))
+        } else {
+            ItemVH(inflater.inflate(R.layout.item_order_item, parent, false))
+        }
+    }
 
-    override fun onBindViewHolder(holder: ItemVH, position: Int) {
-        val doc = items[position]
+    override fun getItemCount() = listItems.size
 
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        when (val entry = listItems[position]) {
+            is OrderListItem.GuestHeader -> {
+                (holder as HeaderVH).txtHeader.text = "— Guest ${entry.guestNumber} —"
+            }
+            is OrderListItem.Item -> bindItem(holder as ItemVH, entry.doc)
+        }
+    }
+
+    private fun bindItem(holder: ItemVH, doc: DocumentSnapshot) {
         holder.itemView.setOnClickListener {
             onItemClick?.invoke(doc)
         }
@@ -102,8 +131,6 @@ class OrderItemsAdapter(
 
         holder.nameQty.text = "$name (Qty: $qty)"
 
-        // Base price
-        // Base price
         if (basePriceInCents > 0L) {
             holder.base.visibility = View.VISIBLE
             holder.base.text = "Base: ${MoneyUtils.centsToDisplay(basePriceInCents)}"
@@ -111,7 +138,6 @@ class OrderItemsAdapter(
             holder.base.visibility = View.GONE
         }
 
-        // Modifiers
         val modsText = buildModifiersText(doc)
         if (modsText.isNullOrBlank()) {
             holder.modifiers.visibility = View.GONE
@@ -123,26 +149,15 @@ class OrderItemsAdapter(
         holder.lineTotal.text =
             "Line Total: ${MoneyUtils.centsToDisplay(lineInCents)}"
 
-        // ===============================
-        // 🔥 PAYMENT BREAKDOWN
-        // ===============================
-
-// ===============================
-// 🔥 PAYMENT BREAKDOWN
-// ===============================
-
         val paymentsArray = doc.get("payments") as? List<Map<String, Any>>
 
         if (!paymentsArray.isNullOrEmpty()) {
-
             val totalsByType = mutableMapOf<String, Double>()
             var grandTotal = 0.0
 
             paymentsArray.forEach { payment ->
-
                 val type = payment["type"]?.toString() ?: return@forEach
                 val amount = (payment["amount"] as? Number)?.toDouble() ?: 0.0
-
                 totalsByType[type] = (totalsByType[type] ?: 0.0) + amount
                 grandTotal += amount
             }
@@ -156,51 +171,39 @@ class OrderItemsAdapter(
 
             holder.payments.visibility = View.VISIBLE
             holder.payments.text = lines.joinToString("\n")
-
         } else {
             holder.payments.visibility = View.GONE
         }
     }
 
     private fun buildModifiersText(doc: DocumentSnapshot): String? {
-
         val raw = doc.get("modifiers") as? List<*> ?: return null
         if (raw.isEmpty()) return null
 
         val lines = raw.mapNotNull { item ->
-
             when (item) {
-
-                // Case 1: stored as Pair map {first, second}
                 is Map<*, *> -> {
                     val name = item["first"]?.toString() ?: return@mapNotNull null
                     val price = (item["second"] as? Number)?.toDouble() ?: 0.0
-
                     if (price > 0)
                         "   • $name (+$${String.format(Locale.US, "%.2f", price)})"
                     else
                         "   • $name"
                 }
-
-                // Case 2: stored as list ["Large", 0.01]
                 is List<*> -> {
                     if (item.size < 2) return@mapNotNull null
-
                     val name = item[0]?.toString() ?: return@mapNotNull null
                     val price = (item[1] as? Number)?.toDouble() ?: 0.0
-
                     if (price > 0)
                         "   • $name (+$${String.format(Locale.US, "%.2f", price)})"
                     else
                         "   • $name"
                 }
-
                 else -> null
             }
         }
 
         if (lines.isEmpty()) return null
-
         return lines.joinToString("\n")
     }
 }

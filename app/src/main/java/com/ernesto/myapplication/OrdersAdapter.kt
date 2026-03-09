@@ -104,9 +104,18 @@ class OrdersAdapter(
 
             if (order.orderType.isNotBlank()) {
                 txtOrderType.visibility = View.VISIBLE
-                val isDineIn = order.orderType == "DINE_IN"
-                txtOrderType.text = if (isDineIn) "DINE IN" else "TO-GO"
-                val bgColor = if (isDineIn) 0xFF1B5E20.toInt() else 0xFFE65100.toInt()
+                txtOrderType.text = when (order.orderType) {
+                    "DINE_IN" -> "DINE IN"
+                    "BAR" -> "BAR"
+                    "BAR_TAB" -> "BAR TAB"
+                    else -> "TO-GO"
+                }
+                val bgColor = when (order.orderType) {
+                    "DINE_IN" -> 0xFF1B5E20.toInt()
+                    "BAR" -> 0xFF4A148C.toInt()
+                    "BAR_TAB" -> 0xFF6A4FB3.toInt()
+                    else -> 0xFFE65100.toInt()
+                }
                 val badge = GradientDrawable().apply {
                     setColor(bgColor)
                     cornerRadius = 8f

@@ -13,6 +13,6 @@ object MoneyUtils {
     }
 
     fun dollarsToCents(amount: Double): Long {
-        return (amount * 100).toLong()
+        return kotlin.math.round(amount * 100).toLong()
     }
 }

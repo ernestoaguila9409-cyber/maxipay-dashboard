@@ -80,6 +80,14 @@
             android:name=".TableSelectionActivity"
             android:exported="false" />
         <activity
+            android:name=".BarTabsActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
+        <activity
+            android:name=".BarTabConfigActivity"
+            android:exported="false"
+            android:parentActivityName=".ConfigurationActivity" />
+        <activity
             android:name=".MenuActivity"
             android:exported="false" />
         <activity

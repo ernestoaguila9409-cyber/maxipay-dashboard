@@ -152,6 +152,7 @@ class OrdersActivity : AppCompatActivity() {
             orderTypeFilter = when (checkedId) {
                 R.id.chipDineIn -> "DINE_IN"
                 R.id.chipToGo -> "TO_GO"
+                R.id.chipBar -> "BAR"
                 else -> "ALL"
             }
             applyAndRefresh()
@@ -189,6 +190,8 @@ class OrdersActivity : AppCompatActivity() {
             query = query.whereLessThanOrEqualTo("createdAt", Timestamp(java.util.Date(dateToMillis!!)))
         }
 
+        query = query.limit(200)
+
         listener = query.addSnapshotListener { snap, err ->
             if (err != null) {
                 Toast.makeText(this, "Error: ${err.message}", Toast.LENGTH_LONG).show()
@@ -196,44 +199,51 @@ class OrdersActivity : AppCompatActivity() {
             }
             if (snap == null) return@addSnapshotListener
 
-            allOrders.clear()
-            for (doc in snap.documents) {
-                val id = doc.id
-                val status = doc.getString("status") ?: "OPEN"
-                val totalCents = doc.getLong("totalInCents") ?: 0L
-                val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
-                val employee = doc.getString("employeeName") ?: "—"
-                val displayEmployee = if (status == "VOIDED") {
-                    doc.getString("voidedBy")?.takeIf { it.isNotBlank() } ?: employee
-                } else {
-                    employee
+            lifecycleScope.launch {
+                val parsed = withContext(Dispatchers.Default) {
+                    val result = mutableListOf<OrderRow>()
+                    for (doc in snap.documents) {
+                        val id = doc.id
+                        val status = doc.getString("status") ?: "OPEN"
+                        val totalCents = doc.getLong("totalInCents") ?: 0L
+                        val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
+                        val employee = doc.getString("employeeName") ?: "—"
+                        val displayEmployee = if (status == "VOIDED") {
+                            doc.getString("voidedBy")?.takeIf { it.isNotBlank() } ?: employee
+                        } else {
+                            employee
+                        }
+                        val createdAt = doc.getTimestamp("createdAt") ?: Timestamp.now()
+                        val orderType = doc.getString("orderType") ?: ""
+                        result.add(
+                            OrderRow(
+                                id = id,
+                                status = status,
+                                totalCents = totalCents,
+                                totalRefundedInCents = totalRefundedInCents,
+                                employeeName = displayEmployee,
+                                createdAt = createdAt,
+                                orderType = orderType
+                            )
+                        )
+                    }
+                    result
                 }
-                val createdAt = doc.getTimestamp("createdAt") ?: Timestamp.now()
-                val orderType = doc.getString("orderType") ?: ""
-                allOrders.add(
-                    OrderRow(
-                        id = id,
-                        status = status,
-                        totalCents = totalCents,
-                        totalRefundedInCents = totalRefundedInCents,
-                        employeeName = displayEmployee,
-                        createdAt = createdAt,
-                        orderType = orderType
-                    )
-                )
-            }
 
-            orders.clear()
-            orders.addAll(applyFilters(allOrders))
-            adapter.submit(orders)
-            updateDeleteButtonState()
+                allOrders.clear()
+                allOrders.addAll(parsed)
+                orders.clear()
+                orders.addAll(applyFilters(allOrders))
+                adapter.submit(orders)
+                updateDeleteButtonState()
 
-            if (currentOrderView && orders.isEmpty()) {
-                AlertDialog.Builder(this)
-                    .setMessage("NO ORDERS AT THE MOMENT")
-                    .setPositiveButton("OK") { _, _ -> finish() }
-                    .setCancelable(false)
-                    .show()
+                if (currentOrderView && orders.isEmpty()) {
+                    AlertDialog.Builder(this@OrdersActivity)
+                        .setMessage("NO ORDERS AT THE MOMENT")
+                        .setPositiveButton("OK") { _, _ -> finish() }
+                        .setCancelable(false)
+                        .show()
+                }
             }
         }
     }
@@ -247,7 +257,11 @@ class OrdersActivity : AppCompatActivity() {
     private fun applyFilters(list: List<OrderRow>): List<OrderRow> {
         var result = applyStatusFilter(list)
         if (orderTypeFilter != "ALL") {
-            result = result.filter { it.orderType == orderTypeFilter }
+            result = if (orderTypeFilter == "BAR") {
+                result.filter { it.orderType == "BAR" || it.orderType == "BAR_TAB" }
+            } else {
+                result.filter { it.orderType == orderTypeFilter }
+            }
         }
         return result
     }

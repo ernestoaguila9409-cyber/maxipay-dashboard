@@ -122,6 +122,10 @@ class TransactionActivity : AppCompatActivity() {
                         return@forEach
                     }
 
+                    if (type == "PRE_AUTH" && !doc.contains("totalPaidInCents")) {
+                        return@forEach
+                    }
+
                     val createdAt = doc.getTimestamp("createdAt")?.toDate()
                     val oldTimestamp = doc.getTimestamp("timestamp")?.toDate()
 
@@ -138,6 +142,7 @@ class TransactionActivity : AppCompatActivity() {
                             amountInCents = amountCents,
                             referenceId = p["referenceId"]?.toString() ?: p["terminalReference"]?.toString() ?: "",
                             clientReferenceId = p["clientReferenceId"]?.toString() ?: "",
+                            authCode = p["authCode"]?.toString() ?: "",
                             batchNumber = (p["batchNumber"] as? Number)?.toString() ?: p["batchNumber"]?.toString() ?: "",
                             transactionNumber = (p["transactionNumber"] as? Number)?.toString() ?: p["transactionNumber"]?.toString() ?: "",
                             paymentId = p["paymentId"]?.toString() ?: ""
@@ -194,7 +199,7 @@ class TransactionActivity : AppCompatActivity() {
                 // Sort newest first
                 allTransactions.sortByDescending { it.date }
 
-                val sales = allTransactions.filter { it.type == "SALE" }
+                val sales = allTransactions.filter { it.type == "SALE" || it.type == "PRE_AUTH" || it.type == "CAPTURE" }
                 val refunds = allTransactions.filter { it.type == "REFUND" }
 
                 allSalesWithRefunds.clear()
@@ -351,6 +356,10 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun showTransactionOptions(transaction: Transaction) {
+        if (transaction.type == "PRE_AUTH") {
+            Toast.makeText(this, "Pre-authorization cannot be voided. Capture the tab first, then void the capture if needed.", Toast.LENGTH_LONG).show()
+            return
+        }
         if (transaction.voided) {
             Toast.makeText(this, "This transaction has already been voided.", Toast.LENGTH_SHORT).show()
             return
@@ -413,7 +422,7 @@ class TransactionActivity : AppCompatActivity() {
             return
         }
         val payments = transaction.payments.ifEmpty {
-            // Fallback: single payment from legacy fields
+            // Fallback: single payment from legacy fields (no authCode for legacy)
             listOf(
                 TransactionPayment(
                     paymentType = transaction.paymentType,
@@ -487,16 +496,14 @@ class TransactionActivity : AppCompatActivity() {
             put("Amount", amountNumber)
             put("PaymentType", payment.paymentType.ifBlank { "Credit" })
             put("ReferenceId", refId)
+            if (payment.authCode.isNotBlank()) put("AuthCode", payment.authCode)
             put("PrintReceipt", "No")
             put("GetReceipt", "No")
-            put("MerchantNumber", org.json.JSONObject.NULL)
             put("CaptureSignature", false)
             put("GetExtendedData", true)
-            put("CallbackInfo", org.json.JSONObject().apply { put("Url", "") })
             put("Tpn", TerminalPrefs.getTpn(this@TransactionActivity))
+            put("RegisterId", TerminalPrefs.getRegisterId(this@TransactionActivity))
             put("Authkey", TerminalPrefs.getAuthKey(this@TransactionActivity))
-            put("SPInProxyTimeout", org.json.JSONObject.NULL)
-            put("CustomFields", org.json.JSONObject())
             if (payment.batchNumber.isNotBlank()) {
                 put("BatchNumber", payment.batchNumber.toIntOrNull() ?: payment.batchNumber)
             }
@@ -504,6 +511,7 @@ class TransactionActivity : AppCompatActivity() {
                 put("TransactionNumber", payment.transactionNumber.toIntOrNull() ?: payment.transactionNumber)
             }
         }.toString()
+        Log.d("TX_API", "[VOID_REQ] $json")
 
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)

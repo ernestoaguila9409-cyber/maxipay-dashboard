@@ -16,8 +16,11 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Date
 import java.util.Locale
-import com.ernesto.myapplication.engine.OrderEngine
+import java.util.UUID
+import com.ernesto.myapplication.engine.CaptureResult
 import com.ernesto.myapplication.engine.MoneyUtils
+import com.ernesto.myapplication.engine.OrderEngine
+import com.ernesto.myapplication.engine.PaymentService
 data class CartItem(
     val itemId: String,
     val name: String,
@@ -42,8 +45,6 @@ class MenuActivity : AppCompatActivity() {
     private lateinit var cartTaxSummary: LinearLayout
     private lateinit var txtTotal: TextView
     private lateinit var btnCheckout: Button
-    private lateinit var guestScrollView: HorizontalScrollView
-    private lateinit var guestTabContainer: LinearLayout
     private var selectedGuest: Int = 0
 
     private var totalAmount = 0.0
@@ -54,6 +55,14 @@ class MenuActivity : AppCompatActivity() {
     private var tableId: String? = null
     private var tableName: String? = null
     private var guestCount: Int = 0
+
+    private lateinit var paymentService: PaymentService
+    private var preAuthReferenceId: String? = null
+    private var preAuthAuthCode: String? = null
+    private var preAuthCardLast4: String? = null
+    private var preAuthCardBrand: String? = null
+    private var preAuthFirestoreDocId: String? = null
+    private var currentBatchId: String? = null
 
     private val paymentLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -80,6 +89,7 @@ class MenuActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_menu)
         orderEngine = OrderEngine(db)
+        paymentService = PaymentService(this)
         employeeName = intent.getStringExtra("employeeName") ?: ""
         orderType = intent.getStringExtra("orderType") ?: ""
         tableId = intent.getStringExtra("tableId")
@@ -96,9 +106,6 @@ class MenuActivity : AppCompatActivity() {
         // ✅ IMPORTANT: if we came from OrderDetail "Checkout", we are editing an existing order
         currentOrderId = intent.getStringExtra("ORDER_ID")
 
-        guestScrollView = findViewById(R.id.guestScrollView)
-        guestTabContainer = findViewById(R.id.guestTabContainer)
-
         val txtTableHeader = findViewById<TextView>(R.id.txtTableHeader)
         if (!tableName.isNullOrBlank()) {
             val guestLabel = if (guestCount > 0) " • $guestCount guest${if (guestCount > 1) "s" else ""}" else ""
@@ -108,7 +115,6 @@ class MenuActivity : AppCompatActivity() {
 
         if (guestCount > 0) {
             selectedGuest = 1
-            buildGuestTabs()
         }
 
         loadCategories()
@@ -128,18 +134,21 @@ class MenuActivity : AppCompatActivity() {
 
             val oid = currentOrderId ?: return@setOnClickListener
 
-            orderEngine.recomputeOrderTotals(
-                orderId = oid,
-                onSuccess = {
-
-                    val intent = Intent(this, PaymentActivity::class.java)
-                    intent.putExtra("ORDER_ID", oid)
-                    paymentLauncher.launch(intent)
-                },
-                onFailure = {
-                    Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
-                }
-            )
+            if (!preAuthReferenceId.isNullOrBlank() && !preAuthAuthCode.isNullOrBlank()) {
+                startCaptureFlow(oid)
+            } else {
+                orderEngine.recomputeOrderTotals(
+                    orderId = oid,
+                    onSuccess = {
+                        val intent = Intent(this, PaymentActivity::class.java)
+                        intent.putExtra("ORDER_ID", oid)
+                        paymentLauncher.launch(intent)
+                    },
+                    onFailure = {
+                        Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+                    }
+                )
+            }
         }
     }
 
@@ -178,6 +187,42 @@ class MenuActivity : AppCompatActivity() {
                 val nameFromOrder = orderDoc.getString("employeeName")
                 if (!nameFromOrder.isNullOrBlank()) {
                     employeeName = nameFromOrder
+                }
+
+                val docOrderType = orderDoc.getString("orderType") ?: ""
+                if (orderType.isBlank() && docOrderType.isNotBlank()) {
+                    orderType = docOrderType
+                }
+
+                currentBatchId = orderDoc.getString("batchId")
+
+                val refId = orderDoc.getString("preAuthReferenceId")
+                val authCode = orderDoc.getString("preAuthAuthCode")
+                if (!refId.isNullOrBlank() && !authCode.isNullOrBlank()) {
+                    preAuthReferenceId = refId
+                    preAuthAuthCode = authCode
+                    preAuthCardLast4 = orderDoc.getString("cardLast4") ?: ""
+                    preAuthCardBrand = orderDoc.getString("cardBrand") ?: ""
+                    preAuthFirestoreDocId = orderDoc.getString("preAuthFirestoreDocId")
+                    btnCheckout.text = "Capture"
+                }
+                if (tableId.isNullOrBlank()) {
+                    tableId = orderDoc.getString("tableId")
+                }
+                if (tableName.isNullOrBlank()) {
+                    tableName = orderDoc.getString("tableName")
+                }
+                val docGuestCount = (orderDoc.getLong("guestCount") ?: 0L).toInt()
+                if (guestCount == 0 && docGuestCount > 0) {
+                    guestCount = docGuestCount
+                    selectedGuest = 1
+
+                    val txtTableHeader = findViewById<TextView>(R.id.txtTableHeader)
+                    if (!tableName.isNullOrBlank()) {
+                        val guestLabel = " • $guestCount guest${if (guestCount > 1) "s" else ""}"
+                        txtTableHeader.text = "$tableName$guestLabel"
+                        txtTableHeader.visibility = View.VISIBLE
+                    }
                 }
 
                 db.collection("Orders")
@@ -233,54 +278,6 @@ class MenuActivity : AppCompatActivity() {
             out.add(name to price)
         }
         return out
-    }
-
-    // ----------------------------
-    // GUEST TABS
-    // ----------------------------
-
-    private fun buildGuestTabs() {
-        guestTabContainer.removeAllViews()
-        guestScrollView.visibility = View.VISIBLE
-
-        for (g in 1..guestCount) {
-            val btn = Button(this)
-            btn.text = "Guest $g"
-            btn.textSize = 12f
-            btn.isAllCaps = false
-            val params = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            params.setMargins(0, 0, 8, 0)
-            btn.layoutParams = params
-
-            styleGuestTab(btn, g == selectedGuest)
-
-            btn.setOnClickListener {
-                selectedGuest = g
-                refreshGuestTabStyles()
-                refreshCart()
-            }
-            guestTabContainer.addView(btn)
-        }
-    }
-
-    private fun styleGuestTab(btn: Button, isSelected: Boolean) {
-        if (isSelected) {
-            btn.setBackgroundColor(Color.parseColor("#6A4FB3"))
-            btn.setTextColor(Color.WHITE)
-        } else {
-            btn.setBackgroundColor(Color.parseColor("#E0E0E0"))
-            btn.setTextColor(Color.parseColor("#333333"))
-        }
-    }
-
-    private fun refreshGuestTabStyles() {
-        for (i in 0 until guestTabContainer.childCount) {
-            val btn = guestTabContainer.getChildAt(i) as? Button ?: continue
-            styleGuestTab(btn, i + 1 == selectedGuest)
-        }
     }
 
     // ----------------------------
@@ -662,125 +659,96 @@ class MenuActivity : AppCompatActivity() {
         totalAmount = 0.0
 
         val entries = cartMap.entries.toList()
-        val grouped = if (guestCount > 0) {
-            entries.groupBy { it.value.guestNumber }
-        } else {
-            mapOf(0 to entries)
-        }
 
-        val sortedKeys = grouped.keys.sorted()
+        if (guestCount > 0) {
+            val grouped = entries.groupBy { it.value.guestNumber }
 
-        for (gKey in sortedKeys) {
-            val items = grouped[gKey] ?: continue
+            for (g in 1..guestCount) {
+                val isActive = g == selectedGuest
+                val guestItems = grouped[g] ?: emptyList()
 
-            if (guestCount > 0 && gKey > 0) {
-                val guestHeader = TextView(this)
-                guestHeader.text = "— Guest $gKey —"
-                guestHeader.textSize = 14f
-                guestHeader.setTypeface(null, Typeface.BOLD)
-                guestHeader.setTextColor(Color.parseColor("#6A4FB3"))
-                guestHeader.setPadding(0, 16, 0, 8)
-                cartContainer.addView(guestHeader)
+                val sectionLayout = LinearLayout(this)
+                sectionLayout.orientation = LinearLayout.VERTICAL
+                val sectionBg = if (isActive) Color.parseColor("#EDE7F6") else Color.TRANSPARENT
+                sectionLayout.setBackgroundColor(sectionBg)
+                sectionLayout.setPadding(12, 12, 12, 12)
+                val sectionParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                sectionParams.setMargins(0, 0, 0, 4)
+                sectionLayout.layoutParams = sectionParams
+
+                val headerRow = LinearLayout(this)
+                headerRow.orientation = LinearLayout.HORIZONTAL
+                headerRow.gravity = android.view.Gravity.CENTER_VERTICAL
+
+                val headerText = TextView(this)
+                headerText.text = "Guest $g"
+                headerText.textSize = 15f
+                headerText.setTypeface(null, Typeface.BOLD)
+                headerText.setTextColor(Color.parseColor("#6A4FB3"))
+                headerText.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+
+                if (isActive) {
+                    val indicator = TextView(this)
+                    indicator.text = "ACTIVE"
+                    indicator.textSize = 10f
+                    indicator.setTypeface(null, Typeface.BOLD)
+                    indicator.setTextColor(Color.WHITE)
+                    indicator.setPadding(16, 4, 16, 4)
+                    val bg = android.graphics.drawable.GradientDrawable()
+                    bg.setColor(Color.parseColor("#6A4FB3"))
+                    bg.cornerRadius = 12f
+                    indicator.background = bg
+                    headerRow.addView(headerText)
+                    headerRow.addView(indicator)
+                } else {
+                    headerRow.addView(headerText)
+                }
+
+                sectionLayout.addView(headerRow)
+
+                val divider = View(this)
+                divider.setBackgroundColor(Color.parseColor("#6A4FB3"))
+                divider.layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 2
+                ).apply { topMargin = 8; bottomMargin = 8 }
+                sectionLayout.addView(divider)
+
+                if (guestItems.isEmpty()) {
+                    val emptyText = TextView(this)
+                    emptyText.text = "(no items)"
+                    emptyText.textSize = 13f
+                    emptyText.setTextColor(Color.parseColor("#AAAAAA"))
+                    emptyText.setPadding(0, 4, 0, 4)
+                    sectionLayout.addView(emptyText)
+                } else {
+                    for ((lineKey, item) in guestItems) {
+                        val itemView = buildCartItemView(lineKey, item)
+                        sectionLayout.addView(itemView)
+
+                        val modifiersTotal = item.modifiers.sumOf { it.second }
+                        val unitPrice = item.basePrice + modifiersTotal
+                        totalAmount += unitPrice * item.quantity
+                    }
+                }
+
+                sectionLayout.setOnClickListener {
+                    selectedGuest = g
+                    refreshCart()
+                }
+
+                cartContainer.addView(sectionLayout)
             }
-
-            for ((lineKey, item) in items) {
-                val itemLayout = LinearLayout(this)
-                itemLayout.orientation = LinearLayout.VERTICAL
-                itemLayout.setPadding(0, 0, 0, 24)
-
-                val nameText = TextView(this)
-                nameText.text = "${item.name} (Qty: ${item.quantity})"
-                nameText.textSize = 16f
-                nameText.setTypeface(null, Typeface.BOLD)
-                itemLayout.addView(nameText)
+        } else {
+            for ((lineKey, item) in entries) {
+                val itemView = buildCartItemView(lineKey, item)
+                cartContainer.addView(itemView)
 
                 val modifiersTotal = item.modifiers.sumOf { it.second }
-
-                for (modifier in item.modifiers) {
-                    val row = LinearLayout(this)
-                    row.orientation = LinearLayout.HORIZONTAL
-
-                    val nameView = TextView(this)
-                    nameView.text = "   • ${modifier.first}"
-                    nameView.setTextColor(Color.parseColor("#2E7D32"))
-                    nameView.layoutParams = LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1f
-                    )
-
-                    val priceView = TextView(this)
-                    priceView.text = "+${MoneyUtils.centsToDisplay((modifier.second * 100).toLong())}"
-                    priceView.setTextColor(Color.parseColor("#2E7D32"))
-
-                    row.addView(nameView)
-                    row.addView(priceView)
-                    itemLayout.addView(row)
-                }
-
                 val unitPrice = item.basePrice + modifiersTotal
-                val lineTotal = unitPrice * item.quantity
-
-                val subtotalText = TextView(this)
-                subtotalText.text = "Line Total: ${MoneyUtils.centsToDisplay((lineTotal * 100).toLong())}"
-                subtotalText.setTypeface(null, Typeface.BOLD)
-                itemLayout.addView(subtotalText)
-
-                itemLayout.setOnClickListener {
-                    val currentStock = item.stock
-                    val currentQty = item.quantity
-
-                    if (currentStock > 0 && currentQty + 1 > currentStock) {
-                        Toast.makeText(this, "Only $currentStock in stock", Toast.LENGTH_SHORT).show()
-                        return@setOnClickListener
-                    }
-
-                    item.quantity += 1
-                    cartMap[lineKey] = item
-                    refreshCart()
-
-                    val oid = currentOrderId ?: return@setOnClickListener
-                    orderEngine.upsertLineItem(
-                        orderId = oid,
-                        lineKey = lineKey,
-                        input = OrderEngine.LineItemInput(
-                            itemId = item.itemId,
-                            name = item.name,
-                            quantity = item.quantity,
-                            basePrice = item.basePrice,
-                            modifiers = item.modifiers,
-                            guestNumber = item.guestNumber
-                        ),
-                        onSuccess = {},
-                        onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
-                    )
-                }
-
-                itemLayout.setOnLongClickListener {
-                    AlertDialog.Builder(this)
-                        .setTitle("Remove Item")
-                        .setMessage("Remove ${item.name} from cart?")
-                        .setPositiveButton("Yes") { _, _ ->
-                            cartMap.remove(lineKey)
-                            refreshCart()
-
-                            val oid = currentOrderId ?: return@setPositiveButton
-                            orderEngine.deleteLineItem(
-                                orderId = oid,
-                                lineKey = lineKey,
-                                onSuccess = {
-                                    if (cartMap.isEmpty()) deleteOrderIfEmpty()
-                                },
-                                onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
-                            )
-                        }
-                        .setNegativeButton("No", null)
-                        .show()
-                    true
-                }
-
-                cartContainer.addView(itemLayout)
-                totalAmount += lineTotal
+                totalAmount += unitPrice * item.quantity
             }
         }
 
@@ -806,6 +774,102 @@ class MenuActivity : AppCompatActivity() {
 
         txtTotal.text = "Total: ${MoneyUtils.centsToDisplay((totalAmount * 100).toLong())}"
     }
+    private fun buildCartItemView(lineKey: String, item: CartItem): View {
+        val itemLayout = LinearLayout(this)
+        itemLayout.orientation = LinearLayout.VERTICAL
+        itemLayout.setPadding(0, 4, 0, 16)
+
+        val nameText = TextView(this)
+        nameText.text = "${item.name} (Qty: ${item.quantity})"
+        nameText.textSize = 14f
+        nameText.setTypeface(null, Typeface.BOLD)
+        itemLayout.addView(nameText)
+
+        val modifiersTotal = item.modifiers.sumOf { it.second }
+
+        for (modifier in item.modifiers) {
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+
+            val nameView = TextView(this)
+            nameView.text = "   • ${modifier.first}"
+            nameView.setTextColor(Color.parseColor("#2E7D32"))
+            nameView.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+
+            val priceView = TextView(this)
+            priceView.text = "+${MoneyUtils.centsToDisplay((modifier.second * 100).toLong())}"
+            priceView.setTextColor(Color.parseColor("#2E7D32"))
+
+            row.addView(nameView)
+            row.addView(priceView)
+            itemLayout.addView(row)
+        }
+
+        val unitPrice = item.basePrice + modifiersTotal
+        val lineTotal = unitPrice * item.quantity
+
+        val subtotalText = TextView(this)
+        subtotalText.text = "Line Total: ${MoneyUtils.centsToDisplay((lineTotal * 100).toLong())}"
+        subtotalText.setTypeface(null, Typeface.BOLD)
+        subtotalText.textSize = 13f
+        itemLayout.addView(subtotalText)
+
+        itemLayout.setOnClickListener {
+            val currentStock = item.stock
+            val currentQty = item.quantity
+
+            if (currentStock > 0 && currentQty + 1 > currentStock) {
+                Toast.makeText(this, "Only $currentStock in stock", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            item.quantity += 1
+            cartMap[lineKey] = item
+            refreshCart()
+
+            val oid = currentOrderId ?: return@setOnClickListener
+            orderEngine.upsertLineItem(
+                orderId = oid,
+                lineKey = lineKey,
+                input = OrderEngine.LineItemInput(
+                    itemId = item.itemId,
+                    name = item.name,
+                    quantity = item.quantity,
+                    basePrice = item.basePrice,
+                    modifiers = item.modifiers,
+                    guestNumber = item.guestNumber
+                ),
+                onSuccess = {},
+                onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
+            )
+        }
+
+        itemLayout.setOnLongClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Remove Item")
+                .setMessage("Remove ${item.name} from cart?")
+                .setPositiveButton("Yes") { _, _ ->
+                    cartMap.remove(lineKey)
+                    refreshCart()
+
+                    val oid = currentOrderId ?: return@setPositiveButton
+                    orderEngine.deleteLineItem(
+                        orderId = oid,
+                        lineKey = lineKey,
+                        onSuccess = {
+                            if (cartMap.isEmpty()) deleteOrderIfEmpty()
+                        },
+                        onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
+                    )
+                }
+                .setNegativeButton("No", null)
+                .show()
+            true
+        }
+
+        return itemLayout
+    }
+
     // ----------------------------
     // FIRESTORE ORDER / ITEMS
     // ----------------------------
@@ -881,5 +945,192 @@ class MenuActivity : AppCompatActivity() {
         cartContainer.removeAllViews()
         cartTaxSummary.removeAllViews()
         txtTotal.text = "Total: $0.00"
+    }
+
+    // ── Bar Tab Capture Flow ────────────────────────────────────────
+
+    private var captureDialog: AlertDialog? = null
+
+    private fun startCaptureFlow(orderId: String) {
+        btnCheckout.isEnabled = false
+        showCaptureLoading("Capturing payment…")
+
+        orderEngine.recomputeOrderTotals(
+            orderId = orderId,
+            onSuccess = { fetchTotalAndCapture(orderId) },
+            onFailure = { e ->
+                hideCaptureLoading()
+                btnCheckout.isEnabled = true
+                Toast.makeText(this, "Failed to compute total: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        )
+    }
+
+    private fun fetchTotalAndCapture(orderId: String) {
+        db.collection("Orders").document(orderId).get()
+            .addOnSuccessListener { doc ->
+                val totalInCents = doc.getLong("totalInCents") ?: 0L
+                if (totalInCents <= 0L) {
+                    hideCaptureLoading()
+                    btnCheckout.isEnabled = true
+                    Toast.makeText(this, "Order total is $0. Nothing to capture.", Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+
+                val captureAmount = totalInCents / 100.0
+
+                paymentService.capture(
+                    amount = captureAmount,
+                    authCode = preAuthAuthCode!!,
+                    referenceId = preAuthReferenceId!!,
+                    onSuccess = { result ->
+                        runOnUiThread { finalizeCaptureOrder(orderId, totalInCents, result) }
+                    },
+                    onFailure = { msg ->
+                        runOnUiThread {
+                            hideCaptureLoading()
+                            btnCheckout.isEnabled = true
+                            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                )
+            }
+            .addOnFailureListener { e ->
+                hideCaptureLoading()
+                btnCheckout.isEnabled = true
+                Toast.makeText(this, "Error reading order: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+    }
+
+    private fun finalizeCaptureOrder(orderId: String, totalInCents: Long, capture: CaptureResult) {
+        val batchId = currentBatchId ?: ""
+
+        val orderRef = db.collection("Orders").document(orderId)
+
+        val paymentEntry = hashMapOf<String, Any>(
+            "paymentId" to UUID.randomUUID().toString(),
+            "paymentType" to "Credit",
+            "amountInCents" to totalInCents,
+            "timestamp" to Date(),
+            "authCode" to capture.authCode,
+            "cardBrand" to capture.cardBrand,
+            "last4" to capture.cardLast4,
+            "entryType" to capture.entryType,
+            "referenceId" to capture.referenceId,
+            "batchNumber" to capture.batchNumber,
+            "transactionNumber" to capture.transactionNumber
+        )
+
+        val txUpdateData = hashMapOf<String, Any>(
+            "type" to "CAPTURE",
+            "totalPaidInCents" to totalInCents,
+            "payments" to listOf(paymentEntry),
+            "status" to "COMPLETED"
+        )
+        if (batchId.isNotBlank()) txUpdateData["batchId"] = batchId
+
+        val orderUpdates = hashMapOf<String, Any>(
+            "status" to "CLOSED",
+            "totalPaidInCents" to totalInCents,
+            "remainingInCents" to 0L,
+            "updatedAt" to Date()
+        )
+
+        val txDocId = preAuthFirestoreDocId
+        if (!txDocId.isNullOrBlank()) {
+            // Update the original PRE_AUTH transaction in place → Post Auth
+            val txRef = db.collection("Transactions").document(txDocId)
+            orderUpdates["saleTransactionId"] = txDocId
+
+            db.runBatch { batch ->
+                batch.update(txRef, txUpdateData)
+                batch.update(orderRef, orderUpdates)
+            }.addOnSuccessListener {
+                hideCaptureLoading()
+                deductStockTransaction(
+                    onSuccess = {
+                        clearCart()
+                        currentOrderId = null
+                        Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_LONG).show()
+                        finish()
+                    },
+                    onFailure = { msg ->
+                        Toast.makeText(this, "Tab closed but stock error: $msg", Toast.LENGTH_LONG).show()
+                        finish()
+                    }
+                )
+            }.addOnFailureListener { e ->
+                hideCaptureLoading()
+                btnCheckout.isEnabled = true
+                Toast.makeText(this, "Capture approved but save failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        } else {
+            // Fallback for older orders without preAuthFirestoreDocId: create new CAPTURE transaction
+            val txRef = db.collection("Transactions").document()
+            orderUpdates["saleTransactionId"] = txRef.id
+
+            val txData = hashMapOf<String, Any>(
+                "orderId" to orderId,
+                "type" to "CAPTURE",
+                "totalPaidInCents" to totalInCents,
+                "payments" to listOf(paymentEntry),
+                "status" to "COMPLETED",
+                "createdAt" to Date(),
+                "voided" to false,
+                "settled" to false
+            )
+            if (batchId.isNotBlank()) txData["batchId"] = batchId
+
+            db.runBatch { batch ->
+                batch.set(txRef, txData)
+                batch.update(orderRef, orderUpdates)
+            }.addOnSuccessListener {
+                hideCaptureLoading()
+                deductStockTransaction(
+                    onSuccess = {
+                        clearCart()
+                        currentOrderId = null
+                        Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_LONG).show()
+                        finish()
+                    },
+                    onFailure = { msg ->
+                        Toast.makeText(this, "Tab closed but stock error: $msg", Toast.LENGTH_LONG).show()
+                        finish()
+                    }
+                )
+            }.addOnFailureListener { e ->
+                hideCaptureLoading()
+                btnCheckout.isEnabled = true
+                Toast.makeText(this, "Capture approved but save failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun showCaptureLoading(message: String) {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(48, 32, 48, 32)
+        }
+        val progress = android.widget.ProgressBar(this)
+        val text = TextView(this).apply {
+            this.text = message
+            textSize = 16f
+            setPadding(32, 0, 0, 0)
+        }
+        layout.addView(progress)
+        layout.addView(text)
+
+        captureDialog = AlertDialog.Builder(this)
+            .setView(layout)
+            .setCancelable(false)
+            .create()
+        captureDialog?.show()
+    }
+
+    private fun hideCaptureLoading() {
+        captureDialog?.dismiss()
+        captureDialog = null
+        btnCheckout.isEnabled = true
     }
 }

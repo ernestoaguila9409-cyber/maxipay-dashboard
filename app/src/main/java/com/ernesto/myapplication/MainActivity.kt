@@ -69,6 +69,13 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
+        findViewById<android.view.View>(R.id.btnBar).setOnClickListener {
+            val intent = Intent(this, BarTabsActivity::class.java)
+            intent.putExtra("batchId", currentBatchId)
+            intent.putExtra("employeeName", employeeName)
+            startActivity(intent)
+        }
+
         findViewById<Button>(R.id.btnTransactions).setOnClickListener {
             val intent = Intent(this, TransactionActivity::class.java)
             intent.putExtra("employeeName", employeeName)

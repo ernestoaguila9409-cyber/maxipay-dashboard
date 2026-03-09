@@ -99,6 +99,36 @@
                     android:layout_marginTop="6dp"/>
             </LinearLayout>
 
+            <LinearLayout
+                android:id="@+id/btnBar"
+                android:layout_width="105dp"
+                android:layout_height="105dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/bg_order_type_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:layout_marginStart="10dp"
+                android:padding="12dp">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_bar"
+                    android:contentDescription="Bar"
+                    app:tint="@android:color/white"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="BAR"
+                    android:textColor="@android:color/white"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="6dp"/>
+            </LinearLayout>
+
         </LinearLayout>
 
         <Button

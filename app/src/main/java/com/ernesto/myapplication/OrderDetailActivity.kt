@@ -25,6 +25,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.Locale
+import android.util.Log
 import com.ernesto.myapplication.engine.MoneyUtils
 
 class OrderDetailActivity : AppCompatActivity() {
@@ -45,10 +46,12 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var taxBreakdownContainer: LinearLayout
 
     private lateinit var adapter: OrderItemsAdapter
+    private val listItems = mutableListOf<OrderListItem>()
     private val itemDocs = mutableListOf<DocumentSnapshot>()
 
     private lateinit var orderId: String
     private var currentBatchId: String? = null
+    private var orderType: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,7 +79,7 @@ class OrderDetailActivity : AppCompatActivity() {
         taxBreakdownContainer = findViewById(R.id.taxBreakdownContainer)
 
         recycler.layoutManager = LinearLayoutManager(this)
-        adapter = OrderItemsAdapter(itemDocs) { itemDoc -> onOrderItemClick(itemDoc) }
+        adapter = OrderItemsAdapter(listItems) { itemDoc -> onOrderItemClick(itemDoc) }
         recycler.adapter = adapter
 
         recycler.addItemDecoration(object : RecyclerView.ItemDecoration() {
@@ -143,6 +146,7 @@ class OrderDetailActivity : AppCompatActivity() {
                 }
 
                 currentBatchId = doc.getString("batchId")
+                orderType = doc.getString("orderType") ?: ""
 
                 displayOrderSummary(doc)
 
@@ -367,9 +371,27 @@ class OrderDetailActivity : AppCompatActivity() {
             .addOnSuccessListener { docs ->
                 itemDocs.clear()
                 itemDocs.addAll(docs.documents)
+
+                listItems.clear()
+
+                val hasGuests = orderType == "DINE_IN" &&
+                    itemDocs.any { (it.getLong("guestNumber") ?: 0L) > 0L }
+
+                if (hasGuests) {
+                    val grouped = itemDocs.groupBy { (it.getLong("guestNumber") ?: 0L).toInt() }
+                    for (guestNum in grouped.keys.sorted()) {
+                        if (guestNum > 0) {
+                            listItems.add(OrderListItem.GuestHeader(guestNum))
+                        }
+                        grouped[guestNum]?.forEach { listItems.add(OrderListItem.Item(it)) }
+                    }
+                } else {
+                    itemDocs.forEach { listItems.add(OrderListItem.Item(it)) }
+                }
+
                 adapter.notifyDataSetChanged()
 
-                if (itemDocs.isEmpty()) {
+                if (listItems.isEmpty()) {
                     txtEmptyItems.visibility = View.VISIBLE
                     recycler.visibility = View.GONE
                 } else {
@@ -431,6 +453,11 @@ class OrderDetailActivity : AppCompatActivity() {
                         }
                         @Suppress("UNCHECKED_CAST")
                         val paymentsRaw = txDoc.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                        val txType = txDoc.getString("type") ?: "SALE"
+                        if (txType == "PRE_AUTH") {
+                            Toast.makeText(this, "Pre-authorization cannot be voided. Capture the tab first, then void the capture if needed.", Toast.LENGTH_LONG).show()
+                            return@addOnSuccessListener
+                        }
                         val payments = paymentsRaw.map { p ->
                             val amountCents = (p["amountInCents"] as? Number)?.toLong() ?: 0L
                             TransactionPayment(
@@ -441,6 +468,7 @@ class OrderDetailActivity : AppCompatActivity() {
                                 amountInCents = amountCents,
                                 referenceId = p["referenceId"]?.toString() ?: p["terminalReference"]?.toString() ?: "",
                                 clientReferenceId = p["clientReferenceId"]?.toString() ?: "",
+                                authCode = p["authCode"]?.toString() ?: "",
                                 batchNumber = (p["batchNumber"] as? Number)?.toString() ?: p["batchNumber"]?.toString() ?: "",
                                 transactionNumber = (p["transactionNumber"] as? Number)?.toString() ?: p["transactionNumber"]?.toString() ?: "",
                                 paymentId = p["paymentId"]?.toString() ?: ""
@@ -526,12 +554,13 @@ class OrderDetailActivity : AppCompatActivity() {
             put("Amount", amount)
             put("PaymentType", payment.paymentType.ifBlank { "Credit" })
             put("ReferenceId", refId)
+            if (payment.authCode.isNotBlank()) put("AuthCode", payment.authCode)
             put("PrintReceipt", "No")
             put("GetReceipt", "No")
             put("CaptureSignature", false)
             put("GetExtendedData", true)
-            put("CallbackInfo", JSONObject().apply { put("Url", "") })
             put("Tpn", TerminalPrefs.getTpn(this@OrderDetailActivity))
+            put("RegisterId", TerminalPrefs.getRegisterId(this@OrderDetailActivity))
             put("Authkey", TerminalPrefs.getAuthKey(this@OrderDetailActivity))
             if (payment.batchNumber.isNotBlank()) {
                 put("BatchNumber", payment.batchNumber.toIntOrNull() ?: payment.batchNumber)
@@ -540,6 +569,7 @@ class OrderDetailActivity : AppCompatActivity() {
                 put("TransactionNumber", payment.transactionNumber.toIntOrNull() ?: payment.transactionNumber)
             }
         }
+        Log.d("TX_API", "[VOID_REQ] ${json.toString()}")
 
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)

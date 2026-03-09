@@ -7,9 +7,11 @@ data class TransactionPayment(
     val last4: String = "",
     val entryType: String = "",
     val amountInCents: Long = 0L,
-    /** Terminal/gateway reference for this payment; required for Card Void API. */
+    /** Terminal/gateway reference for this payment; required for Card Void API. For CAPTURE (Post Auth), use capture referenceId, NOT PreAuth. */
     val referenceId: String = "",
     val clientReferenceId: String = "",
+    /** AuthCode from sale/capture response; required for Void on captured PreAuth transactions. */
+    val authCode: String = "",
     val batchNumber: String = "",
     val transactionNumber: String = "",
     val paymentId: String = ""
