@@ -1,47 +1,28 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * const {onCall} = require("firebase-functions/v2/https");
- * const {onDocumentWritten} = require("firebase-functions/v2/firestore");
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
+require("dotenv").config();
 
 const admin = require("firebase-admin");
 admin.initializeApp();
 
+const { onCall } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions");
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const sgMail = require("@sendgrid/mail");
 const logger = require("firebase-functions/logger");
 
-const apiKey = process.env.SENDGRID_API_KEY;
-logger.info("SendGrid API key present:", !!apiKey, "length:", apiKey ? apiKey.length : 0);
-sgMail.setApiKey(apiKey);
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-// For cost control, you can set the maximum number of containers that can be
-// running at the same time. This helps mitigate the impact of unexpected
-// traffic spikes by instead downgrading performance. This limit is a
-// per-function limit. You can override the limit for each function using the
-// `maxInstances` option in the function's options, e.g.
-// `onRequest({ maxInstances: 5 }, (req, res) => { ... })`.
-// NOTE: setGlobalOptions does not apply to functions using the v1 API. V1
-// functions should each use functions.runWith({ maxInstances: 10 }) instead.
-// In the v1 API, each function can only serve one request per container, so
-// this will be the maximum concurrent request count.
 setGlobalOptions({ maxInstances: 10 });
 
 exports.sendReceiptEmail = onCall(async (request) => {
   const { email, orderId } = request.data || {};
 
   if (!email || !orderId) {
-    throw new HttpsError("invalid-argument", "Email and orderId are required.");
+    return { success: false, error: "Email and orderId are required." };
   }
 
   const fromEmail = process.env.SENDGRID_FROM_EMAIL;
   if (!fromEmail) {
     logger.error("SENDGRID_FROM_EMAIL is not configured");
-    throw new HttpsError("internal", "Email service is not configured.");
+    return { success: false, error: "Email service is not configured." };
   }
 
   const db = admin.firestore();
@@ -49,7 +30,7 @@ exports.sendReceiptEmail = onCall(async (request) => {
   const orderDoc = await orderRef.get();
 
   if (!orderDoc.exists) {
-    throw new HttpsError("not-found", "Order not found.");
+    return { success: false, error: "Order not found." };
   }
 
   const order = orderDoc.data();
@@ -67,12 +48,19 @@ exports.sendReceiptEmail = onCall(async (request) => {
     const unitPriceInCents = d.unitPriceInCents ?? 0;
     const lineTotalInCents = d.lineTotalInCents ?? unitPriceInCents * quantity;
     subtotalInCents += lineTotalInCents;
-    items.push({
-      name,
-      quantity,
-      price: unitPriceInCents / 100,
-      lineTotal: lineTotalInCents / 100,
-    });
+
+    let modifiers = [];
+    const raw = d.modifiers;
+    if (Array.isArray(raw) && raw.length > 0) {
+      modifiers = raw.map((m) => {
+        const modName = (m?.name ?? m?.first ?? m?.[0])?.toString?.() ?? "Modifier";
+        const modPrice = m?.price ?? m?.second ?? m?.[1] ?? 0;
+        const priceInCents = typeof modPrice === "number" ? Math.round(modPrice * 100) : 0;
+        return { name: modName, priceInCents };
+      });
+    }
+
+    items.push({ name, quantity, unitPriceInCents, lineTotalInCents, modifiers });
   });
 
   let taxInCents = 0;
@@ -86,83 +74,50 @@ exports.sendReceiptEmail = onCall(async (request) => {
 
   let itemsHtml = "";
   items.forEach((item) => {
-    itemsHtml += `
-    <tr>
-      <td>${escapeHtml(item.name)}</td>
-      <td style="text-align:center">${item.quantity}</td>
-      <td style="text-align:right">$${item.price.toFixed(2)}</td>
-      <td style="text-align:right">$${item.lineTotal.toFixed(2)}</td>
-    </tr>
-  `;
+    const price = (item.unitPriceInCents / 100).toFixed(2);
+    const lineTotal = (item.lineTotalInCents / 100).toFixed(2);
+    itemsHtml += `<p style="margin:4px 0;">${item.quantity}x ${escapeHtml(item.name)} - $${lineTotal}</p>\n`;
+
+    item.modifiers.forEach((mod) => {
+      const modPrice = (mod.priceInCents / 100).toFixed(2);
+      itemsHtml += `<p style="margin:2px 0 2px 20px;color:#555;font-size:14px;">+ ${escapeHtml(mod.name)} - $${modPrice}</p>\n`;
+    });
   });
 
   const html = `
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8">
-  <title>Receipt - Order ${escapeHtml(orderId)}</title>
-</head>
-<body>
-<div style="font-family: Arial; background:#f4f4f4; padding:30px;">
-  <div style="max-width:600px;margin:auto;background:white;padding:30px;border-radius:8px;">
-
-    <h2 style="text-align:center;">MaxiPay POS</h2>
-    <p style="text-align:center;">Thank you for your visit</p>
-
+<head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;background:#f4f4f4;padding:30px;">
+  <div style="max-width:500px;margin:auto;background:#fff;padding:30px;border-radius:8px;">
+    <h2 style="text-align:center;margin-bottom:4px;">MaxiPay Receipt</h2>
+    <p style="text-align:center;color:#555;">Order #${escapeHtml(orderId)}</p>
     <hr/>
-
-    <p><strong>Order ID:</strong> ${escapeHtml(orderId)}</p>
-    <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
-
-    <table width="100%" style="border-collapse:collapse;margin-top:20px;">
-      <thead>
-        <tr style="border-bottom:1px solid #ddd;">
-          <th align="left">Item</th>
-          <th align="center">Qty</th>
-          <th align="right">Price</th>
-          <th align="right">Total</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${itemsHtml}
-      </tbody>
-    </table>
-
+    ${itemsHtml}
     <hr/>
-
     <p style="text-align:right;">Subtotal: $${subtotal.toFixed(2)}</p>
     <p style="text-align:right;">Tax: $${tax.toFixed(2)}</p>
     <h3 style="text-align:right;">Total: $${total.toFixed(2)}</h3>
-
-    <hr/>
-
-    <p style="text-align:center;color:#777;font-size:12px;">
-      Powered by MaxiPay POS
-    </p>
-
+    <p style="text-align:center;color:#777;margin-top:24px;">Thank you for your purchase.</p>
   </div>
-</div>
 </body>
-</html>
-  `.trim();
+</html>`.trim();
 
   try {
-    logger.info("Sending receipt email", { to: email, from: fromEmail, orderId });
     await sgMail.send({
       to: email,
       from: fromEmail,
-      subject: `Receipt for Order ${orderId}`,
+      subject: `MaxiPay Receipt - Order #${orderId}`,
       html,
     });
-    logger.info("Receipt email sent successfully to", email);
+    logger.info("Receipt sent", { to: email, orderId });
     return { success: true };
   } catch (error) {
-    logger.error("SendGrid error:", error.message, "code:", error.code);
+    logger.error("SendGrid error:", error.message);
     if (error.response) {
-      logger.error("SendGrid response body:", JSON.stringify(error.response.body));
+      logger.error("SendGrid response:", JSON.stringify(error.response.body));
     }
-    throw new HttpsError("internal", "Failed to send receipt email.");
+    return { success: false, error: error.message };
   }
 });
 
