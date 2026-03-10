@@ -32,29 +32,42 @@
             android:text="Logged in as:"
             android:layout_marginBottom="8dp"/>
 
-        <LinearLayout
+        <androidx.constraintlayout.widget.ConstraintLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center"
             android:layout_marginBottom="16dp">
 
-            <Space
+            <androidx.gridlayout.widget.GridLayout
+                android:id="@+id/homeGrid"
                 android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1"/>
+                android:layout_height="0dp"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintDimensionRatio="1:1"
+                app:columnCount="3"
+                app:rowCount="3"
+                app:useDefaultMargins="false"
+                app:alignmentMode="alignBounds">
 
-            <LinearLayout
-                android:id="@+id/btnDineIn"
-                android:layout_width="105dp"
-                android:layout_height="105dp"
-                android:orientation="vertical"
+                <!-- Row 0: DINE IN, TO-GO, BAR -->
+                <LinearLayout
+                    android:id="@+id/btnDineIn"
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:layout_margin="8dp"
+                    android:orientation="vertical"
                 android:gravity="center"
                 android:background="@drawable/bg_order_type_button"
                 android:clickable="true"
                 android:focusable="true"
                 android:foreground="?attr/selectableItemBackground"
-                android:padding="12dp">
+                android:padding="12dp"
+                app:layout_columnWeight="1"
+                app:layout_rowWeight="1"
+                app:layout_row="0"
+                app:layout_column="0"
+                app:layout_gravity="fill">
 
                 <ImageView
                     android:layout_width="40dp"
@@ -64,31 +77,34 @@
                     app:tint="@android:color/white"/>
 
                 <TextView
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="DINE IN"
                     android:textColor="@android:color/white"
-                    android:textSize="13sp"
+                    android:textSize="11sp"
                     android:textStyle="bold"
+                    android:maxLines="1"
+                    android:gravity="center"
                     android:layout_marginTop="6dp"/>
             </LinearLayout>
 
-            <Space
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1"/>
-
             <LinearLayout
                 android:id="@+id/btnToGo"
-                android:layout_width="105dp"
-                android:layout_height="105dp"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_margin="8dp"
                 android:orientation="vertical"
                 android:gravity="center"
                 android:background="@drawable/bg_order_type_button"
                 android:clickable="true"
                 android:focusable="true"
                 android:foreground="?attr/selectableItemBackground"
-                android:padding="12dp">
+                android:padding="12dp"
+                app:layout_columnWeight="1"
+                app:layout_rowWeight="1"
+                app:layout_row="0"
+                app:layout_column="1"
+                app:layout_gravity="fill">
 
                 <ImageView
                     android:layout_width="40dp"
@@ -98,31 +114,34 @@
                     app:tint="@android:color/white"/>
 
                 <TextView
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="TO-GO"
                     android:textColor="@android:color/white"
-                    android:textSize="13sp"
+                    android:textSize="11sp"
                     android:textStyle="bold"
+                    android:maxLines="1"
+                    android:gravity="center"
                     android:layout_marginTop="6dp"/>
             </LinearLayout>
 
-            <Space
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1"/>
-
             <LinearLayout
                 android:id="@+id/btnBar"
-                android:layout_width="105dp"
-                android:layout_height="105dp"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_margin="8dp"
                 android:orientation="vertical"
                 android:gravity="center"
                 android:background="@drawable/bg_order_type_button"
                 android:clickable="true"
                 android:focusable="true"
                 android:foreground="?attr/selectableItemBackground"
-                android:padding="12dp">
+                android:padding="12dp"
+                app:layout_columnWeight="1"
+                app:layout_rowWeight="1"
+                app:layout_row="0"
+                app:layout_column="2"
+                app:layout_gravity="fill">
 
                 <ImageView
                     android:layout_width="40dp"
@@ -132,35 +151,182 @@
                     app:tint="@android:color/white"/>
 
                 <TextView
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="BAR"
                     android:textColor="@android:color/white"
-                    android:textSize="13sp"
+                    android:textSize="11sp"
                     android:textStyle="bold"
+                    android:maxLines="1"
+                    android:gravity="center"
                     android:layout_marginTop="6dp"/>
             </LinearLayout>
 
-            <Space
+            <!-- Row 1: TRANSACTIONS, SETTLE BATCH, EMPLOYEES -->
+            <LinearLayout
+                android:id="@+id/btnTransactions"
                 android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1"/>
+                android:layout_height="0dp"
+                android:layout_margin="8dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/bg_order_type_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:padding="12dp"
+                app:layout_columnWeight="1"
+                app:layout_rowWeight="1"
+                app:layout_row="1"
+                app:layout_column="0"
+                app:layout_gravity="fill">
 
-        </LinearLayout>
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_transactions"
+                    android:contentDescription="Transactions"
+                    app:tint="@android:color/white"/>
 
-        <Button
-            android:id="@+id/btnTransactions"
-            android:layout_width="220dp"
-            android:layout_height="wrap_content"
-            android:text="TRANSACTIONS"
-            android:layout_marginBottom="16dp"/>
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="TRANSACTIONS"
+                    android:textColor="@android:color/white"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:maxLines="1"
+                    android:gravity="center"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="8sp"
+                    android:autoSizeMaxTextSize="11sp"
+                    android:layout_marginTop="6dp"/>
+            </LinearLayout>
 
-        <Button
-            android:id="@+id/btnSettle"
-            android:layout_width="220dp"
-            android:layout_height="wrap_content"
-            android:text="SETTLE BATCH"
-            android:layout_marginBottom="30dp"/>
+            <LinearLayout
+                android:id="@+id/btnSettle"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_margin="8dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/bg_order_type_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:padding="12dp"
+                app:layout_columnWeight="1"
+                app:layout_rowWeight="1"
+                app:layout_row="1"
+                app:layout_column="1"
+                app:layout_gravity="fill">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_settle_batch"
+                    android:contentDescription="Settle Batch"
+                    app:tint="@android:color/white"/>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="SETTLE BATCH"
+                    android:textColor="@android:color/white"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:maxLines="1"
+                    android:gravity="center"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="8sp"
+                    android:autoSizeMaxTextSize="11sp"
+                    android:layout_marginTop="6dp"/>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/btnEmployees"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_margin="8dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/bg_order_type_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:padding="12dp"
+                app:layout_columnWeight="1"
+                app:layout_rowWeight="1"
+                app:layout_row="1"
+                app:layout_column="2"
+                app:layout_gravity="fill">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_employees"
+                    android:contentDescription="Employees"
+                    app:tint="@android:color/white"/>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="EMPLOYEES"
+                    android:textColor="@android:color/white"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:maxLines="1"
+                    android:gravity="center"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="8sp"
+                    android:autoSizeMaxTextSize="11sp"
+                    android:layout_marginTop="6dp"/>
+            </LinearLayout>
+
+            <!-- Row 2: CUSTOMERS -->
+            <LinearLayout
+                android:id="@+id/btnCustomers"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_margin="8dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/bg_order_type_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:padding="12dp"
+                app:layout_columnWeight="1"
+                app:layout_rowWeight="1"
+                app:layout_row="2"
+                app:layout_column="0"
+                app:layout_gravity="fill">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_customers"
+                    android:contentDescription="Customers"
+                    app:tint="@android:color/white"/>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="CUSTOMERS"
+                    android:textColor="@android:color/white"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:maxLines="1"
+                    android:gravity="center"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="8sp"
+                    android:autoSizeMaxTextSize="11sp"
+                    android:layout_marginTop="6dp"/>
+            </LinearLayout>
+
+        </androidx.gridlayout.widget.GridLayout>
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
 
         <LinearLayout
             android:id="@+id/todaySalesArea"
@@ -189,15 +355,6 @@
                 android:textSize="16sp"
                 android:layout_marginTop="8dp"/>
         </LinearLayout>
-
-        <Button
-            android:id="@+id/btnEmployees"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="EMPLOYEES"
-            android:layout_marginTop="20dp"
-            android:backgroundTint="#6A4FB3"
-            android:textColor="@android:color/white"/>
 
     </LinearLayout>
 

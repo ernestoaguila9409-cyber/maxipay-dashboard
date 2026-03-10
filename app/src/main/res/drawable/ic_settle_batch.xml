@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorControlNormal">
+    <!-- Material "account_balance" icon -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,2L2,7v2h20V7L12,2zM4,10v7h3v-7H4zM9,10v7h3v-7H9zM20,10v7h3v-7h-3z"/>
+</vector>

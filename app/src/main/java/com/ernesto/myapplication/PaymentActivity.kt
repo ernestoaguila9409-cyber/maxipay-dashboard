@@ -7,6 +7,7 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Source
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -141,7 +142,7 @@ class PaymentActivity : AppCompatActivity() {
     private fun loadRemainingBalance() {
         val oid = orderId ?: return
 
-        db.collection("Orders").document(oid).get()
+        db.collection("Orders").document(oid).get(Source.SERVER)
             .addOnSuccessListener { snap ->
 
                 val remainingInCents =
@@ -161,6 +162,28 @@ class PaymentActivity : AppCompatActivity() {
                     "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
 
                 showSplitPayShareDialogIfNeeded()
+            }
+            .addOnFailureListener {
+                db.collection("Orders").document(oid).get()
+                    .addOnSuccessListener { snap ->
+                        val remainingInCents =
+                            snap.getLong("remainingInCents")
+                                ?: snap.getLong("totalInCents")
+                                ?: 0L
+
+                        remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
+
+                        if (remainingInCents <= 0L) {
+                            setResult(RESULT_OK)
+                            finish()
+                            return@addOnSuccessListener
+                        }
+
+                        txtPaymentTotal.text =
+                            "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
+
+                        showSplitPayShareDialogIfNeeded()
+                    }
             }
     }
 
@@ -437,17 +460,14 @@ class PaymentActivity : AppCompatActivity() {
             onSuccess = { remainingInCents ->
 
                 runOnUiThread {
-                    // ✅ convert cents → double for internal logic
                     remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
                     if (remainingInCents <= 0L) {
                         splitPayAmount = -1.0
                         splitTotalCount = 0
                         splitPaymentsDone = 0
-                        setResult(RESULT_OK)
-                        finish()
+                        onOrderFullyPaid()
                     } else {
-                        // ✅ display using MoneyUtils
                         txtPaymentTotal.text =
                             "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
                         setButtonsEnabled(true)
@@ -485,18 +505,15 @@ class PaymentActivity : AppCompatActivity() {
 
                     showApproved()
 
-                    // ✅ convert cents → double for internal logic
                     remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
                     if (remainingInCents <= 0L) {
                         splitPayAmount = -1.0
                         splitTotalCount = 0
                         splitPaymentsDone = 0
-                        setResult(RESULT_OK)
-                        finish()
+                        onOrderFullyPaid()
                     } else {
 
-                        // ✅ display using MoneyUtils
                         txtPaymentTotal.text =
                             "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
 
@@ -538,6 +555,17 @@ class PaymentActivity : AppCompatActivity() {
         btnCredit.isEnabled = enabled
         btnDebit.isEnabled = enabled
         btnCash.isEnabled = enabled
+    }
+
+    private fun onOrderFullyPaid() {
+        setResult(RESULT_OK)
+        val oid = orderId ?: run { finish(); return }
+        val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
+            putExtra("ORDER_ID", oid)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        startActivity(intent)
+        finish()
     }
 
     private fun roundMoney(value: Double): Double {

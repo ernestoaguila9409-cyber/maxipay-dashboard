@@ -97,12 +97,18 @@
             android:name=".PaymentActivity"
             android:exported="false" />
         <activity
+            android:name=".ReceiptOptionsActivity"
+            android:exported="false" />
+        <activity
             android:name=".SplitPaymentActivity"
             android:exported="false"
             android:parentActivityName=".PaymentActivity" />
 
         <activity
             android:name=".EmployeesActivity"
+            android:exported="false" />
+        <activity
+            android:name=".CustomersActivity"
             android:exported="false" />
         <activity
             android:name=".BatchManagementActivity"

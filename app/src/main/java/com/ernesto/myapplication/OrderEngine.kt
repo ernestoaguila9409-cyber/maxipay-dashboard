@@ -5,6 +5,9 @@ import java.util.Date
 
 class OrderEngine(private val db: FirebaseFirestore) {
 
+    private var pendingWrites = 0
+    private val flushCallbacks = mutableListOf<() -> Unit>()
+
     data class LineItemInput(
         val itemId: String,
         val name: String,
@@ -51,7 +54,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
             .addOnFailureListener { e -> onFailure(e) }
     }
 
-    /** Save/replace an item line doc (Orders/{orderId}/items/{lineKey}) and then recompute totals */
+    /** Save/replace an item line doc (Orders/{orderId}/items/{lineKey}). Does NOT recompute totals. */
     fun upsertLineItem(
         orderId: String,
         lineKey: String,
@@ -83,16 +86,24 @@ class OrderEngine(private val db: FirebaseFirestore) {
 
         val orderRef = db.collection("Orders").document(orderId)
 
+        pendingWrites++
+
         orderRef.collection("items")
             .document(lineKey)
             .set(itemMap)
             .addOnSuccessListener {
-                recomputeOrderTotals(orderId, onSuccess, onFailure)
+                pendingWrites--
+                drainFlushCallbacks()
+                onSuccess()
             }
-            .addOnFailureListener { e -> onFailure(e) }
+            .addOnFailureListener { e ->
+                pendingWrites--
+                drainFlushCallbacks()
+                onFailure(e)
+            }
     }
 
-    /** Delete a line doc and then recompute totals */
+    /** Delete a line doc. Does NOT recompute totals. */
     fun deleteLineItem(
         orderId: String,
         lineKey: String,
@@ -101,16 +112,43 @@ class OrderEngine(private val db: FirebaseFirestore) {
     ) {
         val orderRef = db.collection("Orders").document(orderId)
 
+        pendingWrites++
+
         orderRef.collection("items")
             .document(lineKey)
             .delete()
             .addOnSuccessListener {
-                recomputeOrderTotals(orderId, onSuccess, onFailure)
+                pendingWrites--
+                drainFlushCallbacks()
+                onSuccess()
             }
-            .addOnFailureListener { e -> onFailure(e) }
+            .addOnFailureListener { e ->
+                pendingWrites--
+                drainFlushCallbacks()
+                onFailure(e)
+            }
     }
 
-    /** Recompute total from items subcollection + taxes; update total + remainingBalance + status deterministically */
+    /** Wait until all pending item writes have completed, then invoke callback. Fires immediately if nothing is pending. */
+    fun waitForPendingWrites(callback: () -> Unit) {
+        if (pendingWrites <= 0) {
+            pendingWrites = 0
+            callback()
+        } else {
+            flushCallbacks.add(callback)
+        }
+    }
+
+    private fun drainFlushCallbacks() {
+        if (pendingWrites <= 0) {
+            pendingWrites = 0
+            val callbacks = flushCallbacks.toList()
+            flushCallbacks.clear()
+            callbacks.forEach { it() }
+        }
+    }
+
+    /** Recompute total from items subcollection + taxes; update total + remainingBalance + status. */
     fun recomputeOrderTotals(
         orderId: String,
         onSuccess: () -> Unit,
@@ -131,7 +169,6 @@ class OrderEngine(private val db: FirebaseFirestore) {
                     subtotalInCents += lineTotal
                 }
 
-                // Fetch enabled taxes and apply them to get the final total
                 db.collection("Taxes")
                     .whereEqualTo("enabled", true)
                     .get()

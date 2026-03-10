@@ -2,7 +2,6 @@ package com.ernesto.myapplication
 
 import android.content.Intent
 import android.os.Bundle
-import android.widget.Button
 import android.widget.ImageButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -76,13 +75,13 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
-        findViewById<Button>(R.id.btnTransactions).setOnClickListener {
+        findViewById<android.view.View>(R.id.btnTransactions).setOnClickListener {
             val intent = Intent(this, TransactionActivity::class.java)
             intent.putExtra("employeeName", employeeName)
             startActivity(intent)
         }
 
-        findViewById<Button>(R.id.btnSettle).setOnClickListener {
+        findViewById<android.view.View>(R.id.btnSettle).setOnClickListener {
             startActivity(Intent(this, BatchManagementActivity::class.java))
         }
 
@@ -90,8 +89,12 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, TodaySalesActivity::class.java))
         }
 
-        findViewById<Button>(R.id.btnEmployees).setOnClickListener {
+        findViewById<android.view.View>(R.id.btnEmployees).setOnClickListener {
             startActivity(Intent(this, EmployeesActivity::class.java))
+        }
+
+        findViewById<android.view.View>(R.id.btnCustomers).setOnClickListener {
+            startActivity(Intent(this, CustomersActivity::class.java))
         }
 
         findViewById<ImageButton>(R.id.btnLogout).setOnClickListener {

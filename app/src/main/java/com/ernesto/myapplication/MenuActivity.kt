@@ -134,20 +134,27 @@ class MenuActivity : AppCompatActivity() {
 
             val oid = currentOrderId ?: return@setOnClickListener
 
-            if (!preAuthReferenceId.isNullOrBlank() && !preAuthAuthCode.isNullOrBlank()) {
-                startCaptureFlow(oid)
-            } else {
-                orderEngine.recomputeOrderTotals(
-                    orderId = oid,
-                    onSuccess = {
-                        val intent = Intent(this, PaymentActivity::class.java)
-                        intent.putExtra("ORDER_ID", oid)
-                        paymentLauncher.launch(intent)
-                    },
-                    onFailure = {
-                        Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
-                    }
-                )
+            btnCheckout.isEnabled = false
+
+            orderEngine.waitForPendingWrites {
+                if (!preAuthReferenceId.isNullOrBlank() && !preAuthAuthCode.isNullOrBlank()) {
+                    btnCheckout.isEnabled = true
+                    startCaptureFlow(oid)
+                } else {
+                    orderEngine.recomputeOrderTotals(
+                        orderId = oid,
+                        onSuccess = {
+                            btnCheckout.isEnabled = true
+                            val intent = Intent(this, PaymentActivity::class.java)
+                            intent.putExtra("ORDER_ID", oid)
+                            paymentLauncher.launch(intent)
+                        },
+                        onFailure = {
+                            btnCheckout.isEnabled = true
+                            Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+                        }
+                    )
+                }
             }
         }
     }
