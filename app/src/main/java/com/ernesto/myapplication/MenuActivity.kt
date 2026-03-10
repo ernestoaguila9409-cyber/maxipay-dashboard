@@ -95,6 +95,7 @@ class MenuActivity : AppCompatActivity() {
         tableId = intent.getStringExtra("tableId")
         tableName = intent.getStringExtra("tableName")
         guestCount = intent.getIntExtra("guestCount", 0)
+        currentBatchId = intent.getStringExtra("batchId")
 
         categoryContainer = findViewById(R.id.categoryContainer)
         itemContainer = findViewById(R.id.itemContainer)
@@ -147,6 +148,7 @@ class MenuActivity : AppCompatActivity() {
                             btnCheckout.isEnabled = true
                             val intent = Intent(this, PaymentActivity::class.java)
                             intent.putExtra("ORDER_ID", oid)
+                            intent.putExtra("BATCH_ID", currentBatchId ?: "")
                             paymentLauncher.launch(intent)
                         },
                         onFailure = {
