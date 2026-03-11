@@ -96,12 +96,16 @@ object ReceiptPromptHelper {
                 if (response?.get("success") == true) {
                     Toast.makeText(activity, "Receipt sent to $email", Toast.LENGTH_SHORT).show()
                 } else {
-                    Toast.makeText(activity, "Failed to send receipt", Toast.LENGTH_SHORT).show()
+                    val errorMsg = (response?.get("error") as? String)?.takeIf { it.isNotBlank() }
+                    val msg = if (errorMsg != null) "Failed to send receipt: $errorMsg" else "Failed to send receipt"
+                    Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
                 }
                 onDismiss?.invoke()
             }
-            .addOnFailureListener {
-                Toast.makeText(activity, "Failed to send receipt. Please try again.", Toast.LENGTH_SHORT).show()
+            .addOnFailureListener { e ->
+                android.util.Log.e("ReceiptPromptHelper", "Receipt send failed", e)
+                val msg = e.message?.takeIf { it.isNotBlank() } ?: "Please try again."
+                Toast.makeText(activity, "Failed to send receipt. $msg", Toast.LENGTH_LONG).show()
                 onDismiss?.invoke()
             }
     }

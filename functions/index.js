@@ -202,24 +202,25 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
 });
 
 exports.sendRefundReceiptEmail = onCall(async (request) => {
-  const { email, orderId, transactionId } = request.data || {};
+  try {
+    const { email, orderId, transactionId } = request.data || {};
 
-  if (!email || !orderId) {
-    return { success: false, error: "Email and orderId are required." };
-  }
+    if (!email || !orderId) {
+      return { success: false, error: "Email and orderId are required." };
+    }
 
-  const fromEmail = process.env.SENDGRID_FROM_EMAIL;
-  if (!fromEmail) {
-    logger.error("SENDGRID_FROM_EMAIL is not configured");
-    return { success: false, error: "Email service is not configured." };
-  }
+    const fromEmail = process.env.SENDGRID_FROM_EMAIL;
+    if (!fromEmail) {
+      logger.error("SENDGRID_FROM_EMAIL is not configured");
+      return { success: false, error: "Email service is not configured." };
+    }
 
-  const db = admin.firestore();
-  const orderDoc = await db.collection("Orders").doc(orderId).get();
+    const db = admin.firestore();
+    const orderDoc = await db.collection("Orders").doc(orderId).get();
 
-  if (!orderDoc.exists) {
-    return { success: false, error: "Order not found." };
-  }
+    if (!orderDoc.exists) {
+      return { success: false, error: "Order not found." };
+    }
 
   const order = orderDoc.data();
   const totalInCents = order.totalInCents ?? 0;
@@ -257,16 +258,22 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
     const refundSnap = await db.collection("Transactions")
       .where("type", "==", "REFUND")
       .where("originalReferenceId", "==", transactionId)
-      .orderBy("createdAt", "desc")
-      .limit(1)
       .get();
 
     if (!refundSnap.empty) {
-      const refundDoc = refundSnap.docs[0].data();
+      const docs = refundSnap.docs;
+      const sorted = docs.sort((a, b) => {
+        const aTime = a.data().createdAt?.toMillis?.() ?? a.data().createdAt?._seconds ?? 0;
+        const bTime = b.data().createdAt?.toMillis?.() ?? b.data().createdAt?._seconds ?? 0;
+        return bTime - aTime;
+      });
+      const refundDoc = sorted[0].data();
       refundAmountCents = refundDoc.amountInCents ?? Math.round((refundDoc.amount ?? 0) * 100);
       refundedBy = refundDoc.refundedBy ?? "";
       if (refundDoc.createdAt) {
-        refundDate = new Date(refundDoc.createdAt._seconds * 1000).toLocaleString("en-US");
+        const ts = refundDoc.createdAt;
+        const ms = ts.toMillis ? ts.toMillis() : (ts._seconds ?? ts.seconds ?? 0) * 1000;
+        refundDate = new Date(ms).toLocaleString("en-US");
       }
     }
   }
@@ -313,21 +320,25 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
 </body>
 </html>`.trim();
 
-  try {
-    await sgMail.send({
-      to: email,
-      from: fromEmail,
-      subject: `REFUND Receipt - Order #${orderId}`,
-      html,
-    });
-    logger.info("Refund receipt sent", { to: email, orderId });
-    return { success: true };
-  } catch (error) {
-    logger.error("SendGrid error:", error.message);
-    if (error.response) {
-      logger.error("SendGrid response:", JSON.stringify(error.response.body));
+    try {
+      await sgMail.send({
+        to: email,
+        from: fromEmail,
+        subject: `REFUND Receipt - Order #${orderId}`,
+        html,
+      });
+      logger.info("Refund receipt sent", { to: email, orderId });
+      return { success: true };
+    } catch (error) {
+      logger.error("SendGrid error:", error.message);
+      if (error.response) {
+        logger.error("SendGrid response:", JSON.stringify(error.response.body));
+      }
+      return { success: false, error: error.message };
     }
-    return { success: false, error: error.message };
+  } catch (error) {
+    logger.error("sendRefundReceiptEmail error:", error.message, error);
+    return { success: false, error: error.message || "An unexpected error occurred." };
   }
 });
 
