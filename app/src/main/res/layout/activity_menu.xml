@@ -66,6 +66,46 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"/>
 
+        <!-- Customer section -->
+        <LinearLayout
+            android:id="@+id/customerSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp">
+
+            <TextView
+                android:id="@+id/txtCustomerLabel"
+                android:text="Customer: "
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#5D4E7B"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+
+            <TextView
+                android:id="@+id/txtCustomerValue"
+                android:text="+ Add Customer"
+                android:textSize="14sp"
+                android:textColor="#6A4FB3"
+                android:padding="4dp"
+                android:background="?attr/selectableItemBackground"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/txtCartItemsLabel"
+            android:text="Cart Items"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#5D4E7B"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"/>
+
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="0dp"

@@ -25,6 +25,9 @@ class OrderEngine(private val db: FirebaseFirestore) {
         tableId: String? = null,
         tableName: String? = null,
         guestCount: Int? = null,
+        customerName: String? = null,
+        customerPhone: String? = null,
+        customerEmail: String? = null,
         onSuccess: (orderId: String) -> Unit,
         onFailure: (Exception) -> Unit
     ) {
@@ -47,10 +50,34 @@ class OrderEngine(private val db: FirebaseFirestore) {
         if (!tableId.isNullOrBlank()) orderMap["tableId"] = tableId
         if (!tableName.isNullOrBlank()) orderMap["tableName"] = tableName
         if (guestCount != null && guestCount > 0) orderMap["guestCount"] = guestCount
+        if (!customerName.isNullOrBlank()) orderMap["customerName"] = customerName
+        if (!customerPhone.isNullOrBlank()) orderMap["customerPhone"] = customerPhone
+        if (!customerEmail.isNullOrBlank()) orderMap["customerEmail"] = customerEmail
 
         db.collection("Orders")
             .add(orderMap)
             .addOnSuccessListener { doc -> onSuccess(doc.id) }
+            .addOnFailureListener { e -> onFailure(e) }
+    }
+
+    /** Update customer fields on an existing order */
+    fun updateOrderCustomer(
+        orderId: String,
+        customerName: String,
+        customerPhone: String = "",
+        customerEmail: String = "",
+        onSuccess: () -> Unit,
+        onFailure: (Exception) -> Unit
+    ) {
+        val updates = hashMapOf<String, Any>(
+            "customerName" to customerName,
+            "customerPhone" to customerPhone,
+            "customerEmail" to customerEmail,
+            "updatedAt" to Date()
+        )
+        db.collection("Orders").document(orderId)
+            .update(updates)
+            .addOnSuccessListener { onSuccess() }
             .addOnFailureListener { e -> onFailure(e) }
     }
 

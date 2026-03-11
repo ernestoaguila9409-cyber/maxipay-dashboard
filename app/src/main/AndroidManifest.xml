@@ -87,6 +87,26 @@
             android:name=".BarTabConfigActivity"
             android:exported="false"
             android:parentActivityName=".ConfigurationActivity" />
+
+        <activity
+            android:name=".OrderTypesConfigureActivity"
+            android:exported="false"
+            android:parentActivityName=".ConfigurationActivity" />
+
+        <activity
+            android:name=".ToGoConfigureActivity"
+            android:exported="false"
+            android:parentActivityName=".OrderTypesConfigureActivity" />
+
+        <activity
+            android:name=".DineInConfigureActivity"
+            android:exported="false"
+            android:parentActivityName=".OrderTypesConfigureActivity" />
+
+        <activity
+            android:name=".BarTabConfigureActivity"
+            android:exported="false"
+            android:parentActivityName=".OrderTypesConfigureActivity" />
         <activity
             android:name=".MenuActivity"
             android:exported="false" />

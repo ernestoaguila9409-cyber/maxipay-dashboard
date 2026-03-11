@@ -108,9 +108,9 @@
             android:textColor="@android:color/darker_gray"/>
     </LinearLayout>
 
-    <!-- Clickable option: opens Bar Tab Configuration screen -->
+    <!-- Clickable option: opens Order Types Configure screen -->
     <LinearLayout
-        android:id="@+id/optionBarTabConfig"
+        android:id="@+id/optionOrderTypes"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -125,36 +125,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="BAR TAB CONFIGURATION"
-            android:textSize="16sp"
-            android:textStyle="bold"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="›"
-            android:textSize="24sp"
-            android:textColor="@android:color/darker_gray"/>
-    </LinearLayout>
-
-    <!-- Clickable option: opens Table Mapping Setup screen -->
-    <LinearLayout
-        android:id="@+id/optionTableMapping"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="@android:color/white"
-        android:padding="16dp"
-        android:layout_marginTop="12dp"
-        android:clickable="true"
-        android:focusable="true">
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="TABLE MAPPING SETUP"
+            android:text="ORDER TYPES CONFIGURE"
             android:textSize="16sp"
             android:textStyle="bold"/>
 

@@ -24,12 +24,8 @@ class ConfigurationActivity : AppCompatActivity() {
             startActivity(Intent(this, TerminalListActivity::class.java))
         }
 
-        findViewById<android.view.View>(R.id.optionBarTabConfig).setOnClickListener {
-            startActivity(Intent(this, BarTabConfigActivity::class.java))
-        }
-
-        findViewById<android.view.View>(R.id.optionTableMapping).setOnClickListener {
-            startActivity(Intent(this, TableLayoutActivity::class.java))
+        findViewById<android.view.View>(R.id.optionOrderTypes).setOnClickListener {
+            startActivity(Intent(this, OrderTypesConfigureActivity::class.java))
         }
     }
 

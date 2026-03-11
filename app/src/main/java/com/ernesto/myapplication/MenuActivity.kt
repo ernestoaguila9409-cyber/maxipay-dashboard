@@ -56,6 +56,10 @@ class MenuActivity : AppCompatActivity() {
     private var tableName: String? = null
     private var guestCount: Int = 0
 
+    private var customerName: String? = null
+    private var customerPhone: String? = null
+    private var customerEmail: String? = null
+
     private lateinit var paymentService: PaymentService
     private var preAuthReferenceId: String? = null
     private var preAuthAuthCode: String? = null
@@ -104,6 +108,9 @@ class MenuActivity : AppCompatActivity() {
         txtTotal = findViewById(R.id.txtTotal)
         btnCheckout = findViewById(R.id.btnCheckout)
 
+        val txtCustomerValue = findViewById<TextView>(R.id.txtCustomerValue)
+        txtCustomerValue.setOnClickListener { showAddCustomerDialog() }
+
         // ✅ IMPORTANT: if we came from OrderDetail "Checkout", we are editing an existing order
         currentOrderId = intent.getStringExtra("ORDER_ID")
 
@@ -120,6 +127,7 @@ class MenuActivity : AppCompatActivity() {
 
         loadCategories()
         loadEnabledTaxes()
+        updateCustomerDisplay()
 
         // ✅ Load existing order items into cart if ORDER_ID was provided
         currentOrderId?.let { existingOrderId ->
@@ -234,6 +242,11 @@ class MenuActivity : AppCompatActivity() {
                     }
                 }
 
+                customerName = orderDoc.getString("customerName")?.takeIf { it.isNotBlank() }
+                customerPhone = orderDoc.getString("customerPhone")?.takeIf { it.isNotBlank() }
+                customerEmail = orderDoc.getString("customerEmail")?.takeIf { it.isNotBlank() }
+                updateCustomerDisplay()
+
                 db.collection("Orders")
                     .document(orderId)
                     .collection("items")
@@ -274,6 +287,67 @@ class MenuActivity : AppCompatActivity() {
                     }
             }
     }
+
+    private fun showAddCustomerDialog() {
+        CustomerDialogHelper.showCustomerDialog(
+            activity = this,
+            initialName = customerName ?: "",
+            initialPhone = customerPhone ?: "",
+            initialEmail = customerEmail ?: "",
+            onSave = { info ->
+                customerName = info.name
+                customerPhone = info.phone.takeIf { it.isNotBlank() }
+                customerEmail = info.email.takeIf { it.isNotBlank() }
+                updateCustomerDisplay()
+
+                val oid = currentOrderId
+                if (!oid.isNullOrBlank()) {
+                    orderEngine.updateOrderCustomer(
+                        orderId = oid,
+                        customerName = info.name,
+                        customerPhone = info.phone,
+                        customerEmail = info.email,
+                        onSuccess = { /* already updated UI */ },
+                        onFailure = { e ->
+                            Toast.makeText(this, "Failed to save customer: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
+
+                // Save to Customers collection only if not a duplicate (same name + email)
+                saveCustomerToFirestoreIfNew(info.name, info.phone, info.email)
+            }
+        )
+    }
+
+    private fun updateCustomerDisplay() {
+        val txtCustomerValue = findViewById<TextView>(R.id.txtCustomerValue)
+        txtCustomerValue.text = if (!customerName.isNullOrBlank()) customerName else "+ Add Customer"
+    }
+
+    private fun saveCustomerToFirestoreIfNew(name: String, phone: String, email: String) {
+        CustomerDuplicateChecker.checkExists(db, name, email) { exists ->
+            if (exists) {
+                Toast.makeText(
+                    this,
+                    "Customer already in list. Attached to order.",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@checkExists
+            }
+            val customer = hashMapOf<String, Any>(
+                "name" to name,
+                "phone" to phone,
+                "email" to email
+            )
+            db.collection("Customers")
+                .add(customer)
+                .addOnFailureListener { e ->
+                    android.util.Log.e("MenuActivity", "Failed to save customer to Customers collection", e)
+                }
+        }
+    }
+
     private fun parseModifiers(raw: Any?): List<Pair<String, Double>> {
         // Your Firestore stores modifiers as:
         // modifiers: [ {first:"Medium", second:0.02}, {first:"grande", second:0.02} ]
@@ -602,6 +676,9 @@ class MenuActivity : AppCompatActivity() {
             tableId = tableId,
             tableName = tableName,
             guestCount = if (guestCount > 0) guestCount else null,
+            customerName = customerName,
+            customerPhone = customerPhone,
+            customerEmail = customerEmail,
             onSuccess = { oid ->
 
                 currentOrderId = oid
@@ -951,9 +1028,13 @@ class MenuActivity : AppCompatActivity() {
     private fun clearCart() {
         cartMap.clear()
         totalAmount = 0.0
+        customerName = null
+        customerPhone = null
+        customerEmail = null
         cartContainer.removeAllViews()
         cartTaxSummary.removeAllViews()
         txtTotal.text = "Total: $0.00"
+        updateCustomerDisplay()
     }
 
     // ── Bar Tab Capture Flow ────────────────────────────────────────

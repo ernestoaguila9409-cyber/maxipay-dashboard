@@ -27,13 +27,6 @@ class SideMenuActivity : AppCompatActivity() {
         // Normal entry (no orderId): show the side menu page
         setContentView(R.layout.activity_side_menu)
 
-        val btnOrders = findViewById<Button>(R.id.btnOrders)
-        btnOrders.setOnClickListener {
-            val intent = Intent(this, OrdersActivity::class.java)
-            intent.putExtra("employeeName", intent.getStringExtra("employeeName"))
-            startActivity(intent)
-        }
-
         val btnConfiguration = findViewById<Button>(R.id.btnConfiguration)
         btnConfiguration.setOnClickListener {
             val intent = Intent(this, ConfigurationActivity::class.java)

@@ -97,6 +97,12 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, CustomersActivity::class.java))
         }
 
+        findViewById<android.view.View>(R.id.btnOrders).setOnClickListener {
+            val intent = Intent(this, OrdersActivity::class.java)
+            intent.putExtra("employeeName", employeeName)
+            startActivity(intent)
+        }
+
         findViewById<ImageButton>(R.id.btnLogout).setOnClickListener {
             val intent = Intent(this, LoginActivity::class.java)
             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -109,6 +115,16 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         loadTodayStats()
+        applyOrderTypeVisibility()
+    }
+
+    private fun applyOrderTypeVisibility() {
+        findViewById<android.view.View>(R.id.btnDineIn).visibility =
+            if (OrderTypePrefs.isDineInEnabled(this)) android.view.View.VISIBLE else android.view.View.GONE
+        findViewById<android.view.View>(R.id.btnToGo).visibility =
+            if (OrderTypePrefs.isToGoEnabled(this)) android.view.View.VISIBLE else android.view.View.GONE
+        findViewById<android.view.View>(R.id.btnBar).visibility =
+            if (OrderTypePrefs.isBarTabEnabled(this)) android.view.View.VISIBLE else android.view.View.GONE
     }
 
     private fun ensureOpenBatch() {

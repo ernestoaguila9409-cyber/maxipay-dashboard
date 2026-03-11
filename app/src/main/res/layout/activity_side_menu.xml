@@ -9,15 +9,6 @@
     android:padding="24dp">
 
     <Button
-        android:id="@+id/btnOrders"
-        android:layout_width="220dp"
-        android:layout_height="wrap_content"
-        android:text="ORDERS"
-        android:textAllCaps="true"
-        android:textSize="16sp"
-        android:layout_marginBottom="16dp"/>
-
-    <Button
         android:id="@+id/btnConfiguration"
         android:layout_width="220dp"
         android:layout_height="wrap_content"
