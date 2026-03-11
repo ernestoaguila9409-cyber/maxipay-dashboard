@@ -1060,7 +1060,12 @@ class MenuActivity : AppCompatActivity() {
                     onSuccess = {
                         clearCart()
                         currentOrderId = null
-                        Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_SHORT).show()
+                        val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
+                            putExtra("ORDER_ID", orderId)
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        }
+                        startActivity(intent)
                         finish()
                     },
                     onFailure = { msg ->
@@ -1099,7 +1104,12 @@ class MenuActivity : AppCompatActivity() {
                     onSuccess = {
                         clearCart()
                         currentOrderId = null
-                        Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_SHORT).show()
+                        val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
+                            putExtra("ORDER_ID", orderId)
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        }
+                        startActivity(intent)
                         finish()
                     },
                     onFailure = { msg ->

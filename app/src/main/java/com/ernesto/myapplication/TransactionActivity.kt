@@ -23,8 +23,10 @@ import java.util.concurrent.TimeUnit
 import org.json.JSONObject
 import android.util.Log
 import java.util.*
+import android.text.InputType
 import com.ernesto.myapplication.data.SaleWithRefunds
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.functions.FirebaseFunctions
 class TransactionActivity : AppCompatActivity() {
 
     private lateinit var recyclerView: RecyclerView
@@ -103,7 +105,7 @@ class TransactionActivity : AppCompatActivity() {
                         if (voided) return@forEach
                         val settled = doc.getBoolean("settled") ?: false
                         val docType = doc.getString("type") ?: "SALE"
-                        if (docType == "SALE" && settled) return@forEach
+                        if ((docType == "SALE" || docType == "CAPTURE") && settled) return@forEach
                         if (docType == "REFUND") {
                             val ts = doc.getTimestamp("createdAt")?.toDate()
                                 ?: doc.getTimestamp("timestamp")?.toDate()
@@ -366,9 +368,20 @@ class TransactionActivity : AppCompatActivity() {
             return
         }
         if (transaction.voided) {
-            Toast.makeText(this, "This transaction has already been voided.", Toast.LENGTH_SHORT).show()
+            AlertDialog.Builder(this)
+                .setTitle("Voided Transaction")
+                .setMessage("This transaction has been voided.")
+                .setPositiveButton("Email Receipt") { _, _ -> showEmailReceiptForTransaction(transaction.referenceId) }
+                .setNegativeButton("Cancel", null)
+                .show()
             return
         }
+
+        val swr = allSalesWithRefunds.find { it.sale.referenceId == transaction.referenceId }
+        val alreadyRefundedCents = swr?.refunds?.sumOf { kotlin.math.abs(it.amountInCents) } ?: 0L
+        val remainingCents = transaction.amountInCents - alreadyRefundedCents
+        val fullyRefunded = remainingCents <= 0L
+
         val payments = transaction.payments.ifEmpty { null }
         val hasCard = payments?.any { p ->
             !p.paymentType.equals("Cash", true) && !p.paymentType.equals("Debit", true)
@@ -381,14 +394,24 @@ class TransactionActivity : AppCompatActivity() {
             transaction.paymentType.equals("Debit", true)
         }
 
+        if (fullyRefunded) {
+            AlertDialog.Builder(this)
+                .setTitle("Transaction Options")
+                .setMessage("This transaction has already been fully refunded.")
+                .setPositiveButton("Email Receipt") { _, _ -> showEmailReceiptForTransaction(transaction.referenceId) }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+
         if (transaction.settled) {
-            // Cash refunds are local-only (no gateway); card refunds need gateway reference
             AlertDialog.Builder(this)
                 .setTitle("Transaction Options")
                 .setMessage("Batch already closed. Refund only.")
                 .setPositiveButton("Refund") { _, _ ->
-                    if (allCash) processCashRefund(transaction) else processRefund(transaction)
+                    if (allCash) processCashRefund(transaction, remainingCents) else processRefund(transaction, remainingCents)
                 }
+                .setNeutralButton("Email Receipt") { _, _ -> showEmailReceiptForTransaction(transaction.referenceId) }
                 .setNegativeButton("Cancel", null)
                 .show()
             return
@@ -397,7 +420,8 @@ class TransactionActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("Transaction Options")
                 .setMessage("Debit sale can only be refunded.")
-                .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
+                .setPositiveButton("Refund") { _, _ -> processRefund(transaction, remainingCents) }
+                .setNeutralButton("Email Receipt") { _, _ -> showEmailReceiptForTransaction(transaction.referenceId) }
                 .setNegativeButton("Cancel", null)
                 .show()
             return
@@ -406,17 +430,22 @@ class TransactionActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("Cash Transaction")
                 .setMessage("Select an option for this cash payment.")
-                .setPositiveButton("Refund") { _, _ -> processCashRefund(transaction) }
+                .setPositiveButton("Refund") { _, _ -> processCashRefund(transaction, remainingCents) }
+                .setNeutralButton("Email Receipt") { _, _ -> showEmailReceiptForTransaction(transaction.referenceId) }
                 .setNegativeButton("Cancel", null)
                 .show()
             return
         }
-        // Has card (and possibly cash): allow Refund or Void when batch is open
+        val options = arrayOf("Refund", "Void", "Email Receipt", "Cancel")
         AlertDialog.Builder(this)
             .setTitle("Transaction Options")
-            .setPositiveButton("Refund") { _, _ -> processRefund(transaction) }
-            .setNegativeButton("Void") { _, _ -> processVoid(transaction) }
-            .setNeutralButton("Cancel", null)
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> processRefund(transaction, remainingCents)
+                    1 -> processVoid(transaction)
+                    2 -> showEmailReceiptForTransaction(transaction.referenceId)
+                }
+            }
             .show()
     }
 
@@ -463,8 +492,15 @@ class TransactionActivity : AppCompatActivity() {
 
     private fun runVoidSequence(txDocId: String, cardPayments: List<TransactionPayment>) {
         if (cardPayments.isEmpty()) {
-            doFinalVoidUpdate(txDocId)
-            Toast.makeText(this, "VOID APPROVED", Toast.LENGTH_LONG).show()
+            doFinalVoidUpdate(txDocId) { orderId ->
+                runOnUiThread {
+                    if (orderId.isNotBlank()) {
+                        ReceiptPromptHelper.promptForReceipt(this, ReceiptPromptHelper.ReceiptType.VOID, orderId, txDocId)
+                    } else {
+                        Toast.makeText(this, "VOID APPROVED", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
             return
         }
         voidCardPaymentsSequentially(txDocId, cardPayments, 0)
@@ -476,8 +512,15 @@ class TransactionActivity : AppCompatActivity() {
         index: Int
     ) {
         if (index >= cardPayments.size) {
-            doFinalVoidUpdate(txDocId)
-            runOnUiThread { Toast.makeText(this, "VOID APPROVED", Toast.LENGTH_LONG).show() }
+            doFinalVoidUpdate(txDocId) { orderId ->
+                runOnUiThread {
+                    if (orderId.isNotBlank()) {
+                        ReceiptPromptHelper.promptForReceipt(this, ReceiptPromptHelper.ReceiptType.VOID, orderId, txDocId)
+                    } else {
+                        Toast.makeText(this, "VOID APPROVED", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
             return
         }
         val payment = cardPayments[index]
@@ -559,7 +602,7 @@ class TransactionActivity : AppCompatActivity() {
         })
     }
 
-    private fun doFinalVoidUpdate(txDocId: String) {
+    private fun doFinalVoidUpdate(txDocId: String, onComplete: ((orderId: String) -> Unit)? = null) {
         val txRef = db.collection("Transactions").document(txDocId)
         txRef.get()
             .addOnSuccessListener { document ->
@@ -577,39 +620,44 @@ class TransactionActivity : AppCompatActivity() {
                 val batchId = document.getString("batchId") ?: ""
 
                 txRef.update("voided", true, "payments", updatedPayments)
-
-                if (orderId.isNotBlank()) {
-                    db.collection("Orders").document(orderId).update(
-                        mapOf(
-                            "status" to "VOIDED",
-                            "voidedAt" to Date(),
-                            "voidedBy" to currentEmployeeName
-                        )
-                    ).addOnFailureListener { e ->
-                        Log.e("TX_API", "Failed to update Order to VOIDED", e)
+                    .addOnSuccessListener {
+                        if (batchId.isNotBlank()) {
+                            db.collection("Batches").document(batchId).update(
+                                mapOf(
+                                    "totalSales" to FieldValue.increment(-amount),
+                                    "netTotal" to FieldValue.increment(-amount),
+                                    "transactionCount" to FieldValue.increment(-1)
+                                )
+                            ).addOnFailureListener { e ->
+                                Log.e("TX_API", "Failed to update Batch on void", e)
+                            }
+                        }
+                        if (orderId.isNotBlank()) {
+                            db.collection("Orders").document(orderId).update(
+                                mapOf(
+                                    "status" to "VOIDED",
+                                    "voidedAt" to Date(),
+                                    "voidedBy" to currentEmployeeName
+                                )
+                            ).addOnSuccessListener {
+                                onComplete?.invoke(orderId)
+                            }.addOnFailureListener { e ->
+                                Log.e("TX_API", "Failed to update Order to VOIDED", e)
+                                onComplete?.invoke(orderId)
+                            }
+                        } else {
+                            onComplete?.invoke("")
+                        }
                     }
-                }
-                if (batchId.isNotBlank()) {
-                    db.collection("Batches").document(batchId).update(
-                        mapOf(
-                            "totalSales" to FieldValue.increment(-amount),
-                            "netTotal" to FieldValue.increment(-amount),
-                            "transactionCount" to FieldValue.increment(-1)
-                        )
-                    ).addOnFailureListener { e ->
-                        Log.e("TX_API", "Failed to update Batch on void", e)
-                    }
-                }
             }
     }
 
-    // Card refund: send request to Devajoo and, on approval, store refund transaction
-    private fun processRefund(transaction: Transaction) {
+    private fun processRefund(transaction: Transaction, remainingCents: Long) {
 
-        val fullAmount = transaction.amountInCents / 100.0
+        val maxAmount = remainingCents / 100.0
 
         val input = EditText(this)
-        input.hint = "Enter refund amount (Max: $fullAmount)"
+        input.hint = "Enter refund amount (Max: $${String.format("%.2f", maxAmount)})"
 
         AlertDialog.Builder(this)
             .setTitle("Refund")
@@ -617,8 +665,8 @@ class TransactionActivity : AppCompatActivity() {
             .setPositiveButton("Refund") { _, _ ->
                 val entered = input.text.toString().toDoubleOrNull()
 
-                if (entered == null || entered <= 0 || entered > fullAmount) {
-                    Toast.makeText(this, "Invalid amount", Toast.LENGTH_SHORT).show()
+                if (entered == null || entered <= 0 || entered > maxAmount) {
+                    Toast.makeText(this, "Invalid amount (max $${String.format("%.2f", maxAmount)})", Toast.LENGTH_SHORT).show()
                 } else {
                     sendRefundRequest(transaction, entered)
                 }
@@ -627,13 +675,12 @@ class TransactionActivity : AppCompatActivity() {
             .show()
     }
 
-    // Cash refund: local Firestore-only refund, no terminal call
-    private fun processCashRefund(transaction: Transaction) {
+    private fun processCashRefund(transaction: Transaction, remainingCents: Long) {
 
-        val fullAmount = transaction.amountInCents / 100.0
+        val maxAmount = remainingCents / 100.0
 
         val input = EditText(this)
-        input.hint = "Enter refund amount (Max: $fullAmount)"
+        input.hint = "Enter refund amount (Max: $${String.format("%.2f", maxAmount)})"
 
         AlertDialog.Builder(this)
             .setTitle("Cash Refund")
@@ -641,8 +688,8 @@ class TransactionActivity : AppCompatActivity() {
             .setPositiveButton("Refund") { _, _ ->
                 val entered = input.text.toString().toDoubleOrNull()
 
-                if (entered == null || entered <= 0 || entered > fullAmount) {
-                    Toast.makeText(this, "Invalid amount", Toast.LENGTH_SHORT).show()
+                if (entered == null || entered <= 0 || entered > maxAmount) {
+                    Toast.makeText(this, "Invalid amount (max $${String.format("%.2f", maxAmount)})", Toast.LENGTH_SHORT).show()
                 } else {
                     createLocalRefund(transaction, entered)
                 }
@@ -673,15 +720,20 @@ class TransactionActivity : AppCompatActivity() {
         db.collection("Transactions")
             .add(refundMap)
             .addOnSuccessListener {
-                // Mirror card refund behavior: update Order totals and status so it shows REFUNDED
                 db.collection("Transactions").document(original.referenceId).get()
                     .addOnSuccessListener { saleDoc ->
-                        if (!saleDoc.exists()) return@addOnSuccessListener
-                        val orderId = saleDoc.getString("orderId") ?: return@addOnSuccessListener
+                        val orderId = saleDoc.getString("orderId")
+                        if (!saleDoc.exists() || orderId.isNullOrBlank()) {
+                            Toast.makeText(this, "Cash refund saved", Toast.LENGTH_LONG).show()
+                            return@addOnSuccessListener
+                        }
                         val orderRef = db.collection("Orders").document(orderId)
                         orderRef.get()
                             .addOnSuccessListener { orderDoc ->
-                                if (!orderDoc.exists()) return@addOnSuccessListener
+                                if (!orderDoc.exists()) {
+                                    ReceiptPromptHelper.promptForReceipt(this, ReceiptPromptHelper.ReceiptType.REFUND, orderId, original.referenceId)
+                                    return@addOnSuccessListener
+                                }
                                 val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
                                 val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
                                 val newTotalRefunded = currentRefunded + refundAmountCents
@@ -693,10 +745,14 @@ class TransactionActivity : AppCompatActivity() {
                                     updates["status"] = "REFUNDED"
                                 }
                                 orderRef.update(updates)
+                                    .addOnSuccessListener {
+                                        ReceiptPromptHelper.promptForReceipt(this, ReceiptPromptHelper.ReceiptType.REFUND, orderId, original.referenceId)
+                                    }
                             }
                     }
-
-                Toast.makeText(this, "Cash refund saved", Toast.LENGTH_LONG).show()
+                    .addOnFailureListener {
+                        Toast.makeText(this, "Cash refund saved", Toast.LENGTH_LONG).show()
+                    }
             }
             .addOnFailureListener {
                 Toast.makeText(this, "Failed to save refund: ${it.message}", Toast.LENGTH_LONG).show()
@@ -828,15 +884,20 @@ class TransactionActivity : AppCompatActivity() {
 
                         db.collection("Transactions").add(refundMap)
                             .addOnSuccessListener {
-                                // Update Order so it shows REFUNDED on order screen and detail
                                 db.collection("Transactions").document(referenceId).get()
                                     .addOnSuccessListener { saleDoc ->
-                                        if (!saleDoc.exists()) return@addOnSuccessListener
-                                        val orderId = saleDoc.getString("orderId") ?: return@addOnSuccessListener
+                                        val orderId = saleDoc.getString("orderId")
+                                        if (!saleDoc.exists() || orderId.isNullOrBlank()) {
+                                            Toast.makeText(this@TransactionActivity, "REFUND APPROVED", Toast.LENGTH_LONG).show()
+                                            return@addOnSuccessListener
+                                        }
                                         val orderRef = db.collection("Orders").document(orderId)
                                         orderRef.get()
                                             .addOnSuccessListener { orderDoc ->
-                                                if (!orderDoc.exists()) return@addOnSuccessListener
+                                                if (!orderDoc.exists()) {
+                                                    ReceiptPromptHelper.promptForReceipt(this@TransactionActivity, ReceiptPromptHelper.ReceiptType.REFUND, orderId, referenceId)
+                                                    return@addOnSuccessListener
+                                                }
                                                 val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
                                                 val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
                                                 val newTotalRefunded = currentRefunded + refundAmountCents
@@ -848,9 +909,19 @@ class TransactionActivity : AppCompatActivity() {
                                                     updates["status"] = "REFUNDED"
                                                 }
                                                 orderRef.update(updates)
+                                                    .addOnSuccessListener {
+                                                        ReceiptPromptHelper.promptForReceipt(this@TransactionActivity, ReceiptPromptHelper.ReceiptType.REFUND, orderId, referenceId)
+                                                    }
                                             }
                                     }
+                                    .addOnFailureListener {
+                                        Toast.makeText(this@TransactionActivity, "REFUND APPROVED", Toast.LENGTH_LONG).show()
+                                    }
                             }
+                            .addOnFailureListener {
+                                Toast.makeText(this@TransactionActivity, "REFUND APPROVED but failed to save: ${it.message}", Toast.LENGTH_LONG).show()
+                            }
+                        return@runOnUiThread
                     }
 
                     Toast.makeText(
@@ -861,5 +932,61 @@ class TransactionActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    private fun showEmailReceiptForTransaction(transactionDocId: String) {
+        db.collection("Transactions").document(transactionDocId).get()
+            .addOnSuccessListener { doc ->
+                val orderId = doc.getString("orderId")
+                if (orderId.isNullOrBlank()) {
+                    Toast.makeText(this, "No order linked to this transaction.", Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+                showEmailReceiptDialog(orderId)
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to load transaction: ${it.message}", Toast.LENGTH_SHORT).show()
+            }
+    }
+
+    private fun showEmailReceiptDialog(orderId: String) {
+        val input = EditText(this).apply {
+            hint = "Enter email address"
+            inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setPadding(48, 32, 48, 32)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Email Receipt")
+            .setView(input)
+            .setPositiveButton("Send") { _, _ ->
+                val email = input.text.toString().trim()
+                if (email.isEmpty()) {
+                    Toast.makeText(this, "Please enter an email", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                sendReceiptEmail(email, orderId)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun sendReceiptEmail(email: String, orderId: String) {
+        val data = hashMapOf("email" to email, "orderId" to orderId)
+
+        FirebaseFunctions.getInstance()
+            .getHttpsCallable("sendReceiptEmail")
+            .call(data)
+            .addOnSuccessListener { result ->
+                val response = result.data as? Map<*, *>
+                if (response?.get("success") == true) {
+                    Toast.makeText(this, "Receipt sent to $email", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Failed to send receipt", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to send receipt. Please try again.", Toast.LENGTH_SHORT).show()
+            }
     }
 }

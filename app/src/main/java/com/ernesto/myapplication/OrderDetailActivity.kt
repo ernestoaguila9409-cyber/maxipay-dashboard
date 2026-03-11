@@ -26,7 +26,9 @@ import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.Locale
 import android.util.Log
+import android.widget.EditText
 import com.ernesto.myapplication.engine.MoneyUtils
+import com.google.firebase.functions.FirebaseFunctions
 
 class OrderDetailActivity : AppCompatActivity() {
 
@@ -40,6 +42,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var bottomActions: View
     private lateinit var btnVoid: MaterialButton
     private lateinit var btnRefund: MaterialButton
+    private lateinit var btnEmailReceipt: MaterialButton
     private lateinit var orderSummaryContainer: LinearLayout
     private lateinit var txtSubtotal: TextView
     private lateinit var txtOrderTotal: TextView
@@ -73,6 +76,7 @@ class OrderDetailActivity : AppCompatActivity() {
         bottomActions = findViewById(R.id.bottomActions)
         btnVoid = findViewById(R.id.btnVoid)
         btnRefund = findViewById(R.id.btnRefund)
+        btnEmailReceipt = findViewById(R.id.btnEmailReceipt)
         orderSummaryContainer = findViewById(R.id.orderSummaryContainer)
         txtSubtotal = findViewById(R.id.txtSubtotal)
         txtOrderTotal = findViewById(R.id.txtOrderTotal)
@@ -113,6 +117,7 @@ class OrderDetailActivity : AppCompatActivity() {
         bottomActions.visibility = View.GONE
         btnVoid.visibility = View.GONE
         btnRefund.visibility = View.GONE
+        btnEmailReceipt.visibility = View.GONE
 
         db.collection("Orders").document(orderId)
             .get()
@@ -163,6 +168,8 @@ class OrderDetailActivity : AppCompatActivity() {
                     bottomActions.visibility = View.VISIBLE
                     btnVoid.visibility = View.GONE
                     btnRefund.visibility = View.GONE
+                    btnEmailReceipt.visibility = View.VISIBLE
+                    btnEmailReceipt.setOnClickListener { showEmailReceiptDialog() }
                     txtRefundHistory.visibility = View.GONE
                     return@addOnSuccessListener
                 }
@@ -180,6 +187,8 @@ class OrderDetailActivity : AppCompatActivity() {
                         bottomActions.visibility = View.VISIBLE
                         btnVoid.visibility = View.GONE
                         btnRefund.visibility = View.GONE
+                        btnEmailReceipt.visibility = View.VISIBLE
+                        btnEmailReceipt.setOnClickListener { showEmailReceiptDialog() }
                         return@loadRefundHistory
                     }
                     if (status == "CLOSED") {
@@ -190,6 +199,8 @@ class OrderDetailActivity : AppCompatActivity() {
                         } else {
                             btnRefund.visibility = View.GONE
                         }
+                        btnEmailReceipt.visibility = View.VISIBLE
+                        btnEmailReceipt.setOnClickListener { showEmailReceiptDialog() }
                         resolveBatchAndShowVoid(saleTransactionId)
                     }
                 }
@@ -673,8 +684,9 @@ class OrderDetailActivity : AppCompatActivity() {
                     ))
                 }
                     .addOnSuccessListener {
-                        Toast.makeText(this, "Sale Voided", Toast.LENGTH_LONG).show()
-                        loadHeader()
+                        ReceiptPromptHelper.promptForReceipt(
+                            this, ReceiptPromptHelper.ReceiptType.VOID, orderId, transactionId
+                        ) { loadHeader() }
                     }
             }
     }
@@ -947,6 +959,47 @@ class OrderDetailActivity : AppCompatActivity() {
             }
         })
     }
+    private fun showEmailReceiptDialog() {
+        val input = EditText(this).apply {
+            hint = "Enter email address"
+            inputType = android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setPadding(48, 32, 48, 32)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Email Receipt")
+            .setView(input)
+            .setPositiveButton("Send") { _, _ ->
+                val email = input.text.toString().trim()
+                if (email.isEmpty()) {
+                    Toast.makeText(this, "Please enter an email", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                sendReceiptEmail(email, orderId)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun sendReceiptEmail(email: String, orderId: String) {
+        val data = hashMapOf("email" to email, "orderId" to orderId)
+
+        FirebaseFunctions.getInstance()
+            .getHttpsCallable("sendReceiptEmail")
+            .call(data)
+            .addOnSuccessListener { result ->
+                val response = result.data as? Map<*, *>
+                if (response?.get("success") == true) {
+                    Toast.makeText(this, "Receipt sent to $email", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Failed to send receipt", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to send receipt. Please try again.", Toast.LENGTH_SHORT).show()
+            }
+    }
+
     private fun finalizeRefund(
         originalTransactionId: String,
         amountInCents: Long,
@@ -1015,8 +1068,11 @@ class OrderDetailActivity : AppCompatActivity() {
                                                 "transactionCount" to FieldValue.increment(1)
                                             ))
                                             .addOnSuccessListener {
-                                                Toast.makeText(this, if (finishAfter) "Order Refunded" else "Refund applied", Toast.LENGTH_LONG).show()
-                                                if (finishAfter) finish() else { loadHeader(); loadItems() }
+                                                ReceiptPromptHelper.promptForReceipt(
+                                                    this, ReceiptPromptHelper.ReceiptType.REFUND, orderId, originalTransactionId
+                                                ) {
+                                                    if (finishAfter) finish() else { loadHeader(); loadItems() }
+                                                }
                                             }
                                     }
                             }
