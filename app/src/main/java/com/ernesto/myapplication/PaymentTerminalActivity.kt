@@ -14,6 +14,7 @@ class PaymentTerminalActivity : AppCompatActivity() {
     private val db = FirebaseFirestore.getInstance()
     private lateinit var edtName: EditText
     private lateinit var edtTpn: EditText
+    private lateinit var edtIpAddress: EditText
     private lateinit var edtRegisterId: EditText
     private lateinit var edtAuthKey: EditText
     private lateinit var btnDelete: MaterialButton
@@ -27,6 +28,7 @@ class PaymentTerminalActivity : AppCompatActivity() {
 
         edtName = findViewById(R.id.edtTerminalName)
         edtTpn = findViewById(R.id.edtTpn)
+        edtIpAddress = findViewById(R.id.edtIpAddress)
         edtRegisterId = findViewById(R.id.edtRegisterId)
         edtAuthKey = findViewById(R.id.edtAuthKey)
         btnDelete = findViewById(R.id.btnDeleteTerminal)
@@ -52,6 +54,7 @@ class PaymentTerminalActivity : AppCompatActivity() {
                 if (!doc.exists()) return@addOnSuccessListener
                 edtName.setText(doc.getString("name") ?: "")
                 edtTpn.setText(doc.getString("tpn") ?: "")
+                edtIpAddress.setText(doc.getString("ipAddress") ?: "")
                 edtRegisterId.setText(doc.getString("registerId") ?: "")
                 edtAuthKey.setText(doc.getString("authKey") ?: "")
             }
@@ -60,6 +63,7 @@ class PaymentTerminalActivity : AppCompatActivity() {
     private fun saveTerminal() {
         val name = edtName.text.toString().trim()
         val tpn = edtTpn.text.toString().trim()
+        val ipAddress = edtIpAddress.text.toString().trim()
         val registerId = edtRegisterId.text.toString().trim()
         val authKey = edtAuthKey.text.toString().trim()
 
@@ -75,6 +79,7 @@ class PaymentTerminalActivity : AppCompatActivity() {
         val data = mapOf(
             "name" to name,
             "tpn" to tpn,
+            "ipAddress" to ipAddress,
             "registerId" to registerId,
             "authKey" to authKey
         )

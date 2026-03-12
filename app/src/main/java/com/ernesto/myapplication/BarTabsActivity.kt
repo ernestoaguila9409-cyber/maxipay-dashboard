@@ -181,31 +181,78 @@ class BarTabsActivity : AppCompatActivity() {
                 val name = etCustomerName.text.toString().trim()
                 val phone = etCustomerPhone.text.toString().trim()
                 val email = etCustomerEmail.text.toString().trim()
-                createBarTabOrder(seat, name, phone, email, 1)
+                showOpenBarTabDialog(seat, name, phone, email)
             }
             .setNeutralButton("Skip") { _, _ ->
-                createBarTabOrder(seat, "", "", "", 1)
+                showOpenBarTabDialog(seat, "", "", "")
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private lateinit var paymentService: PaymentService
-    private var preAuthDialog: AlertDialog? = null
-
-    private fun createBarTabOrder(
+    private fun showOpenBarTabDialog(
         seat: BarSeat,
         customerName: String,
         customerPhone: String,
-        customerEmail: String,
-        guestCount: Int
+        customerEmail: String
+    ) {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_open_bar_tab, null)
+
+        val txtCustomerName = dialogView.findViewById<TextView>(R.id.txtCustomerName)
+        val txtSeatName = dialogView.findViewById<TextView>(R.id.txtSeatName)
+        val btnPreauthCard = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnPreauthCard)
+        val btnCashTab = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnCashTab)
+
+        txtCustomerName.text = if (customerName.isNotBlank()) customerName else "No name"
+        txtSeatName.text = seat.seatName
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Open Bar Tab")
+            .setView(dialogView)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        btnPreauthCard.setOnClickListener {
+            dialog.dismiss()
+            createBarTabOrderWithPreauth(seat, customerName, customerPhone, customerEmail)
+        }
+
+        btnCashTab.setOnClickListener {
+            dialog.dismiss()
+            createBarTabOrderCash(seat, customerName, customerPhone, customerEmail)
+        }
+
+        dialog.show()
+    }
+
+    private lateinit var paymentService: PaymentService
+    private var preAuthDialog: AlertDialog? = null
+
+    private fun createBarTabOrderWithPreauth(
+        seat: BarSeat,
+        customerName: String,
+        customerPhone: String,
+        customerEmail: String
     ) {
         showPreAuthLoading("Creating tab…")
-
         if (customerName.isNotBlank()) {
-            resolveCustomerIdAndCreateOrder(seat, customerName, customerPhone, customerEmail, guestCount)
+            resolveCustomerIdAndCreateOrder(seat, customerName, customerPhone, customerEmail, usePreauth = true)
         } else {
-            buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, guestCount)
+            buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, usePreauth = true)
+        }
+    }
+
+    private fun createBarTabOrderCash(
+        seat: BarSeat,
+        customerName: String,
+        customerPhone: String,
+        customerEmail: String
+    ) {
+        showPreAuthLoading("Creating tab…")
+        if (customerName.isNotBlank()) {
+            resolveCustomerIdAndCreateOrder(seat, customerName, customerPhone, customerEmail, usePreauth = false)
+        } else {
+            buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, usePreauth = false)
         }
     }
 
@@ -214,7 +261,7 @@ class BarTabsActivity : AppCompatActivity() {
         customerName: String,
         customerPhone: String,
         customerEmail: String,
-        guestCount: Int
+        usePreauth: Boolean
     ) {
         db.collection("Customers")
             .whereEqualTo("name", customerName)
@@ -222,10 +269,10 @@ class BarTabsActivity : AppCompatActivity() {
             .get()
             .addOnSuccessListener { snap ->
                 val customerId = snap.documents.firstOrNull()?.id
-                buildAndSaveBarTabOrder(seat, customerId, customerName, customerPhone, customerEmail, guestCount)
+                buildAndSaveBarTabOrder(seat, customerId, customerName, customerPhone, customerEmail, usePreauth)
             }
             .addOnFailureListener {
-                buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, guestCount)
+                buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, usePreauth)
             }
     }
 
@@ -235,7 +282,7 @@ class BarTabsActivity : AppCompatActivity() {
         customerName: String,
         customerPhone: String,
         customerEmail: String,
-        guestCount: Int
+        usePreauth: Boolean
     ) {
         OrderNumberGenerator.nextOrderNumber(
             onSuccess = { orderNumber ->
@@ -252,7 +299,7 @@ class BarTabsActivity : AppCompatActivity() {
                         "orderType" to "BAR_TAB",
                         "seatName" to seat.seatName,
                         "area" to "Bar",
-                        "guestCount" to guestCount
+                        "guestCount" to 1
                     )
 
                     if (!customerId.isNullOrBlank()) orderMap["customerId"] = customerId
@@ -261,10 +308,22 @@ class BarTabsActivity : AppCompatActivity() {
                     if (customerEmail.isNotBlank()) orderMap["customerEmail"] = customerEmail
                     if (currentBatchId.isNotBlank()) orderMap["batchId"] = currentBatchId
 
+                    if (usePreauth) {
+                        // Payment fields set after preauth succeeds
+                    } else {
+                        orderMap["paymentMethod"] = "CASH"
+                        orderMap["paymentStatus"] = "OPEN"
+                    }
+
                     db.collection("Orders")
                         .add(orderMap)
                         .addOnSuccessListener { doc ->
-                            runPreAuth(doc.id, seat.seatName)
+                            if (usePreauth) {
+                                runPreAuth(doc.id, seat.seatName)
+                            } else {
+                                hidePreAuthLoading()
+                                openBarOrder(doc.id, seat.seatName)
+                            }
                         }
                         .addOnFailureListener { e ->
                             hidePreAuthLoading()
@@ -327,7 +386,11 @@ class BarTabsActivity : AppCompatActivity() {
                 )
                 if (currentBatchId.isNotBlank()) txData["batchId"] = currentBatchId
 
+                val preAuthAmount = BarTabPrefs.getPreAuthAmount(this)
                 val orderUpdates = hashMapOf<String, Any>(
+                    "paymentMethod" to "CARD",
+                    "paymentStatus" to "PREAUTHORIZED",
+                    "preAuthAmount" to preAuthAmount,
                     "preAuthReferenceId" to result.referenceId,
                     "preAuthAuthCode" to result.authCode,
                     "cardLast4" to result.cardLast4,
@@ -373,7 +436,16 @@ class BarTabsActivity : AppCompatActivity() {
                 runPreAuth(orderId, seatName)
             }
             .setNeutralButton("Continue") { _, _ ->
-                openBarOrder(orderId, seatName)
+                db.collection("Orders").document(orderId)
+                    .update(
+                        mapOf(
+                            "paymentMethod" to "CASH",
+                            "paymentStatus" to "OPEN",
+                            "updatedAt" to Date()
+                        )
+                    )
+                    .addOnSuccessListener { openBarOrder(orderId, seatName) }
+                    .addOnFailureListener { openBarOrder(orderId, seatName) }
             }
             .setNegativeButton("Cancel") { _, _ ->
                 db.collection("Orders").document(orderId).delete()

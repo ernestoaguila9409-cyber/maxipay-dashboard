@@ -8,8 +8,6 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.*
 import java.util.concurrent.Executors
-import com.ernesto.myapplication.ModifierManagementActivity
-
 class MainActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
@@ -30,22 +28,6 @@ class MainActivity : AppCompatActivity() {
         } else {
             employeeName = SessionEmployee.getEmployeeName(this)
             employeeRole = SessionEmployee.getEmployeeRole(this)
-        }
-
-        findViewById<ImageButton>(R.id.btnHamburger).setOnClickListener {
-            val intent = Intent(this, SideMenuActivity::class.java)
-            intent.putExtra("employeeName", employeeName)
-            intent.putExtra("employeeRole", employeeRole)
-            startActivity(intent)
-        }
-        findViewById<ImageButton>(R.id.btnModifiers).setOnClickListener {
-            startActivity(Intent(this, GlobalModifierActivity::class.java))
-        }
-        // 🔥 MENU ICON CLICK (TOP RIGHT)
-        findViewById<ImageButton>(R.id.btnMenuTop).setOnClickListener {
-            val intent = Intent(this, MenuOnlyActivity::class.java)
-            intent.putExtra("batchId", currentBatchId)
-            startActivity(intent)
         }
 
         val txtLoggedUser = findViewById<TextView>(R.id.txtLoggedUser)
@@ -103,6 +85,23 @@ class MainActivity : AppCompatActivity() {
         findViewById<android.view.View>(R.id.btnOrders).setOnClickListener {
             val intent = Intent(this, OrdersActivity::class.java)
             intent.putExtra("employeeName", employeeName)
+            startActivity(intent)
+        }
+
+        findViewById<android.view.View>(R.id.btnSetup).setOnClickListener {
+            val intent = Intent(this, SideMenuActivity::class.java)
+            intent.putExtra("employeeName", employeeName)
+            intent.putExtra("employeeRole", employeeRole)
+            startActivity(intent)
+        }
+
+        findViewById<android.view.View>(R.id.btnModifiers).setOnClickListener {
+            startActivity(Intent(this, GlobalModifierActivity::class.java))
+        }
+
+        findViewById<android.view.View>(R.id.btnInventory).setOnClickListener {
+            val intent = Intent(this, MenuOnlyActivity::class.java)
+            intent.putExtra("batchId", currentBatchId)
             startActivity(intent)
         }
 
