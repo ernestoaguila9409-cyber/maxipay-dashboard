@@ -108,6 +108,10 @@
             android:exported="false"
             android:parentActivityName=".OrderTypesConfigureActivity" />
         <activity
+            android:name=".BarSeatConfigActivity"
+            android:exported="false"
+            android:parentActivityName=".BarTabConfigureActivity" />
+        <activity
             android:name=".MenuActivity"
             android:exported="false" />
         <activity

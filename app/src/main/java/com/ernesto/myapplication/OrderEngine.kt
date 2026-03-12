@@ -26,6 +26,9 @@ class OrderEngine(private val db: FirebaseFirestore) {
         tableId: String? = null,
         tableName: String? = null,
         guestCount: Int? = null,
+        guestNames: List<String>? = null,
+        seatName: String? = null,
+        area: String? = null,
         customerName: String? = null,
         customerPhone: String? = null,
         customerEmail: String? = null,
@@ -54,6 +57,9 @@ class OrderEngine(private val db: FirebaseFirestore) {
                 if (!tableId.isNullOrBlank()) orderMap["tableId"] = tableId
                 if (!tableName.isNullOrBlank()) orderMap["tableName"] = tableName
                 if (guestCount != null && guestCount > 0) orderMap["guestCount"] = guestCount
+                if (!guestNames.isNullOrEmpty()) orderMap["guestNames"] = guestNames!!
+                if (!seatName.isNullOrBlank()) orderMap["seatName"] = seatName
+                if (!area.isNullOrBlank()) orderMap["area"] = area
                 if (!customerName.isNullOrBlank()) orderMap["customerName"] = customerName
                 if (!customerPhone.isNullOrBlank()) orderMap["customerPhone"] = customerPhone
                 if (!customerEmail.isNullOrBlank()) orderMap["customerEmail"] = customerEmail

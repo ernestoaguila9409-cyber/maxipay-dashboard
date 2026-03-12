@@ -19,6 +19,10 @@ class BarTabConfigureActivity : AppCompatActivity() {
             OrderTypePrefs.setBarTabEnabled(this, isChecked)
         }
 
+        findViewById<android.view.View>(R.id.optionSeatsConfig).setOnClickListener {
+            startActivity(Intent(this, BarSeatConfigActivity::class.java))
+        }
+
         findViewById<android.view.View>(R.id.optionSetPreAuth).setOnClickListener {
             startActivity(Intent(this, BarTabConfigActivity::class.java))
         }

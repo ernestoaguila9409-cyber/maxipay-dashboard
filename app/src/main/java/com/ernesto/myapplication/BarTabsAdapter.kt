@@ -8,22 +8,25 @@ import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.ernesto.myapplication.engine.MoneyUtils
 
-data class BarTab(
-    val orderId: String,
-    val barSeat: Int,
-    val status: String,
-    val totalInCents: Long,
+data class BarSeat(
+    val tableId: String,
+    val seatName: String,
+    val maxSeats: Int,
+    val isOccupied: Boolean,
+    val orderId: String? = null,
+    val customerName: String? = null,
+    val totalInCents: Long = 0L,
     val cardLast4: String = "",
     val cardBrand: String = ""
 )
 
 class BarTabsAdapter(
-    private val onTabClick: (BarTab) -> Unit
+    private val onSeatClick: (BarSeat) -> Unit
 ) : RecyclerView.Adapter<BarTabsAdapter.VH>() {
 
-    private val items = mutableListOf<BarTab>()
+    private val items = mutableListOf<BarSeat>()
 
-    fun submit(list: List<BarTab>) {
+    fun submit(list: List<BarSeat>) {
         items.clear()
         items.addAll(list)
         notifyDataSetChanged()
@@ -36,9 +39,9 @@ class BarTabsAdapter(
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
-        val tab = items[position]
-        holder.bind(tab)
-        holder.itemView.setOnClickListener { onTabClick(tab) }
+        val seat = items[position]
+        holder.bind(seat)
+        holder.itemView.setOnClickListener { onSeatClick(seat) }
     }
 
     override fun getItemCount(): Int = items.size
@@ -49,26 +52,38 @@ class BarTabsAdapter(
         private val txtTabTotal: TextView = itemView.findViewById(R.id.txtTabTotal)
         private val txtCardLast4: TextView = itemView.findViewById(R.id.txtCardLast4)
 
-        fun bind(tab: BarTab) {
-            txtSeatLabel.text = "Seat ${tab.barSeat}"
-            txtTabStatus.text = tab.status
-            txtTabTotal.text = MoneyUtils.centsToDisplay(tab.totalInCents)
+        fun bind(seat: BarSeat) {
+            txtSeatLabel.text = seat.seatName
 
-            if (tab.cardLast4.isNotBlank()) {
+            val statusText = if (seat.isOccupied) "OCCUPIED" else "OPEN"
+            txtTabStatus.text = statusText
+
+            if (seat.isOccupied) {
+                txtTabTotal.text = MoneyUtils.centsToDisplay(seat.totalInCents)
+                txtTabTotal.visibility = View.VISIBLE
+            } else {
+                txtTabTotal.visibility = View.GONE
+            }
+
+            if (seat.isOccupied && !seat.customerName.isNullOrBlank()) {
+                txtCardLast4.text = seat.customerName
                 txtCardLast4.visibility = View.VISIBLE
-                val brandLabel = if (tab.cardBrand.isNotBlank()) "${tab.cardBrand} " else ""
-                txtCardLast4.text = "${brandLabel}•••• ${tab.cardLast4}"
+            } else if (seat.cardLast4.isNotBlank()) {
+                val brandLabel = if (seat.cardBrand.isNotBlank()) "${seat.cardBrand} " else ""
+                txtCardLast4.text = "${brandLabel}•••• ${seat.cardLast4}"
+                txtCardLast4.visibility = View.VISIBLE
             } else {
                 txtCardLast4.visibility = View.GONE
             }
 
-            val statusColor = when (tab.status) {
-                "OPEN" -> 0xFF1B5E20.toInt()
-                else -> 0xFFB71C1C.toInt()
-            }
-            val bgColor = when (tab.status) {
-                "OPEN" -> 0xFFDFF5E3.toInt()
-                else -> 0xFFFFE0E0.toInt()
+            val statusColor: Int
+            val bgColor: Int
+            if (seat.isOccupied) {
+                statusColor = 0xFFE65100.toInt()
+                bgColor = 0xFFFFF3E0.toInt()
+            } else {
+                statusColor = 0xFF1B5E20.toInt()
+                bgColor = 0xFFDFF5E3.toInt()
             }
             val badge = GradientDrawable().apply {
                 setColor(bgColor)

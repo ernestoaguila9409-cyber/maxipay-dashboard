@@ -55,6 +55,7 @@ class MenuActivity : AppCompatActivity() {
     private var tableId: String? = null
     private var tableName: String? = null
     private var guestCount: Int = 0
+    private var guestNames: MutableList<String> = mutableListOf()
 
     private var customerName: String? = null
     private var customerPhone: String? = null
@@ -99,6 +100,7 @@ class MenuActivity : AppCompatActivity() {
         tableId = intent.getStringExtra("tableId")
         tableName = intent.getStringExtra("tableName")
         guestCount = intent.getIntExtra("guestCount", 0)
+        guestNames = intent.getStringArrayListExtra("guestNames")?.toMutableList() ?: mutableListOf()
         currentBatchId = intent.getStringExtra("batchId")
 
         categoryContainer = findViewById(R.id.categoryContainer)
@@ -233,13 +235,18 @@ class MenuActivity : AppCompatActivity() {
                 if (guestCount == 0 && docGuestCount > 0) {
                     guestCount = docGuestCount
                     selectedGuest = 1
+                }
+                @Suppress("UNCHECKED_CAST")
+                val docGuestNames = orderDoc.get("guestNames") as? List<String>
+                if (!docGuestNames.isNullOrEmpty()) {
+                    guestNames = docGuestNames.toMutableList()
+                }
 
-                    val txtTableHeader = findViewById<TextView>(R.id.txtTableHeader)
-                    if (!tableName.isNullOrBlank()) {
-                        val guestLabel = " • $guestCount guest${if (guestCount > 1) "s" else ""}"
-                        txtTableHeader.text = "$tableName$guestLabel"
-                        txtTableHeader.visibility = View.VISIBLE
-                    }
+                val txtTableHeader = findViewById<TextView>(R.id.txtTableHeader)
+                if (!tableName.isNullOrBlank()) {
+                    val guestLabel = " • $guestCount guest${if (guestCount > 1) "s" else ""}"
+                    txtTableHeader.text = "$tableName$guestLabel"
+                    txtTableHeader.visibility = View.VISIBLE
                 }
 
                 customerName = orderDoc.getString("customerName")?.takeIf { it.isNotBlank() }
@@ -676,6 +683,7 @@ class MenuActivity : AppCompatActivity() {
             tableId = tableId,
             tableName = tableName,
             guestCount = if (guestCount > 0) guestCount else null,
+            guestNames = if (guestNames.isNotEmpty()) guestNames else null,
             customerName = customerName,
             customerPhone = customerPhone,
             customerEmail = customerEmail,
@@ -770,7 +778,8 @@ class MenuActivity : AppCompatActivity() {
                 headerRow.gravity = android.view.Gravity.CENTER_VERTICAL
 
                 val headerText = TextView(this)
-                headerText.text = "Guest $g"
+                val displayName = guestNames.getOrNull(g - 1)?.takeIf { it.isNotBlank() } ?: "Guest $g"
+                headerText.text = displayName
                 headerText.textSize = 15f
                 headerText.setTypeface(null, Typeface.BOLD)
                 headerText.setTextColor(Color.parseColor("#6A4FB3"))
@@ -1144,6 +1153,7 @@ class MenuActivity : AppCompatActivity() {
                         Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_SHORT).show()
                         val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
                             putExtra("ORDER_ID", orderId)
+                            if (!customerEmail.isNullOrBlank()) putExtra("CUSTOMER_EMAIL", customerEmail)
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                         }
                         startActivity(intent)
@@ -1188,6 +1198,7 @@ class MenuActivity : AppCompatActivity() {
                         Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_SHORT).show()
                         val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
                             putExtra("ORDER_ID", orderId)
+                            if (!customerEmail.isNullOrBlank()) putExtra("CUSTOMER_EMAIL", customerEmail)
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                         }
                         startActivity(intent)

@@ -5,8 +5,10 @@ import android.content.res.ColorStateList
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import android.widget.Button
@@ -95,7 +97,7 @@ class TableSelectionActivity : AppCompatActivity() {
                 knownSections.clear()
                 for (doc in snap.documents) {
                     val name = doc.getString("name") ?: doc.id
-                    if (name.isNotBlank()) knownSections.add(name)
+                    if (name.isNotBlank() && name != "Bar") knownSections.add(name)
                 }
                 rebuildSectionChips()
                 loadTables()
@@ -115,6 +117,9 @@ class TableSelectionActivity : AppCompatActivity() {
                 tableSeats.clear()
 
                 for (doc in snap.documents) {
+                    val areaType = doc.getString("areaType") ?: "DINING_TABLE"
+                    if (areaType == "BAR_SEAT") continue
+
                     val name = doc.getString("name") ?: "Table"
                     val seats = doc.getLong("seats")?.toInt() ?: 4
                     val shapeStr = doc.getString("shape")
@@ -179,15 +184,46 @@ class TableSelectionActivity : AppCompatActivity() {
         val txtGuestCount = dialogView.findViewById<TextView>(R.id.txtGuestCount)
         val btnMinus = dialogView.findViewById<Button>(R.id.btnMinus)
         val btnPlus = dialogView.findViewById<Button>(R.id.btnPlus)
+        val guestNamesContainer = dialogView.findViewById<LinearLayout>(R.id.guestNamesContainer)
 
         txtTableInfo.text = "$name • $maxSeats seats"
 
         var guestCount = 1
+        val nameInputs = mutableListOf<EditText>()
+
+        fun updateNameInputs() {
+            val currentCount = nameInputs.size
+            when {
+                guestCount > currentCount -> {
+                    for (i in currentCount until guestCount) {
+                        val editText = EditText(this).apply {
+                            hint = "Guest ${i + 1} name"
+                            setPadding(32, 24, 32, 24)
+                            layoutParams = LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT,
+                                LinearLayout.LayoutParams.WRAP_CONTENT
+                            ).apply { bottomMargin = 12 }
+                        }
+                        guestNamesContainer.addView(editText)
+                        nameInputs.add(editText)
+                    }
+                }
+                guestCount < currentCount -> {
+                    for (i in guestCount until currentCount) {
+                        guestNamesContainer.removeView(nameInputs.last())
+                        nameInputs.removeAt(nameInputs.lastIndex)
+                    }
+                }
+            }
+        }
 
         fun updateDisplay() {
             txtGuestCount.text = guestCount.toString()
             btnMinus.isEnabled = guestCount > 1
             btnMinus.alpha = if (guestCount > 1) 1f else 0.4f
+            btnPlus.isEnabled = guestCount < maxSeats
+            btnPlus.alpha = if (guestCount < maxSeats) 1f else 0.4f
+            updateNameInputs()
         }
 
         updateDisplay()
@@ -200,21 +236,24 @@ class TableSelectionActivity : AppCompatActivity() {
         }
 
         btnPlus.setOnClickListener {
-            guestCount++
-            updateDisplay()
+            if (guestCount < maxSeats) {
+                guestCount++
+                updateDisplay()
+            }
         }
 
         AlertDialog.Builder(this)
             .setTitle("How many guests?")
             .setView(dialogView)
             .setPositiveButton("Start Order") { _, _ ->
-                navigateToMenu(tableId, name, guestCount)
+                val guestNames = nameInputs.map { it.text.toString().trim() }
+                navigateToMenu(tableId, name, guestCount, guestNames)
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun navigateToMenu(tableId: String, tableName: String, guestCount: Int) {
+    private fun navigateToMenu(tableId: String, tableName: String, guestCount: Int, guestNames: List<String>) {
         val intent = Intent(this, MenuActivity::class.java)
         intent.putExtra("batchId", batchId)
         intent.putExtra("employeeName", employeeName)
@@ -222,6 +261,7 @@ class TableSelectionActivity : AppCompatActivity() {
         intent.putExtra("tableId", tableId)
         intent.putExtra("tableName", tableName)
         intent.putExtra("guestCount", guestCount)
+        intent.putStringArrayListExtra("guestNames", ArrayList(guestNames))
         startActivity(intent)
         finish()
     }

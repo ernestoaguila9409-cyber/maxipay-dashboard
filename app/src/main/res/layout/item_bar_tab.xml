@@ -44,33 +44,43 @@
                 android:textColor="#1A1A1A"/>
 
             <TextView
-                android:id="@+id/txtTabStatus"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="OPEN"
-                android:textSize="12sp"
-                android:textColor="#6A4FB3"
-                android:layout_marginTop="2dp"/>
-
-            <TextView
                 android:id="@+id/txtCardLast4"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="11sp"
+                android:textSize="13sp"
                 android:textColor="#888888"
                 android:layout_marginTop="2dp"
                 android:visibility="gone"/>
 
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/txtTabTotal"
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="$0.00"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:textColor="#1A1A1A"/>
+            android:orientation="vertical"
+            android:gravity="end">
+
+            <TextView
+                android:id="@+id/txtTabStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="OPEN"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#1B5E20"/>
+
+            <TextView
+                android:id="@+id/txtTabTotal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="$0.00"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#1A1A1A"
+                android:layout_marginTop="4dp"
+                android:visibility="gone"/>
+
+        </LinearLayout>
 
     </LinearLayout>
 

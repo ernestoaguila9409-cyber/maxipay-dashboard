@@ -4,9 +4,9 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
-import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -14,10 +14,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.ernesto.myapplication.engine.PaymentService
-import com.ernesto.myapplication.engine.PreAuthResult
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
-import com.google.firebase.firestore.Query
 import java.util.Date
 import java.util.UUID
 
@@ -26,18 +24,30 @@ class BarTabsActivity : AppCompatActivity() {
     private val db = FirebaseFirestore.getInstance()
 
     private lateinit var recyclerBarTabs: RecyclerView
-    private lateinit var btnNewTab: Button
-    private lateinit var loadingOverlay: LinearLayout
-    private lateinit var txtLoadingMessage: TextView
+    private lateinit var txtEmptyState: TextView
     private lateinit var adapter: BarTabsAdapter
-    private lateinit var paymentService: PaymentService
 
-    private var listener: ListenerRegistration? = null
+    private var orderListener: ListenerRegistration? = null
 
     private var currentBatchId: String = ""
     private var employeeName: String = ""
 
-    private var preAuthAmount: Double = 50.0
+    private val barSeats = mutableListOf<BarSeatInfo>()
+    private val openOrders = mutableMapOf<String, OpenBarOrder>()
+
+    private data class BarSeatInfo(
+        val tableId: String,
+        val name: String,
+        val maxSeats: Int
+    )
+
+    private data class OpenBarOrder(
+        val orderId: String,
+        val customerName: String?,
+        val totalInCents: Long,
+        val cardLast4: String,
+        val cardBrand: String
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,309 +57,328 @@ class BarTabsActivity : AppCompatActivity() {
         employeeName = intent.getStringExtra("employeeName") ?: ""
 
         recyclerBarTabs = findViewById(R.id.recyclerBarTabs)
-        btnNewTab = findViewById(R.id.btnNewTab)
-        loadingOverlay = findViewById(R.id.loadingOverlay)
-        txtLoadingMessage = findViewById(R.id.txtLoadingMessage)
+        txtEmptyState = findViewById(R.id.txtEmptyState)
 
-        paymentService = PaymentService(this)
-        preAuthAmount = BarTabPrefs.getPreAuthAmount(this)
-
-        adapter = BarTabsAdapter { tab ->
-            openBarOrder(tab.orderId, tab.barSeat)
+        adapter = BarTabsAdapter { seat ->
+            if (seat.isOccupied && seat.orderId != null) {
+                openBarOrder(seat.orderId, seat.seatName)
+            } else {
+                showSeatOrderDialog(seat)
+            }
         }
 
         recyclerBarTabs.layoutManager = LinearLayoutManager(this)
         recyclerBarTabs.adapter = adapter
 
-        btnNewTab.setOnClickListener { showCustomerInfoDialog() }
-    }
-
-    private var pendingCustomerName: String = ""
-    private var pendingCustomerPhone: String = ""
-    private var pendingCustomerEmail: String = ""
-
-    private fun showCustomerInfoDialog() {
-        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_add_customer, null)
-        val etFirstName = dialogView.findViewById<EditText>(R.id.etFirstName)
-        val etLastName = dialogView.findViewById<EditText>(R.id.etLastName)
-        val etPhone = dialogView.findViewById<EditText>(R.id.etPhone)
-        val etEmail = dialogView.findViewById<EditText>(R.id.etEmail)
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Customer Information")
-            .setView(dialogView)
-            .setPositiveButton("Continue", null)
-            .setNeutralButton("Skip", null)
-            .setNegativeButton("Cancel", null)
-            .create()
-
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val firstName = etFirstName.text.toString().trim()
-                val lastName = etLastName.text.toString().trim()
-                val phone = etPhone.text.toString().trim()
-                val email = etEmail.text.toString().trim()
-
-                if (firstName.isEmpty() && lastName.isEmpty()) {
-                    Toast.makeText(this, "Please enter a name or press Skip", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-
-                val fullName = "$firstName $lastName".trim()
-                pendingCustomerName = fullName
-                pendingCustomerPhone = phone
-                pendingCustomerEmail = email
-
-                dialog.dismiss()
-                ensureCustomerAndStartPreAuth(fullName, phone, email)
-            }
-
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-                pendingCustomerName = ""
-                pendingCustomerPhone = ""
-                pendingCustomerEmail = ""
-                dialog.dismiss()
-                startPreAuthFlow()
-            }
-        }
-        dialog.show()
-    }
-
-    private fun ensureCustomerAndStartPreAuth(name: String, phone: String, email: String) {
-        showLoading("Checking customer…")
-
-        CustomerDuplicateChecker.checkExists(db, name, email, phone) { exists ->
-            if (exists) {
-                startPreAuthFlow()
-            } else {
-                val nameParts = name.split(" ", limit = 2)
-                val customer = hashMapOf(
-                    "firstName" to nameParts[0],
-                    "lastName" to if (nameParts.size > 1) nameParts[1] else "",
-                    "phone" to phone,
-                    "email" to email
-                )
-                db.collection("Customers").add(customer)
-                    .addOnSuccessListener { startPreAuthFlow() }
-                    .addOnFailureListener {
-                        startPreAuthFlow()
-                    }
-            }
-        }
+        loadBarSeats()
     }
 
     override fun onStart() {
         super.onStart()
-        startListening()
+        startListeningToOrders()
     }
 
     override fun onStop() {
         super.onStop()
-        listener?.remove()
-        listener = null
+        orderListener?.remove()
+        orderListener = null
     }
 
-    private fun startListening() {
-        listener?.remove()
-
-        listener = db.collection("Orders")
-            .whereIn("orderType", listOf("BAR", "BAR_TAB"))
-            .whereEqualTo("status", "OPEN")
-            .orderBy("barSeat", Query.Direction.ASCENDING)
-            .addSnapshotListener { snap, err ->
-                if (err != null) {
-                    Toast.makeText(this, "Error: ${err.message}", Toast.LENGTH_LONG).show()
-                    return@addSnapshotListener
+    private fun loadBarSeats() {
+        db.collection("Tables")
+            .whereEqualTo("active", true)
+            .whereEqualTo("areaType", "BAR_SEAT")
+            .get()
+            .addOnSuccessListener { snap ->
+                barSeats.clear()
+                for (doc in snap.documents) {
+                    val name = doc.getString("name") ?: "Bar Seat"
+                    val seats = doc.getLong("seats")?.toInt() ?: 1
+                    barSeats.add(BarSeatInfo(
+                        tableId = doc.id,
+                        name = name,
+                        maxSeats = seats
+                    ))
                 }
+                barSeats.sortBy {
+                    val match = Regex("(\\d+)").find(it.name)
+                    match?.value?.toIntOrNull() ?: Int.MAX_VALUE
+                }
+
+                if (barSeats.isEmpty()) {
+                    txtEmptyState.visibility = View.VISIBLE
+                    recyclerBarTabs.visibility = View.GONE
+                } else {
+                    txtEmptyState.visibility = View.GONE
+                    recyclerBarTabs.visibility = View.VISIBLE
+                }
+
+                refreshList()
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to load bar seats: ${it.message}", Toast.LENGTH_LONG).show()
+            }
+    }
+
+    private fun startListeningToOrders() {
+        orderListener?.remove()
+
+        orderListener = db.collection("Orders")
+            .whereEqualTo("orderType", "BAR_TAB")
+            .whereEqualTo("status", "OPEN")
+            .addSnapshotListener { snap, err ->
+                if (err != null) return@addSnapshotListener
                 if (snap == null) return@addSnapshotListener
 
-                val tabs = snap.documents.mapNotNull { doc ->
-                    val barSeat = doc.getLong("barSeat")?.toInt() ?: return@mapNotNull null
-                    BarTab(
+                openOrders.clear()
+                for (doc in snap.documents) {
+                    val seatName = doc.getString("seatName") ?: continue
+                    openOrders[seatName] = OpenBarOrder(
                         orderId = doc.id,
-                        barSeat = barSeat,
-                        status = doc.getString("status") ?: "OPEN",
+                        customerName = doc.getString("customerName"),
                         totalInCents = doc.getLong("totalInCents") ?: 0L,
                         cardLast4 = doc.getString("cardLast4") ?: "",
                         cardBrand = doc.getString("cardBrand") ?: ""
                     )
                 }
-                adapter.submit(tabs)
+                refreshList()
             }
     }
 
-    // ── PreAuth Flow ────────────────────────────────────────────────
+    private fun refreshList() {
+        val seatList = barSeats.map { seatInfo ->
+            val order = openOrders[seatInfo.name]
+            BarSeat(
+                tableId = seatInfo.tableId,
+                seatName = seatInfo.name,
+                maxSeats = seatInfo.maxSeats,
+                isOccupied = order != null,
+                orderId = order?.orderId,
+                customerName = order?.customerName,
+                totalInCents = order?.totalInCents ?: 0L,
+                cardLast4 = order?.cardLast4 ?: "",
+                cardBrand = order?.cardBrand ?: ""
+            )
+        }
+        adapter.submit(seatList)
+    }
 
-    private fun startPreAuthFlow() {
-        showLoading("Opening tab…")
+    private fun showSeatOrderDialog(seat: BarSeat) {
+        val dialogView = LayoutInflater.from(this)
+            .inflate(R.layout.dialog_bar_seat_order, null)
 
-        val referenceId = "TAB_${System.currentTimeMillis()}"
+        val txtSeatName = dialogView.findViewById<TextView>(R.id.txtSeatName)
+        val etCustomerName = dialogView.findViewById<EditText>(R.id.etCustomerName)
+        val etCustomerPhone = dialogView.findViewById<EditText>(R.id.etCustomerPhone)
+        val etCustomerEmail = dialogView.findViewById<EditText>(R.id.etCustomerEmail)
+
+        txtSeatName.text = seat.seatName
+
+        AlertDialog.Builder(this)
+            .setTitle(seat.seatName)
+            .setView(dialogView)
+            .setPositiveButton("Start Tab") { _, _ ->
+                val name = etCustomerName.text.toString().trim()
+                val phone = etCustomerPhone.text.toString().trim()
+                val email = etCustomerEmail.text.toString().trim()
+                createBarTabOrder(seat, name, phone, email, 1)
+            }
+            .setNeutralButton("Skip") { _, _ ->
+                createBarTabOrder(seat, "", "", "", 1)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private lateinit var paymentService: PaymentService
+    private var preAuthDialog: AlertDialog? = null
+
+    private fun createBarTabOrder(
+        seat: BarSeat,
+        customerName: String,
+        customerPhone: String,
+        customerEmail: String,
+        guestCount: Int
+    ) {
+        showPreAuthLoading("Creating tab…")
+
+        OrderNumberGenerator.nextOrderNumber(
+            onSuccess = { orderNumber ->
+                runOnUiThread {
+                    val orderMap = hashMapOf<String, Any>(
+                        "orderNumber" to orderNumber,
+                        "employeeName" to employeeName,
+                        "status" to "OPEN",
+                        "createdAt" to Date(),
+                        "updatedAt" to Date(),
+                        "totalInCents" to 0L,
+                        "totalPaidInCents" to 0L,
+                        "remainingInCents" to 0L,
+                        "orderType" to "BAR_TAB",
+                        "seatName" to seat.seatName,
+                        "area" to "Bar",
+                        "guestCount" to guestCount
+                    )
+
+                    if (customerName.isNotBlank()) orderMap["customerName"] = customerName
+                    if (customerPhone.isNotBlank()) orderMap["customerPhone"] = customerPhone
+                    if (customerEmail.isNotBlank()) orderMap["customerEmail"] = customerEmail
+                    if (currentBatchId.isNotBlank()) orderMap["batchId"] = currentBatchId
+
+                    db.collection("Orders")
+                        .add(orderMap)
+                        .addOnSuccessListener { doc ->
+                            runPreAuth(doc.id, seat.seatName)
+                        }
+                        .addOnFailureListener { e ->
+                            hidePreAuthLoading()
+                            Toast.makeText(
+                                this,
+                                "Failed to create tab: ${e.message}",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                }
+            },
+            onFailure = { e ->
+                runOnUiThread {
+                    hidePreAuthLoading()
+                    Toast.makeText(
+                        this,
+                        "Failed to generate order number: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        )
+    }
+
+    private fun runPreAuth(orderId: String, seatName: String) {
+        if (!::paymentService.isInitialized) {
+            paymentService = PaymentService(this)
+        }
+
+        val preAuthAmount = BarTabPrefs.getPreAuthAmount(this)
+        val referenceId = UUID.randomUUID().toString()
+
+        runOnUiThread { showPreAuthLoading("Pre-authorizing card…") }
 
         paymentService.preAuth(
             amount = preAuthAmount,
             referenceId = referenceId,
             onSuccess = { result ->
-                runOnUiThread { onPreAuthApproved(result) }
-            },
-            onFailure = { message ->
-                runOnUiThread { onPreAuthFailed(message) }
-            }
-        )
-    }
-
-    private fun onPreAuthApproved(result: PreAuthResult) {
-        txtLoadingMessage.text = "Card approved – creating tab…"
-        createBarTabOrder(result)
-    }
-
-    private fun onPreAuthFailed(message: String) {
-        hideLoading()
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-    }
-
-    // ── Firestore Order Creation ────────────────────────────────────
-
-    private fun createBarTabOrder(preAuth: PreAuthResult) {
-        db.collection("Orders")
-            .whereIn("orderType", listOf("BAR", "BAR_TAB"))
-            .whereEqualTo("status", "OPEN")
-            .get()
-            .addOnSuccessListener { snap ->
-                val usedSeats = snap.documents.mapNotNull { it.getLong("barSeat")?.toInt() }.toSet()
-                var nextSeat = 1
-                while (usedSeats.contains(nextSeat)) nextSeat++
-
-                OrderNumberGenerator.nextOrderNumber(
-                    onSuccess = { orderNumber ->
-                        val orderMap = hashMapOf<String, Any>(
-                            "orderNumber" to orderNumber,
-                            "employeeName" to employeeName,
-                            "status" to "OPEN",
-                            "createdAt" to Date(),
-                            "updatedAt" to Date(),
-                            "totalInCents" to 0L,
-                            "totalPaidInCents" to 0L,
-                            "remainingInCents" to 0L,
-                            "orderType" to "BAR_TAB",
-                            "barSeat" to nextSeat,
-                            "preAuthAmount" to preAuthAmount,
-                            "preAuthReferenceId" to preAuth.referenceId,
-                            "preAuthAuthCode" to preAuth.authCode,
-                            "preAuthTransactionId" to preAuth.transactionId,
-                            "cardLast4" to preAuth.cardLast4,
-                            "cardBrand" to preAuth.cardBrand
+                val txRef = db.collection("Transactions").document()
+                val txData = hashMapOf<String, Any>(
+                    "orderId" to orderId,
+                    "type" to "PRE_AUTH",
+                    "totalPaidInCents" to (preAuthAmount * 100).toLong(),
+                    "payments" to listOf(
+                        hashMapOf(
+                            "paymentId" to UUID.randomUUID().toString(),
+                            "paymentType" to "Credit",
+                            "amountInCents" to (preAuthAmount * 100).toLong(),
+                            "timestamp" to Date(),
+                            "authCode" to result.authCode,
+                            "cardBrand" to result.cardBrand,
+                            "last4" to result.cardLast4,
+                            "referenceId" to result.referenceId
                         )
-
-                        if (pendingCustomerName.isNotBlank()) orderMap["customerName"] = pendingCustomerName
-                        if (pendingCustomerPhone.isNotBlank()) orderMap["customerPhone"] = pendingCustomerPhone
-                        if (pendingCustomerEmail.isNotBlank()) orderMap["customerEmail"] = pendingCustomerEmail
-
-                        if (currentBatchId.isNotBlank()) {
-                            orderMap["batchId"] = currentBatchId
-                        }
-
-                        db.collection("Orders")
-                            .add(orderMap)
-                            .addOnSuccessListener { doc ->
-                                savePreAuthTransaction(doc.id, preAuth,
-                                    onCreated = { txDocId ->
-                                        db.collection("Orders").document(doc.id)
-                                            .update("preAuthFirestoreDocId", txDocId)
-                                            .addOnSuccessListener {
-                                                hideLoading()
-                                                openBarOrder(doc.id, nextSeat)
-                                            }
-                                            .addOnFailureListener {
-                                                hideLoading()
-                                                openBarOrder(doc.id, nextSeat)
-                                            }
-                                    },
-                                    onFailure = {
-                                        hideLoading()
-                                        Toast.makeText(this, "Failed to save pre-auth transaction", Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                            }
-                            .addOnFailureListener { e ->
-                                hideLoading()
-                                Toast.makeText(
-                                    this,
-                                    "PreAuth approved but failed to create tab: ${e.message}",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            }
-                    },
-                    onFailure = { e ->
-                        hideLoading()
-                        Toast.makeText(this, "Failed to generate order number: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
+                    ),
+                    "status" to "PENDING",
+                    "createdAt" to Date(),
+                    "voided" to false,
+                    "settled" to false
                 )
+                if (currentBatchId.isNotBlank()) txData["batchId"] = currentBatchId
+
+                val orderUpdates = hashMapOf<String, Any>(
+                    "preAuthReferenceId" to result.referenceId,
+                    "preAuthAuthCode" to result.authCode,
+                    "cardLast4" to result.cardLast4,
+                    "cardBrand" to result.cardBrand,
+                    "preAuthFirestoreDocId" to txRef.id,
+                    "updatedAt" to Date()
+                )
+
+                db.runBatch { batch ->
+                    batch.set(txRef, txData)
+                    batch.update(db.collection("Orders").document(orderId), orderUpdates)
+                }.addOnSuccessListener {
+                    runOnUiThread {
+                        hidePreAuthLoading()
+                        openBarOrder(orderId, seatName)
+                    }
+                }.addOnFailureListener { e ->
+                    runOnUiThread {
+                        hidePreAuthLoading()
+                        Toast.makeText(
+                            this,
+                            "Card authorized but failed to save: ${e.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        openBarOrder(orderId, seatName)
+                    }
+                }
+            },
+            onFailure = { msg ->
+                runOnUiThread {
+                    hidePreAuthLoading()
+                    showPreAuthFailedDialog(orderId, seatName, msg)
+                }
             }
-            .addOnFailureListener { e ->
-                hideLoading()
-                Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
-            }
+        )
     }
 
-    private fun savePreAuthTransaction(
-        orderId: String,
-        preAuth: PreAuthResult,
-        onCreated: (String) -> Unit = {},
-        onFailure: () -> Unit = {}
-    ) {
-        val preAuthAmountCents = kotlin.math.round(preAuthAmount * 100).toLong()
-
-        val paymentEntry = hashMapOf<String, Any>(
-            "paymentId" to UUID.randomUUID().toString(),
-            "paymentType" to "Credit",
-            "amountInCents" to preAuthAmountCents,
-            "timestamp" to Date(),
-            "authCode" to preAuth.authCode,
-            "cardBrand" to preAuth.cardBrand,
-            "last4" to preAuth.cardLast4,
-            "entryType" to "",
-            "referenceId" to preAuth.referenceId
-        )
-
-        val txData = hashMapOf<String, Any>(
-            "orderId" to orderId,
-            "type" to "PRE_AUTH",
-            "totalPaidInCents" to preAuthAmountCents,
-            "payments" to listOf(paymentEntry),
-            "status" to "HOLD",
-            "createdAt" to Date(),
-            "voided" to false,
-            "settled" to false
-        )
-        if (currentBatchId.isNotBlank()) txData["batchId"] = currentBatchId
-
-        db.collection("Transactions").add(txData)
-            .addOnSuccessListener { txRef -> onCreated(txRef.id) }
-            .addOnFailureListener { onFailure() }
+    private fun showPreAuthFailedDialog(orderId: String, seatName: String, errorMsg: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Pre-Authorization Failed")
+            .setMessage("$errorMsg\n\nWould you like to retry, continue without pre-auth, or cancel?")
+            .setPositiveButton("Retry") { _, _ ->
+                runPreAuth(orderId, seatName)
+            }
+            .setNeutralButton("Continue") { _, _ ->
+                openBarOrder(orderId, seatName)
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                db.collection("Orders").document(orderId).delete()
+            }
+            .setCancelable(false)
+            .show()
     }
 
-    // ── Navigation ──────────────────────────────────────────────────
+    private fun showPreAuthLoading(message: String) {
+        hidePreAuthLoading()
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(48, 32, 48, 32)
+        }
+        layout.addView(ProgressBar(this))
+        layout.addView(TextView(this).apply {
+            text = message
+            textSize = 16f
+            setPadding(32, 0, 0, 0)
+        })
 
-    private fun openBarOrder(orderId: String, barSeat: Int) {
+        preAuthDialog = AlertDialog.Builder(this)
+            .setView(layout)
+            .setCancelable(false)
+            .create()
+        preAuthDialog?.show()
+    }
+
+    private fun hidePreAuthLoading() {
+        preAuthDialog?.dismiss()
+        preAuthDialog = null
+    }
+
+    private fun openBarOrder(orderId: String, seatName: String) {
         val intent = Intent(this, MenuActivity::class.java)
         intent.putExtra("ORDER_ID", orderId)
         intent.putExtra("batchId", currentBatchId)
         intent.putExtra("employeeName", employeeName)
-        intent.putExtra("orderType", "BAR")
-        intent.putExtra("tableName", "Seat $barSeat")
+        intent.putExtra("orderType", "BAR_TAB")
+        intent.putExtra("tableName", seatName)
         startActivity(intent)
-    }
-
-    // ── Loading UI ──────────────────────────────────────────────────
-
-    private fun showLoading(message: String) {
-        btnNewTab.isEnabled = false
-        txtLoadingMessage.text = message
-        loadingOverlay.visibility = View.VISIBLE
-    }
-
-    private fun hideLoading() {
-        loadingOverlay.visibility = View.GONE
-        btnNewTab.isEnabled = true
     }
 }

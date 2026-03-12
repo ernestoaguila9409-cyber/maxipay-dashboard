@@ -243,14 +243,14 @@ class TransactionActivity : AppCompatActivity() {
                     transactionList.clear()
                     transactionList.addAll(applyTransactionFilter(allSalesWithRefunds))
                     adapter.notifyDataSetChanged()
-                }
 
-                if ((currentTransactionNoBatch || showUnsettledAndTodayRefunds || (filterBatchId != null && !showUnsettledAndTodayRefunds)) && transactionList.isEmpty()) {
-                    AlertDialog.Builder(this)
-                        .setMessage("NO TRANSACTIONS AT THE MOMENT")
-                        .setPositiveButton("OK") { _, _ -> finish() }
-                        .setCancelable(false)
-                        .show()
+                    if ((currentTransactionNoBatch || showUnsettledAndTodayRefunds || (filterBatchId != null && !showUnsettledAndTodayRefunds)) && transactionList.isEmpty()) {
+                        AlertDialog.Builder(this)
+                            .setMessage("NO TRANSACTIONS AT THE MOMENT")
+                            .setPositiveButton("OK") { _, _ -> finish() }
+                            .setCancelable(false)
+                            .show()
+                    }
                 }
             }
     }

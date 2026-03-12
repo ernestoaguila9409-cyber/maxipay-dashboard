@@ -20,9 +20,17 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         setContentView(R.layout.activity_receipt_options)
 
         orderId = intent.getStringExtra("ORDER_ID")
+        val customerEmail = intent.getStringExtra("CUSTOMER_EMAIL")
 
         val optionsContainer = findViewById<LinearLayout>(R.id.optionsContainer)
         val emailFormContainer = findViewById<LinearLayout>(R.id.emailFormContainer)
+        val etReceiptEmail = findViewById<EditText>(R.id.etReceiptEmail)
+
+        if (!customerEmail.isNullOrBlank()) {
+            etReceiptEmail.setText(customerEmail)
+            optionsContainer.visibility = View.GONE
+            emailFormContainer.visibility = View.VISIBLE
+        }
 
         findViewById<LinearLayout>(R.id.btnEmailReceipt).setOnClickListener {
             optionsContainer.visibility = View.GONE

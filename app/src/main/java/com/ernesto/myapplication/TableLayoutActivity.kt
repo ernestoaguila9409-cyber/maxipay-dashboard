@@ -7,7 +7,6 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.widget.ArrayAdapter
-import android.widget.AdapterView
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.Spinner
@@ -24,13 +23,7 @@ class TableLayoutActivity : AppCompatActivity() {
 
     companion object {
         const val SECTION_ALL = "All"
-        const val AREA_DINING_TABLE = "DINING_TABLE"
-        const val AREA_BAR_SEAT = "BAR_SEAT"
-        const val BAR_SECTION = "Bar"
     }
-
-    private val areaTypeLabels = arrayOf("Dining Table", "Bar Seat")
-    private val areaTypeValues = arrayOf(AREA_DINING_TABLE, AREA_BAR_SEAT)
 
     private val db = FirebaseFirestore.getInstance()
     private lateinit var canvas: FrameLayout
@@ -225,6 +218,9 @@ class TableLayoutActivity : AppCompatActivity() {
                 var sectionsAdded = false
 
                 for (doc in snap.documents) {
+                    val areaType = doc.getString("areaType") ?: "DINING_TABLE"
+                    if (areaType == "BAR_SEAT") continue
+
                     val name = doc.getString("name") ?: "Table"
                     val seats = doc.getLong("seats")?.toInt() ?: 0
                     val shapeStr = doc.getString("shape")
@@ -386,30 +382,15 @@ class TableLayoutActivity : AppCompatActivity() {
         if (idx >= 0) spinner.setSelection(idx)
     }
 
-    private fun nextBarSeatNumber(): Int {
-        var max = 0
-        for (view in tableViews.values) {
-            val tv = view as? TableShapeView ?: continue
-            val match = Regex("^Bar Seat (\\d+)$").find(tv.tableName)
-            if (match != null) {
-                val num = match.groupValues[1].toIntOrNull() ?: 0
-                if (num > max) max = num
-            }
-        }
-        return max + 1
-    }
-
     // ── ADD TABLE DIALOG ───────────────────────────────────
 
     private fun showAddTableDialog() {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_add_table, null)
-        val spinnerAreaType = dialogView.findViewById<Spinner>(R.id.spinnerAreaType)
         val edtName = dialogView.findViewById<EditText>(R.id.edtTableName)
         val edtSeats = dialogView.findViewById<EditText>(R.id.edtTableSeats)
         val spinnerShape = dialogView.findViewById<Spinner>(R.id.spinnerShape)
         val spinnerSection = dialogView.findViewById<Spinner>(R.id.spinnerSection)
 
-        spinnerAreaType.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, areaTypeLabels)
         spinnerShape.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, shapeLabels)
 
         if (knownSections.isNotEmpty()) {
@@ -418,36 +399,10 @@ class TableLayoutActivity : AppCompatActivity() {
             setupSectionSpinner(spinnerSection, defaultSection)
         }
 
-        spinnerAreaType.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, v: View?, position: Int, id: Long) {
-                if (areaTypeValues[position] == AREA_BAR_SEAT) {
-                    ensureSection(BAR_SECTION)
-                    setupSectionSpinner(spinnerSection, BAR_SECTION)
-                    spinnerSection.isEnabled = false
-                    edtSeats.setText("1")
-                    val current = edtName.text.toString()
-                    if (current.isBlank() || current.startsWith("Bar Seat")) {
-                        edtName.setText("Bar Seat ${nextBarSeatNumber()}")
-                    }
-                    spinnerShape.setSelection(shapeLabels.indexOf("Square").coerceAtLeast(0))
-                } else {
-                    spinnerSection.isEnabled = true
-                    edtSeats.isEnabled = true
-                    if (knownSections.isNotEmpty()) {
-                        val sec = if (selectedSection.isNotEmpty()) selectedSection
-                                  else knownSections.first()
-                        setupSectionSpinner(spinnerSection, sec)
-                    }
-                }
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-
         AlertDialog.Builder(this)
             .setTitle("Add Table")
             .setView(dialogView)
             .setPositiveButton("Add") { _, _ ->
-                val areaType = areaTypeValues[spinnerAreaType.selectedItemPosition]
                 val name = edtName.text.toString().trim()
                 val seats = edtSeats.text.toString().trim().toIntOrNull() ?: 0
                 val shape = shapeValues[spinnerShape.selectedItemPosition]
@@ -457,15 +412,11 @@ class TableLayoutActivity : AppCompatActivity() {
                     return@setPositiveButton
                 }
 
-                val section = if (areaType == AREA_BAR_SEAT) {
-                    BAR_SECTION
-                } else {
-                    if (knownSections.isEmpty() || spinnerSection.selectedItemPosition < 0) {
-                        Toast.makeText(this, "Create a section first using the + button", Toast.LENGTH_LONG).show()
-                        return@setPositiveButton
-                    }
-                    knownSections[spinnerSection.selectedItemPosition]
+                if (knownSections.isEmpty() || spinnerSection.selectedItemPosition < 0) {
+                    Toast.makeText(this, "Create a section first using the + button", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
                 }
+                val section = knownSections[spinnerSection.selectedItemPosition]
 
                 val (newX, newY) = nextAvailablePosition()
 
@@ -476,7 +427,7 @@ class TableLayoutActivity : AppCompatActivity() {
                     "posX" to newX.toDouble(),
                     "posY" to newY.toDouble(),
                     "section" to section,
-                    "areaType" to areaType,
+                    "areaType" to "DINING_TABLE",
                     "active" to true
                 )
 
@@ -507,13 +458,12 @@ class TableLayoutActivity : AppCompatActivity() {
                 val currentSeats = doc.getLong("seats")?.toInt() ?: 0
                 val currentShape = TableShapeView.shapeFromString(doc.getString("shape"))
                 val currentSection = doc.getString("section") ?: ""
-                val currentAreaType = doc.getString("areaType") ?: AREA_DINING_TABLE
 
                 AlertDialog.Builder(this)
                     .setTitle(currentName)
                     .setItems(arrayOf("Edit", "Delete")) { _, which ->
                         when (which) {
-                            0 -> showEditTableDialog(tableId, currentName, currentSeats, currentShape, currentSection, currentAreaType)
+                            0 -> showEditTableDialog(tableId, currentName, currentSeats, currentShape, currentSection)
                             1 -> confirmDeleteTable(tableId, currentName)
                         }
                     }
@@ -524,38 +474,18 @@ class TableLayoutActivity : AppCompatActivity() {
     private fun showEditTableDialog(
         tableId: String, currentName: String,
         currentSeats: Int, currentShape: TableShapeView.Shape,
-        currentSection: String, currentAreaType: String
+        currentSection: String
     ) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_add_table, null)
-        val spinnerAreaType = dialogView.findViewById<Spinner>(R.id.spinnerAreaType)
         val edtName = dialogView.findViewById<EditText>(R.id.edtTableName)
         val edtSeats = dialogView.findViewById<EditText>(R.id.edtTableSeats)
         val spinnerShape = dialogView.findViewById<Spinner>(R.id.spinnerShape)
         val spinnerSection = dialogView.findViewById<Spinner>(R.id.spinnerSection)
 
-        spinnerAreaType.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, areaTypeLabels)
         spinnerShape.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, shapeLabels)
 
         ensureSection(currentSection)
-
-        spinnerAreaType.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, v: View?, position: Int, id: Long) {
-                if (areaTypeValues[position] == AREA_BAR_SEAT) {
-                    ensureSection(BAR_SECTION)
-                    setupSectionSpinner(spinnerSection, BAR_SECTION)
-                    spinnerSection.isEnabled = false
-                } else {
-                    spinnerSection.isEnabled = true
-                    if (knownSections.isNotEmpty()) {
-                        setupSectionSpinner(spinnerSection, currentSection)
-                    }
-                }
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-
-        val areaIdx = areaTypeValues.indexOf(currentAreaType).coerceAtLeast(0)
-        spinnerAreaType.setSelection(areaIdx)
+        setupSectionSpinner(spinnerSection, currentSection)
 
         edtName.setText(currentName)
         edtSeats.setText(currentSeats.toString())
@@ -565,7 +495,6 @@ class TableLayoutActivity : AppCompatActivity() {
             .setTitle("Edit Table")
             .setView(dialogView)
             .setPositiveButton("Save") { _, _ ->
-                val areaType = areaTypeValues[spinnerAreaType.selectedItemPosition]
                 val name = edtName.text.toString().trim()
                 val seats = edtSeats.text.toString().trim().toIntOrNull() ?: 0
                 val shape = shapeValues[spinnerShape.selectedItemPosition]
@@ -575,15 +504,11 @@ class TableLayoutActivity : AppCompatActivity() {
                     return@setPositiveButton
                 }
 
-                val section = if (areaType == AREA_BAR_SEAT) {
-                    BAR_SECTION
-                } else {
-                    if (knownSections.isEmpty() || spinnerSection.selectedItemPosition < 0) {
-                        Toast.makeText(this, "Select a section", Toast.LENGTH_SHORT).show()
-                        return@setPositiveButton
-                    }
-                    knownSections[spinnerSection.selectedItemPosition]
+                if (knownSections.isEmpty() || spinnerSection.selectedItemPosition < 0) {
+                    Toast.makeText(this, "Select a section", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
                 }
+                val section = knownSections[spinnerSection.selectedItemPosition]
 
                 db.collection("Tables").document(tableId)
                     .update(
@@ -591,7 +516,7 @@ class TableLayoutActivity : AppCompatActivity() {
                         "seats", seats,
                         "shape", TableShapeView.shapeToString(shape),
                         "section", section,
-                        "areaType", areaType
+                        "areaType", "DINING_TABLE"
                     )
                     .addOnSuccessListener {
                         val tv = tableViews[tableId] as? TableShapeView
