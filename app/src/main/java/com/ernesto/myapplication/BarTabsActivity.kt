@@ -219,62 +219,71 @@ class BarTabsActivity : AppCompatActivity() {
                 var nextSeat = 1
                 while (usedSeats.contains(nextSeat)) nextSeat++
 
-                val orderMap = hashMapOf<String, Any>(
-                    "employeeName" to employeeName,
-                    "status" to "OPEN",
-                    "createdAt" to Date(),
-                    "updatedAt" to Date(),
-                    "totalInCents" to 0L,
-                    "totalPaidInCents" to 0L,
-                    "remainingInCents" to 0L,
-                    "orderType" to "BAR_TAB",
-                    "barSeat" to nextSeat,
-                    "preAuthAmount" to preAuthAmount,
-                    "preAuthReferenceId" to preAuth.referenceId,
-                    "preAuthAuthCode" to preAuth.authCode,
-                    "preAuthTransactionId" to preAuth.transactionId,
-                    "cardLast4" to preAuth.cardLast4,
-                    "cardBrand" to preAuth.cardBrand
-                )
-
-                if (pendingCustomerName.isNotBlank()) orderMap["customerName"] = pendingCustomerName
-                if (pendingCustomerPhone.isNotBlank()) orderMap["customerPhone"] = pendingCustomerPhone
-                if (pendingCustomerEmail.isNotBlank()) orderMap["customerEmail"] = pendingCustomerEmail
-
-                if (currentBatchId.isNotBlank()) {
-                    orderMap["batchId"] = currentBatchId
-                }
-
-                db.collection("Orders")
-                    .add(orderMap)
-                    .addOnSuccessListener { doc ->
-                        savePreAuthTransaction(doc.id, preAuth,
-                            onCreated = { txDocId ->
-                                db.collection("Orders").document(doc.id)
-                                    .update("preAuthFirestoreDocId", txDocId)
-                                    .addOnSuccessListener {
-                                        hideLoading()
-                                        openBarOrder(doc.id, nextSeat)
-                                    }
-                                    .addOnFailureListener {
-                                        hideLoading()
-                                        openBarOrder(doc.id, nextSeat)
-                                    }
-                            },
-                            onFailure = {
-                                hideLoading()
-                                Toast.makeText(this, "Failed to save pre-auth transaction", Toast.LENGTH_SHORT).show()
-                            }
+                OrderNumberGenerator.nextOrderNumber(
+                    onSuccess = { orderNumber ->
+                        val orderMap = hashMapOf<String, Any>(
+                            "orderNumber" to orderNumber,
+                            "employeeName" to employeeName,
+                            "status" to "OPEN",
+                            "createdAt" to Date(),
+                            "updatedAt" to Date(),
+                            "totalInCents" to 0L,
+                            "totalPaidInCents" to 0L,
+                            "remainingInCents" to 0L,
+                            "orderType" to "BAR_TAB",
+                            "barSeat" to nextSeat,
+                            "preAuthAmount" to preAuthAmount,
+                            "preAuthReferenceId" to preAuth.referenceId,
+                            "preAuthAuthCode" to preAuth.authCode,
+                            "preAuthTransactionId" to preAuth.transactionId,
+                            "cardLast4" to preAuth.cardLast4,
+                            "cardBrand" to preAuth.cardBrand
                         )
-                    }
-                    .addOnFailureListener { e ->
+
+                        if (pendingCustomerName.isNotBlank()) orderMap["customerName"] = pendingCustomerName
+                        if (pendingCustomerPhone.isNotBlank()) orderMap["customerPhone"] = pendingCustomerPhone
+                        if (pendingCustomerEmail.isNotBlank()) orderMap["customerEmail"] = pendingCustomerEmail
+
+                        if (currentBatchId.isNotBlank()) {
+                            orderMap["batchId"] = currentBatchId
+                        }
+
+                        db.collection("Orders")
+                            .add(orderMap)
+                            .addOnSuccessListener { doc ->
+                                savePreAuthTransaction(doc.id, preAuth,
+                                    onCreated = { txDocId ->
+                                        db.collection("Orders").document(doc.id)
+                                            .update("preAuthFirestoreDocId", txDocId)
+                                            .addOnSuccessListener {
+                                                hideLoading()
+                                                openBarOrder(doc.id, nextSeat)
+                                            }
+                                            .addOnFailureListener {
+                                                hideLoading()
+                                                openBarOrder(doc.id, nextSeat)
+                                            }
+                                    },
+                                    onFailure = {
+                                        hideLoading()
+                                        Toast.makeText(this, "Failed to save pre-auth transaction", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
+                            .addOnFailureListener { e ->
+                                hideLoading()
+                                Toast.makeText(
+                                    this,
+                                    "PreAuth approved but failed to create tab: ${e.message}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                    },
+                    onFailure = { e ->
                         hideLoading()
-                        Toast.makeText(
-                            this,
-                            "PreAuth approved but failed to create tab: ${e.message}",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        Toast.makeText(this, "Failed to generate order number: ${e.message}", Toast.LENGTH_LONG).show()
                     }
+                )
             }
             .addOnFailureListener { e ->
                 hideLoading()

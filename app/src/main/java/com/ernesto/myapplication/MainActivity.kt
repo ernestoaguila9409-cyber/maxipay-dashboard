@@ -23,10 +23,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val employeeName = intent.getStringExtra("employeeName") ?: ""
-        val employeeRole = intent.getStringExtra("employeeRole") ?: ""
+        var employeeName = intent.getStringExtra("employeeName") ?: ""
+        var employeeRole = intent.getStringExtra("employeeRole") ?: ""
         if (employeeName.isNotBlank()) {
-            SessionEmployee.setEmployeeName(this, employeeName)
+            SessionEmployee.setEmployee(this, employeeName, employeeRole)
+        } else {
+            employeeName = SessionEmployee.getEmployeeName(this)
+            employeeRole = SessionEmployee.getEmployeeRole(this)
         }
 
         findViewById<ImageButton>(R.id.btnHamburger).setOnClickListener {

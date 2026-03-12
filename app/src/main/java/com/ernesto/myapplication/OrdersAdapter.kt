@@ -1,5 +1,6 @@
 package com.ernesto.myapplication
 
+import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.text.format.DateFormat
 import android.view.LayoutInflater
@@ -9,9 +10,8 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
-import com.google.firebase.Timestamp
-import java.util.Locale
 import com.ernesto.myapplication.engine.MoneyUtils
+
 class OrdersAdapter(
     private val onOrderClick: (OrderRow) -> Unit,
     private val onOrderLongPress: (OrderRow) -> Boolean
@@ -55,53 +55,32 @@ class OrdersAdapter(
 
     class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val card: MaterialCardView = itemView.findViewById(R.id.cardOrder)
-        private val txtStatus: TextView = itemView.findViewById(R.id.txtStatus)
+        private val statusBar: View = itemView.findViewById(R.id.statusBar)
+        private val txtOrderLabel: TextView = itemView.findViewById(R.id.txtOrderLabel)
         private val txtTotal: TextView = itemView.findViewById(R.id.txtTotal)
-        private val txtEmployee: TextView = itemView.findViewById(R.id.txtEmployee)
-        private val txtOrderType: TextView = itemView.findViewById(R.id.txtOrderType)
+        private val txtStatus: TextView = itemView.findViewById(R.id.txtStatus)
         private val txtPreAuth: TextView = itemView.findViewById(R.id.txtPreAuth)
         private val txtRefund: TextView = itemView.findViewById(R.id.txtRefund)
         private val txtTime: TextView = itemView.findViewById(R.id.txtTime)
+        private val txtOrderType: TextView = itemView.findViewById(R.id.txtOrderType)
         private val imgSelected: ImageView = itemView.findViewById(R.id.imgSelected)
 
         fun bind(order: OrderRow, isSelected: Boolean) {
-
-            txtStatus.text = order.status
-
-            // ✅ Status color styling (linked to Transaction screen: voided sales show as VOIDED here)
-            when (order.status.uppercase()) {
-                "OPEN" -> {
-                    txtStatus.setBackgroundColor(0xFFDFF5E3.toInt()) // light green
-                    txtStatus.setTextColor(0xFF1B5E20.toInt()) // dark green
-                }
-                "CLOSED" -> {
-                    txtStatus.setBackgroundColor(0xFFFFE0E0.toInt()) // light red
-                    txtStatus.setTextColor(0xFFB71C1C.toInt()) // dark red
-                }
-                "VOIDED" -> {
-                    txtStatus.setBackgroundColor(0xFFFFF3E0.toInt()) // light orange
-                    txtStatus.setTextColor(0xFFE65100.toInt()) // dark orange
-                }
-                "REFUNDED" -> {
-                    txtStatus.setBackgroundColor(0xFFE3F2FD.toInt()) // light blue
-                    txtStatus.setTextColor(0xFF1565C0.toInt()) // dark blue
-                }
-                else -> {
-                    txtStatus.setBackgroundColor(0xFFE0E0E0.toInt())
-                    txtStatus.setTextColor(0xFF000000.toInt())
+            val label = buildString {
+                if (order.orderNumber > 0L) append("#${order.orderNumber}")
+                val name = order.employeeName.takeIf { it.isNotBlank() && it != "—" }
+                if (name != null) {
+                    if (isNotEmpty()) append(" · ")
+                    append(name)
                 }
             }
+            txtOrderLabel.text = label
+            txtOrderLabel.visibility = if (label.isNotEmpty()) View.VISIBLE else View.GONE
 
-            // Show net total (original minus refunds); show refund line when there's a partial/full refund
-            val hasRefund = order.totalRefundedInCents > 0L
             txtTotal.text = MoneyUtils.centsToDisplay(order.netCents)
-            if (hasRefund) {
-                txtRefund.visibility = View.VISIBLE
-                txtRefund.text = "Refund -${MoneyUtils.centsToDisplay(order.totalRefundedInCents)}"
-            } else {
-                txtRefund.visibility = View.GONE
-            }
-            txtEmployee.text = order.employeeName
+
+            bindStatusBar(order.status)
+            bindStatusBadge(order.status)
 
             if (order.preAuthAmountCents > 0L) {
                 txtPreAuth.visibility = View.VISIBLE
@@ -111,38 +90,86 @@ class OrdersAdapter(
                 txtPreAuth.visibility = View.GONE
             }
 
-            if (order.orderType.isNotBlank()) {
-                txtOrderType.visibility = View.VISIBLE
-                txtOrderType.text = when (order.orderType) {
-                    "DINE_IN" -> "DINE IN"
-                    "BAR" -> "BAR"
-                    "BAR_TAB" -> "BAR TAB"
-                    else -> "TO-GO"
-                }
-                val bgColor = when (order.orderType) {
-                    "DINE_IN" -> 0xFF1B5E20.toInt()
-                    "BAR" -> 0xFF4A148C.toInt()
-                    "BAR_TAB" -> 0xFF6A4FB3.toInt()
-                    else -> 0xFFE65100.toInt()
-                }
-                val badge = GradientDrawable().apply {
-                    setColor(bgColor)
-                    cornerRadius = 8f
-                }
-                txtOrderType.background = badge
-                txtOrderType.setTextColor(0xFFFFFFFF.toInt())
+            val hasRefund = order.totalRefundedInCents > 0L
+            if (hasRefund) {
+                txtRefund.visibility = View.VISIBLE
+                txtRefund.text = "Refund -${MoneyUtils.centsToDisplay(order.totalRefundedInCents)}"
             } else {
-                txtOrderType.visibility = View.GONE
+                txtRefund.visibility = View.GONE
             }
 
             txtTime.text = formatTime(order.createdAt.toDate().time)
+
+            bindOrderTypeBadge(order.orderType)
 
             imgSelected.visibility = if (isSelected) View.VISIBLE else View.GONE
             card.alpha = if (isSelected) 0.85f else 1f
         }
 
+        private fun bindStatusBar(status: String) {
+            val color = when (status.uppercase()) {
+                "OPEN" -> Color.parseColor("#2196F3")
+                "CLOSED" -> Color.parseColor("#9E9E9E")
+                "VOIDED" -> Color.parseColor("#F44336")
+                "REFUNDED" -> Color.parseColor("#FF9800")
+                else -> Color.parseColor("#BDBDBD")
+            }
+            val drawable = GradientDrawable().apply {
+                setColor(color)
+                cornerRadii = floatArrayOf(16f, 0f, 0f, 0f, 0f, 0f, 16f, 0f)
+            }
+            statusBar.background = drawable
+        }
+
+        private fun bindStatusBadge(status: String) {
+            txtStatus.text = status.uppercase()
+
+            val (bgColor, textColor) = when (status.uppercase()) {
+                "OPEN" -> Color.parseColor("#E3F2FD") to Color.parseColor("#1565C0")
+                "CLOSED" -> Color.parseColor("#F5F5F5") to Color.parseColor("#616161")
+                "VOIDED" -> Color.parseColor("#FFEBEE") to Color.parseColor("#C62828")
+                "REFUNDED" -> Color.parseColor("#FFF3E0") to Color.parseColor("#E65100")
+                else -> Color.parseColor("#F5F5F5") to Color.parseColor("#424242")
+            }
+
+            val badge = GradientDrawable().apply {
+                setColor(bgColor)
+                cornerRadius = 50f
+            }
+            txtStatus.background = badge
+            txtStatus.setTextColor(textColor)
+        }
+
+        private fun bindOrderTypeBadge(orderType: String) {
+            if (orderType.isBlank()) {
+                txtOrderType.visibility = View.GONE
+                return
+            }
+
+            txtOrderType.visibility = View.VISIBLE
+            txtOrderType.text = when (orderType) {
+                "DINE_IN" -> "DINE IN"
+                "BAR" -> "BAR"
+                "BAR_TAB" -> "BAR TAB"
+                else -> "TO-GO"
+            }
+
+            val bgColor = when (orderType) {
+                "DINE_IN" -> Color.parseColor("#2E7D32")
+                "BAR", "BAR_TAB" -> Color.parseColor("#6A4FB3")
+                else -> Color.parseColor("#E65100")
+            }
+
+            val badge = GradientDrawable().apply {
+                setColor(bgColor)
+                cornerRadius = 50f
+            }
+            txtOrderType.background = badge
+            txtOrderType.setTextColor(Color.WHITE)
+        }
+
         private fun formatTime(ms: Long): String {
-            return DateFormat.format("MMM dd, h:mm a", ms).toString()
+            return DateFormat.format("MMM dd · h:mm a", ms).toString()
         }
     }
 }

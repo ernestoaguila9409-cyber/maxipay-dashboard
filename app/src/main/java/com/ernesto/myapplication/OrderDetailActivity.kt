@@ -33,7 +33,9 @@ import com.google.firebase.functions.FirebaseFunctions
 class OrderDetailActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
+    private lateinit var txtHeaderOrderNumber: TextView
     private lateinit var txtHeaderEmployee: TextView
+    private lateinit var txtHeaderCustomer: TextView
     private lateinit var txtHeaderTime: TextView
     private lateinit var txtRefundHistory: TextView
     private lateinit var recycler: RecyclerView
@@ -67,7 +69,9 @@ class OrderDetailActivity : AppCompatActivity() {
             finish()
             return
         }
+        txtHeaderOrderNumber = findViewById(R.id.txtHeaderOrderNumber)
         txtHeaderEmployee = findViewById(R.id.txtHeaderEmployee)
+        txtHeaderCustomer = findViewById(R.id.txtHeaderCustomer)
         txtHeaderTime = findViewById(R.id.txtHeaderTime)
         txtRefundHistory = findViewById(R.id.txtRefundHistory)
         recycler = findViewById(R.id.recyclerOrderItems)
@@ -125,9 +129,18 @@ class OrderDetailActivity : AppCompatActivity() {
 
                 if (!doc.exists()) return@addOnSuccessListener
 
-                // ✅ HEADER DATA (MUST BE INSIDE HERE)
                 val status = doc.getString("status") ?: ""
                 val employee = doc.getString("employeeName") ?: "Unknown"
+                val customerName = doc.getString("customerName") ?: ""
+                val orderNumber = doc.getLong("orderNumber") ?: 0L
+
+                if (orderNumber > 0L) {
+                    txtHeaderOrderNumber.text = "Order #$orderNumber"
+                    txtHeaderOrderNumber.visibility = View.VISIBLE
+                } else {
+                    txtHeaderOrderNumber.visibility = View.GONE
+                }
+
                 if (status == "VOIDED") {
                     val voidedBy = doc.getString("voidedBy")?.takeIf { it.isNotBlank() } ?: "—"
                     txtHeaderEmployee.text = "Voided by: $voidedBy"
@@ -148,6 +161,13 @@ class OrderDetailActivity : AppCompatActivity() {
                     } else {
                         txtHeaderTime.text = ""
                     }
+                }
+
+                if (customerName.isNotBlank()) {
+                    txtHeaderCustomer.text = "Customer: $customerName"
+                    txtHeaderCustomer.visibility = View.VISIBLE
+                } else {
+                    txtHeaderCustomer.visibility = View.GONE
                 }
 
                 currentBatchId = doc.getString("batchId")

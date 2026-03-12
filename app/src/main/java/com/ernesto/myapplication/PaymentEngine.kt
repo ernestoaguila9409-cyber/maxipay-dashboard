@@ -35,6 +35,7 @@ class PaymentEngine(private val db: FirebaseFirestore) {
 
             val orderTotal = orderSnap.getLong("totalInCents") ?: 0L
             val currentPaid = orderSnap.getLong("totalPaidInCents") ?: 0L
+            val orderNumber = orderSnap.getLong("orderNumber") ?: 0L
 
             val newPaid = currentPaid + amountInCents
             val newRemaining = orderTotal - newPaid
@@ -65,21 +66,19 @@ class PaymentEngine(private val db: FirebaseFirestore) {
 
             if (saleId == null) {
 
-                // First payment → create SALE
-                transaction.set(
-                    saleRef,
-                    mapOf(
-                        "orderId" to orderId,
-                        "batchId" to batchId,
-                        "type" to "SALE",
-                        "totalPaidInCents" to newPaid,
-                        "payments" to listOf(paymentEntry),
-                        "status" to if (newRemaining <= 0L) "COMPLETED" else "OPEN",
-                        "createdAt" to Date(),
-                        "voided" to false,
-                        "settled" to false
-                    )
+                val saleData = mutableMapOf<String, Any>(
+                    "orderId" to orderId,
+                    "batchId" to batchId,
+                    "type" to "SALE",
+                    "totalPaidInCents" to newPaid,
+                    "payments" to listOf(paymentEntry),
+                    "status" to if (newRemaining <= 0L) "COMPLETED" else "OPEN",
+                    "createdAt" to Date(),
+                    "voided" to false,
+                    "settled" to false
                 )
+                if (orderNumber > 0L) saleData["orderNumber"] = orderNumber
+                transaction.set(saleRef, saleData)
 
                 val orderUpdates = mutableMapOf<String, Any>("saleTransactionId" to saleRef.id)
                 if (batchId.isNotBlank()) orderUpdates["batchId"] = batchId

@@ -14,12 +14,30 @@
         android:padding="16dp">
 
         <TextView
-            android:id="@+id/txtHeaderEmployee"
+            android:id="@+id/txtHeaderOrderNumber"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textStyle="bold"
-            android:textSize="18sp"
-            android:textColor="#333333"/>
+            android:textSize="20sp"
+            android:textColor="#333333"
+            android:visibility="gone"/>
+
+        <TextView
+            android:id="@+id/txtHeaderEmployee"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="15sp"
+            android:layout_marginTop="2dp"
+            android:textColor="#555555"/>
+
+        <TextView
+            android:id="@+id/txtHeaderCustomer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:layout_marginTop="2dp"
+            android:textColor="#6A4FB3"
+            android:visibility="gone"/>
 
         <TextView
             android:id="@+id/txtHeaderTime"

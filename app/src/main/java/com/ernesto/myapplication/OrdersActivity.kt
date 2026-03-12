@@ -213,6 +213,8 @@ class OrdersActivity : AppCompatActivity() {
                         } else {
                             employee
                         }
+                        val customerName = doc.getString("customerName") ?: ""
+                        val orderNumber = doc.getLong("orderNumber") ?: 0L
                         val createdAt = doc.getTimestamp("createdAt") ?: Timestamp.now()
                         val orderType = doc.getString("orderType") ?: ""
                         val preAuthAmount = doc.getDouble("preAuthAmount") ?: 0.0
@@ -220,10 +222,12 @@ class OrdersActivity : AppCompatActivity() {
                         result.add(
                             OrderRow(
                                 id = id,
+                                orderNumber = orderNumber,
                                 status = status,
                                 totalCents = totalCents,
                                 totalRefundedInCents = totalRefundedInCents,
                                 employeeName = displayEmployee,
+                                customerName = customerName,
                                 createdAt = createdAt,
                                 orderType = orderType,
                                 preAuthAmountCents = preAuthAmountCents

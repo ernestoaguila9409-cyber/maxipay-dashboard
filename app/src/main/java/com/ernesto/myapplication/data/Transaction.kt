@@ -19,6 +19,8 @@ data class TransactionPayment(
 
 data class Transaction(
     val id: String = "",
+    val orderId: String = "",
+    var orderNumber: Long = 0L,
 
     /** Firestore document ID; used to link refunds and find the doc for void updates. */
     val referenceId: String = "",

@@ -1,5 +1,6 @@
 package com.ernesto.myapplication.engine
 
+import com.ernesto.myapplication.OrderNumberGenerator
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Date
 
@@ -36,28 +37,34 @@ class OrderEngine(private val db: FirebaseFirestore) {
             return
         }
 
-        val orderMap = hashMapOf<String, Any>(
-            "employeeName" to employeeName,
-            "status" to "OPEN",
-            "createdAt" to Date(),
-            "updatedAt" to Date(),
-            "totalInCents" to 0L,
-            "totalPaidInCents" to 0L,
-            "remainingInCents" to 0L,
-            "orderType" to orderType
+        OrderNumberGenerator.nextOrderNumber(
+            onSuccess = { orderNumber ->
+                val orderMap = hashMapOf<String, Any>(
+                    "orderNumber" to orderNumber,
+                    "employeeName" to employeeName,
+                    "status" to "OPEN",
+                    "createdAt" to Date(),
+                    "updatedAt" to Date(),
+                    "totalInCents" to 0L,
+                    "totalPaidInCents" to 0L,
+                    "remainingInCents" to 0L,
+                    "orderType" to orderType
+                )
+
+                if (!tableId.isNullOrBlank()) orderMap["tableId"] = tableId
+                if (!tableName.isNullOrBlank()) orderMap["tableName"] = tableName
+                if (guestCount != null && guestCount > 0) orderMap["guestCount"] = guestCount
+                if (!customerName.isNullOrBlank()) orderMap["customerName"] = customerName
+                if (!customerPhone.isNullOrBlank()) orderMap["customerPhone"] = customerPhone
+                if (!customerEmail.isNullOrBlank()) orderMap["customerEmail"] = customerEmail
+
+                db.collection("Orders")
+                    .add(orderMap)
+                    .addOnSuccessListener { doc -> onSuccess(doc.id) }
+                    .addOnFailureListener { e -> onFailure(e) }
+            },
+            onFailure = { e -> onFailure(e) }
         )
-
-        if (!tableId.isNullOrBlank()) orderMap["tableId"] = tableId
-        if (!tableName.isNullOrBlank()) orderMap["tableName"] = tableName
-        if (guestCount != null && guestCount > 0) orderMap["guestCount"] = guestCount
-        if (!customerName.isNullOrBlank()) orderMap["customerName"] = customerName
-        if (!customerPhone.isNullOrBlank()) orderMap["customerPhone"] = customerPhone
-        if (!customerEmail.isNullOrBlank()) orderMap["customerEmail"] = customerEmail
-
-        db.collection("Orders")
-            .add(orderMap)
-            .addOnSuccessListener { doc -> onSuccess(doc.id) }
-            .addOnFailureListener { e -> onFailure(e) }
     }
 
     /** Update customer fields on an existing order */

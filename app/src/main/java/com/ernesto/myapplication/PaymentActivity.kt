@@ -441,7 +441,7 @@ class PaymentActivity : AppCompatActivity() {
             setButtonsEnabled(true)
             return
         }
-        val amountInCents = (paymentAmount * 100).toLong()
+        val amountInCents = MoneyUtils.dollarsToCents(paymentAmount)
 
         paymentEngine.processPayment(
             orderId = oid,
@@ -492,7 +492,7 @@ class PaymentActivity : AppCompatActivity() {
             setButtonsEnabled(true)
             return
         }
-        val amountInCents = (paymentAmount * 100).toLong()
+        val amountInCents = MoneyUtils.dollarsToCents(paymentAmount)
 
         paymentEngine.processPayment(
             orderId = oid,

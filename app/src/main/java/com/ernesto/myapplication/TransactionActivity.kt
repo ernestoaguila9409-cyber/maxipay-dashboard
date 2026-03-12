@@ -176,6 +176,8 @@ class TransactionActivity : AppCompatActivity() {
 
                     val transaction = Transaction(
                         referenceId = doc.id,
+                        orderId = doc.getString("orderId") ?: "",
+                        orderNumber = doc.getLong("orderNumber") ?: 0L,
                         gatewayReferenceId = gatewayRef,
                         clientReferenceId = clientRef,
                         batchNumber = batchNum,
@@ -237,9 +239,11 @@ class TransactionActivity : AppCompatActivity() {
                     allSalesWithRefunds.sortByDescending { it.sale.date }
                 }
 
-                transactionList.clear()
-                transactionList.addAll(applyTransactionFilter(allSalesWithRefunds))
-                adapter.notifyDataSetChanged()
+                resolveOrderNumbers(allSalesWithRefunds) {
+                    transactionList.clear()
+                    transactionList.addAll(applyTransactionFilter(allSalesWithRefunds))
+                    adapter.notifyDataSetChanged()
+                }
 
                 if ((currentTransactionNoBatch || showUnsettledAndTodayRefunds || (filterBatchId != null && !showUnsettledAndTodayRefunds)) && transactionList.isEmpty()) {
                     AlertDialog.Builder(this)
@@ -249,6 +253,34 @@ class TransactionActivity : AppCompatActivity() {
                         .show()
                 }
             }
+    }
+
+    private fun resolveOrderNumbers(list: List<SaleWithRefunds>, onDone: () -> Unit) {
+        val needsLookup = list
+            .map { it.sale }
+            .filter { it.orderNumber == 0L && it.orderId.isNotBlank() }
+        if (needsLookup.isEmpty()) { onDone(); return }
+
+        val uniqueOrderIds = needsLookup.map { it.orderId }.distinct()
+        val resolved = mutableMapOf<String, Long>()
+        var remaining = uniqueOrderIds.size
+
+        for (oid in uniqueOrderIds) {
+            db.collection("Orders").document(oid).get()
+                .addOnSuccessListener { doc ->
+                    val num = doc.getLong("orderNumber") ?: 0L
+                    if (num > 0L) resolved[oid] = num
+                    if (--remaining <= 0) {
+                        for (swr in list) {
+                            if (swr.sale.orderNumber == 0L) {
+                                resolved[swr.sale.orderId]?.let { swr.sale.orderNumber = it }
+                            }
+                        }
+                        onDone()
+                    }
+                }
+                .addOnFailureListener { if (--remaining <= 0) onDone() }
+        }
     }
 
     private fun applyTransactionFilter(list: List<SaleWithRefunds>): List<SaleWithRefunds> {

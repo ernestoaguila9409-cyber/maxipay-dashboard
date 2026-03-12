@@ -1,82 +1,129 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
+<com.google.android.material.card.MaterialCardView
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/cardTransaction"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="12dp"
-    android:background="@android:color/white"
-    android:layout_marginBottom="8dp">
+    android:layout_marginStart="12dp"
+    android:layout_marginEnd="12dp"
+    android:layout_marginTop="6dp"
+    android:layout_marginBottom="6dp"
+    app:cardCornerRadius="16dp"
+    app:cardElevation="2dp"
+    app:strokeWidth="0dp"
+    app:cardBackgroundColor="@android:color/white">
 
-    <!-- Top Row -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal">
+        android:orientation="vertical"
+        android:padding="16dp">
 
-        <View
-            android:id="@+id/statusDot"
-            android:layout_width="12dp"
-            android:layout_height="12dp"
-            android:layout_marginEnd="8dp"
-            android:background="@android:color/holo_green_dark"/>
-
-        <TextView
-            android:id="@+id/txtCard"
-            android:layout_width="0dp"
+        <!-- Row 1: Icon + Transaction type header -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:text="Card Info"/>
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
+            <TextView
+                android:id="@+id/txtPaymentIcon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="18sp"
+                android:layout_marginEnd="8dp" />
+
+            <TextView
+                android:id="@+id/txtTransactionType"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="#555555"
+                android:letterSpacing="0.05" />
+
+            <!-- VOID badge (shown only for voided transactions) -->
+            <TextView
+                android:id="@+id/txtVoidBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="VOID"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#C62828"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- Row 2: Payment method name (left) + Amount (right) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/txtPaymentMethod"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="16sp"
+                android:textColor="#1A1A1A" />
+
+            <TextView
+                android:id="@+id/txtAmount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="#1A1A1A" />
+        </LinearLayout>
+
+        <!-- Row 3: Order number -->
         <TextView
-            android:id="@+id/txtAmount"
+            android:id="@+id/txtOrderNumber"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:text="$0.00"/>
+            android:layout_marginTop="6dp"
+            android:textSize="13sp"
+            android:textColor="#777777"
+            android:visibility="gone" />
+
+        <!-- Row 4: Date and time -->
+        <TextView
+            android:id="@+id/txtDateTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textSize="13sp"
+            android:textColor="#999999" />
+
+        <!-- Row 5: Transaction number -->
+        <TextView
+            android:id="@+id/txtTxnNumber"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textSize="12sp"
+            android:textColor="#AAAAAA"
+            android:visibility="gone" />
+
+        <!-- Refund summary (shown only when sale has attached refunds) -->
+        <TextView
+            android:id="@+id/txtRefunds"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textSize="13sp"
+            android:textColor="#E65100"
+            android:visibility="gone" />
+
     </LinearLayout>
 
-    <!-- Type -->
-    <TextView
-        android:id="@+id/txtType"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="14sp"
-        android:textColor="@android:color/darker_gray"
-        android:layout_marginTop="4dp"/>
-
-    <!-- Meta -->
-    <TextView
-        android:id="@+id/txtMeta"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="13sp"
-        android:textColor="@android:color/darker_gray"
-        android:layout_marginTop="4dp"/>
-
-    <!-- 🔵 Refund Section -->
-    <TextView
-        android:id="@+id/txtRefunds"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="14sp"
-        android:textColor="@android:color/holo_blue_dark"
-        android:paddingStart="32dp"
-        android:layout_marginTop="6dp"
-        android:visibility="gone"/>
-
-    <!-- VOID badge -->
-    <TextView
-        android:id="@+id/txtVoidBadge"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="VOID"
-        android:textColor="@android:color/holo_red_dark"
-        android:textStyle="bold"
-        android:visibility="gone"
-        android:layout_marginTop="6dp"/>
-
-</LinearLayout>
+</com.google.android.material.card.MaterialCardView>
