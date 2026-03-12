@@ -202,6 +202,41 @@ class BarTabsActivity : AppCompatActivity() {
     ) {
         showPreAuthLoading("Creating tab…")
 
+        if (customerName.isNotBlank()) {
+            resolveCustomerIdAndCreateOrder(seat, customerName, customerPhone, customerEmail, guestCount)
+        } else {
+            buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, guestCount)
+        }
+    }
+
+    private fun resolveCustomerIdAndCreateOrder(
+        seat: BarSeat,
+        customerName: String,
+        customerPhone: String,
+        customerEmail: String,
+        guestCount: Int
+    ) {
+        db.collection("Customers")
+            .whereEqualTo("name", customerName)
+            .limit(1)
+            .get()
+            .addOnSuccessListener { snap ->
+                val customerId = snap.documents.firstOrNull()?.id
+                buildAndSaveBarTabOrder(seat, customerId, customerName, customerPhone, customerEmail, guestCount)
+            }
+            .addOnFailureListener {
+                buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, guestCount)
+            }
+    }
+
+    private fun buildAndSaveBarTabOrder(
+        seat: BarSeat,
+        customerId: String?,
+        customerName: String,
+        customerPhone: String,
+        customerEmail: String,
+        guestCount: Int
+    ) {
         OrderNumberGenerator.nextOrderNumber(
             onSuccess = { orderNumber ->
                 runOnUiThread {
@@ -220,6 +255,7 @@ class BarTabsActivity : AppCompatActivity() {
                         "guestCount" to guestCount
                     )
 
+                    if (!customerId.isNullOrBlank()) orderMap["customerId"] = customerId
                     if (customerName.isNotBlank()) orderMap["customerName"] = customerName
                     if (customerPhone.isNotBlank()) orderMap["customerPhone"] = customerPhone
                     if (customerEmail.isNotBlank()) orderMap["customerEmail"] = customerEmail

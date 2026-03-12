@@ -22,12 +22,14 @@ import com.google.firebase.firestore.FirebaseFirestore
 object CustomerDialogHelper {
 
     data class CustomerInfo(
+        val id: String? = null,
         val name: String,
         val phone: String = "",
         val email: String = ""
     )
 
     private data class SavedCustomer(
+        val id: String,
         val name: String,
         val phone: String,
         val email: String
@@ -127,8 +129,11 @@ object CustomerDialogHelper {
         }
         searchInput.setAdapter(adapter)
 
+        var selectedCustomerId: String? = null
+
         searchInput.setOnItemClickListener { _, _, position, _ ->
             val selected = adapter.getItem(position) ?: return@setOnItemClickListener
+            selectedCustomerId = selected.id
             nameInput.setText(selected.name)
             phoneInput.setText(selected.phone)
             emailInput.setText(selected.email)
@@ -154,6 +159,7 @@ object CustomerDialogHelper {
                     return@setOnClickListener
                 }
                 val info = CustomerInfo(
+                    id = selectedCustomerId,
                     name = name,
                     phone = phoneInput.text.toString().trim(),
                     email = emailInput.text.toString().trim()
@@ -186,6 +192,7 @@ object CustomerDialogHelper {
 
                     allCustomers.add(
                         SavedCustomer(
+                            id = doc.id,
                             name = fullName,
                             phone = doc.getString("phone") ?: "",
                             email = doc.getString("email") ?: ""

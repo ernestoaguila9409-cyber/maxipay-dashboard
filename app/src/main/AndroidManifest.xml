@@ -135,6 +135,10 @@
             android:name=".CustomersActivity"
             android:exported="false" />
         <activity
+            android:name=".CustomerProfileActivity"
+            android:exported="false"
+            android:parentActivityName=".CustomersActivity" />
+        <activity
             android:name=".BatchManagementActivity"
             android:exported="false" />
         <activity

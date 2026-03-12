@@ -57,6 +57,7 @@ class MenuActivity : AppCompatActivity() {
     private var guestCount: Int = 0
     private var guestNames: MutableList<String> = mutableListOf()
 
+    private var customerId: String? = null
     private var customerName: String? = null
     private var customerPhone: String? = null
     private var customerEmail: String? = null
@@ -249,6 +250,7 @@ class MenuActivity : AppCompatActivity() {
                     txtTableHeader.visibility = View.VISIBLE
                 }
 
+                customerId = orderDoc.getString("customerId")?.takeIf { it.isNotBlank() }
                 customerName = orderDoc.getString("customerName")?.takeIf { it.isNotBlank() }
                 customerPhone = orderDoc.getString("customerPhone")?.takeIf { it.isNotBlank() }
                 customerEmail = orderDoc.getString("customerEmail")?.takeIf { it.isNotBlank() }
@@ -302,6 +304,7 @@ class MenuActivity : AppCompatActivity() {
             initialPhone = customerPhone ?: "",
             initialEmail = customerEmail ?: "",
             onSave = { info ->
+                customerId = info.id
                 customerName = info.name
                 customerPhone = info.phone.takeIf { it.isNotBlank() }
                 customerEmail = info.email.takeIf { it.isNotBlank() }
@@ -309,19 +312,32 @@ class MenuActivity : AppCompatActivity() {
 
                 val oid = currentOrderId
                 if (!oid.isNullOrBlank()) {
-                    orderEngine.updateOrderCustomer(
-                        orderId = oid,
-                        customerName = info.name,
-                        customerPhone = info.phone,
-                        customerEmail = info.email,
-                        onSuccess = { /* already updated UI */ },
-                        onFailure = { e ->
-                            Toast.makeText(this, "Failed to save customer: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    )
+                    if (info.id != null) {
+                        orderEngine.updateOrderCustomer(
+                            orderId = oid,
+                            customerId = info.id,
+                            customerName = info.name,
+                            customerPhone = info.phone,
+                            customerEmail = info.email,
+                            onSuccess = { /* already updated UI */ },
+                            onFailure = { e ->
+                                Toast.makeText(this, "Failed to save customer: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    } else {
+                        orderEngine.updateOrderCustomer(
+                            orderId = oid,
+                            customerName = info.name,
+                            customerPhone = info.phone,
+                            customerEmail = info.email,
+                            onSuccess = { /* already updated UI */ },
+                            onFailure = { e ->
+                                Toast.makeText(this, "Failed to save customer: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
                 }
 
-                // Save to Customers collection only if not a duplicate (same name + email)
                 saveCustomerToFirestoreIfNew(info.name, info.phone, info.email)
             }
         )
@@ -335,6 +351,9 @@ class MenuActivity : AppCompatActivity() {
     private fun saveCustomerToFirestoreIfNew(name: String, phone: String, email: String) {
         CustomerDuplicateChecker.checkExists(db, name, email) { exists ->
             if (exists) {
+                if (customerId == null) {
+                    resolveCustomerId(name, email)
+                }
                 Toast.makeText(
                     this,
                     "Customer already in list. Attached to order.",
@@ -349,10 +368,36 @@ class MenuActivity : AppCompatActivity() {
             )
             db.collection("Customers")
                 .add(customer)
+                .addOnSuccessListener { docRef ->
+                    customerId = docRef.id
+                    val oid = currentOrderId
+                    if (!oid.isNullOrBlank()) {
+                        db.collection("Orders").document(oid)
+                            .update("customerId", docRef.id)
+                    }
+                }
                 .addOnFailureListener { e ->
                     android.util.Log.e("MenuActivity", "Failed to save customer to Customers collection", e)
                 }
         }
+    }
+
+    private fun resolveCustomerId(name: String, email: String) {
+        db.collection("Customers")
+            .whereEqualTo("name", name)
+            .limit(1)
+            .get()
+            .addOnSuccessListener { snap ->
+                val doc = snap.documents.firstOrNull()
+                if (doc != null) {
+                    customerId = doc.id
+                    val oid = currentOrderId
+                    if (!oid.isNullOrBlank()) {
+                        db.collection("Orders").document(oid)
+                            .update("customerId", doc.id)
+                    }
+                }
+            }
     }
 
     private fun parseModifiers(raw: Any?): List<Pair<String, Double>> {
@@ -684,6 +729,7 @@ class MenuActivity : AppCompatActivity() {
             tableName = tableName,
             guestCount = if (guestCount > 0) guestCount else null,
             guestNames = if (guestNames.isNotEmpty()) guestNames else null,
+            customerId = customerId,
             customerName = customerName,
             customerPhone = customerPhone,
             customerEmail = customerEmail,
@@ -1037,6 +1083,7 @@ class MenuActivity : AppCompatActivity() {
     private fun clearCart() {
         cartMap.clear()
         totalAmount = 0.0
+        customerId = null
         customerName = null
         customerPhone = null
         customerEmail = null

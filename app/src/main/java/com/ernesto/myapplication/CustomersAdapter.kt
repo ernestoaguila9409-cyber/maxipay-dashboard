@@ -19,7 +19,8 @@ class CustomersAdapter(
     private var items: List<CustomerItem> = emptyList(),
     private var selectionMode: Boolean = false,
     private var selectedIds: MutableSet<String> = mutableSetOf(),
-    private val onSelectionChanged: (Set<String>) -> Unit = {}
+    private val onSelectionChanged: (Set<String>) -> Unit = {},
+    private val onItemClick: (CustomerItem) -> Unit = {}
 ) : RecyclerView.Adapter<CustomersAdapter.VH>() {
 
     fun submitList(list: List<CustomerItem>) {
@@ -63,7 +64,8 @@ class CustomersAdapter(
             items[position],
             selectionMode,
             selectedIds.contains(items[position].id),
-            { toggleSelection(it) }
+            { toggleSelection(it) },
+            onItemClick
         )
     }
 
@@ -79,7 +81,8 @@ class CustomersAdapter(
             item: CustomerItem,
             selectionMode: Boolean,
             isSelected: Boolean,
-            onToggleSelection: (CustomerItem) -> Unit
+            onToggleSelection: (CustomerItem) -> Unit,
+            onItemClick: (CustomerItem) -> Unit
         ) {
             txtName.text = item.name.ifBlank { "No name" }
             txtPhone.text = if (item.phone.isNotBlank()) "Phone: ${formatPhone(item.phone)}" else ""
@@ -98,6 +101,8 @@ class CustomersAdapter(
             itemView.setOnClickListener {
                 if (selectionMode) {
                     onToggleSelection(item)
+                } else {
+                    onItemClick(item)
                 }
             }
         }

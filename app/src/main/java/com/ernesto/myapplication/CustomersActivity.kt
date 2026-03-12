@@ -1,6 +1,7 @@
 package com.ernesto.myapplication
 
 import android.app.AlertDialog
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -28,7 +29,10 @@ class CustomersActivity : AppCompatActivity() {
         btnCancelSelect = findViewById(R.id.btnCancelSelect)
         btnDeleteMode = findViewById(R.id.btnDeleteMode)
 
-        adapter = CustomersAdapter(onSelectionChanged = { updateSelectionUI(it) })
+        adapter = CustomersAdapter(
+            onSelectionChanged = { updateSelectionUI(it) },
+            onItemClick = { customer -> openCustomerProfile(customer) }
+        )
         findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.recyclerCustomers).apply {
             layoutManager = LinearLayoutManager(this@CustomersActivity)
             this.adapter = this@CustomersActivity.adapter
@@ -168,6 +172,13 @@ class CustomersActivity : AppCompatActivity() {
             .setPositiveButton("Delete") { _, _ -> deleteCustomers(selectedIds) }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun openCustomerProfile(customer: CustomerItem) {
+        val intent = Intent(this, CustomerProfileActivity::class.java)
+        intent.putExtra("customerId", customer.id)
+        intent.putExtra("customerName", customer.name)
+        startActivity(intent)
     }
 
     private fun deleteCustomers(selectedIds: Set<String>) {

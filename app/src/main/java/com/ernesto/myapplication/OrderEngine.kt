@@ -29,6 +29,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
         guestNames: List<String>? = null,
         seatName: String? = null,
         area: String? = null,
+        customerId: String? = null,
         customerName: String? = null,
         customerPhone: String? = null,
         customerEmail: String? = null,
@@ -60,6 +61,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
                 if (!guestNames.isNullOrEmpty()) orderMap["guestNames"] = guestNames!!
                 if (!seatName.isNullOrBlank()) orderMap["seatName"] = seatName
                 if (!area.isNullOrBlank()) orderMap["area"] = area
+                if (!customerId.isNullOrBlank()) orderMap["customerId"] = customerId
                 if (!customerName.isNullOrBlank()) orderMap["customerName"] = customerName
                 if (!customerPhone.isNullOrBlank()) orderMap["customerPhone"] = customerPhone
                 if (!customerEmail.isNullOrBlank()) orderMap["customerEmail"] = customerEmail
@@ -76,6 +78,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
     /** Update customer fields on an existing order */
     fun updateOrderCustomer(
         orderId: String,
+        customerId: String? = null,
         customerName: String,
         customerPhone: String = "",
         customerEmail: String = "",
@@ -88,6 +91,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
             "customerEmail" to customerEmail,
             "updatedAt" to Date()
         )
+        if (!customerId.isNullOrBlank()) updates["customerId"] = customerId
         db.collection("Orders").document(orderId)
             .update(updates)
             .addOnSuccessListener { onSuccess() }
