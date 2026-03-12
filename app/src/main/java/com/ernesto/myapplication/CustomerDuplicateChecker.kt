@@ -4,10 +4,10 @@ import com.google.firebase.firestore.FirebaseFirestore
 
 /**
  * Checks for duplicate customers in the Customers collection.
- * A duplicate is detected if either:
+ * A duplicate is detected if any of:
  *  - The email matches an existing customer (case-insensitive), OR
- *  - The full name matches an existing customer (case-insensitive)
- * Used by both CustomersActivity and MenuActivity (Cart Add Customer).
+ *  - The full name matches an existing customer (case-insensitive), OR
+ *  - The phone number matches an existing customer (digits only)
  */
 object CustomerDuplicateChecker {
 
@@ -15,12 +15,14 @@ object CustomerDuplicateChecker {
         db: FirebaseFirestore,
         name: String,
         email: String,
+        phone: String = "",
         onResult: (Boolean) -> Unit
     ) {
         val normalizedName = name.trim().lowercase()
         val normalizedEmail = email.trim().lowercase()
+        val normalizedPhone = phone.replace(Regex("[^0-9]"), "")
 
-        if (normalizedName.isEmpty() && normalizedEmail.isEmpty()) {
+        if (normalizedName.isEmpty() && normalizedEmail.isEmpty() && normalizedPhone.isEmpty()) {
             onResult(false)
             return
         }
@@ -39,6 +41,7 @@ object CustomerDuplicateChecker {
                     }
                     val docNameNorm = fullName.lowercase()
                     val docEmailNorm = (doc.getString("email") ?: "").trim().lowercase()
+                    val docPhoneNorm = (doc.getString("phone") ?: "").replace(Regex("[^0-9]"), "")
 
                     val emailMatch = normalizedEmail.isNotEmpty()
                             && docEmailNorm.isNotEmpty()
@@ -46,8 +49,11 @@ object CustomerDuplicateChecker {
                     val nameMatch = normalizedName.isNotEmpty()
                             && docNameNorm.isNotEmpty()
                             && docNameNorm == normalizedName
+                    val phoneMatch = normalizedPhone.isNotEmpty()
+                            && docPhoneNorm.isNotEmpty()
+                            && docPhoneNorm == normalizedPhone
 
-                    emailMatch || nameMatch
+                    emailMatch || nameMatch || phoneMatch
                 }
                 onResult(exists)
             }

@@ -2,11 +2,14 @@ package com.ernesto.myapplication
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.LayoutInflater
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -58,7 +61,81 @@ class BarTabsActivity : AppCompatActivity() {
         recyclerBarTabs.layoutManager = LinearLayoutManager(this)
         recyclerBarTabs.adapter = adapter
 
-        btnNewTab.setOnClickListener { startPreAuthFlow() }
+        btnNewTab.setOnClickListener { showCustomerInfoDialog() }
+    }
+
+    private var pendingCustomerName: String = ""
+    private var pendingCustomerPhone: String = ""
+    private var pendingCustomerEmail: String = ""
+
+    private fun showCustomerInfoDialog() {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_add_customer, null)
+        val etFirstName = dialogView.findViewById<EditText>(R.id.etFirstName)
+        val etLastName = dialogView.findViewById<EditText>(R.id.etLastName)
+        val etPhone = dialogView.findViewById<EditText>(R.id.etPhone)
+        val etEmail = dialogView.findViewById<EditText>(R.id.etEmail)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Customer Information")
+            .setView(dialogView)
+            .setPositiveButton("Continue", null)
+            .setNeutralButton("Skip", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val firstName = etFirstName.text.toString().trim()
+                val lastName = etLastName.text.toString().trim()
+                val phone = etPhone.text.toString().trim()
+                val email = etEmail.text.toString().trim()
+
+                if (firstName.isEmpty() && lastName.isEmpty()) {
+                    Toast.makeText(this, "Please enter a name or press Skip", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+
+                val fullName = "$firstName $lastName".trim()
+                pendingCustomerName = fullName
+                pendingCustomerPhone = phone
+                pendingCustomerEmail = email
+
+                dialog.dismiss()
+                ensureCustomerAndStartPreAuth(fullName, phone, email)
+            }
+
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                pendingCustomerName = ""
+                pendingCustomerPhone = ""
+                pendingCustomerEmail = ""
+                dialog.dismiss()
+                startPreAuthFlow()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun ensureCustomerAndStartPreAuth(name: String, phone: String, email: String) {
+        showLoading("Checking customer…")
+
+        CustomerDuplicateChecker.checkExists(db, name, email, phone) { exists ->
+            if (exists) {
+                startPreAuthFlow()
+            } else {
+                val nameParts = name.split(" ", limit = 2)
+                val customer = hashMapOf(
+                    "firstName" to nameParts[0],
+                    "lastName" to if (nameParts.size > 1) nameParts[1] else "",
+                    "phone" to phone,
+                    "email" to email
+                )
+                db.collection("Customers").add(customer)
+                    .addOnSuccessListener { startPreAuthFlow() }
+                    .addOnFailureListener {
+                        startPreAuthFlow()
+                    }
+            }
+        }
     }
 
     override fun onStart() {
@@ -159,6 +236,10 @@ class BarTabsActivity : AppCompatActivity() {
                     "cardLast4" to preAuth.cardLast4,
                     "cardBrand" to preAuth.cardBrand
                 )
+
+                if (pendingCustomerName.isNotBlank()) orderMap["customerName"] = pendingCustomerName
+                if (pendingCustomerPhone.isNotBlank()) orderMap["customerPhone"] = pendingCustomerPhone
+                if (pendingCustomerEmail.isNotBlank()) orderMap["customerEmail"] = pendingCustomerEmail
 
                 if (currentBatchId.isNotBlank()) {
                     orderMap["batchId"] = currentBatchId
