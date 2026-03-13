@@ -10,7 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         android:backgroundTint="#FFFFFF"
-        android:title="Today's Sales"
+        android:title="Current Sales"
         android:titleTextColor="@android:color/black" />
 
     <LinearLayout
@@ -24,7 +24,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Sales total (today)"
+            android:text="Sales total (current batch)"
             android:textSize="14sp"
             android:textColor="#666666"/>
 
@@ -32,7 +32,7 @@
             android:id="@+id/txtTodayTotal"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Today: $0.00"
+            android:text="Current Sales: $0.00"
             android:textSize="28sp"
             android:textStyle="bold"
             android:layout_marginTop="8dp"/>

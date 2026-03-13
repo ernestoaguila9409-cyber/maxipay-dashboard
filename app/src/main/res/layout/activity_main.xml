@@ -213,9 +213,9 @@
                     android:layout_height="wrap_content"
                     android:text="TRANSACTIONS"
                     android:textColor="@android:color/white"
-                    android:textSize="12sp"
+                    android:textSize="10sp"
                     android:fontFamily="sans-serif-medium"
-                    android:maxLines="2"
+                    android:maxLines="1"
                     android:gravity="center"/>
             </LinearLayout>
 
@@ -254,9 +254,9 @@
                     android:layout_height="wrap_content"
                     android:text="SETTLE BATCH"
                     android:textColor="@android:color/white"
-                    android:textSize="12sp"
+                    android:textSize="10sp"
                     android:fontFamily="sans-serif-medium"
-                    android:maxLines="2"
+                    android:maxLines="1"
                     android:gravity="center"/>
             </LinearLayout>
 
@@ -529,7 +529,7 @@
                 android:id="@+id/txtTodayTotal"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Today: $0.00"
+                android:text="Current Sales: $0.00"
                 android:textSize="16sp"/>
 
             <TextView

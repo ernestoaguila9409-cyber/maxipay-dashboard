@@ -9,7 +9,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import com.google.firebase.firestore.FirebaseFirestore
-import java.util.*
+import java.util.Locale
 import java.util.concurrent.Executors
 
 class TodaySalesActivity : AppCompatActivity() {
@@ -25,7 +25,7 @@ class TodaySalesActivity : AppCompatActivity() {
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Today's Sales"
+        supportActionBar?.title = "Current Sales"
 
         txtTodayTotal = findViewById(R.id.txtTodayTotal)
         txtTodayCount = findViewById(R.id.txtTodayCount)
@@ -63,7 +63,7 @@ class TodaySalesActivity : AppCompatActivity() {
                 }
         }
 
-        loadTodayStats()
+        loadCurrentSales()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -73,51 +73,38 @@ class TodaySalesActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        loadTodayStats()
+        loadCurrentSales()
     }
 
-    private fun loadTodayStats() {
-        val calendar = Calendar.getInstance()
-        calendar.set(Calendar.HOUR_OF_DAY, 0)
-        calendar.set(Calendar.MINUTE, 0)
-        calendar.set(Calendar.SECOND, 0)
-        calendar.set(Calendar.MILLISECOND, 0)
-        val startOfDay = calendar.time
-
+    private fun loadCurrentSales() {
         db.collection("Transactions")
+            .whereEqualTo("settled", false)
             .get()
             .addOnSuccessListener { documents ->
-                val startOfDayCopy = startOfDay
                 Executors.newSingleThreadExecutor().execute {
                     var total = 0.0
                     var count = 0
 
                     for (doc in documents) {
-                    val voided = doc.getBoolean("voided") ?: false
-                    if (voided) continue
-                    val settled = doc.getBoolean("settled") ?: false
+                        val voided = doc.getBoolean("voided") ?: false
+                        if (voided) continue
 
-                    val type = doc.getString("type") ?: "SALE"
+                        val type = doc.getString("type") ?: "SALE"
 
-                    if (type == "SALE" || type == "CAPTURE") {
-                        if (settled) continue
-                        val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
-                        var todaysCents = 0L
+                        if (type == "SALE" || type == "CAPTURE") {
+                            val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
+                            var totalCents = 0L
 
-                        for (p in payments) {
-                            val map = p as? Map<*, *> ?: continue
-                            val ts = (map["timestamp"] as? com.google.firebase.Timestamp)?.toDate()
-                            if (ts == null || ts.before(startOfDayCopy)) continue
+                            for (p in payments) {
+                                val map = p as? Map<*, *> ?: continue
+                                val amountInCents = (map["amountInCents"] as? Number)?.toLong() ?: 0L
+                                totalCents += amountInCents
+                            }
 
-                            val amountInCents = (map["amountInCents"] as? Number)?.toLong() ?: 0L
-                            todaysCents += amountInCents
-                        }
-
-                        if (todaysCents == 0L) {
-                            val ts =
-                                doc.getTimestamp("timestamp")?.toDate()
-                                    ?: doc.getTimestamp("createdAt")?.toDate()
-                            if (ts != null && !ts.before(startOfDayCopy)) {
+                            if (totalCents > 0L) {
+                                total += totalCents / 100.0
+                                count++
+                            } else {
                                 val amount = doc.getDouble("amount")
                                     ?: doc.getDouble("totalPaid")
                                     ?: 0.0
@@ -126,33 +113,20 @@ class TodaySalesActivity : AppCompatActivity() {
                                     count++
                                 }
                             }
-                        } else {
-                            val amountToday = todaysCents / 100.0
-                            if (amountToday > 0.0) {
-                                total += amountToday
+                        } else if (type == "REFUND") {
+                            val amount = doc.getDouble("amount") ?: 0.0
+                            if (amount > 0.0) {
+                                total -= amount
                                 count++
                             }
                         }
-                    } else if (type == "REFUND") {
-                        if (settled) continue
-                        val ts =
-                            doc.getTimestamp("createdAt")?.toDate()
-                                ?: doc.getTimestamp("timestamp")?.toDate()
-                        if (ts == null || ts.before(startOfDayCopy)) continue
-
-                        val amount = doc.getDouble("amount") ?: 0.0
-                        if (amount > 0.0) {
-                            total -= amount
-                            count++
-                        }
                     }
-                }
 
                     val finalTotal = total
                     val finalCount = count
                     runOnUiThread {
                         if (!isDestroyed) {
-                            txtTodayTotal.text = String.format(Locale.US, "Today: $%.2f", finalTotal)
+                            txtTodayTotal.text = String.format(Locale.US, "Current Sales: $%.2f", finalTotal)
                             txtTodayCount.text = "Transactions: $finalCount"
                         }
                     }
