@@ -156,7 +156,7 @@ class OrdersAdapter(
 
             val bgColor = when (orderType) {
                 "DINE_IN" -> Color.parseColor("#2E7D32")
-                "BAR", "BAR_TAB" -> Color.parseColor("#6A4FB3")
+                "BAR", "BAR_TAB" -> Color.parseColor("#00897B")
                 else -> Color.parseColor("#E65100")
             }
 
