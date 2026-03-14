@@ -22,6 +22,12 @@ class DineInConfigureActivity : AppCompatActivity() {
         findViewById<android.view.View>(R.id.optionTableMappingSetup).setOnClickListener {
             startActivity(Intent(this, TableLayoutActivity::class.java))
         }
+
+        findViewById<android.view.View>(R.id.optionPaymentMethods).setOnClickListener {
+            val intent = Intent(this, PaymentMethodsActivity::class.java)
+            intent.putExtra("ORDER_TYPE", "DINE_IN")
+            startActivity(intent)
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {

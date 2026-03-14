@@ -54,128 +54,188 @@
                 app:alignmentMode="alignBounds">
 
                 <!-- Row 0: DINE IN, TO-GO, BAR -->
-                <LinearLayout
-                    android:id="@+id/btnDineIn"
+                <FrameLayout
                     android:layout_width="0dp"
                     android:layout_height="0dp"
                     android:layout_margin="8dp"
-                    android:orientation="vertical"
-                    android:gravity="center"
-                    android:background="@drawable/bg_button_dine_in"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:foreground="?attr/selectableItemBackground"
-                    android:padding="16dp"
-                    android:minHeight="0dp"
+                    android:clipChildren="false"
+                    android:clipToPadding="false"
                     app:layout_columnWeight="1"
                     app:layout_rowWeight="1"
                     app:layout_row="0"
                     app:layout_column="0"
                     app:layout_gravity="fill">
 
-                    <ImageView
-                        android:layout_width="40dp"
-                        android:layout_height="40dp"
-                        android:src="@drawable/ic_dine_in"
-                        android:contentDescription="Dine In"
-                        app:tint="@android:color/white"/>
+                    <LinearLayout
+                        android:id="@+id/btnDineIn"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical"
+                        android:gravity="center"
+                        android:background="@drawable/bg_button_dine_in"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:foreground="?attr/selectableItemBackground"
+                        android:padding="16dp">
 
-                    <View
-                        android:layout_width="0dp"
-                        android:layout_height="8dp"/>
+                        <ImageView
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:src="@drawable/ic_dine_in"
+                            android:contentDescription="Dine In"
+                            app:tint="@android:color/white"/>
+
+                        <View
+                            android:layout_width="0dp"
+                            android:layout_height="8dp"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="DINE IN"
+                            android:textColor="@android:color/white"
+                            android:textSize="13sp"
+                            android:fontFamily="sans-serif-medium"
+                            android:maxLines="2"
+                            android:gravity="center"/>
+                    </LinearLayout>
 
                     <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="DINE IN"
+                        android:id="@+id/dineInBadge"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:layout_gravity="top|end"
+                        android:layout_marginTop="-4dp"
+                        android:layout_marginEnd="-4dp"
+                        android:background="@drawable/bg_badge"
+                        android:gravity="center"
                         android:textColor="@android:color/white"
-                        android:textSize="13sp"
-                        android:fontFamily="sans-serif-medium"
-                        android:maxLines="2"
-                        android:gravity="center"/>
-                </LinearLayout>
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:visibility="gone"/>
+                </FrameLayout>
 
-            <LinearLayout
-                android:id="@+id/btnToGo"
-                android:layout_width="0dp"
-                android:layout_height="0dp"
-                android:layout_margin="8dp"
-                android:orientation="vertical"
-                android:gravity="center"
-                android:background="@drawable/bg_button_to_go"
-                android:clickable="true"
-                android:focusable="true"
-                android:foreground="?attr/selectableItemBackground"
-                android:padding="16dp"
-                android:minHeight="0dp"
-                app:layout_columnWeight="1"
-                app:layout_rowWeight="1"
-                app:layout_row="0"
-                app:layout_column="1"
-                app:layout_gravity="fill">
-
-                <ImageView
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:src="@drawable/ic_to_go"
-                    android:contentDescription="To Go"
-                    app:tint="@android:color/white"/>
-
-                <View
+                <FrameLayout
                     android:layout_width="0dp"
-                    android:layout_height="8dp"/>
+                    android:layout_height="0dp"
+                    android:layout_margin="8dp"
+                    android:clipChildren="false"
+                    android:clipToPadding="false"
+                    app:layout_columnWeight="1"
+                    app:layout_rowWeight="1"
+                    app:layout_row="0"
+                    app:layout_column="1"
+                    app:layout_gravity="fill">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="TO-GO"
-                    android:textColor="@android:color/white"
-                    android:textSize="13sp"
-                    android:fontFamily="sans-serif-medium"
-                    android:maxLines="2"
-                    android:gravity="center"/>
-            </LinearLayout>
+                    <LinearLayout
+                        android:id="@+id/btnToGo"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical"
+                        android:gravity="center"
+                        android:background="@drawable/bg_button_to_go"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:foreground="?attr/selectableItemBackground"
+                        android:padding="16dp">
 
-            <LinearLayout
-                android:id="@+id/btnBar"
-                android:layout_width="0dp"
-                android:layout_height="0dp"
-                android:layout_margin="8dp"
-                android:orientation="vertical"
-                android:gravity="center"
-                android:background="@drawable/bg_button_bar"
-                android:clickable="true"
-                android:focusable="true"
-                android:foreground="?attr/selectableItemBackground"
-                android:padding="16dp"
-                android:minHeight="0dp"
-                app:layout_columnWeight="1"
-                app:layout_rowWeight="1"
-                app:layout_row="0"
-                app:layout_column="2"
-                app:layout_gravity="fill">
+                        <ImageView
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:src="@drawable/ic_to_go"
+                            android:contentDescription="To Go"
+                            app:tint="@android:color/white"/>
 
-                <ImageView
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:src="@drawable/ic_bar"
-                    android:contentDescription="Bar"
-                    app:tint="@android:color/white"/>
+                        <View
+                            android:layout_width="0dp"
+                            android:layout_height="8dp"/>
 
-                <View
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="TO-GO"
+                            android:textColor="@android:color/white"
+                            android:textSize="13sp"
+                            android:fontFamily="sans-serif-medium"
+                            android:maxLines="2"
+                            android:gravity="center"/>
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/toGoBadge"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:layout_gravity="top|end"
+                        android:layout_marginTop="-4dp"
+                        android:layout_marginEnd="-4dp"
+                        android:background="@drawable/bg_badge"
+                        android:gravity="center"
+                        android:textColor="@android:color/white"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:visibility="gone"/>
+                </FrameLayout>
+
+                <FrameLayout
                     android:layout_width="0dp"
-                    android:layout_height="8dp"/>
+                    android:layout_height="0dp"
+                    android:layout_margin="8dp"
+                    android:clipChildren="false"
+                    android:clipToPadding="false"
+                    app:layout_columnWeight="1"
+                    app:layout_rowWeight="1"
+                    app:layout_row="0"
+                    app:layout_column="2"
+                    app:layout_gravity="fill">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="BAR"
-                    android:textColor="@android:color/white"
-                    android:textSize="13sp"
-                    android:fontFamily="sans-serif-medium"
-                    android:maxLines="2"
-                    android:gravity="center"/>
-            </LinearLayout>
+                    <LinearLayout
+                        android:id="@+id/btnBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical"
+                        android:gravity="center"
+                        android:background="@drawable/bg_button_bar"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:foreground="?attr/selectableItemBackground"
+                        android:padding="16dp">
+
+                        <ImageView
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:src="@drawable/ic_bar"
+                            android:contentDescription="Bar"
+                            app:tint="@android:color/white"/>
+
+                        <View
+                            android:layout_width="0dp"
+                            android:layout_height="8dp"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="BAR"
+                            android:textColor="@android:color/white"
+                            android:textSize="13sp"
+                            android:fontFamily="sans-serif-medium"
+                            android:maxLines="2"
+                            android:gravity="center"/>
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/barBadge"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:layout_gravity="top|end"
+                        android:layout_marginTop="-4dp"
+                        android:layout_marginEnd="-4dp"
+                        android:background="@drawable/bg_badge"
+                        android:gravity="center"
+                        android:textColor="@android:color/white"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:visibility="gone"/>
+                </FrameLayout>
 
             <!-- Row 1: TRANSACTIONS, SETTLE BATCH, EMPLOYEES -->
             <LinearLayout

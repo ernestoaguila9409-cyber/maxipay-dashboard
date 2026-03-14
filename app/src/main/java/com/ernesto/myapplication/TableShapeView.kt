@@ -20,16 +20,19 @@ class TableShapeView(context: Context) : View(context) {
     var shape: Shape = Shape.SQUARE
         set(value) { field = value; requestLayout(); invalidate() }
 
+    var isOccupied: Boolean = false
+        set(value) { field = value; applyOccupiedColors(); invalidate() }
+
     private val dp = context.resources.displayMetrics.density
 
     private val tablePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF5D4037.toInt()
+        color = Color.TRANSPARENT
         style = Paint.Style.FILL
     }
     private val tableBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF3E2723.toInt()
+        color = 0xFF5D4037.toInt()
         style = Paint.Style.STROKE
-        strokeWidth = 1.5f * dp
+        strokeWidth = 2f * dp
     }
     private val chairPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFF9E9E9E.toInt()
@@ -42,16 +45,17 @@ class TableShapeView(context: Context) : View(context) {
     }
     private val boothCushionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFF8D6E63.toInt()
-        style = Paint.Style.FILL
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * dp
     }
     private val namePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFFFFFFF.toInt()
+        color = 0xFF333333.toInt()
         textAlign = Paint.Align.CENTER
         textSize = 12f * dp
         isFakeBoldText = true
     }
     private val seatsPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFD7CCC8.toInt()
+        color = 0xFF777777.toInt()
         textAlign = Paint.Align.CENTER
         textSize = 9f * dp
     }
@@ -197,6 +201,18 @@ class TableShapeView(context: Context) : View(context) {
         canvas.drawText(tableName, cx, nameY, namePaint)
         val seatsStr = "Seats: $seatCount"
         canvas.drawText(seatsStr, cx, nameY + 14f * dp, seatsPaint)
+    }
+
+    private fun applyOccupiedColors() {
+        if (isOccupied) {
+            tablePaint.color = 0x33D32F2F.toInt()
+            tableBorderPaint.color = 0xFFD32F2F.toInt()
+            boothCushionPaint.color = 0xFFD32F2F.toInt()
+        } else {
+            tablePaint.color = Color.TRANSPARENT
+            tableBorderPaint.color = 0xFF5D4037.toInt()
+            boothCushionPaint.color = 0xFF8D6E63.toInt()
+        }
     }
 
     companion object {

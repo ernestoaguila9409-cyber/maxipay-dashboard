@@ -22,34 +22,6 @@
         android:textColor="@android:color/darker_gray"
         android:paddingBottom="24dp"/>
 
-    <!-- Clickable option: opens Payment Methods screen -->
-    <LinearLayout
-        android:id="@+id/optionPaymentMethods"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="@android:color/white"
-        android:padding="16dp"
-        android:clickable="true"
-        android:focusable="true">
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="PAYMENTS METHODS"
-            android:textSize="16sp"
-            android:textStyle="bold"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="›"
-            android:textSize="24sp"
-            android:textColor="@android:color/darker_gray"/>
-    </LinearLayout>
-
     <!-- Clickable option: opens Taxes and Fees screen -->
     <LinearLayout
         android:id="@+id/optionTaxesAndFees"
@@ -59,7 +31,6 @@
         android:gravity="center_vertical"
         android:background="@android:color/white"
         android:padding="16dp"
-        android:layout_marginTop="12dp"
         android:clickable="true"
         android:focusable="true">
 

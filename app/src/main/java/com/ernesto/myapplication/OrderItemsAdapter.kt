@@ -12,7 +12,7 @@ import java.util.Locale
 import com.ernesto.myapplication.engine.MoneyUtils
 
 sealed class OrderListItem {
-    data class GuestHeader(val guestNumber: Int) : OrderListItem()
+    data class GuestHeader(val guestNumber: Int, val guestName: String? = null) : OrderListItem()
     data class Item(val doc: DocumentSnapshot) : OrderListItem()
 }
 
@@ -85,7 +85,8 @@ class OrderItemsAdapter(
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (val entry = listItems[position]) {
             is OrderListItem.GuestHeader -> {
-                (holder as HeaderVH).txtHeader.text = "— Guest ${entry.guestNumber} —"
+                val label = if (!entry.guestName.isNullOrBlank()) entry.guestName else "Guest ${entry.guestNumber}"
+                (holder as HeaderVH).txtHeader.text = "— $label —"
             }
             is OrderListItem.Item -> bindItem(holder as ItemVH, entry.doc)
         }

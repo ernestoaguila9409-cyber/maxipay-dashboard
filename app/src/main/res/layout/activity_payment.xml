@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
+<FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+<LinearLayout
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -98,3 +102,12 @@
             android:minWidth="120dp" />
     </LinearLayout>
 </LinearLayout>
+
+<com.ernesto.myapplication.FireworksView
+    android:id="@+id/fireworksView"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clickable="false"
+    android:focusable="false" />
+
+</FrameLayout>

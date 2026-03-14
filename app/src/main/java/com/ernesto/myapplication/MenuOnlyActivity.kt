@@ -1,9 +1,14 @@
 package com.ernesto.myapplication
 
+import android.graphics.Color
 import android.os.Bundle
 import android.text.InputType
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.LinearLayout
+import android.widget.Switch
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -18,6 +23,7 @@ class MenuOnlyActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
     private var selectedCategoryId: String? = null
+    private var selectedCategoryAvailability: List<String> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,11 +60,21 @@ class MenuOnlyActivity : AppCompatActivity() {
             .get()
             .addOnSuccessListener { documents ->
 
-                val categoryList = mutableListOf<Pair<String, String>>() // id, name
+                val categoryList = mutableListOf<CategoryModel>()
 
                 for (doc in documents) {
                     val name = doc.getString("name") ?: continue
-                    categoryList.add(Pair(doc.id, name))
+                    @Suppress("UNCHECKED_CAST")
+                    val availableOrderTypes =
+                        (doc.get("availableOrderTypes") as? List<String>) ?: emptyList()
+
+                    categoryList.add(
+                        CategoryModel(
+                            id = doc.id,
+                            name = name,
+                            availableOrderTypes = availableOrderTypes
+                        )
+                    )
                 }
 
                 categoryRecycler.adapter =
@@ -66,13 +82,17 @@ class MenuOnlyActivity : AppCompatActivity() {
                         categories = categoryList,
                         onCategoryClick = { categoryId ->
                             selectedCategoryId = categoryId
+                            selectedCategoryAvailability =
+                                categoryList.find { it.id == categoryId }?.availableOrderTypes
+                                    ?: emptyList()
                             loadItems(categoryId)
                         },
                         context = this,
                         onDataChanged = {
                             loadCategories()
                         }
-                    )}
+                    )
+            }
     }
 
     // =========================================================
@@ -92,20 +112,27 @@ class MenuOnlyActivity : AppCompatActivity() {
                     val name = doc.getString("name") ?: continue
                     val price = doc.getDouble("price") ?: 0.0
                     val stock = doc.getLong("stock") ?: 0L
+                    @Suppress("UNCHECKED_CAST")
+                    val availableOrderTypes =
+                        doc.get("availableOrderTypes") as? List<String>
 
                     itemList.add(
                         ItemModel(
                             id = doc.id,
                             name = name,
                             price = price,
-                            stock = stock
+                            stock = stock,
+                            availableOrderTypes = availableOrderTypes
                         )
                     )
                 }
 
-                itemRecycler.adapter = ItemAdapter(this, itemList) {
-                    loadItems(categoryId)
-                }
+                itemRecycler.adapter = ItemAdapter(
+                    context = this,
+                    itemList = itemList,
+                    categoryAvailability = selectedCategoryAvailability,
+                    refresh = { loadItems(categoryId) }
+                )
             }
     }
 
@@ -115,13 +142,50 @@ class MenuOnlyActivity : AppCompatActivity() {
 
     private fun showAddCategoryDialog() {
 
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(50, 40, 50, 10)
+
+        val nameLabel = TextView(this)
+        nameLabel.text = "Category Name"
+        nameLabel.textSize = 13f
+        nameLabel.setTextColor(Color.DKGRAY)
+        layout.addView(nameLabel)
+
         val input = EditText(this)
         input.hint = "Category name"
+        layout.addView(input)
+
+        val availLabel = TextView(this)
+        availLabel.text = "Available In Order Types"
+        availLabel.textSize = 13f
+        availLabel.setTextColor(Color.DKGRAY)
+        val params = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        params.topMargin = 32
+        availLabel.layoutParams = params
+        layout.addView(availLabel)
+
+        val checkBoxes = mutableMapOf<String, CheckBox>()
+        for (orderType in CategoryAdapter.ALL_ORDER_TYPES) {
+            val cb = CheckBox(this)
+            cb.text = when (orderType) {
+                "BAR_TAB" -> "BAR"
+                "TO_GO" -> "TO GO"
+                "DINE_IN" -> "DINE IN"
+                else -> orderType
+            }
+            cb.isChecked = true
+            layout.addView(cb)
+            checkBoxes[orderType] = cb
+        }
 
         val dialog = AlertDialog.Builder(this)
             .setTitle("Add Category")
-            .setView(input)
-            .setPositiveButton("Add", null) // we override later
+            .setView(layout)
+            .setPositiveButton("Add", null)
             .setNegativeButton("Cancel", null)
             .create()
 
@@ -161,13 +225,15 @@ class MenuOnlyActivity : AppCompatActivity() {
 
             addButton.setOnClickListener {
                 val name = input.text.toString().trim()
-                saveCategory(name)
+                val selectedTypes = checkBoxes.filter { it.value.isChecked }.keys.toList()
+                saveCategory(name, selectedTypes)
                 dialog.dismiss()
             }
         }
 
         dialog.show()
     }
+
     private fun checkCategoryExists(name: String, callback: (Boolean) -> Unit) {
 
         val normalizedName = name.trim().lowercase()
@@ -189,7 +255,8 @@ class MenuOnlyActivity : AppCompatActivity() {
                 callback(exists)
             }
     }
-    private fun saveCategory(name: String) {
+
+    private fun saveCategory(name: String, availableOrderTypes: List<String>) {
 
         val normalizedName = name.trim().lowercase()
 
@@ -215,7 +282,10 @@ class MenuOnlyActivity : AppCompatActivity() {
                     ).show()
                 } else {
 
-                    val category = hashMapOf("name" to name)
+                    val category = hashMapOf(
+                        "name" to name,
+                        "availableOrderTypes" to availableOrderTypes
+                    )
 
                     db.collection("Categories")
                         .add(category)
@@ -237,8 +307,8 @@ class MenuOnlyActivity : AppCompatActivity() {
 
     private fun showAddItemDialog() {
 
-        val layout = android.widget.LinearLayout(this)
-        layout.orientation = android.widget.LinearLayout.VERTICAL
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(40, 40, 40, 40)
 
         val nameInput = EditText(this)
@@ -257,6 +327,50 @@ class MenuOnlyActivity : AppCompatActivity() {
         layout.addView(priceInput)
         layout.addView(stockInput)
 
+        val divider = android.view.View(this)
+        divider.setBackgroundColor(Color.LTGRAY)
+        divider.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 2
+        ).apply { topMargin = 24; bottomMargin = 16 }
+        layout.addView(divider)
+
+        val useCategorySwitch = Switch(this)
+        useCategorySwitch.text = "Use Category Availability"
+        useCategorySwitch.isChecked = true
+        layout.addView(useCategorySwitch)
+
+        val checkBoxContainer = LinearLayout(this)
+        checkBoxContainer.orientation = LinearLayout.VERTICAL
+        checkBoxContainer.setPadding(0, 16, 0, 0)
+        checkBoxContainer.visibility = android.view.View.GONE
+
+        val availLabel = TextView(this)
+        availLabel.text = "Custom Availability"
+        availLabel.textSize = 13f
+        availLabel.setTextColor(Color.DKGRAY)
+        checkBoxContainer.addView(availLabel)
+
+        val checkBoxes = mutableMapOf<String, CheckBox>()
+        for (orderType in CategoryAdapter.ALL_ORDER_TYPES) {
+            val cb = CheckBox(this)
+            cb.text = when (orderType) {
+                "BAR_TAB" -> "BAR"
+                "TO_GO" -> "TO GO"
+                "DINE_IN" -> "DINE IN"
+                else -> orderType
+            }
+            cb.isChecked = true
+            checkBoxContainer.addView(cb)
+            checkBoxes[orderType] = cb
+        }
+
+        layout.addView(checkBoxContainer)
+
+        useCategorySwitch.setOnCheckedChangeListener { _, isChecked ->
+            checkBoxContainer.visibility =
+                if (isChecked) android.view.View.GONE else android.view.View.VISIBLE
+        }
+
         AlertDialog.Builder(this)
             .setTitle("Add Item")
             .setView(layout)
@@ -271,12 +385,18 @@ class MenuOnlyActivity : AppCompatActivity() {
                     selectedCategoryId != null
                 ) {
 
-                    val item = hashMapOf(
+                    val item = hashMapOf<String, Any>(
                         "name" to name,
                         "price" to price,
-                        "stock" to stock, // ✅ IMPORTANT
-                        "categoryId" to selectedCategoryId
+                        "stock" to stock,
+                        "categoryId" to selectedCategoryId!!
                     )
+
+                    if (!useCategorySwitch.isChecked) {
+                        val selectedTypes =
+                            checkBoxes.filter { it.value.isChecked }.keys.toList()
+                        item["availableOrderTypes"] = selectedTypes
+                    }
 
                     db.collection("MenuItems")
                         .add(item)

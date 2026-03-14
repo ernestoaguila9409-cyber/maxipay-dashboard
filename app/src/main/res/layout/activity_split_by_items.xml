@@ -11,17 +11,18 @@
         android:id="@+id/txtPersonStep"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Person 1 – Select items to pay"
+        android:text="Split by Guest"
         android:textSize="18sp"
         android:textStyle="bold"
-        android:layout_marginBottom="8dp"/>
+        android:layout_marginBottom="4dp"/>
 
     <TextView
         android:id="@+id/txtRemaining"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Remaining: $0.00"
-        android:textSize="16sp"
+        android:text="Hold and drag items to move between guests"
+        android:textSize="13sp"
+        android:textColor="#777777"
         android:layout_marginBottom="16dp"/>
 
     <ScrollView
@@ -41,7 +42,7 @@
         android:id="@+id/btnDonePerson"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Done with this person"
+        android:text="Done with Splitting"
         android:layout_marginTop="16dp"/>
 
     <Button

@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.View
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -28,11 +29,13 @@ import java.util.Locale
 import android.util.Log
 import android.widget.EditText
 import com.ernesto.myapplication.engine.MoneyUtils
+import com.ernesto.myapplication.engine.OrderEngine
 import com.google.firebase.functions.FirebaseFunctions
 
 class OrderDetailActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
+    private val orderEngine = OrderEngine(FirebaseFirestore.getInstance())
     private lateinit var txtHeaderOrderNumber: TextView
     private lateinit var txtHeaderEmployee: TextView
     private lateinit var txtHeaderCustomer: TextView
@@ -45,6 +48,8 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var btnVoid: MaterialButton
     private lateinit var btnRefund: MaterialButton
     private lateinit var btnEmailReceipt: MaterialButton
+    private lateinit var txtAddCustomer: TextView
+    private lateinit var txtOrderType: TextView
     private lateinit var orderSummaryContainer: LinearLayout
     private lateinit var txtSubtotal: TextView
     private lateinit var txtOrderTotal: TextView
@@ -57,6 +62,19 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var orderId: String
     private var currentBatchId: String? = null
     private var orderType: String = ""
+
+    private val tableSelectLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val data = result.data ?: return@registerForActivityResult
+                val tableId = data.getStringExtra("tableId") ?: ""
+                val tableName = data.getStringExtra("tableName") ?: ""
+                val guestCount = data.getIntExtra("guestCount", 0)
+                val guestNames = data.getStringArrayListExtra("guestNames") ?: arrayListOf()
+
+                switchToDineIn(tableId, tableName, guestCount, guestNames)
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,6 +99,8 @@ class OrderDetailActivity : AppCompatActivity() {
         btnVoid = findViewById(R.id.btnVoid)
         btnRefund = findViewById(R.id.btnRefund)
         btnEmailReceipt = findViewById(R.id.btnEmailReceipt)
+        txtAddCustomer = findViewById(R.id.txtAddCustomer)
+        txtOrderType = findViewById(R.id.txtOrderType)
         orderSummaryContainer = findViewById(R.id.orderSummaryContainer)
         txtSubtotal = findViewById(R.id.txtSubtotal)
         txtOrderTotal = findViewById(R.id.txtOrderTotal)
@@ -166,14 +186,22 @@ class OrderDetailActivity : AppCompatActivity() {
                 if (customerName.isNotBlank()) {
                     txtHeaderCustomer.text = "Customer: $customerName"
                     txtHeaderCustomer.visibility = View.VISIBLE
+                    txtAddCustomer.visibility = View.GONE
                 } else {
                     txtHeaderCustomer.visibility = View.GONE
+                    if (status == "OPEN") {
+                        txtAddCustomer.visibility = View.VISIBLE
+                        txtAddCustomer.setOnClickListener { showAddCustomerDialog() }
+                    } else {
+                        txtAddCustomer.visibility = View.GONE
+                    }
                 }
 
                 currentBatchId = doc.getString("batchId")
                 orderType = doc.getString("orderType") ?: ""
 
                 displayOrderSummary(doc)
+                updateOrderTypeBadge(status)
 
                 if (status == "OPEN") {
                     btnCheckout.visibility = View.VISIBLE
@@ -227,6 +255,68 @@ class OrderDetailActivity : AppCompatActivity() {
             }
     }
 
+    private fun showAddCustomerDialog() {
+        CustomerDialogHelper.showCustomerDialog(this) { info ->
+            val updates = hashMapOf<String, Any>(
+                "customerName" to info.name,
+                "customerPhone" to info.phone,
+                "customerEmail" to info.email,
+                "updatedAt" to Date()
+            )
+            if (info.id != null) {
+                updates["customerId"] = info.id
+            }
+
+            db.collection("Orders").document(orderId)
+                .update(updates as Map<String, Any>)
+                .addOnSuccessListener {
+                    txtHeaderCustomer.text = "Customer: ${info.name}"
+                    txtHeaderCustomer.visibility = View.VISIBLE
+                    txtAddCustomer.visibility = View.GONE
+                    saveCustomerToFirestoreIfNew(info)
+                }
+                .addOnFailureListener {
+                    Toast.makeText(this, "Failed to save: ${it.message}", Toast.LENGTH_SHORT).show()
+                }
+        }
+    }
+
+    private fun saveCustomerToFirestoreIfNew(info: CustomerDialogHelper.CustomerInfo) {
+        if (info.id != null) return
+
+        CustomerDuplicateChecker.checkExists(db, info.name, info.email, info.phone) { exists ->
+            if (exists) {
+                resolveCustomerId(info.name, info.email)
+            } else {
+                val customer = hashMapOf<String, Any>(
+                    "name" to info.name,
+                    "phone" to info.phone,
+                    "email" to info.email
+                )
+                db.collection("Customers")
+                    .add(customer)
+                    .addOnSuccessListener { docRef ->
+                        db.collection("Orders").document(orderId)
+                            .update("customerId", docRef.id)
+                    }
+            }
+        }
+    }
+
+    private fun resolveCustomerId(name: String, email: String) {
+        db.collection("Customers")
+            .whereEqualTo("name", name)
+            .limit(1)
+            .get()
+            .addOnSuccessListener { snap ->
+                val doc = snap.documents.firstOrNull()
+                if (doc != null) {
+                    db.collection("Orders").document(orderId)
+                        .update("customerId", doc.id)
+                }
+            }
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun displayOrderSummary(orderDoc: DocumentSnapshot) {
         val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
@@ -234,9 +324,35 @@ class OrderDetailActivity : AppCompatActivity() {
 
         if (totalInCents <= 0L) {
             orderSummaryContainer.visibility = View.GONE
+            recomputeAndRefreshSummary()
             return
         }
 
+        renderSummary(totalInCents, taxBreakdown)
+    }
+
+    private fun recomputeAndRefreshSummary() {
+        orderEngine.recomputeOrderTotals(
+            orderId = orderId,
+            onSuccess = {
+                db.collection("Orders").document(orderId).get()
+                    .addOnSuccessListener { doc ->
+                        if (doc.exists()) {
+                            val totalInCents = doc.getLong("totalInCents") ?: 0L
+                            @Suppress("UNCHECKED_CAST")
+                            val taxBreakdown = doc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
+                            if (totalInCents > 0L) {
+                                renderSummary(totalInCents, taxBreakdown)
+                            }
+                        }
+                    }
+            },
+            onFailure = { }
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun renderSummary(totalInCents: Long, taxBreakdown: List<Map<String, Any>>) {
         var taxTotalCents = 0L
         taxBreakdownContainer.removeAllViews()
 
@@ -395,40 +511,145 @@ class OrderDetailActivity : AppCompatActivity() {
     // LOAD ITEMS
     // ===============================
 
-    private fun loadItems() {
+    private fun updateOrderTypeBadge(status: String) {
+        if (orderType != "TO_GO" && orderType != "DINE_IN") {
+            txtOrderType.visibility = View.GONE
+            return
+        }
+
+        txtOrderType.visibility = View.VISIBLE
+        val label = if (orderType == "TO_GO") "TO-GO" else "DINE IN"
+        val bgColor = if (orderType == "TO_GO") "#FF9800" else "#4CAF50"
+
+        txtOrderType.text = if (status == "OPEN") "$label  ✎" else label
+        txtOrderType.setTextColor(android.graphics.Color.WHITE)
+
+        val bg = android.graphics.drawable.GradientDrawable()
+        bg.setColor(android.graphics.Color.parseColor(bgColor))
+        bg.cornerRadius = 16f
+        txtOrderType.background = bg
+
+        if (status == "OPEN") {
+            txtOrderType.setOnClickListener { showSwitchOrderTypeDialog() }
+        } else {
+            txtOrderType.setOnClickListener(null)
+            txtOrderType.isClickable = false
+        }
+    }
+
+    private fun showSwitchOrderTypeDialog() {
+        if (orderType == "TO_GO") {
+            AlertDialog.Builder(this)
+                .setTitle("Switch to Dine In")
+                .setMessage("Select a table for this order?")
+                .setPositiveButton("Yes") { _, _ ->
+                    val intent = Intent(this, TableSelectionActivity::class.java)
+                    intent.putExtra("SELECT_TABLE_ONLY", true)
+                    tableSelectLauncher.launch(intent)
+                }
+                .setNegativeButton("No", null)
+                .show()
+        } else {
+            AlertDialog.Builder(this)
+                .setTitle("Switch to To Go")
+                .setMessage("Change this order to To Go?")
+                .setPositiveButton("Yes") { _, _ ->
+                    switchToToGo()
+                }
+                .setNegativeButton("No", null)
+                .show()
+        }
+    }
+
+    private fun switchToDineIn(tableId: String, tableName: String, guestCount: Int, guestNames: List<String>) {
+        val updates = mutableMapOf<String, Any>(
+            "orderType" to "DINE_IN",
+            "updatedAt" to Date()
+        )
+        if (tableId.isNotBlank()) updates["tableId"] = tableId
+        if (tableName.isNotBlank()) updates["tableName"] = tableName
+        if (guestCount > 0) updates["guestCount"] = guestCount
+        if (guestNames.isNotEmpty()) updates["guestNames"] = guestNames
+
         db.collection("Orders").document(orderId)
-            .collection("items")
-            .get()
-            .addOnSuccessListener { docs ->
-                itemDocs.clear()
-                itemDocs.addAll(docs.documents)
+            .update(updates)
+            .addOnSuccessListener {
+                orderType = "DINE_IN"
+                updateOrderTypeBadge("OPEN")
+                Toast.makeText(this, "Switched to Dine In – $tableName", Toast.LENGTH_SHORT).show()
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+    }
 
-                listItems.clear()
+    private fun switchToToGo() {
+        val updates = mapOf<String, Any>(
+            "orderType" to "TO_GO",
+            "tableId" to FieldValue.delete(),
+            "tableName" to FieldValue.delete(),
+            "guestCount" to FieldValue.delete(),
+            "guestNames" to FieldValue.delete(),
+            "updatedAt" to Date()
+        )
 
-                val hasGuests = orderType == "DINE_IN" &&
-                    itemDocs.any { (it.getLong("guestNumber") ?: 0L) > 0L }
+        db.collection("Orders").document(orderId)
+            .update(updates)
+            .addOnSuccessListener {
+                orderType = "TO_GO"
+                updateOrderTypeBadge("OPEN")
+                Toast.makeText(this, "Switched to To Go", Toast.LENGTH_SHORT).show()
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+    }
 
-                if (hasGuests) {
-                    val grouped = itemDocs.groupBy { (it.getLong("guestNumber") ?: 0L).toInt() }
-                    for (guestNum in grouped.keys.sorted()) {
-                        if (guestNum > 0) {
-                            listItems.add(OrderListItem.GuestHeader(guestNum))
+    // ===============================
+
+    private var guestNames: List<String> = emptyList()
+
+    private fun loadItems() {
+        db.collection("Orders").document(orderId).get()
+            .addOnSuccessListener { orderDoc ->
+                @Suppress("UNCHECKED_CAST")
+                guestNames = (orderDoc.get("guestNames") as? List<String>) ?: emptyList()
+
+                db.collection("Orders").document(orderId)
+                    .collection("items")
+                    .get()
+                    .addOnSuccessListener { docs ->
+                        itemDocs.clear()
+                        itemDocs.addAll(docs.documents)
+
+                        listItems.clear()
+
+                        val hasGuests = orderType == "DINE_IN" &&
+                            itemDocs.any { (it.getLong("guestNumber") ?: 0L) > 0L }
+
+                        if (hasGuests) {
+                            val grouped = itemDocs.groupBy { (it.getLong("guestNumber") ?: 0L).toInt() }
+                            for (guestNum in grouped.keys.sorted()) {
+                                if (guestNum > 0) {
+                                    val name = guestNames.getOrNull(guestNum - 1)?.takeIf { it.isNotBlank() }
+                                    listItems.add(OrderListItem.GuestHeader(guestNum, name))
+                                }
+                                grouped[guestNum]?.forEach { listItems.add(OrderListItem.Item(it)) }
+                            }
+                        } else {
+                            itemDocs.forEach { listItems.add(OrderListItem.Item(it)) }
                         }
-                        grouped[guestNum]?.forEach { listItems.add(OrderListItem.Item(it)) }
+
+                        adapter.notifyDataSetChanged()
+
+                        if (listItems.isEmpty()) {
+                            txtEmptyItems.visibility = View.VISIBLE
+                            recycler.visibility = View.GONE
+                        } else {
+                            txtEmptyItems.visibility = View.GONE
+                            recycler.visibility = View.VISIBLE
+                        }
                     }
-                } else {
-                    itemDocs.forEach { listItems.add(OrderListItem.Item(it)) }
-                }
-
-                adapter.notifyDataSetChanged()
-
-                if (listItems.isEmpty()) {
-                    txtEmptyItems.visibility = View.VISIBLE
-                    recycler.visibility = View.GONE
-                } else {
-                    txtEmptyItems.visibility = View.GONE
-                    recycler.visibility = View.VISIBLE
-                }
             }
     }
 

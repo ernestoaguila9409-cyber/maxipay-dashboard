@@ -36,9 +36,11 @@ class PaymentActivity : AppCompatActivity() {
     private lateinit var progressBar: ProgressBar
     private lateinit var txtSubStatus: TextView
     private lateinit var txtStatus: TextView
+    private lateinit var fireworksView: FireworksView
 
     private var orderId: String? = null
     private var batchId: String? = null
+    private var orderType: String = ""
     private var remainingBalance = 0.0
     private var paymentAmount = 0.0
 
@@ -66,6 +68,7 @@ class PaymentActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
         txtSubStatus = findViewById(R.id.txtSubStatus)
         txtStatus = findViewById(R.id.txtStatus)
+        fireworksView = findViewById(R.id.fireworksView)
 
         orderId = intent.getStringExtra("ORDER_ID")
         batchId = intent.getStringExtra("BATCH_ID")
@@ -111,10 +114,17 @@ class PaymentActivity : AppCompatActivity() {
     }
 
     private fun updateMixPaymentsVisibility() {
-        btnMixMode.visibility = if (MixPaymentsConfig.isEnabled(this)) View.VISIBLE else View.GONE
-        btnCredit.visibility = if (PaymentMethodsConfig.isCreditEnabled(this)) View.VISIBLE else View.GONE
-        btnDebit.visibility = if (PaymentMethodsConfig.isDebitEnabled(this)) View.VISIBLE else View.GONE
-        btnCash.visibility = if (PaymentMethodsConfig.isCashEnabled(this)) View.VISIBLE else View.GONE
+        if (orderType == "TO_GO" || orderType == "DINE_IN") {
+            btnMixMode.visibility = if (OrderTypePaymentConfig.isMixPaymentsEnabled(this, orderType)) View.VISIBLE else View.GONE
+            btnCredit.visibility = if (OrderTypePaymentConfig.isCreditEnabled(this, orderType)) View.VISIBLE else View.GONE
+            btnDebit.visibility = if (OrderTypePaymentConfig.isDebitEnabled(this, orderType)) View.VISIBLE else View.GONE
+            btnCash.visibility = if (OrderTypePaymentConfig.isCashEnabled(this, orderType)) View.VISIBLE else View.GONE
+        } else {
+            btnMixMode.visibility = if (MixPaymentsConfig.isEnabled(this)) View.VISIBLE else View.GONE
+            btnCredit.visibility = if (PaymentMethodsConfig.isCreditEnabled(this)) View.VISIBLE else View.GONE
+            btnDebit.visibility = if (PaymentMethodsConfig.isDebitEnabled(this)) View.VISIBLE else View.GONE
+            btnCash.visibility = if (PaymentMethodsConfig.isCashEnabled(this)) View.VISIBLE else View.GONE
+        }
     }
 
     /**
@@ -145,6 +155,9 @@ class PaymentActivity : AppCompatActivity() {
         db.collection("Orders").document(oid).get(Source.SERVER)
             .addOnSuccessListener { snap ->
 
+                orderType = snap.getString("orderType") ?: ""
+                updateMixPaymentsVisibility()
+
                 val remainingInCents =
                     snap.getLong("remainingInCents")
                         ?: snap.getLong("totalInCents")
@@ -166,6 +179,10 @@ class PaymentActivity : AppCompatActivity() {
             .addOnFailureListener {
                 db.collection("Orders").document(oid).get()
                     .addOnSuccessListener { snap ->
+
+                        orderType = snap.getString("orderType") ?: ""
+                        updateMixPaymentsVisibility()
+
                         val remainingInCents =
                             snap.getLong("remainingInCents")
                                 ?: snap.getLong("totalInCents")
@@ -272,17 +289,38 @@ class PaymentActivity : AppCompatActivity() {
 
     private fun showAmountDialog(paymentType: String) {
 
-        val input = EditText(this)
-        input.inputType =
-            android.text.InputType.TYPE_CLASS_NUMBER or
-                    android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        val remainingFormatted = String.format(Locale.US, "%.2f", remainingBalance)
 
-        input.hint =
-            "Enter amount (Remaining: ${String.format(Locale.US, "%.2f", remainingBalance)})"
+        val input = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                    android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            hint = "Enter amount (Remaining: $remainingFormatted)"
+        }
+
+        val btnRemaining = Button(this).apply {
+            text = "Remaining Balance: $$remainingFormatted"
+            isAllCaps = false
+            setBackgroundColor(0xFF4CAF50.toInt())
+            setTextColor(0xFFFFFFFF.toInt())
+            val dp8 = (8 * resources.displayMetrics.density).toInt()
+            setPadding(dp8, dp8, dp8, dp8)
+            setOnClickListener { input.setText(remainingFormatted) }
+        }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val dp16 = (16 * resources.displayMetrics.density).toInt()
+            setPadding(dp16, dp16, dp16, 0)
+            addView(input)
+            addView(btnRemaining, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (8 * resources.displayMetrics.density).toInt() })
+        }
 
         val dialog = AlertDialog.Builder(this)
             .setTitle("Enter Amount")
-            .setView(input)
+            .setView(container)
             .setPositiveButton("Confirm", null)
             .setNegativeButton("Cancel", null)
             .create()
@@ -460,13 +498,14 @@ class PaymentActivity : AppCompatActivity() {
             onSuccess = { remainingInCents ->
 
                 runOnUiThread {
+                    showApproved()
                     remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
                     if (remainingInCents <= 0L) {
                         splitPayAmount = -1.0
                         splitTotalCount = 0
                         splitPaymentsDone = 0
-                        onOrderFullyPaid()
+                        Handler(Looper.getMainLooper()).postDelayed({ onOrderFullyPaid() }, 2000)
                     } else {
                         txtPaymentTotal.text =
                             "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
@@ -534,7 +573,9 @@ class PaymentActivity : AppCompatActivity() {
     private fun showApproved() {
         progressBar.visibility = View.GONE
         txtStatus.text = "APPROVED ✅"
+        txtStatus.setTextColor(android.graphics.Color.parseColor("#2E7D32"))
         txtSubStatus.text = "Transaction successful"
+        fireworksView.launch()
     }
     private fun showWaitingStatus() {
         statusContainer.visibility = View.VISIBLE

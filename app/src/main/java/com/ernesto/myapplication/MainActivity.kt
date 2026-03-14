@@ -2,13 +2,16 @@ package com.ernesto.myapplication
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import android.widget.ImageButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+
 class MainActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
@@ -16,6 +19,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var txtTodayTotal: TextView
     private lateinit var txtTodayCount: TextView
 
+    private lateinit var dineInBadge: TextView
+    private lateinit var toGoBadge: TextView
+    private lateinit var barBadge: TextView
+
+    private var openOrdersListener: ListenerRegistration? = null
     private var currentBatchId: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,6 +45,11 @@ class MainActivity : AppCompatActivity() {
         txtTodayTotal = findViewById(R.id.txtTodayTotal)
         txtTodayCount = findViewById(R.id.txtTodayCount)
 
+        dineInBadge = findViewById(R.id.dineInBadge)
+        toGoBadge = findViewById(R.id.toGoBadge)
+        barBadge = findViewById(R.id.barBadge)
+
+        listenForOpenOrders()
         ensureOpenBatch()
 
         findViewById<android.view.View>(R.id.btnDineIn).setOnClickListener {
@@ -161,6 +174,44 @@ class MainActivity : AppCompatActivity() {
                         }
                 }
             }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        openOrdersListener?.remove()
+    }
+
+    private fun listenForOpenOrders() {
+        openOrdersListener = db.collection("Orders")
+            .whereEqualTo("status", "OPEN")
+            .addSnapshotListener { snapshots, _ ->
+                if (snapshots == null) return@addSnapshotListener
+
+                var dineIn = 0
+                var toGo = 0
+                var bar = 0
+
+                for (doc in snapshots) {
+                    when (doc.getString("orderType")) {
+                        "DINE_IN" -> dineIn++
+                        "TO_GO" -> toGo++
+                        "BAR", "BAR_TAB" -> bar++
+                    }
+                }
+
+                updateBadge(dineInBadge, dineIn)
+                updateBadge(toGoBadge, toGo)
+                updateBadge(barBadge, bar)
+            }
+    }
+
+    private fun updateBadge(badge: TextView, count: Int) {
+        if (count > 0) {
+            badge.text = count.toString()
+            badge.visibility = View.VISIBLE
+        } else {
+            badge.visibility = View.GONE
+        }
     }
 
     private fun loadCurrentSales() {

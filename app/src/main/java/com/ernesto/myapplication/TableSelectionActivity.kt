@@ -17,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 
 class TableSelectionActivity : AppCompatActivity() {
 
@@ -30,6 +31,8 @@ class TableSelectionActivity : AppCompatActivity() {
     private val tableSeats = mutableMapOf<String, Int>()
     private val knownSections = mutableListOf<String>()
     private var selectedSection = ""
+    private val occupiedTableIds = mutableSetOf<String>()
+    private var occupiedListener: ListenerRegistration? = null
 
     private var batchId: String = ""
     private var employeeName: String = ""
@@ -57,6 +60,12 @@ class TableSelectionActivity : AppCompatActivity() {
         }
 
         loadSectionsAndTables()
+        listenForOccupiedTables()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        occupiedListener?.remove()
     }
 
     private fun rebuildSectionChips() {
@@ -136,6 +145,7 @@ class TableSelectionActivity : AppCompatActivity() {
                 }
 
                 filterTablesBySection()
+                applyOccupiedState()
 
                 if (snap.isEmpty) {
                     Toast.makeText(this, "No tables configured. Set them up in Configuration → Table Layout.", Toast.LENGTH_LONG).show()
@@ -169,7 +179,12 @@ class TableSelectionActivity : AppCompatActivity() {
         }
 
         tableView.setOnClickListener {
-            showGuestCountDialog(id)
+            if (id in occupiedTableIds) {
+                val tName = tableNames[id] ?: "This table"
+                Toast.makeText(this, "$tName is currently occupied.", Toast.LENGTH_SHORT).show()
+            } else {
+                showGuestCountDialog(id)
+            }
         }
 
         tableViews[id] = tableView
@@ -253,7 +268,42 @@ class TableSelectionActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun listenForOccupiedTables() {
+        occupiedListener = db.collection("Orders")
+            .whereEqualTo("status", "OPEN")
+            .whereEqualTo("orderType", "DINE_IN")
+            .addSnapshotListener { snap, _ ->
+                if (snap == null) return@addSnapshotListener
+                occupiedTableIds.clear()
+                for (doc in snap.documents) {
+                    val tid = doc.getString("tableId")
+                    if (!tid.isNullOrBlank()) occupiedTableIds.add(tid)
+                }
+                applyOccupiedState()
+            }
+    }
+
+    private fun applyOccupiedState() {
+        for ((id, view) in tableViews) {
+            if (view is TableShapeView) {
+                view.isOccupied = id in occupiedTableIds
+            }
+        }
+    }
+
     private fun navigateToMenu(tableId: String, tableName: String, guestCount: Int, guestNames: List<String>) {
+        if (intent.getBooleanExtra("SELECT_TABLE_ONLY", false)) {
+            val result = Intent().apply {
+                putExtra("tableId", tableId)
+                putExtra("tableName", tableName)
+                putExtra("guestCount", guestCount)
+                putStringArrayListExtra("guestNames", ArrayList(guestNames))
+            }
+            setResult(RESULT_OK, result)
+            finish()
+            return
+        }
+
         val intent = Intent(this, MenuActivity::class.java)
         intent.putExtra("batchId", batchId)
         intent.putExtra("employeeName", employeeName)

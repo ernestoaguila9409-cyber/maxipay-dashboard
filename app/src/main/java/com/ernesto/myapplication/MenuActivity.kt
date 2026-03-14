@@ -52,6 +52,7 @@ class MenuActivity : AppCompatActivity() {
     private var employeeName: String = ""
     private var orderType: String = ""
     private var currentOrderId: String? = null
+    private var isCreatingOrder = false
     private var tableId: String? = null
     private var tableName: String? = null
     private var guestCount: Int = 0
@@ -419,15 +420,29 @@ class MenuActivity : AppCompatActivity() {
     // LOAD CATEGORIES / ITEMS
     // ----------------------------
 
+    private val categoryAvailabilityMap = mutableMapOf<String, List<String>>()
+
     private fun loadCategories() {
         categoryContainer.removeAllViews()
 
-        db.collection("Categories")
-            .get()
+        val query = if (orderType.isNotBlank()) {
+            db.collection("Categories")
+                .whereArrayContains("availableOrderTypes", orderType)
+        } else {
+            db.collection("Categories")
+        }
+
+        query.get()
             .addOnSuccessListener { documents ->
+                categoryAvailabilityMap.clear()
+
                 for (doc in documents) {
                     val name = doc.getString("name") ?: continue
                     val categoryId = doc.id
+                    @Suppress("UNCHECKED_CAST")
+                    val availableOrderTypes =
+                        (doc.get("availableOrderTypes") as? List<String>) ?: emptyList()
+                    categoryAvailabilityMap[categoryId] = availableOrderTypes
 
                     val button = Button(this)
                     button.text = name
@@ -452,6 +467,8 @@ class MenuActivity : AppCompatActivity() {
         currentCategoryId = categoryId
         itemContainer.removeAllViews()
 
+        val catAvailability = categoryAvailabilityMap[categoryId] ?: emptyList()
+
         db.collection("MenuItems")
             .whereEqualTo("categoryId", categoryId)
             .get()
@@ -463,16 +480,25 @@ class MenuActivity : AppCompatActivity() {
                     val price = doc.getDouble("price") ?: 0.0
                     val stock = doc.getLong("stock") ?: 0L
 
+                    @Suppress("UNCHECKED_CAST")
+                    val itemAvailability =
+                        doc.get("availableOrderTypes") as? List<String>
+
+                    if (orderType.isNotBlank()) {
+                        val effectiveTypes = itemAvailability ?: catAvailability
+                        if (effectiveTypes.isNotEmpty() && !effectiveTypes.contains(orderType)) {
+                            continue
+                        }
+                    }
+
                     val button = Button(this)
 
                     if (stock <= 0) {
-                        // 🔴 OUT OF STOCK STYLE
                         button.text = "$name\n$${String.format(Locale.US, "%.2f", price)}\nOUT OF STOCK"
                         button.setBackgroundColor(Color.LTGRAY)
                         button.setTextColor(Color.DKGRAY)
                         button.isEnabled = false
                     } else {
-                        // 🟣 NORMAL STYLE
                         button.text = "$name\n$${String.format(Locale.US, "%.2f", price)}\nStock: $stock"
                         button.setTextColor(Color.WHITE)
                         button.setBackgroundColor(Color.parseColor("#6A4FB3"))
@@ -721,6 +747,15 @@ class MenuActivity : AppCompatActivity() {
         modifiers: List<Pair<String, Double>>
     ) {
 
+        if (currentOrderId == null && isCreatingOrder) {
+            Toast.makeText(this, "Creating order, please wait…", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (currentOrderId == null) {
+            isCreatingOrder = true
+        }
+
         orderEngine.ensureOrder(
             currentOrderId = currentOrderId,
             employeeName = employeeName,
@@ -735,6 +770,7 @@ class MenuActivity : AppCompatActivity() {
             customerEmail = customerEmail,
             onSuccess = { oid ->
 
+                isCreatingOrder = false
                 currentOrderId = oid
 
                 val guest = selectedGuest
@@ -789,6 +825,7 @@ class MenuActivity : AppCompatActivity() {
                 )
             },
             onFailure = {
+                isCreatingOrder = false
                 Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
             }
         )
@@ -914,7 +951,23 @@ class MenuActivity : AppCompatActivity() {
         }
 
         txtTotal.text = "Total: ${MoneyUtils.centsToDisplay((totalAmount * 100).toLong())}"
+
+        syncOrderTotal()
     }
+
+    private fun syncOrderTotal() {
+        val oid = currentOrderId ?: return
+        val totalInCents = Math.round(totalAmount * 100)
+        db.collection("Orders").document(oid)
+            .update(
+                mapOf(
+                    "totalInCents" to totalInCents,
+                    "remainingInCents" to totalInCents,
+                    "updatedAt" to Date()
+                )
+            )
+    }
+
     private fun buildCartItemView(lineKey: String, item: CartItem): View {
         val itemLayout = LinearLayout(this)
         itemLayout.orientation = LinearLayout.VERTICAL
@@ -1083,6 +1136,7 @@ class MenuActivity : AppCompatActivity() {
     private fun clearCart() {
         cartMap.clear()
         totalAmount = 0.0
+        isCreatingOrder = false
         customerId = null
         customerName = null
         customerPhone = null

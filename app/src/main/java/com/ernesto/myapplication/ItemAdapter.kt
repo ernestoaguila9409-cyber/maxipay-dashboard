@@ -1,25 +1,36 @@
 package com.ernesto.myapplication
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.FirebaseFirestore
-import android.content.Intent
+
 class ItemAdapter(
     private val context: Context,
     private val itemList: List<ItemModel>,
+    private val categoryAvailability: List<String> = emptyList(),
     private val refresh: () -> Unit
 ) : RecyclerView.Adapter<ItemAdapter.ViewHolder>() {
 
     private val db = FirebaseFirestore.getInstance()
+
+    private val orderTypeShortLabels = mapOf(
+        "BAR_TAB" to "BAR",
+        "TO_GO" to "TO GO",
+        "DINE_IN" to "DINE IN"
+    )
 
     inner class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val txtItemName: TextView = view.findViewById(R.id.txtItemName)
@@ -40,19 +51,13 @@ class ItemAdapter(
         holder.txtItemName.text =
             "${item.name}  |  $${String.format("%.2f", item.price)}  |  Stock: ${item.stock}"
 
-        // ==========================
-        // STOCK COLOR LOGIC
-        // ==========================
-
         when {
             item.stock <= 0 -> {
                 holder.itemView.setBackgroundColor(Color.parseColor("#FFCDD2"))
             }
-
             item.stock <= 5 -> {
                 holder.itemView.setBackgroundColor(Color.parseColor("#FFE0B2"))
             }
-
             else -> {
                 holder.itemView.setBackgroundColor(Color.WHITE)
             }
@@ -97,8 +102,8 @@ class ItemAdapter(
 
     private fun showEditDialog(item: ItemModel) {
 
-        val layout = android.widget.LinearLayout(context)
-        layout.orientation = android.widget.LinearLayout.VERTICAL
+        val layout = LinearLayout(context)
+        layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(50, 40, 50, 10)
 
         fun createLabel(text: String): TextView {
@@ -130,6 +135,52 @@ class ItemAdapter(
         layout.addView(createLabel("Stock"))
         layout.addView(stockInput)
 
+        val divider = View(context)
+        divider.setBackgroundColor(Color.LTGRAY)
+        divider.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 2
+        ).apply { topMargin = 24; bottomMargin = 16 }
+        layout.addView(divider)
+
+        val useCategorySwitch = Switch(context)
+        useCategorySwitch.text = "Use Category Availability"
+        useCategorySwitch.isChecked = item.availableOrderTypes == null
+        layout.addView(useCategorySwitch)
+
+        val checkBoxContainer = LinearLayout(context)
+        checkBoxContainer.orientation = LinearLayout.VERTICAL
+        checkBoxContainer.setPadding(0, 16, 0, 0)
+        checkBoxContainer.visibility =
+            if (item.availableOrderTypes == null) View.GONE else View.VISIBLE
+
+        val availLabel = createLabel("Custom Availability")
+        val labelParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        labelParams.bottomMargin = 8
+        availLabel.layoutParams = labelParams
+        checkBoxContainer.addView(availLabel)
+
+        val checkBoxes = mutableMapOf<String, CheckBox>()
+        for (orderType in CategoryAdapter.ALL_ORDER_TYPES) {
+            val cb = CheckBox(context)
+            cb.text = orderTypeShortLabels[orderType] ?: orderType
+            cb.isChecked = if (item.availableOrderTypes != null) {
+                item.availableOrderTypes.contains(orderType)
+            } else {
+                categoryAvailability.contains(orderType)
+            }
+            checkBoxContainer.addView(cb)
+            checkBoxes[orderType] = cb
+        }
+
+        layout.addView(checkBoxContainer)
+
+        useCategorySwitch.setOnCheckedChangeListener { _, isChecked ->
+            checkBoxContainer.visibility = if (isChecked) View.GONE else View.VISIBLE
+        }
+
         AlertDialog.Builder(context)
             .setTitle("Edit Item")
             .setView(layout)
@@ -141,15 +192,23 @@ class ItemAdapter(
 
                 if (newName.isNotEmpty() && newPrice != null && newStock != null) {
 
+                    val updates = mutableMapOf<String, Any>(
+                        "name" to newName,
+                        "price" to newPrice,
+                        "stock" to newStock
+                    )
+
+                    if (useCategorySwitch.isChecked) {
+                        updates["availableOrderTypes"] =
+                            com.google.firebase.firestore.FieldValue.delete()
+                    } else {
+                        updates["availableOrderTypes"] =
+                            checkBoxes.filter { it.value.isChecked }.keys.toList()
+                    }
+
                     db.collection("MenuItems")
                         .document(item.id)
-                        .update(
-                            mapOf(
-                                "name" to newName,
-                                "price" to newPrice,
-                                "stock" to newStock
-                            )
-                        )
+                        .update(updates)
                         .addOnSuccessListener {
                             Toast.makeText(context, "Updated", Toast.LENGTH_SHORT).show()
                             refresh()

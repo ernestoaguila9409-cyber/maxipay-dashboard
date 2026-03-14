@@ -51,8 +51,11 @@ class TransactionAdapter(
         val cardBrand = (primaryPayment?.cardBrand ?: sale.cardBrand).uppercase()
         val last4 = primaryPayment?.last4 ?: sale.last4
         val isCash = paymentType.equals("Cash", true)
+        val isMix = sale.payments.size > 1 &&
+                sale.payments.any { it.paymentType.equals("Cash", true) } &&
+                sale.payments.any { !it.paymentType.equals("Cash", true) }
 
-        bindTypeHeader(holder, isCash, cardBrand, isRefund, isPreAuth, isPostAuth)
+        bindTypeHeader(holder, isCash, isMix, cardBrand, isRefund, isPreAuth, isPostAuth)
         bindPaymentMethod(holder, sale, isCash, cardBrand, last4)
         bindAmount(holder, sale, refunds, isRefund)
         bindOrderNumber(holder, sale)
@@ -67,7 +70,7 @@ class TransactionAdapter(
     override fun getItemCount(): Int = transactions.size
 
     private fun bindTypeHeader(
-        holder: VH, isCash: Boolean, cardBrand: String,
+        holder: VH, isCash: Boolean, isMix: Boolean, cardBrand: String,
         isRefund: Boolean, isPreAuth: Boolean, isPostAuth: Boolean
     ) {
         when {
@@ -82,6 +85,10 @@ class TransactionAdapter(
             isPostAuth -> {
                 holder.txtPaymentIcon.text = "💳"
                 holder.txtTransactionType.text = "CAPTURE"
+            }
+            isMix -> {
+                holder.txtPaymentIcon.text = "💵💳"
+                holder.txtTransactionType.text = "MIX PAYMENT"
             }
             isCash -> {
                 holder.txtPaymentIcon.text = "💵"

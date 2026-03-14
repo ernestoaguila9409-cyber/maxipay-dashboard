@@ -1,10 +1,16 @@
 package com.ernesto.myapplication
 
+import android.content.ClipData
+import android.content.ClipDescription
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.view.DragEvent
 import android.view.Gravity
+import android.view.View
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -25,14 +31,15 @@ class SplitPaymentActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
 
-    // Split-by-items state
-    private data class OrderLineItem(val lineKey: String, val name: String, val quantity: Int, val lineTotalInCents: Long)
+    private data class OrderLineItem(val lineKey: String, val name: String, val quantity: Int, val lineTotalInCents: Long, val guestNumber: Int)
     private var orderItems = emptyList<OrderLineItem>()
     private var totalRemainingInCents = 0L
     private var currentPerson = 1
     private var assignedLineKeys = mutableSetOf<String>()
     private var personAmountsInCents = mutableListOf<Long>()
     private var byItemsMode = false
+    private var guestNames: List<String> = emptyList()
+    private val itemGuestAssignment = mutableMapOf<String, Int>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,6 +64,11 @@ class SplitPaymentActivity : AppCompatActivity() {
         }
     }
 
+    private fun getPersonLabel(personIndex: Int): String {
+        val name = guestNames.getOrNull(personIndex)?.takeIf { it.isNotBlank() }
+        return name ?: "Person ${personIndex + 1}"
+    }
+
     private fun startSplitByItems() {
         val oid = orderId
         if (oid == null || oid.isBlank()) {
@@ -67,38 +79,67 @@ class SplitPaymentActivity : AppCompatActivity() {
             Toast.makeText(this, "No remaining balance to split", Toast.LENGTH_SHORT).show()
             return
         }
-        db.collection("Orders").document(oid).collection("items")
-            .get()
-            .addOnSuccessListener { snap ->
-                val items = snap.documents.mapNotNull { doc ->
-                    val name = doc.getString("name") ?: return@mapNotNull null
-                    val qty = (doc.getLong("quantity") ?: 1L).toInt()
-                    val lineTotalInCents = doc.getLong("lineTotalInCents") ?: 0L
-                    if (lineTotalInCents <= 0L) return@mapNotNull null
-                    OrderLineItem(doc.id, name, qty, lineTotalInCents)
-                }
-                if (items.isEmpty()) {
-                    Toast.makeText(this, "Order has no items", Toast.LENGTH_SHORT).show()
-                    return@addOnSuccessListener
-                }
-                orderItems = items
-                totalRemainingInCents = (remainingBalance * 100).toLong()
-                currentPerson = 1
-                assignedLineKeys.clear()
-                personAmountsInCents.clear()
-                byItemsMode = true
-                setContentView(R.layout.activity_split_by_items)
-                supportActionBar?.title = "Split by items"
-                setupSplitByItemsListeners()
-                buildPersonStep()
+        db.collection("Orders").document(oid).get()
+            .addOnSuccessListener { orderDoc ->
+                @Suppress("UNCHECKED_CAST")
+                guestNames = (orderDoc.get("guestNames") as? List<String>) ?: emptyList()
+                val guestCount = (orderDoc.getLong("guestCount") ?: 0L).toInt()
+
+                db.collection("Orders").document(oid).collection("items")
+                    .get()
+                    .addOnSuccessListener { snap ->
+                        val items = snap.documents.mapNotNull { doc ->
+                            val name = doc.getString("name") ?: return@mapNotNull null
+                            val qty = (doc.getLong("quantity") ?: 1L).toInt()
+                            val lineTotalInCents = doc.getLong("lineTotalInCents") ?: 0L
+                            val guestNum = (doc.getLong("guestNumber") ?: 0L).toInt()
+                            if (lineTotalInCents <= 0L) return@mapNotNull null
+                            OrderLineItem(doc.id, name, qty, lineTotalInCents, guestNum)
+                        }
+                        if (items.isEmpty()) {
+                            Toast.makeText(this, "Order has no items", Toast.LENGTH_SHORT).show()
+                            return@addOnSuccessListener
+                        }
+                        orderItems = items
+                        totalRemainingInCents = (remainingBalance * 100).toLong()
+
+                        itemGuestAssignment.clear()
+                        val hasGuests = items.any { it.guestNumber > 0 }
+                        if (hasGuests) {
+                            for (item in items) {
+                                itemGuestAssignment[item.lineKey] = (item.guestNumber - 1).coerceAtLeast(0)
+                            }
+                        } else {
+                            for (item in items) {
+                                itemGuestAssignment[item.lineKey] = 0
+                            }
+                        }
+
+                        val maxGuestFromItems = items.maxOf { it.guestNumber }
+                        val totalGuests = maxOf(maxGuestFromItems, guestCount, guestNames.size, 1)
+                        if (guestNames.size < totalGuests) {
+                            val padded = guestNames.toMutableList()
+                            while (padded.size < totalGuests) padded.add("")
+                            guestNames = padded
+                        }
+
+                        byItemsMode = true
+                        setContentView(R.layout.activity_split_by_items)
+                        supportActionBar?.title = "Split by items"
+                        setupSplitByItemsListeners()
+                        buildSplitView()
+                    }
+                    .addOnFailureListener {
+                        Toast.makeText(this, "Failed to load order items", Toast.LENGTH_SHORT).show()
+                    }
             }
             .addOnFailureListener {
-                Toast.makeText(this, "Failed to load order items", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Failed to load order", Toast.LENGTH_SHORT).show()
             }
     }
 
     private fun setupSplitByItemsListeners() {
-        findViewById<Button>(R.id.btnDonePerson).setOnClickListener { onDoneWithPerson() }
+        findViewById<Button>(R.id.btnDonePerson).setOnClickListener { onDoneWithSplitting() }
         findViewById<Button>(R.id.btnSplitByItemsCancel).setOnClickListener {
             byItemsMode = false
             setContentView(R.layout.activity_split_payment)
@@ -109,113 +150,220 @@ class SplitPaymentActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildPersonStep() {
-        val txtPersonStep = findViewById<TextView>(R.id.txtPersonStep)
-        val txtRemaining = findViewById<TextView>(R.id.txtRemaining)
+    private fun buildSplitView() {
         val itemsContainer = findViewById<LinearLayout>(R.id.itemsContainer)
-        val btnDone = findViewById<Button>(R.id.btnDonePerson)
-
-        txtPersonStep.text = "Person $currentPerson – Select items to pay"
-        txtRemaining.text = "Remaining: ${MoneyUtils.centsToDisplay(totalRemainingInCents)}"
-
         itemsContainer.removeAllViews()
-        val unassigned = orderItems.filter { it.lineKey !in assignedLineKeys }
-        for (item in unassigned) {
-            val row = LinearLayout(this).apply {
+
+        val guestCount = guestNames.size.coerceAtLeast(1)
+
+        for (guestIdx in 0 until guestCount) {
+            val itemsForGuest = orderItems.filter { (itemGuestAssignment[it.lineKey] ?: 0) == guestIdx }
+            val guestTotal = itemsForGuest.sumOf { it.lineTotalInCents }
+
+            val sectionLayout = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, 0, 0, 16)
+                tag = "guest_section_$guestIdx"
+            }
+
+            val headerBg = GradientDrawable().apply {
+                setColor(Color.parseColor("#6A4FB3"))
+                cornerRadius = 20f
+            }
+            val headerRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                setPadding(0, 12, 0, 12)
+                background = headerBg
+                setPadding(32, 20, 32, 20)
                 gravity = Gravity.CENTER_VERTICAL
-            }
-            val cb = CheckBox(this).apply {
-                tag = item.lineKey
                 layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                )
+                ).apply { bottomMargin = 8 }
+                tag = "guest_header_$guestIdx"
             }
-            val label = TextView(this).apply {
-                text = "${item.name} (Qty: ${item.quantity})"
-                setPadding(16, 0, 16, 0)
+            val headerLabel = TextView(this).apply {
+                text = getPersonLabel(guestIdx)
+                setTextColor(Color.WHITE)
+                textSize = 15f
+                setTypeface(null, Typeface.BOLD)
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
-            val price = TextView(this).apply {
-                text = MoneyUtils.centsToDisplay(item.lineTotalInCents)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
+            val headerTotal = TextView(this).apply {
+                text = MoneyUtils.centsToDisplay(guestTotal)
+                setTextColor(Color.WHITE)
+                textSize = 15f
+                setTypeface(null, Typeface.BOLD)
             }
-            row.addView(cb)
-            row.addView(label)
-            row.addView(price)
-            itemsContainer.addView(row)
+            headerRow.addView(headerLabel)
+            headerRow.addView(headerTotal)
+            sectionLayout.addView(headerRow)
+
+            val dropZone = sectionLayout
+            dropZone.setOnDragListener { v, event ->
+                when (event.action) {
+                    DragEvent.ACTION_DRAG_ENTERED -> {
+                        val hdr = v.findViewWithTag<View>("guest_header_$guestIdx")
+                        hdr?.let {
+                            val bg = GradientDrawable().apply {
+                                setColor(Color.parseColor("#9575CD"))
+                                cornerRadius = 20f
+                            }
+                            it.background = bg
+                        }
+                        true
+                    }
+                    DragEvent.ACTION_DRAG_EXITED -> {
+                        val hdr = v.findViewWithTag<View>("guest_header_$guestIdx")
+                        hdr?.let {
+                            val bg = GradientDrawable().apply {
+                                setColor(Color.parseColor("#6A4FB3"))
+                                cornerRadius = 20f
+                            }
+                            it.background = bg
+                        }
+                        true
+                    }
+                    DragEvent.ACTION_DROP -> {
+                        val lineKey = event.clipData?.getItemAt(0)?.text?.toString() ?: return@setOnDragListener false
+                        val currentGuest = itemGuestAssignment[lineKey] ?: 0
+                        if (currentGuest != guestIdx) {
+                            itemGuestAssignment[lineKey] = guestIdx
+                            buildSplitView()
+                        }
+                        true
+                    }
+                    DragEvent.ACTION_DRAG_ENDED -> {
+                        val hdr = v.findViewWithTag<View>("guest_header_$guestIdx")
+                        hdr?.let {
+                            val bg = GradientDrawable().apply {
+                                setColor(Color.parseColor("#6A4FB3"))
+                                cornerRadius = 20f
+                            }
+                            it.background = bg
+                        }
+                        true
+                    }
+                    else -> true
+                }
+            }
+
+            for (item in itemsForGuest) {
+                val itemCard = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(32, 20, 32, 20)
+                    gravity = Gravity.CENTER_VERTICAL
+                    val bg = GradientDrawable().apply {
+                        setColor(Color.WHITE)
+                        cornerRadius = 16f
+                        setStroke(1, Color.parseColor("#E0E0E0"))
+                    }
+                    background = bg
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        bottomMargin = 6
+                        marginStart = 8
+                        marginEnd = 8
+                    }
+                }
+
+                val dragHandle = TextView(this).apply {
+                    text = "☰"
+                    textSize = 18f
+                    setTextColor(Color.parseColor("#AAAAAA"))
+                    setPadding(0, 0, 24, 0)
+                }
+
+                val label = TextView(this).apply {
+                    text = "${item.name} (Qty: ${item.quantity})"
+                    textSize = 14f
+                    setTextColor(Color.parseColor("#333333"))
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                }
+                val price = TextView(this).apply {
+                    text = MoneyUtils.centsToDisplay(item.lineTotalInCents)
+                    textSize = 14f
+                    setTextColor(Color.parseColor("#333333"))
+                }
+
+                itemCard.addView(dragHandle)
+                itemCard.addView(label)
+                itemCard.addView(price)
+
+                itemCard.setOnLongClickListener { view ->
+                    val clipData = ClipData.newPlainText("lineKey", item.lineKey)
+                    val shadow = View.DragShadowBuilder(view)
+                    view.startDragAndDrop(clipData, shadow, null, 0)
+                    true
+                }
+
+                sectionLayout.addView(itemCard)
+            }
+
+            if (itemsForGuest.isEmpty()) {
+                val emptyHint = TextView(this).apply {
+                    text = "Drop items here"
+                    textSize = 13f
+                    setTextColor(Color.parseColor("#AAAAAA"))
+                    gravity = Gravity.CENTER
+                    setPadding(0, 24, 0, 24)
+                }
+                sectionLayout.addView(emptyHint)
+            }
+
+            itemsContainer.addView(sectionLayout)
         }
-        btnDone.isEnabled = true
-        btnDone.visibility = android.view.View.VISIBLE
     }
 
-    private fun onDoneWithPerson() {
-        val itemsContainer = findViewById<LinearLayout>(R.id.itemsContainer)
-        var selectedCents = 0L
-        val selectedKeys = mutableListOf<String>()
-        for (i in 0 until itemsContainer.childCount) {
-            val row = itemsContainer.getChildAt(i) as? LinearLayout ?: continue
-            val cb = row.getChildAt(0) as? CheckBox ?: continue
-            if (cb.isChecked) {
-                val lineKey = cb.tag as? String ?: continue
-                val item = orderItems.find { it.lineKey == lineKey } ?: continue
-                selectedCents += item.lineTotalInCents
-                selectedKeys.add(lineKey)
+    private fun onDoneWithSplitting() {
+        personAmountsInCents.clear()
+        val guestCount = guestNames.size.coerceAtLeast(1)
+        val guestsWithItems = mutableListOf<Pair<Int, Long>>()
+
+        for (guestIdx in 0 until guestCount) {
+            val items = orderItems.filter { (itemGuestAssignment[it.lineKey] ?: 0) == guestIdx }
+            val total = items.sumOf { it.lineTotalInCents }
+            if (total > 0L) {
+                guestsWithItems.add(guestIdx to total)
+                personAmountsInCents.add(total)
             }
         }
-        if (selectedKeys.isEmpty()) {
-            Toast.makeText(this, "Select at least one item", Toast.LENGTH_SHORT).show()
+
+        if (guestsWithItems.isEmpty()) {
+            Toast.makeText(this, "No items to pay", Toast.LENGTH_SHORT).show()
             return
         }
-        assignedLineKeys.addAll(selectedKeys)
-        personAmountsInCents.add(selectedCents)
-        totalRemainingInCents -= selectedCents
-        if (totalRemainingInCents <= 0L) {
-            showAllAssignedAndPay()
-            return
-        }
-        currentPerson++
-        buildPersonStep()
-    }
 
-    private fun showAllAssignedAndPay() {
-        val txtPersonStep = findViewById<TextView>(R.id.txtPersonStep)
-        val txtRemaining = findViewById<TextView>(R.id.txtRemaining)
-        val itemsContainer = findViewById<LinearLayout>(R.id.itemsContainer)
-        val btnDone = findViewById<Button>(R.id.btnDonePerson)
-
-        txtPersonStep.text = "All assigned"
-        txtRemaining.text = "Remaining: $0.00"
-        itemsContainer.removeAllViews()
-        btnDone.visibility = android.view.View.GONE
-
-        val firstShareCents = personAmountsInCents.firstOrNull() ?: 0L
+        val firstGuestIdx = guestsWithItems.first().first
+        val firstShareCents = guestsWithItems.first().second
         val firstShareDollars = firstShareCents / 100.0
+
+        if (guestsWithItems.size == 1) {
+            AlertDialog.Builder(this)
+                .setTitle("Pay Full Bill")
+                .setMessage("${getPersonLabel(firstGuestIdx)} pays ${MoneyUtils.centsToDisplay(firstShareCents)}")
+                .setPositiveButton("Pay Now") { _, _ ->
+                    goToPayOneShare(firstShareDollars, 1)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+
         val msg = buildString {
-            personAmountsInCents.forEachIndexed { index, cents ->
-                append("Person ${index + 1} pays ${MoneyUtils.centsToDisplay(cents)}\n")
+            for ((idx, cents) in guestsWithItems) {
+                append("${getPersonLabel(idx)} pays ${MoneyUtils.centsToDisplay(cents)}\n")
             }
             append("\nPay first share now?")
         }
         AlertDialog.Builder(this)
             .setTitle("Split complete")
             .setMessage(msg)
-            .setPositiveButton("Pay Person 1's share") { _, _ ->
-                goToPayOneShare(firstShareDollars, personAmountsInCents.size)
+            .setPositiveButton("Pay ${getPersonLabel(firstGuestIdx)}'s share") { _, _ ->
+                goToPayOneShare(firstShareDollars, guestsWithItems.size)
             }
-            .setNegativeButton("Cancel") { _, _ ->
-                byItemsMode = false
-                setContentView(R.layout.activity_split_payment)
-                supportActionBar?.title = "Split Payments"
-                findViewById<Button>(R.id.btnSplitEvenly).setOnClickListener { showSplitNumberDialog() }
-                findViewById<Button>(R.id.btnByItems).setOnClickListener { startSplitByItems() }
-                findViewById<Button>(R.id.btnCancel).setOnClickListener { finish() }
-            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
