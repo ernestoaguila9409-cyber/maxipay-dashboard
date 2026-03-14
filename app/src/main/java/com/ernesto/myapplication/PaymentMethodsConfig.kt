@@ -32,4 +32,13 @@ object PaymentMethodsConfig {
     fun setCashEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_CASH_ENABLED, enabled).apply()
     }
+
+    private const val KEY_SPLIT_ENABLED = "payment_split_enabled"
+
+    fun isSplitPaymentsEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SPLIT_ENABLED, true)
+
+    fun setSplitPaymentsEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SPLIT_ENABLED, enabled).apply()
+    }
 }

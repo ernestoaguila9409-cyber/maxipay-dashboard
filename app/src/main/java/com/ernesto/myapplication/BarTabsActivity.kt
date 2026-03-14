@@ -1,9 +1,13 @@
 package com.ernesto.myapplication
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
+import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -163,16 +167,89 @@ class BarTabsActivity : AppCompatActivity() {
         adapter.submit(seatList)
     }
 
+    private data class SavedCustomer(
+        val id: String,
+        val name: String,
+        val phone: String,
+        val email: String
+    ) {
+        override fun toString(): String = name
+    }
+
     private fun showSeatOrderDialog(seat: BarSeat) {
         val dialogView = LayoutInflater.from(this)
             .inflate(R.layout.dialog_bar_seat_order, null)
 
         val txtSeatName = dialogView.findViewById<TextView>(R.id.txtSeatName)
+        val etSearchCustomer = dialogView.findViewById<AutoCompleteTextView>(R.id.etSearchCustomer)
         val etCustomerName = dialogView.findViewById<EditText>(R.id.etCustomerName)
         val etCustomerPhone = dialogView.findViewById<EditText>(R.id.etCustomerPhone)
         val etCustomerEmail = dialogView.findViewById<EditText>(R.id.etCustomerEmail)
 
         txtSeatName.text = seat.seatName
+
+        var selectedCustomerId: String? = null
+
+        val allCustomers = mutableListOf<SavedCustomer>()
+        val customerAdapter = object : ArrayAdapter<SavedCustomer>(
+            this,
+            android.R.layout.simple_list_item_1,
+            allCustomers
+        ) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val view = super.getView(position, convertView, parent) as TextView
+                val customer = getItem(position) ?: return view
+                val display = buildString {
+                    append(customer.name)
+                    if (customer.phone.isNotBlank()) append("  •  ${customer.phone}")
+                }
+                view.text = display
+                view.setTextColor(Color.BLACK)
+                view.textSize = 14f
+                view.setPadding(48, 24, 48, 24)
+                return view
+            }
+        }
+        etSearchCustomer.setAdapter(customerAdapter)
+
+        etSearchCustomer.setOnItemClickListener { _, _, position, _ ->
+            val selected = customerAdapter.getItem(position) ?: return@setOnItemClickListener
+            selectedCustomerId = selected.id
+            etCustomerName.setText(selected.name)
+            etCustomerPhone.setText(selected.phone)
+            etCustomerEmail.setText(selected.email)
+            etSearchCustomer.setText("")
+            etSearchCustomer.clearFocus()
+            etCustomerName.requestFocus()
+        }
+
+        db.collection("Customers")
+            .get()
+            .addOnSuccessListener { snap ->
+                allCustomers.clear()
+                for (doc in snap.documents) {
+                    val firstName = (doc.getString("firstName") ?: "").trim()
+                    val lastName = (doc.getString("lastName") ?: "").trim()
+                    val nameField = (doc.getString("name") ?: "").trim()
+                    val fullName = if (firstName.isNotEmpty() || lastName.isNotEmpty()) {
+                        "$firstName $lastName".trim()
+                    } else {
+                        nameField
+                    }
+                    if (fullName.isBlank()) continue
+
+                    allCustomers.add(
+                        SavedCustomer(
+                            id = doc.id,
+                            name = fullName,
+                            phone = doc.getString("phone") ?: "",
+                            email = doc.getString("email") ?: ""
+                        )
+                    )
+                }
+                allCustomers.sortBy { it.name.lowercase() }
+                customerAdapter.notifyDataSetChanged()
+            }
 
         AlertDialog.Builder(this)
             .setTitle(seat.seatName)
@@ -181,10 +258,10 @@ class BarTabsActivity : AppCompatActivity() {
                 val name = etCustomerName.text.toString().trim()
                 val phone = etCustomerPhone.text.toString().trim()
                 val email = etCustomerEmail.text.toString().trim()
-                showOpenBarTabDialog(seat, name, phone, email)
+                showOpenBarTabDialog(seat, selectedCustomerId, name, phone, email)
             }
             .setNeutralButton("Skip") { _, _ ->
-                showOpenBarTabDialog(seat, "", "", "")
+                showOpenBarTabDialog(seat, null, "", "", "")
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -192,6 +269,7 @@ class BarTabsActivity : AppCompatActivity() {
 
     private fun showOpenBarTabDialog(
         seat: BarSeat,
+        customerId: String?,
         customerName: String,
         customerPhone: String,
         customerEmail: String
@@ -214,12 +292,12 @@ class BarTabsActivity : AppCompatActivity() {
 
         btnPreauthCard.setOnClickListener {
             dialog.dismiss()
-            createBarTabOrderWithPreauth(seat, customerName, customerPhone, customerEmail)
+            createBarTabOrderWithPreauth(seat, customerId, customerName, customerPhone, customerEmail)
         }
 
         btnCashTab.setOnClickListener {
             dialog.dismiss()
-            createBarTabOrderCash(seat, customerName, customerPhone, customerEmail)
+            createBarTabOrderCash(seat, customerId, customerName, customerPhone, customerEmail)
         }
 
         dialog.show()
@@ -230,12 +308,15 @@ class BarTabsActivity : AppCompatActivity() {
 
     private fun createBarTabOrderWithPreauth(
         seat: BarSeat,
+        customerId: String?,
         customerName: String,
         customerPhone: String,
         customerEmail: String
     ) {
         showPreAuthLoading("Creating tab…")
-        if (customerName.isNotBlank()) {
+        if (customerId != null) {
+            buildAndSaveBarTabOrder(seat, customerId, customerName, customerPhone, customerEmail, usePreauth = true)
+        } else if (customerName.isNotBlank()) {
             resolveCustomerIdAndCreateOrder(seat, customerName, customerPhone, customerEmail, usePreauth = true)
         } else {
             buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, usePreauth = true)
@@ -244,12 +325,15 @@ class BarTabsActivity : AppCompatActivity() {
 
     private fun createBarTabOrderCash(
         seat: BarSeat,
+        customerId: String?,
         customerName: String,
         customerPhone: String,
         customerEmail: String
     ) {
         showPreAuthLoading("Creating tab…")
-        if (customerName.isNotBlank()) {
+        if (customerId != null) {
+            buildAndSaveBarTabOrder(seat, customerId, customerName, customerPhone, customerEmail, usePreauth = false)
+        } else if (customerName.isNotBlank()) {
             resolveCustomerIdAndCreateOrder(seat, customerName, customerPhone, customerEmail, usePreauth = false)
         } else {
             buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, usePreauth = false)
@@ -268,8 +352,29 @@ class BarTabsActivity : AppCompatActivity() {
             .limit(1)
             .get()
             .addOnSuccessListener { snap ->
-                val customerId = snap.documents.firstOrNull()?.id
-                buildAndSaveBarTabOrder(seat, customerId, customerName, customerPhone, customerEmail, usePreauth)
+                val resolvedId = snap.documents.firstOrNull()?.id
+                if (resolvedId != null) {
+                    buildAndSaveBarTabOrder(seat, resolvedId, customerName, customerPhone, customerEmail, usePreauth)
+                } else {
+                    db.collection("Customers")
+                        .get()
+                        .addOnSuccessListener { allSnap ->
+                            var foundId: String? = null
+                            for (doc in allSnap.documents) {
+                                val firstName = (doc.getString("firstName") ?: "").trim()
+                                val lastName = (doc.getString("lastName") ?: "").trim()
+                                val fullName = "$firstName $lastName".trim()
+                                if (fullName.equals(customerName, ignoreCase = true)) {
+                                    foundId = doc.id
+                                    break
+                                }
+                            }
+                            buildAndSaveBarTabOrder(seat, foundId, customerName, customerPhone, customerEmail, usePreauth)
+                        }
+                        .addOnFailureListener {
+                            buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, usePreauth)
+                        }
+                }
             }
             .addOnFailureListener {
                 buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, usePreauth)

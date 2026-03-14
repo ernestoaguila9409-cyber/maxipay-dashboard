@@ -26,6 +26,12 @@ class BarTabConfigureActivity : AppCompatActivity() {
         findViewById<android.view.View>(R.id.optionSetPreAuth).setOnClickListener {
             startActivity(Intent(this, BarTabConfigActivity::class.java))
         }
+
+        findViewById<android.view.View>(R.id.optionPaymentMethods).setOnClickListener {
+            val intent = Intent(this, PaymentMethodsActivity::class.java)
+            intent.putExtra("ORDER_TYPE", "BAR_TAB")
+            startActivity(intent)
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {

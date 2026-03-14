@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#F5F5F5"
+    android:gravity="center_horizontal"
+    android:padding="32dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Add a Tip"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:textColor="#1F2937"
+        android:layout_marginBottom="8dp"/>
+
+    <TextView
+        android:id="@+id/txtTipOrderTotal"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="18sp"
+        android:textColor="#555555"
+        android:layout_marginBottom="8dp"/>
+
+    <TextView
+        android:id="@+id/txtTipBaseLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="#999999"
+        android:layout_marginBottom="24dp"/>
+
+    <LinearLayout
+        android:id="@+id/presetButtonsContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginBottom="16dp"/>
+
+    <LinearLayout
+        android:id="@+id/presetAmountsContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginBottom="24dp"/>
+
+    <Button
+        android:id="@+id/btnCustomTip"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Custom Tip Amount"
+        android:textSize="16sp"
+        android:layout_marginBottom="12dp"
+        android:visibility="gone"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+
+    <Button
+        android:id="@+id/btnNoTip"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="No Tip"
+        android:textSize="16sp"
+        android:backgroundTint="#E0E0E0"
+        android:textColor="#555555"/>
+
+</LinearLayout>

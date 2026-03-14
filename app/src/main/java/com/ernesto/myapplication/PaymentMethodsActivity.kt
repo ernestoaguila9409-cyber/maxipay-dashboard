@@ -47,6 +47,12 @@ class PaymentMethodsActivity : AppCompatActivity() {
         switchCash.setOnCheckedChangeListener { _, isChecked ->
             OrderTypePaymentConfig.setCashEnabled(this, type, isChecked)
         }
+
+        val switchSplit = findViewById<SwitchCompat>(R.id.switchSplitPayments)
+        switchSplit.isChecked = OrderTypePaymentConfig.isSplitPaymentsEnabled(this, type)
+        switchSplit.setOnCheckedChangeListener { _, isChecked ->
+            OrderTypePaymentConfig.setSplitPaymentsEnabled(this, type, isChecked)
+        }
     }
 
     private fun setupGlobalConfig() {
@@ -72,6 +78,12 @@ class PaymentMethodsActivity : AppCompatActivity() {
         switchCash.isChecked = PaymentMethodsConfig.isCashEnabled(this)
         switchCash.setOnCheckedChangeListener { _, isChecked ->
             PaymentMethodsConfig.setCashEnabled(this, isChecked)
+        }
+
+        val switchSplit = findViewById<SwitchCompat>(R.id.switchSplitPayments)
+        switchSplit.isChecked = PaymentMethodsConfig.isSplitPaymentsEnabled(this)
+        switchSplit.setOnCheckedChangeListener { _, isChecked ->
+            PaymentMethodsConfig.setSplitPaymentsEnabled(this, isChecked)
         }
     }
 

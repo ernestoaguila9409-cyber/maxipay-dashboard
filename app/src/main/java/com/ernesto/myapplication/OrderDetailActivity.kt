@@ -54,6 +54,8 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var txtSubtotal: TextView
     private lateinit var txtOrderTotal: TextView
     private lateinit var taxBreakdownContainer: LinearLayout
+    private lateinit var tipRow: LinearLayout
+    private lateinit var txtTipAmount: TextView
 
     private lateinit var adapter: OrderItemsAdapter
     private val listItems = mutableListOf<OrderListItem>()
@@ -105,6 +107,8 @@ class OrderDetailActivity : AppCompatActivity() {
         txtSubtotal = findViewById(R.id.txtSubtotal)
         txtOrderTotal = findViewById(R.id.txtOrderTotal)
         taxBreakdownContainer = findViewById(R.id.taxBreakdownContainer)
+        tipRow = findViewById(R.id.tipRow)
+        txtTipAmount = findViewById(R.id.txtTipAmount)
 
         recycler.layoutManager = LinearLayoutManager(this)
         adapter = OrderItemsAdapter(listItems) { itemDoc -> onOrderItemClick(itemDoc) }
@@ -321,6 +325,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun displayOrderSummary(orderDoc: DocumentSnapshot) {
         val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
         val taxBreakdown = orderDoc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
+        val tipAmountInCents = orderDoc.getLong("tipAmountInCents") ?: 0L
 
         if (totalInCents <= 0L) {
             orderSummaryContainer.visibility = View.GONE
@@ -328,7 +333,7 @@ class OrderDetailActivity : AppCompatActivity() {
             return
         }
 
-        renderSummary(totalInCents, taxBreakdown)
+        renderSummary(totalInCents, taxBreakdown, tipAmountInCents)
     }
 
     private fun recomputeAndRefreshSummary() {
@@ -341,8 +346,9 @@ class OrderDetailActivity : AppCompatActivity() {
                             val totalInCents = doc.getLong("totalInCents") ?: 0L
                             @Suppress("UNCHECKED_CAST")
                             val taxBreakdown = doc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
+                            val tipAmountInCents = doc.getLong("tipAmountInCents") ?: 0L
                             if (totalInCents > 0L) {
-                                renderSummary(totalInCents, taxBreakdown)
+                                renderSummary(totalInCents, taxBreakdown, tipAmountInCents)
                             }
                         }
                     }
@@ -352,7 +358,7 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun renderSummary(totalInCents: Long, taxBreakdown: List<Map<String, Any>>) {
+    private fun renderSummary(totalInCents: Long, taxBreakdown: List<Map<String, Any>>, tipAmountInCents: Long = 0L) {
         var taxTotalCents = 0L
         taxBreakdownContainer.removeAllViews()
 
@@ -388,8 +394,16 @@ class OrderDetailActivity : AppCompatActivity() {
             taxBreakdownContainer.addView(row)
         }
 
-        val subtotalCents = totalInCents - taxTotalCents
+        val subtotalCents = totalInCents - taxTotalCents - tipAmountInCents
         txtSubtotal.text = MoneyUtils.centsToDisplay(subtotalCents)
+
+        if (tipAmountInCents > 0L) {
+            tipRow.visibility = View.VISIBLE
+            txtTipAmount.text = MoneyUtils.centsToDisplay(tipAmountInCents)
+        } else {
+            tipRow.visibility = View.GONE
+        }
+
         txtOrderTotal.text = MoneyUtils.centsToDisplay(totalInCents)
         orderSummaryContainer.visibility = View.VISIBLE
     }

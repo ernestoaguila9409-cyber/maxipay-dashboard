@@ -13,7 +13,22 @@
         android:layout_height="wrap_content"
         android:textSize="16sp"
         android:textColor="#555555"
-        android:layout_marginBottom="20dp"/>
+        android:layout_marginBottom="16dp"/>
+
+    <AutoCompleteTextView
+        android:id="@+id/etSearchCustomer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Search saved customers..."
+        android:inputType="textNoSuggestions"
+        android:completionThreshold="1"
+        android:layout_marginBottom="12dp"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#CCCCCC"
+        android:layout_marginBottom="12dp"/>
 
     <EditText
         android:id="@+id/etCustomerName"

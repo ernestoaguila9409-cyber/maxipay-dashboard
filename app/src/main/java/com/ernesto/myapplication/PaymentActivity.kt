@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.*
 import android.view.View
 import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
@@ -50,6 +51,12 @@ class PaymentActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
     private lateinit var paymentEngine: PaymentEngine
+    private var tipScreenShown = false
+
+    private val tipLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            loadRemainingBalance()
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,16 +121,18 @@ class PaymentActivity : AppCompatActivity() {
     }
 
     private fun updateMixPaymentsVisibility() {
-        if (orderType == "TO_GO" || orderType == "DINE_IN") {
+        if (orderType == "TO_GO" || orderType == "DINE_IN" || orderType == "BAR_TAB") {
             btnMixMode.visibility = if (OrderTypePaymentConfig.isMixPaymentsEnabled(this, orderType)) View.VISIBLE else View.GONE
             btnCredit.visibility = if (OrderTypePaymentConfig.isCreditEnabled(this, orderType)) View.VISIBLE else View.GONE
             btnDebit.visibility = if (OrderTypePaymentConfig.isDebitEnabled(this, orderType)) View.VISIBLE else View.GONE
             btnCash.visibility = if (OrderTypePaymentConfig.isCashEnabled(this, orderType)) View.VISIBLE else View.GONE
+            btnSplitPayments.visibility = if (OrderTypePaymentConfig.isSplitPaymentsEnabled(this, orderType)) View.VISIBLE else View.GONE
         } else {
             btnMixMode.visibility = if (MixPaymentsConfig.isEnabled(this)) View.VISIBLE else View.GONE
             btnCredit.visibility = if (PaymentMethodsConfig.isCreditEnabled(this)) View.VISIBLE else View.GONE
             btnDebit.visibility = if (PaymentMethodsConfig.isDebitEnabled(this)) View.VISIBLE else View.GONE
             btnCash.visibility = if (PaymentMethodsConfig.isCashEnabled(this)) View.VISIBLE else View.GONE
+            btnSplitPayments.visibility = if (PaymentMethodsConfig.isSplitPaymentsEnabled(this)) View.VISIBLE else View.GONE
         }
     }
 
@@ -174,6 +183,7 @@ class PaymentActivity : AppCompatActivity() {
                 txtPaymentTotal.text =
                     "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
 
+                if (maybeLaunchTipScreen()) return@addOnSuccessListener
                 showSplitPayShareDialogIfNeeded()
             }
             .addOnFailureListener {
@@ -199,9 +209,24 @@ class PaymentActivity : AppCompatActivity() {
                         txtPaymentTotal.text =
                             "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
 
+                        if (maybeLaunchTipScreen()) return@addOnSuccessListener
                         showSplitPayShareDialogIfNeeded()
                     }
             }
+    }
+
+    private fun maybeLaunchTipScreen(): Boolean {
+        if (tipScreenShown) return false
+        if (!TipConfig.isTipsEnabled(this)) return false
+
+        val splitAmount = intent.getDoubleExtra("SPLIT_PAY_AMOUNT", -1.0)
+        if (splitAmount > 0) return false
+
+        tipScreenShown = true
+        val tipIntent = Intent(this, TipActivity::class.java)
+        tipIntent.putExtra("ORDER_ID", orderId)
+        tipLauncher.launch(tipIntent)
+        return true
     }
 
     private fun showSplitPayShareDialogIfNeeded() {

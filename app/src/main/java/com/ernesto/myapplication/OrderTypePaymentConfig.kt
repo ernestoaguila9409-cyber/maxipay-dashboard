@@ -39,4 +39,11 @@ object OrderTypePaymentConfig {
     fun setMixPaymentsEnabled(context: Context, orderType: String, enabled: Boolean) {
         prefs(context).edit().putBoolean(key(orderType, "mix"), enabled).apply()
     }
+
+    fun isSplitPaymentsEnabled(context: Context, orderType: String): Boolean =
+        prefs(context).getBoolean(key(orderType, "split"), true)
+
+    fun setSplitPaymentsEnabled(context: Context, orderType: String, enabled: Boolean) {
+        prefs(context).edit().putBoolean(key(orderType, "split"), enabled).apply()
+    }
 }
