@@ -184,12 +184,21 @@ class OrderItemsAdapter(
         val lines = raw.mapNotNull { item ->
             when (item) {
                 is Map<*, *> -> {
-                    val name = item["first"]?.toString() ?: return@mapNotNull null
-                    val price = (item["second"] as? Number)?.toDouble() ?: 0.0
-                    if (price > 0)
+                    val action = item["action"]?.toString() ?: "ADD"
+                    val name = item["name"]?.toString()
+                        ?: item["first"]?.toString()
+                        ?: return@mapNotNull null
+                    val price = (item["price"] as? Number)?.toDouble()
+                        ?: (item["second"] as? Number)?.toDouble()
+                        ?: 0.0
+
+                    if (action == "REMOVE") {
+                        "   NO $name"
+                    } else if (price > 0) {
                         "   • $name (+$${String.format(Locale.US, "%.2f", price)})"
-                    else
+                    } else {
                         "   • $name"
+                    }
                 }
                 is List<*> -> {
                     if (item.size < 2) return@mapNotNull null

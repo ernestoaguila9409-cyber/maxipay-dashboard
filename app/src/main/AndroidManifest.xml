@@ -165,6 +165,10 @@
             android:parentActivityName=".PaymentActivity" />
 
         <activity android:name=".ModifierManagementActivity" />
+        <activity
+            android:name=".ReportsActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
         <activity android:name=".GlobalModifierActivity" />
         <activity android:name=".AssignModifierToItemActivity" />
 

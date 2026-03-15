@@ -3,6 +3,8 @@ package com.ernesto.myapplication
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.EditText
@@ -16,14 +18,25 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
+import com.ernesto.myapplication.engine.OrderEngine
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import java.util.Date
 
 class TableSelectionActivity : AppCompatActivity() {
+
+    private data class OccupiedTableInfo(
+        val orderId: String,
+        val guestName: String?,
+        val guestCount: Int,
+        val itemsCount: Long,
+        val createdAt: Date?
+    )
 
     private val db = FirebaseFirestore.getInstance()
     private lateinit var canvas: FrameLayout
     private lateinit var chipGroup: ChipGroup
+    private lateinit var orderEngine: OrderEngine
 
     private val tableViews = mutableMapOf<String, View>()
     private val tableSections = mutableMapOf<String, String>()
@@ -31,11 +44,25 @@ class TableSelectionActivity : AppCompatActivity() {
     private val tableSeats = mutableMapOf<String, Int>()
     private val knownSections = mutableListOf<String>()
     private var selectedSection = ""
-    private val occupiedTableIds = mutableSetOf<String>()
+    private val occupiedTableData = mutableMapOf<String, OccupiedTableInfo>()
     private var occupiedListener: ListenerRegistration? = null
+
+    private val waitingHandler = Handler(Looper.getMainLooper())
+    private val waitingRefreshRunnable = object : Runnable {
+        override fun run() {
+            applyOccupiedState()
+            waitingHandler.postDelayed(this, WAITING_REFRESH_MS)
+        }
+    }
 
     private var batchId: String = ""
     private var employeeName: String = ""
+
+    private var waitingThresholdMs = 5L * 60 * 1000
+
+    companion object {
+        private const val WAITING_REFRESH_MS = 60_000L
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,6 +74,7 @@ class TableSelectionActivity : AppCompatActivity() {
 
         canvas = findViewById(R.id.tableCanvas)
         chipGroup = findViewById(R.id.chipGroupSections)
+        orderEngine = OrderEngine(db)
 
         findViewById<ImageButton>(R.id.btnBack).setOnClickListener { finish() }
 
@@ -59,13 +87,23 @@ class TableSelectionActivity : AppCompatActivity() {
             filterTablesBySection()
         }
 
+        waitingThresholdMs = OrderTypePrefs.getWaitingAlertMinutes(this).toLong() * 60 * 1000
+
         loadSectionsAndTables()
         listenForOccupiedTables()
+        waitingHandler.postDelayed(waitingRefreshRunnable, WAITING_REFRESH_MS)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        waitingThresholdMs = OrderTypePrefs.getWaitingAlertMinutes(this).toLong() * 60 * 1000
+        applyOccupiedState()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         occupiedListener?.remove()
+        waitingHandler.removeCallbacks(waitingRefreshRunnable)
     }
 
     private fun rebuildSectionChips() {
@@ -179,9 +217,9 @@ class TableSelectionActivity : AppCompatActivity() {
         }
 
         tableView.setOnClickListener {
-            if (id in occupiedTableIds) {
-                val tName = tableNames[id] ?: "This table"
-                Toast.makeText(this, "$tName is currently occupied.", Toast.LENGTH_SHORT).show()
+            val info = occupiedTableData[id]
+            if (info != null) {
+                navigateToExistingOrder(id, info.orderId)
             } else {
                 showGuestCountDialog(id)
             }
@@ -274,21 +312,62 @@ class TableSelectionActivity : AppCompatActivity() {
             .whereEqualTo("orderType", "DINE_IN")
             .addSnapshotListener { snap, _ ->
                 if (snap == null) return@addSnapshotListener
-                occupiedTableIds.clear()
+                occupiedTableData.clear()
                 for (doc in snap.documents) {
                     val tid = doc.getString("tableId")
-                    if (!tid.isNullOrBlank()) occupiedTableIds.add(tid)
+                    if (!tid.isNullOrBlank()) {
+                        @Suppress("UNCHECKED_CAST")
+                        val gNames = doc.get("guestNames") as? List<String>
+                        val firstGuest = gNames?.firstOrNull()?.takeIf { it.isNotBlank() }
+                        val gCount = (doc.getLong("guestCount") ?: 0L).toInt()
+                        val iCount = doc.getLong("itemsCount") ?: 0L
+                        val created = doc.getTimestamp("createdAt")?.toDate()
+                            ?: doc.getDate("createdAt")
+                        occupiedTableData[tid] = OccupiedTableInfo(
+                            orderId = doc.id,
+                            guestName = firstGuest,
+                            guestCount = gCount,
+                            itemsCount = iCount,
+                            createdAt = created
+                        )
+                    }
                 }
                 applyOccupiedState()
             }
     }
 
     private fun applyOccupiedState() {
+        val now = System.currentTimeMillis()
         for ((id, view) in tableViews) {
             if (view is TableShapeView) {
-                view.isOccupied = id in occupiedTableIds
+                val info = occupiedTableData[id]
+                view.isOccupied = info != null
+                if (info != null) {
+                    val parts = mutableListOf<String>()
+                    if (!info.guestName.isNullOrBlank()) parts.add(info.guestName)
+                    if (info.guestCount > 0) parts.add("${info.guestCount} guest${if (info.guestCount > 1) "s" else ""}")
+                    view.guestInfo = parts.joinToString(" • ")
+
+                    val elapsed = info.createdAt?.let { now - it.time } ?: 0L
+                    view.isWaitingForOrder = info.itemsCount <= 0 && elapsed > waitingThresholdMs
+                } else {
+                    view.guestInfo = ""
+                    view.isWaitingForOrder = false
+                }
             }
         }
+    }
+
+    private fun navigateToExistingOrder(tableId: String, orderId: String) {
+        val intent = Intent(this, MenuActivity::class.java)
+        intent.putExtra("batchId", batchId)
+        intent.putExtra("employeeName", employeeName)
+        intent.putExtra("orderType", "DINE_IN")
+        intent.putExtra("tableId", tableId)
+        intent.putExtra("tableName", tableNames[tableId] ?: "Table")
+        intent.putExtra("ORDER_ID", orderId)
+        startActivity(intent)
+        finish()
     }
 
     private fun navigateToMenu(tableId: String, tableName: String, guestCount: Int, guestNames: List<String>) {
@@ -304,15 +383,30 @@ class TableSelectionActivity : AppCompatActivity() {
             return
         }
 
-        val intent = Intent(this, MenuActivity::class.java)
-        intent.putExtra("batchId", batchId)
-        intent.putExtra("employeeName", employeeName)
-        intent.putExtra("orderType", "DINE_IN")
-        intent.putExtra("tableId", tableId)
-        intent.putExtra("tableName", tableName)
-        intent.putExtra("guestCount", guestCount)
-        intent.putStringArrayListExtra("guestNames", ArrayList(guestNames))
-        startActivity(intent)
-        finish()
+        orderEngine.ensureOrder(
+            currentOrderId = null,
+            employeeName = employeeName,
+            orderType = "DINE_IN",
+            tableId = tableId,
+            tableName = tableName,
+            guestCount = if (guestCount > 0) guestCount else null,
+            guestNames = if (guestNames.isNotEmpty()) guestNames else null,
+            onSuccess = { orderId ->
+                val intent = Intent(this, MenuActivity::class.java)
+                intent.putExtra("batchId", batchId)
+                intent.putExtra("employeeName", employeeName)
+                intent.putExtra("orderType", "DINE_IN")
+                intent.putExtra("tableId", tableId)
+                intent.putExtra("tableName", tableName)
+                intent.putExtra("guestCount", guestCount)
+                intent.putStringArrayListExtra("guestNames", ArrayList(guestNames))
+                intent.putExtra("ORDER_ID", orderId)
+                startActivity(intent)
+                finish()
+            },
+            onFailure = { e ->
+                Toast.makeText(this, "Failed to create order: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        )
     }
 }

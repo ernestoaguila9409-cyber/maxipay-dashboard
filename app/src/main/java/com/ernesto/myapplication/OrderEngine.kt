@@ -1,6 +1,8 @@
 package com.ernesto.myapplication.engine
 
+import com.ernesto.myapplication.OrderModifier
 import com.ernesto.myapplication.OrderNumberGenerator
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Date
 
@@ -14,7 +16,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
         val name: String,
         val quantity: Int,
         val basePrice: Double,
-        val modifiers: List<Pair<String, Double>>,
+        val modifiers: List<OrderModifier>,
         val guestNumber: Int = 0
     )
 
@@ -52,7 +54,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
                     "totalInCents" to 0L,
                     "totalPaidInCents" to 0L,
                     "remainingInCents" to 0L,
-                    "orderType" to orderType
+                    "orderType" to orderType,
+                    "itemsCount" to 0L
                 )
 
                 if (!tableId.isNullOrBlank()) orderMap["tableId"] = tableId
@@ -103,17 +106,26 @@ class OrderEngine(private val db: FirebaseFirestore) {
         orderId: String,
         lineKey: String,
         input: LineItemInput,
+        isNewLine: Boolean = false,
         onSuccess: () -> Unit,
         onFailure: (Exception) -> Unit
     ) {
         val modifiersTotalInCents =
-            input.modifiers.sumOf { (it.second * 100).toLong() }
+            input.modifiers.filter { it.action == "ADD" }.sumOf { (it.price * 100).toLong() }
 
         val basePriceInCents = (input.basePrice * 100).toLong()
 
         val unitPriceInCents = basePriceInCents + modifiersTotalInCents
 
         val lineTotalInCents = unitPriceInCents * input.quantity
+
+        val modifierMaps = input.modifiers.map { mod ->
+            hashMapOf(
+                "name" to mod.name,
+                "action" to mod.action,
+                "price" to mod.price
+            )
+        }
 
         val itemMap = hashMapOf<String, Any>(
             "itemId" to input.itemId,
@@ -123,12 +135,16 @@ class OrderEngine(private val db: FirebaseFirestore) {
             "modifiersTotalInCents" to modifiersTotalInCents,
             "unitPriceInCents" to unitPriceInCents,
             "lineTotalInCents" to lineTotalInCents,
-            "modifiers" to input.modifiers,
+            "modifiers" to modifierMaps,
             "updatedAt" to Date()
         )
         if (input.guestNumber > 0) itemMap["guestNumber"] = input.guestNumber
 
         val orderRef = db.collection("Orders").document(orderId)
+
+        if (isNewLine) {
+            orderRef.update("itemsCount", FieldValue.increment(1))
+        }
 
         pendingWrites++
 
@@ -155,6 +171,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
         onFailure: (Exception) -> Unit
     ) {
         val orderRef = db.collection("Orders").document(orderId)
+
+        orderRef.update("itemsCount", FieldValue.increment(-1))
 
         pendingWrites++
 
@@ -249,10 +267,16 @@ class OrderEngine(private val db: FirebaseFirestore) {
                                 (newTotalInCents - totalPaidInCents)
                                     .coerceAtLeast(0L)
 
+                            val newStatus = when {
+                                remainingInCents > 0L -> "OPEN"
+                                totalPaidInCents > 0L -> "CLOSED"
+                                else -> orderSnap.getString("status") ?: "OPEN"
+                            }
+
                             val updates = mutableMapOf<String, Any>(
                                 "totalInCents" to newTotalInCents,
                                 "remainingInCents" to remainingInCents,
-                                "status" to if (remainingInCents > 0L) "OPEN" else "CLOSED",
+                                "status" to newStatus,
                                 "updatedAt" to Date()
                             )
                             if (taxBreakdown.isNotEmpty()) {

@@ -569,6 +569,47 @@
                     android:gravity="center"/>
             </LinearLayout>
 
+            <LinearLayout
+                android:id="@+id/btnReports"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_margin="8dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/bg_order_type_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:padding="16dp"
+                android:minHeight="0dp"
+                app:layout_columnWeight="1"
+                app:layout_rowWeight="1"
+                app:layout_row="3"
+                app:layout_column="2"
+                app:layout_gravity="fill">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_reports"
+                    android:contentDescription="Reports"
+                    app:tint="@android:color/white"/>
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="8dp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="REPORTS"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="2"
+                    android:gravity="center"/>
+            </LinearLayout>
+
         </androidx.gridlayout.widget.GridLayout>
 
         </androidx.constraintlayout.widget.ConstraintLayout>

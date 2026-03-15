@@ -37,10 +37,14 @@ class ModifierGroupExpandableAdapter(
         // GROUP TITLE
         // =========================
         val title = TextView(holder.layout.context)
-        title.text = group.name
+        val typeTag = if (group.groupType == "REMOVE") " [REMOVE]" else ""
+        title.text = "${group.name}$typeTag"
         title.textSize = 18f
         title.setTypeface(null, Typeface.BOLD)
         title.setPadding(40, 40, 40, 40)
+        if (group.groupType == "REMOVE") {
+            title.setTextColor(0xFFD32F2F.toInt())
+        }
 
         holder.layout.addView(title)
 
@@ -114,6 +118,10 @@ class ModifierGroupExpandableAdapter(
         requiredCheckbox.text = "Required"
         requiredCheckbox.isChecked = group.required
 
+        val removeCheckbox = android.widget.CheckBox(context)
+        removeCheckbox.text = "Remove Ingredients Group"
+        removeCheckbox.isChecked = group.groupType == "REMOVE"
+
         val maxSelectionInput = EditText(context)
         maxSelectionInput.setText(group.maxSelection.toString())
         maxSelectionInput.inputType =
@@ -121,6 +129,7 @@ class ModifierGroupExpandableAdapter(
 
         layout.addView(nameInput)
         layout.addView(requiredCheckbox)
+        layout.addView(removeCheckbox)
         layout.addView(maxSelectionInput)
 
         AlertDialog.Builder(context)
@@ -130,6 +139,7 @@ class ModifierGroupExpandableAdapter(
 
                 val newName = nameInput.text.toString().trim()
                 val newRequired = requiredCheckbox.isChecked
+                val newGroupType = if (removeCheckbox.isChecked) "REMOVE" else "ADD"
                 val newMax =
                     maxSelectionInput.text.toString().toIntOrNull() ?: 1
 
@@ -138,7 +148,8 @@ class ModifierGroupExpandableAdapter(
                     val updates = mapOf(
                         "name" to newName,
                         "required" to newRequired,
-                        "maxSelection" to newMax
+                        "maxSelection" to newMax,
+                        "groupType" to newGroupType
                     )
 
                     db.collection("ModifierGroups")
@@ -147,6 +158,7 @@ class ModifierGroupExpandableAdapter(
                         .addOnSuccessListener {
 
                             group.name = newName
+                            group.groupType = newGroupType
                             group.isExpanded = false
 
                             notifyDataSetChanged()
@@ -184,8 +196,13 @@ class ModifierGroupExpandableAdapter(
                     val price = doc.getDouble("price") ?: 0.0
 
                     val optionText = TextView(holder.layout.context)
-                    optionText.text =
-                        "• $name   +$${String.format(Locale.US, "%.2f", price)}"
+                    if (group.groupType == "REMOVE") {
+                        optionText.text = "✕ $name"
+                        optionText.setTextColor(0xFFD32F2F.toInt())
+                    } else {
+                        optionText.text =
+                            "• $name   +$${String.format(Locale.US, "%.2f", price)}"
+                    }
                     optionText.setPadding(80, 20, 40, 20)
 
                     holder.layout.addView(optionText)

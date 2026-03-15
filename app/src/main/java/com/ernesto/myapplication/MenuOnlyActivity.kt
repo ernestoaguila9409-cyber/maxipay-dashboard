@@ -380,30 +380,38 @@ class MenuOnlyActivity : AppCompatActivity() {
                 val price = priceInput.text.toString().toDoubleOrNull()
                 val stock = stockInput.text.toString().toLongOrNull() ?: 0L
 
-                if (name.isNotEmpty() &&
-                    price != null &&
-                    selectedCategoryId != null
-                ) {
-
-                    val item = hashMapOf<String, Any>(
-                        "name" to name,
-                        "price" to price,
-                        "stock" to stock,
-                        "categoryId" to selectedCategoryId!!
-                    )
-
-                    if (!useCategorySwitch.isChecked) {
-                        val selectedTypes =
-                            checkBoxes.filter { it.value.isChecked }.keys.toList()
-                        item["availableOrderTypes"] = selectedTypes
-                    }
-
-                    db.collection("MenuItems")
-                        .add(item)
-                        .addOnSuccessListener {
-                            loadItems(selectedCategoryId!!)
-                        }
+                if (name.isEmpty()) {
+                    Toast.makeText(this, "Please enter item name", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
                 }
+                if (price == null) {
+                    Toast.makeText(this, "Please enter a valid price", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                if (selectedCategoryId == null) {
+                    Toast.makeText(this, "No category selected", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+
+                val item = hashMapOf<String, Any>(
+                    "name" to name,
+                    "price" to price,
+                    "stock" to stock,
+                    "categoryId" to selectedCategoryId!!
+                )
+
+                if (!useCategorySwitch.isChecked) {
+                    val selectedTypes =
+                        checkBoxes.filter { it.value.isChecked }.keys.toList()
+                    item["availableOrderTypes"] = selectedTypes
+                }
+
+                db.collection("MenuItems")
+                    .add(item)
+                    .addOnSuccessListener {
+                        loadItems(selectedCategoryId!!)
+                        Toast.makeText(this, "$name added", Toast.LENGTH_SHORT).show()
+                    }
             }
             .setNegativeButton("Cancel", null)
             .show()

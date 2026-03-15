@@ -48,13 +48,15 @@ class GlobalModifierActivity : AppCompatActivity() {
                     val required = doc.getBoolean("required") ?: false
                     val maxSelection =
                         doc.getLong("maxSelection")?.toInt() ?: 1
+                    val groupType = doc.getString("groupType") ?: "ADD"
 
                     list.add(
                         ModifierGroupModel(
                             id = doc.id,
                             name = name,
                             required = required,
-                            maxSelection = maxSelection
+                            maxSelection = maxSelection,
+                            groupType = groupType
                         )
                     )
                 }
@@ -76,6 +78,9 @@ class GlobalModifierActivity : AppCompatActivity() {
         val requiredCheckbox = CheckBox(this)
         requiredCheckbox.text = "Required"
 
+        val removeCheckbox = CheckBox(this)
+        removeCheckbox.text = "Remove Ingredients Group"
+
         val maxSelectionInput = EditText(this)
         maxSelectionInput.hint = "Max Selection (ex: 1)"
         maxSelectionInput.inputType =
@@ -83,6 +88,7 @@ class GlobalModifierActivity : AppCompatActivity() {
 
         layout.addView(nameInput)
         layout.addView(requiredCheckbox)
+        layout.addView(removeCheckbox)
         layout.addView(maxSelectionInput)
 
         AlertDialog.Builder(this)
@@ -92,6 +98,7 @@ class GlobalModifierActivity : AppCompatActivity() {
 
                 val name = nameInput.text.toString().trim()
                 val required = requiredCheckbox.isChecked
+                val groupType = if (removeCheckbox.isChecked) "REMOVE" else "ADD"
                 val maxSelection =
                     maxSelectionInput.text.toString().toIntOrNull() ?: 1
 
@@ -100,7 +107,8 @@ class GlobalModifierActivity : AppCompatActivity() {
                     val group = hashMapOf(
                         "name" to name,
                         "required" to required,
-                        "maxSelection" to maxSelection
+                        "maxSelection" to maxSelection,
+                        "groupType" to groupType
                     )
 
                     db.collection("ModifierGroups")

@@ -27,7 +27,7 @@ data class CartItem(
     var quantity: Int,
     val basePrice: Double,
     val stock: Long,
-    val modifiers: List<Pair<String, Double>>,
+    val modifiers: List<OrderModifier>,
     val guestNumber: Int = 0
 )
 
@@ -401,17 +401,21 @@ class MenuActivity : AppCompatActivity() {
             }
     }
 
-    private fun parseModifiers(raw: Any?): List<Pair<String, Double>> {
-        // Your Firestore stores modifiers as:
-        // modifiers: [ {first:"Medium", second:0.02}, {first:"grande", second:0.02} ]
+    private fun parseModifiers(raw: Any?): List<OrderModifier> {
         val list = raw as? List<*> ?: return emptyList()
 
-        val out = mutableListOf<Pair<String, Double>>()
+        val out = mutableListOf<OrderModifier>()
         for (item in list) {
             val map = item as? Map<*, *> ?: continue
-            val name = map["first"]?.toString() ?: continue
-            val price = (map["second"] as? Number)?.toDouble() ?: 0.0
-            out.add(name to price)
+            val name = map["name"]?.toString()
+                ?: map["first"]?.toString()
+                ?: continue
+            val action = map["action"]?.toString() ?: "ADD"
+            val price = if (action == "REMOVE") 0.0
+                else (map["price"] as? Number)?.toDouble()
+                    ?: (map["second"] as? Number)?.toDouble()
+                    ?: 0.0
+            out.add(OrderModifier(name, action, price))
         }
         return out
     }
@@ -551,7 +555,7 @@ class MenuActivity : AppCompatActivity() {
         stock: Long,
         groupIds: List<String>
     ) {
-        val selectedModifiers = mutableListOf<Pair<String, Double>>()
+        val selectedModifiers = mutableListOf<OrderModifier>()
         val selectedCountPerGroup = mutableMapOf<String, Int>()
         val requiredGroups = mutableSetOf<String>()
 
@@ -567,15 +571,15 @@ class MenuActivity : AppCompatActivity() {
                     val groupName = groupDoc.getString("name") ?: ""
                     val isRequired = groupDoc.getBoolean("required") ?: false
                     val maxSelection = groupDoc.getLong("maxSelection")?.toInt() ?: 1
+                    val groupType = groupDoc.getString("groupType") ?: "ADD"
                     if (groupName.isNotEmpty()) {
                         synchronized(fetchedGroups) {
-                            fetchedGroups.add(GroupInfo(groupId, groupName, isRequired, maxSelection))
+                            fetchedGroups.add(GroupInfo(groupId, groupName, isRequired, maxSelection, groupType))
                         }
                         if (isRequired) requiredGroups.add(groupId)
                     }
                     pending--
                     if (pending == 0) {
-                        // Required first, then optional; preserve original order within each
                         val sorted = fetchedGroups.sortedWith(
                             compareBy<GroupInfo> { !it.isRequired }.thenBy { orderIndex[it.groupId] ?: 0 }
                         )
@@ -595,7 +599,7 @@ class MenuActivity : AppCompatActivity() {
         stock: Long,
         sortedGroups: List<GroupInfo>,
         requiredGroups: Set<String>,
-        selectedModifiers: MutableList<Pair<String, Double>>,
+        selectedModifiers: MutableList<OrderModifier>,
         selectedCountPerGroup: MutableMap<String, Int>
     ) {
         val mainLayout = LinearLayout(this)
@@ -624,38 +628,45 @@ class MenuActivity : AppCompatActivity() {
         }
 
         for (group in sortedGroups) {
-            val (groupId, groupName, isRequired, maxSelection) = group
+            val (groupId, groupName, isRequired, maxSelection, groupType) = group
+            val isRemoveGroup = groupType == "REMOVE"
 
             val groupContainer = LinearLayout(this)
             groupContainer.orientation = LinearLayout.VERTICAL
             groupContainer.setPadding(0, 40, 0, 40)
 
             val title = TextView(this)
-            title.text = groupName
+            title.text = if (isRemoveGroup) "REMOVE INGREDIENTS" else groupName
             title.textSize = 18f
             title.setTypeface(null, Typeface.BOLD)
+            if (isRemoveGroup) title.setTextColor(Color.parseColor("#D32F2F"))
 
             val subtitle = TextView(this)
-            val subtitleFull =
-                if (isRequired) "Required • Select up to $maxSelection"
-                else "Optional • Select up to $maxSelection"
-            val spannable = SpannableString(subtitleFull)
-            if (isRequired) {
-                spannable.setSpan(StyleSpan(Typeface.BOLD), 0, 8, 0)
-                spannable.setSpan(RelativeSizeSpan(1.25f), 0, 8, 0)
-                spannable.setSpan(ForegroundColorSpan(Color.parseColor("#1A1A1A")), 0, 8, 0)
-                spannable.setSpan(ForegroundColorSpan(Color.GRAY), 8, subtitleFull.length, 0)
+            if (isRemoveGroup) {
+                subtitle.text = "Tap to remove ingredients"
+                subtitle.setTextColor(Color.GRAY)
             } else {
-                spannable.setSpan(ForegroundColorSpan(Color.GRAY), 0, subtitleFull.length, 0)
+                val subtitleFull =
+                    if (isRequired) "Required • Select up to $maxSelection"
+                    else "Optional • Select up to $maxSelection"
+                val spannable = SpannableString(subtitleFull)
+                if (isRequired) {
+                    spannable.setSpan(StyleSpan(Typeface.BOLD), 0, 8, 0)
+                    spannable.setSpan(RelativeSizeSpan(1.25f), 0, 8, 0)
+                    spannable.setSpan(ForegroundColorSpan(Color.parseColor("#1A1A1A")), 0, 8, 0)
+                    spannable.setSpan(ForegroundColorSpan(Color.GRAY), 8, subtitleFull.length, 0)
+                } else {
+                    spannable.setSpan(ForegroundColorSpan(Color.GRAY), 0, subtitleFull.length, 0)
+                }
+                subtitle.text = spannable
             }
-            subtitle.text = spannable
             subtitle.setPadding(0, 8, 0, 16)
 
             groupContainer.addView(title)
             groupContainer.addView(subtitle)
 
             val divider = View(this)
-            divider.setBackgroundColor(Color.LTGRAY)
+            divider.setBackgroundColor(if (isRemoveGroup) Color.parseColor("#D32F2F") else Color.LTGRAY)
             divider.layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 2
@@ -668,7 +679,24 @@ class MenuActivity : AppCompatActivity() {
                 .whereEqualTo("groupId", groupId)
                 .get()
                 .addOnSuccessListener { options ->
-                    if (maxSelection == 1) {
+                    if (isRemoveGroup) {
+                        for (doc in options) {
+                            val optionName = doc.getString("name") ?: continue
+
+                            val checkBox = CheckBox(this)
+                            checkBox.text = optionName
+                            checkBox.setTextColor(Color.parseColor("#D32F2F"))
+                            groupContainer.addView(checkBox)
+
+                            checkBox.setOnCheckedChangeListener { _, isChecked ->
+                                if (isChecked) {
+                                    selectedModifiers.add(OrderModifier(optionName, "REMOVE", 0.0))
+                                } else {
+                                    selectedModifiers.removeAll { it.name == optionName && it.action == "REMOVE" }
+                                }
+                            }
+                        }
+                    } else if (maxSelection == 1) {
                         val radioGroup = RadioGroup(this)
                         radioGroup.orientation = RadioGroup.VERTICAL
                         groupContainer.addView(radioGroup)
@@ -682,8 +710,8 @@ class MenuActivity : AppCompatActivity() {
                             radioGroup.addView(radioButton)
 
                             radioButton.setOnClickListener {
-                                selectedModifiers.removeAll { it.first == optionName }
-                                selectedModifiers.add(optionName to optionPrice)
+                                selectedModifiers.removeAll { it.name == optionName && it.action == "ADD" }
+                                selectedModifiers.add(OrderModifier(optionName, "ADD", optionPrice))
                                 selectedCountPerGroup[groupId] = 1
                             }
                         }
@@ -711,10 +739,10 @@ class MenuActivity : AppCompatActivity() {
                                         ).show()
                                         return@setOnCheckedChangeListener
                                     }
-                                    selectedModifiers.add(optionName to optionPrice)
+                                    selectedModifiers.add(OrderModifier(optionName, "ADD", optionPrice))
                                     count++
                                 } else {
-                                    selectedModifiers.remove(optionName to optionPrice)
+                                    selectedModifiers.removeAll { it.name == optionName && it.action == "ADD" && it.price == optionPrice }
                                     count--
                                 }
 
@@ -732,7 +760,8 @@ class MenuActivity : AppCompatActivity() {
         val groupId: String,
         val groupName: String,
         val isRequired: Boolean,
-        val maxSelection: Int
+        val maxSelection: Int,
+        val groupType: String = "ADD"
     )
 
     // ----------------------------
@@ -744,7 +773,7 @@ class MenuActivity : AppCompatActivity() {
         name: String,
         basePrice: Double,
         stock: Long,
-        modifiers: List<Pair<String, Double>>
+        modifiers: List<OrderModifier>
     ) {
 
         if (currentOrderId == null && isCreatingOrder) {
@@ -806,6 +835,7 @@ class MenuActivity : AppCompatActivity() {
                 refreshCart()
 
                 val cartItem = cartMap[lineKey] ?: return@ensureOrder
+                val isNew = existingItem == null
 
                 orderEngine.upsertLineItem(
                     orderId = oid,
@@ -818,6 +848,7 @@ class MenuActivity : AppCompatActivity() {
                         modifiers = cartItem.modifiers,
                         guestNumber = cartItem.guestNumber
                     ),
+                    isNewLine = isNew,
                     onSuccess = {},
                     onFailure = {
                         Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
@@ -906,7 +937,7 @@ class MenuActivity : AppCompatActivity() {
                         val itemView = buildCartItemView(lineKey, item)
                         sectionLayout.addView(itemView)
 
-                        val modifiersTotal = item.modifiers.sumOf { it.second }
+                        val modifiersTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
                         val unitPrice = item.basePrice + modifiersTotal
                         totalAmount += unitPrice * item.quantity
                     }
@@ -924,7 +955,7 @@ class MenuActivity : AppCompatActivity() {
                 val itemView = buildCartItemView(lineKey, item)
                 cartContainer.addView(itemView)
 
-                val modifiersTotal = item.modifiers.sumOf { it.second }
+                val modifiersTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
                 val unitPrice = item.basePrice + modifiersTotal
                 totalAmount += unitPrice * item.quantity
             }
@@ -979,23 +1010,32 @@ class MenuActivity : AppCompatActivity() {
         nameText.setTypeface(null, Typeface.BOLD)
         itemLayout.addView(nameText)
 
-        val modifiersTotal = item.modifiers.sumOf { it.second }
+        val modifiersTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
 
         for (modifier in item.modifiers) {
             val row = LinearLayout(this)
             row.orientation = LinearLayout.HORIZONTAL
 
             val nameView = TextView(this)
-            nameView.text = "   • ${modifier.first}"
-            nameView.setTextColor(Color.parseColor("#2E7D32"))
             nameView.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
 
-            val priceView = TextView(this)
-            priceView.text = "+${MoneyUtils.centsToDisplay((modifier.second * 100).toLong())}"
-            priceView.setTextColor(Color.parseColor("#2E7D32"))
+            if (modifier.action == "REMOVE") {
+                nameView.text = "   NO ${modifier.name}"
+                nameView.setTextColor(Color.parseColor("#D32F2F"))
+                nameView.setTypeface(null, Typeface.BOLD)
+                row.addView(nameView)
+            } else {
+                nameView.text = "   • ${modifier.name}"
+                nameView.setTextColor(Color.parseColor("#2E7D32"))
 
-            row.addView(nameView)
-            row.addView(priceView)
+                val priceView = TextView(this)
+                priceView.text = "+${MoneyUtils.centsToDisplay((modifier.price * 100).toLong())}"
+                priceView.setTextColor(Color.parseColor("#2E7D32"))
+
+                row.addView(nameView)
+                row.addView(priceView)
+            }
+
             itemLayout.addView(row)
         }
 
@@ -1067,9 +1107,9 @@ class MenuActivity : AppCompatActivity() {
     // ----------------------------
     // FIRESTORE ORDER / ITEMS
     // ----------------------------
-    private fun cartKey(itemId: String, modifiers: List<Pair<String, Double>>, guest: Int = 0): String {
-        val sorted = modifiers.sortedBy { it.first + "|" + it.second }
-        val modsKey = sorted.joinToString("|") { "${it.first}:${it.second}" }
+    private fun cartKey(itemId: String, modifiers: List<OrderModifier>, guest: Int = 0): String {
+        val sorted = modifiers.sortedBy { "${it.action}|${it.name}|${it.price}" }
+        val modsKey = sorted.joinToString("|") { "${it.action}:${it.name}:${it.price}" }
         val guestPart = if (guest > 0) "__G${guest}" else ""
         return "${itemId}__${modsKey}${guestPart}"
     }
@@ -1116,6 +1156,8 @@ class MenuActivity : AppCompatActivity() {
     private fun deleteOrderIfEmpty() {
         val orderId = currentOrderId ?: return
 
+        if (orderType == "DINE_IN") return
+
         db.collection("Orders")
             .document(orderId)
             .collection("items")
@@ -1128,7 +1170,6 @@ class MenuActivity : AppCompatActivity() {
                         .delete()
                         .addOnSuccessListener {
                             currentOrderId = null
-                            // Stay on Take Payment screen with empty cart (no navigation)
                         }
                 }
             }

@@ -21,7 +21,13 @@ class TableShapeView(context: Context) : View(context) {
         set(value) { field = value; requestLayout(); invalidate() }
 
     var isOccupied: Boolean = false
-        set(value) { field = value; applyOccupiedColors(); invalidate() }
+        set(value) { field = value; applyStateColors(); invalidate() }
+
+    var isWaitingForOrder: Boolean = false
+        set(value) { field = value; applyStateColors(); invalidate() }
+
+    var guestInfo: String = ""
+        set(value) { field = value; invalidate() }
 
     private val dp = context.resources.displayMetrics.density
 
@@ -58,6 +64,17 @@ class TableShapeView(context: Context) : View(context) {
         color = 0xFF777777.toInt()
         textAlign = Paint.Align.CENTER
         textSize = 9f * dp
+    }
+    private val guestInfoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFD32F2F.toInt()
+        textAlign = Paint.Align.CENTER
+        textSize = 8.5f * dp
+    }
+    private val waitingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFE65100.toInt()
+        textAlign = Paint.Align.CENTER
+        textSize = 8f * dp
+        isFakeBoldText = true
     }
 
     private val chairRadius = 7f * dp
@@ -201,17 +218,32 @@ class TableShapeView(context: Context) : View(context) {
         canvas.drawText(tableName, cx, nameY, namePaint)
         val seatsStr = "Seats: $seatCount"
         canvas.drawText(seatsStr, cx, nameY + 14f * dp, seatsPaint)
+        if (guestInfo.isNotBlank()) {
+            canvas.drawText(guestInfo, cx, nameY + 26f * dp, guestInfoPaint)
+        }
+        if (isWaitingForOrder) {
+            val waitingY = if (guestInfo.isNotBlank()) nameY + 38f * dp else nameY + 26f * dp
+            canvas.drawText("Waiting for order", cx, waitingY, waitingPaint)
+        }
     }
 
-    private fun applyOccupiedColors() {
-        if (isOccupied) {
-            tablePaint.color = 0x33D32F2F.toInt()
-            tableBorderPaint.color = 0xFFD32F2F.toInt()
-            boothCushionPaint.color = 0xFFD32F2F.toInt()
-        } else {
-            tablePaint.color = Color.TRANSPARENT
-            tableBorderPaint.color = 0xFF5D4037.toInt()
-            boothCushionPaint.color = 0xFF8D6E63.toInt()
+    private fun applyStateColors() {
+        when {
+            isOccupied && isWaitingForOrder -> {
+                tablePaint.color = 0x33FF8F00.toInt()
+                tableBorderPaint.color = 0xFFFF8F00.toInt()
+                boothCushionPaint.color = 0xFFFF8F00.toInt()
+            }
+            isOccupied -> {
+                tablePaint.color = 0x33D32F2F.toInt()
+                tableBorderPaint.color = 0xFFD32F2F.toInt()
+                boothCushionPaint.color = 0xFFD32F2F.toInt()
+            }
+            else -> {
+                tablePaint.color = Color.TRANSPARENT
+                tableBorderPaint.color = 0xFF5D4037.toInt()
+                boothCushionPaint.color = 0xFF8D6E63.toInt()
+            }
         }
     }
 
