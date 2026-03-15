@@ -32,6 +32,8 @@ class OrderItemsAdapter(
     private var refundedNameAmountToEmployee: Map<String, String> = emptyMap()
     private var refundedLineKeyToDate: Map<String, String> = emptyMap()
     private var refundedNameAmountToDate: Map<String, String> = emptyMap()
+    private var wholeOrderRefundEmployee: String? = null
+    private var wholeOrderRefundDate: String? = null
 
     fun setRefundedKeys(
         lineKeys: Set<String>,
@@ -39,7 +41,9 @@ class OrderItemsAdapter(
         lineKeyToEmployee: Map<String, String> = emptyMap(),
         nameAmountToEmployee: Map<String, String> = emptyMap(),
         lineKeyToDate: Map<String, String> = emptyMap(),
-        nameAmountToDate: Map<String, String> = emptyMap()
+        nameAmountToDate: Map<String, String> = emptyMap(),
+        wholeOrderEmployee: String? = null,
+        wholeOrderDate: String? = null
     ) {
         refundedLineKeys = lineKeys
         refundedNameAmountKeys = nameAmountKeys
@@ -47,6 +51,8 @@ class OrderItemsAdapter(
         refundedNameAmountToEmployee = nameAmountToEmployee
         refundedLineKeyToDate = lineKeyToDate
         refundedNameAmountToDate = nameAmountToDate
+        wholeOrderRefundEmployee = wholeOrderEmployee
+        wholeOrderRefundDate = wholeOrderDate
         notifyDataSetChanged()
     }
 
@@ -113,13 +119,18 @@ class OrderItemsAdapter(
 
         val lineKey = doc.id
         val nameAmountKey = "$name|$lineInCents"
-        val isRefunded = lineKey in refundedLineKeys || nameAmountKey in refundedNameAmountKeys
-        val refundedByEmployee = refundedLineKeyToEmployee[lineKey] ?: refundedNameAmountToEmployee[nameAmountKey]
+        val matchedByKey = lineKey in refundedLineKeys || nameAmountKey in refundedNameAmountKeys
+        val isRefunded = matchedByKey || wholeOrderRefundEmployee != null
+        val refundedByEmployee = refundedLineKeyToEmployee[lineKey]
+            ?: refundedNameAmountToEmployee[nameAmountKey]
+            ?: wholeOrderRefundEmployee
 
         holder.card.setCardBackgroundColor(
             if (isRefunded) Color.parseColor("#BBDEFB") else Color.WHITE
         )
-        val refundedDateStr = refundedLineKeyToDate[lineKey] ?: refundedNameAmountToDate[nameAmountKey]
+        val refundedDateStr = refundedLineKeyToDate[lineKey]
+            ?: refundedNameAmountToDate[nameAmountKey]
+            ?: wholeOrderRefundDate
         if (isRefunded && (!refundedByEmployee.isNullOrBlank() || !refundedDateStr.isNullOrBlank())) {
             holder.refundedByRow.visibility = View.VISIBLE
             holder.refundedBy.text = if (!refundedByEmployee.isNullOrBlank()) "Refunded by: $refundedByEmployee" else ""

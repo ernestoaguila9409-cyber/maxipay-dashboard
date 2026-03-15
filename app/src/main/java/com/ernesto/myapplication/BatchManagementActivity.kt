@@ -332,12 +332,11 @@ class BatchManagementActivity : AppCompatActivity() {
 
                 batchWrite.commit()
                     .addOnSuccessListener {
-
-                        Toast.makeText(
-                            this,
-                            "Batch Closed Successfully",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        val cashFlowIntent = Intent(this, CashFlowActivity::class.java).apply {
+                            putExtra(CashFlowActivity.EXTRA_BATCH_ID, batchId)
+                            putExtra(CashFlowActivity.EXTRA_BATCH_CLOSED, true)
+                        }
+                        startActivity(cashFlowIntent)
 
                         loadOpenBatch()
                         loadClosedBatches()

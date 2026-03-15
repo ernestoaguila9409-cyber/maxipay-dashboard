@@ -56,6 +56,10 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var taxBreakdownContainer: LinearLayout
     private lateinit var tipRow: LinearLayout
     private lateinit var txtTipAmount: TextView
+    private lateinit var partialRefundContainer: LinearLayout
+    private lateinit var txtPartialRefundAmount: TextView
+    private lateinit var txtPartialRefundBy: TextView
+    private lateinit var txtPartialRefundDate: TextView
 
     private lateinit var adapter: OrderItemsAdapter
     private val listItems = mutableListOf<OrderListItem>()
@@ -109,6 +113,10 @@ class OrderDetailActivity : AppCompatActivity() {
         taxBreakdownContainer = findViewById(R.id.taxBreakdownContainer)
         tipRow = findViewById(R.id.tipRow)
         txtTipAmount = findViewById(R.id.txtTipAmount)
+        partialRefundContainer = findViewById(R.id.partialRefundContainer)
+        txtPartialRefundAmount = findViewById(R.id.txtPartialRefundAmount)
+        txtPartialRefundBy = findViewById(R.id.txtPartialRefundBy)
+        txtPartialRefundDate = findViewById(R.id.txtPartialRefundDate)
 
         recycler.layoutManager = LinearLayoutManager(this)
         adapter = OrderItemsAdapter(listItems) { itemDoc -> onOrderItemClick(itemDoc) }
@@ -231,10 +239,32 @@ class OrderDetailActivity : AppCompatActivity() {
                 val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
                 val isFullyRefunded = totalRefundedInCents >= totalInCents && totalInCents > 0L
 
-                loadRefundHistory(saleTransactionId) { totalFromRefunds, refundedLineKeys, refundedNameAmountKeys, lineKeyToEmployee, nameAmountToEmployee, lineKeyToDate, nameAmountToDate ->
+                loadRefundHistory(saleTransactionId) { totalFromRefunds, refundedLineKeys, refundedNameAmountKeys, lineKeyToEmployee, nameAmountToEmployee, lineKeyToDate, nameAmountToDate, wholeOrderRefundEmployee, wholeOrderRefundDate ->
                     val fullyRefunded = isFullyRefunded || (totalFromRefunds >= totalInCents && totalInCents > 0L)
                     txtRefundHistory.visibility = View.GONE
-                    adapter.setRefundedKeys(refundedLineKeys, refundedNameAmountKeys, lineKeyToEmployee, nameAmountToEmployee, lineKeyToDate, nameAmountToDate)
+
+                    val effectiveWholeEmployee = if (fullyRefunded) wholeOrderRefundEmployee else null
+                    val effectiveWholeDate = if (fullyRefunded) wholeOrderRefundDate else null
+                    adapter.setRefundedKeys(refundedLineKeys, refundedNameAmountKeys, lineKeyToEmployee, nameAmountToEmployee, lineKeyToDate, nameAmountToDate, effectiveWholeEmployee, effectiveWholeDate)
+
+                    if (!fullyRefunded && totalFromRefunds > 0 && wholeOrderRefundEmployee != null) {
+                        partialRefundContainer.visibility = View.VISIBLE
+                        txtPartialRefundAmount.text = MoneyUtils.centsToDisplay(totalFromRefunds)
+                        if (!wholeOrderRefundEmployee.isNullOrBlank() && wholeOrderRefundEmployee != "—") {
+                            txtPartialRefundBy.text = "By: $wholeOrderRefundEmployee"
+                            txtPartialRefundBy.visibility = View.VISIBLE
+                        } else {
+                            txtPartialRefundBy.visibility = View.GONE
+                        }
+                        if (!wholeOrderRefundDate.isNullOrBlank()) {
+                            txtPartialRefundDate.text = wholeOrderRefundDate
+                            txtPartialRefundDate.visibility = View.VISIBLE
+                        } else {
+                            txtPartialRefundDate.visibility = View.GONE
+                        }
+                    } else {
+                        partialRefundContainer.visibility = View.GONE
+                    }
                     if (status == "REFUNDED" || fullyRefunded) {
                         bottomActions.visibility = View.VISIBLE
                         btnVoid.visibility = View.GONE
@@ -478,10 +508,10 @@ class OrderDetailActivity : AppCompatActivity() {
             ?: ""
     }
 
-    private fun loadRefundHistory(saleTransactionId: String?, onLoaded: (totalRefundedCents: Long, refundedLineKeys: Set<String>, refundedNameAmountKeys: Set<String>, refundedLineKeyToEmployee: Map<String, String>, refundedNameAmountToEmployee: Map<String, String>, refundedLineKeyToDate: Map<String, String>, refundedNameAmountToDate: Map<String, String>) -> Unit) {
+    private fun loadRefundHistory(saleTransactionId: String?, onLoaded: (totalRefundedCents: Long, refundedLineKeys: Set<String>, refundedNameAmountKeys: Set<String>, refundedLineKeyToEmployee: Map<String, String>, refundedNameAmountToEmployee: Map<String, String>, refundedLineKeyToDate: Map<String, String>, refundedNameAmountToDate: Map<String, String>, wholeOrderRefundEmployee: String?, wholeOrderRefundDate: String?) -> Unit) {
         refundHistoryLines = ""
         if (saleTransactionId.isNullOrBlank()) {
-            onLoaded(0L, emptySet(), emptySet(), emptyMap(), emptyMap(), emptyMap(), emptyMap())
+            onLoaded(0L, emptySet(), emptySet(), emptyMap(), emptyMap(), emptyMap(), emptyMap(), null, null)
             return
         }
         val dateFormat = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US)
@@ -497,6 +527,8 @@ class OrderDetailActivity : AppCompatActivity() {
                 val refundedNameAmountToEmployee = mutableMapOf<String, String>()
                 val refundedLineKeyToDate = mutableMapOf<String, String>()
                 val refundedNameAmountToDate = mutableMapOf<String, String>()
+                var wholeOrderRefundEmployee: String? = null
+                var wholeOrderRefundDate: String? = null
                 for (refundDoc in snap.documents) {
                     val amountCents = refundDoc.getLong("amountInCents")
                         ?: ((refundDoc.getDouble("amount") ?: 0.0) * 100).toLong()
@@ -504,22 +536,28 @@ class OrderDetailActivity : AppCompatActivity() {
                     val employee = refundDoc.getString("refundedBy")?.trim()?.takeIf { it.isNotBlank() } ?: "—"
                     val createdAt = refundDoc.getTimestamp("createdAt")?.toDate()
                     val dateStr = if (createdAt != null) dateFormat.format(createdAt) else ""
-                    refundDoc.getString("refundedLineKey")?.takeIf { it.isNotBlank() }?.let { key ->
+                    val hasLineKey = refundDoc.getString("refundedLineKey")?.isNotBlank() == true
+                    val hasItemName = refundDoc.getString("refundedItemName")?.trim()?.isNotBlank() == true
+
+                    if (hasLineKey) {
+                        val key = refundDoc.getString("refundedLineKey")!!
                         refundedLineKeys.add(key)
                         refundedLineKeyToEmployee[key] = employee
                         refundedLineKeyToDate[key] = dateStr
-                    }
-                    val itemName = refundDoc.getString("refundedItemName")?.trim()?.takeIf { it.isNotBlank() }
-                    if (itemName != null && refundDoc.getString("refundedLineKey")?.isNotBlank() != true) {
+                    } else if (hasItemName) {
+                        val itemName = refundDoc.getString("refundedItemName")!!.trim()
                         val nameAmountKey = "$itemName|$amountCents"
                         refundedNameAmountKeys.add(nameAmountKey)
                         refundedNameAmountToEmployee[nameAmountKey] = employee
                         refundedNameAmountToDate[nameAmountKey] = dateStr
+                    } else {
+                        wholeOrderRefundEmployee = employee
+                        wholeOrderRefundDate = dateStr
                     }
                 }
-                onLoaded(totalCents, refundedLineKeys, refundedNameAmountKeys, refundedLineKeyToEmployee, refundedNameAmountToEmployee, refundedLineKeyToDate, refundedNameAmountToDate)
+                onLoaded(totalCents, refundedLineKeys, refundedNameAmountKeys, refundedLineKeyToEmployee, refundedNameAmountToEmployee, refundedLineKeyToDate, refundedNameAmountToDate, wholeOrderRefundEmployee, wholeOrderRefundDate)
             }
-            .addOnFailureListener { onLoaded(0L, emptySet(), emptySet(), emptyMap(), emptyMap(), emptyMap(), emptyMap()) }
+            .addOnFailureListener { onLoaded(0L, emptySet(), emptySet(), emptyMap(), emptyMap(), emptyMap(), emptyMap(), null, null) }
     }
     // ===============================
     // LOAD ITEMS
@@ -1039,10 +1077,15 @@ class OrderDetailActivity : AppCompatActivity() {
         val totalRefundedInCents = orderDoc.getLong("totalRefundedInCents") ?: 0L
         val remainingBalance = totalInCents - totalRefundedInCents
 
+        if (remainingBalance <= 0L) {
+            Toast.makeText(this, "Order is already fully refunded.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         val refundAmount = if (otherUnrefundedItems.isEmpty() && remainingBalance > lineTotalInCents) {
             remainingBalance
         } else {
-            lineTotalInCents
+            minOf(lineTotalInCents, remainingBalance)
         }
 
         val amountStr = String.format(Locale.US, "%.2f", refundAmount / 100.0)
@@ -1081,13 +1124,22 @@ class OrderDetailActivity : AppCompatActivity() {
                     ?: orderDoc.getString("transactionId")
                     ?: return@addOnSuccessListener
 
+                val orderTotalInCents = orderDoc.getLong("totalInCents") ?: 0L
+                val alreadyRefundedInCents = orderDoc.getLong("totalRefundedInCents") ?: 0L
+                val remainingRefundable = orderTotalInCents - alreadyRefundedInCents
+                if (remainingRefundable <= 0L) {
+                    Toast.makeText(this, "Order is already fully refunded.", Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+
                 db.collection("Transactions")
                     .document(transactionId)
                     .get()
                     .addOnSuccessListener { txDoc ->
 
                         val fullAmountInCents = txDoc.getLong("totalPaidInCents") ?: 0L
-                        val refundAmountInCents = amountInCents ?: fullAmountInCents
+                        val uncappedAmount = amountInCents ?: fullAmountInCents
+                        val refundAmountInCents = minOf(uncappedAmount, remainingRefundable)
                         if (refundAmountInCents <= 0L) return@addOnSuccessListener
                         if (refundAmountInCents > fullAmountInCents) {
                             Toast.makeText(this, "Refund amount cannot exceed transaction amount.", Toast.LENGTH_SHORT).show()
@@ -1194,7 +1246,7 @@ class OrderDetailActivity : AppCompatActivity() {
                         val resultCode = general?.optString("ResultCode") ?: ""
 
                         if (resultCode == "0") {
-                            finalizeRefund(originalTransactionId, amountInCents, finishAfter, refundedItemName, refundedLineKey)
+                            finalizeRefund(originalTransactionId, amountInCents, finishAfter, refundedItemName, refundedLineKey, paymentType)
                         } else {
                             Toast.makeText(
                                 this@OrderDetailActivity,
@@ -1260,7 +1312,8 @@ class OrderDetailActivity : AppCompatActivity() {
         amountInCents: Long,
         finishAfter: Boolean = true,
         refundedItemName: String? = null,
-        refundedLineKey: String? = null
+        refundedLineKey: String? = null,
+        paymentType: String = "Cash"
     ) {
 
         // 1️⃣ Find open batch
@@ -1288,8 +1341,10 @@ class OrderDetailActivity : AppCompatActivity() {
                         val newRefundTxRef = db.collection("Transactions").document()
                         val batchRef = db.collection("Batches").document(openBatchId)
 
+                        val orderNumber = orderDoc.getLong("orderNumber") ?: 0L
                         val refundDocData = buildMap<String, Any> {
                             put("orderId", orderId)
+                            put("orderNumber", orderNumber)
                             put("type", "REFUND")
                             put("amount", amountInCents / 100.0)
                             put("amountInCents", amountInCents)
@@ -1299,6 +1354,7 @@ class OrderDetailActivity : AppCompatActivity() {
                             put("voided", false)
                             put("settled", false)
                             put("refundedBy", employeeName)
+                            put("paymentType", paymentType)
                             refundedItemName?.takeIf { it.isNotBlank() }?.let { put("refundedItemName", it) }
                             refundedLineKey?.takeIf { it.isNotBlank() }?.let { put("refundedLineKey", it) }
                         }

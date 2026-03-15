@@ -2,8 +2,12 @@ package com.ernesto.myapplication
 
 import android.animation.ObjectAnimator
 import android.app.DatePickerDialog
+import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Bundle
 import android.text.InputType
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -19,6 +23,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
+import com.google.android.gms.tasks.Tasks
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
@@ -30,11 +36,17 @@ import java.util.Locale
 
 class CashFlowActivity : AppCompatActivity() {
 
+    companion object {
+        const val EXTRA_BATCH_ID = "extra_batch_id"
+        const val EXTRA_BATCH_CLOSED = "extra_batch_closed"
+    }
+
     private val db = FirebaseFirestore.getInstance()
     private val currencyFmt = NumberFormat.getCurrencyInstance()
     private val dateFmt = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault())
 
     private lateinit var progressBar: ProgressBar
+    private lateinit var bannerBatchClosed: MaterialCardView
     private lateinit var cardCashIn: MaterialCardView
     private lateinit var cardCashOut: MaterialCardView
     private lateinit var cardDrawerTotal: MaterialCardView
@@ -69,8 +81,13 @@ class CashFlowActivity : AppCompatActivity() {
     private lateinit var recyclerCashActivity: RecyclerView
     private val cashActivityAdapter = CashActivityAdapter()
 
+    private lateinit var imgEditStartingCash: ImageView
+    private lateinit var rowStartingCash: LinearLayout
+
     private var transactionListener: ListenerRegistration? = null
     private var startingCash = 0.0
+    private var currentBatchClosed = false
+    private var pendingDrawerSummary = false
 
     private enum class FilterMode { BATCH, DATE }
 
@@ -94,6 +111,7 @@ class CashFlowActivity : AppCompatActivity() {
         txtDate.text = dateFmt.format(Date())
 
         progressBar = findViewById(R.id.progressBar)
+        bannerBatchClosed = findViewById(R.id.bannerBatchClosed)
         cardCashIn = findViewById(R.id.cardCashIn)
         cardCashOut = findViewById(R.id.cardCashOut)
         cardDrawerTotal = findViewById(R.id.cardDrawerTotal)
@@ -122,13 +140,15 @@ class CashFlowActivity : AppCompatActivity() {
         headerCashActivity = findViewById(R.id.headerCashActivity)
         layoutCashActivityContent = findViewById(R.id.layoutCashActivityContent)
         imgExpandArrow = findViewById(R.id.imgExpandArrow)
+        imgEditStartingCash = findViewById(R.id.imgEditStartingCash)
+        rowStartingCash = findViewById(R.id.rowStartingCash)
 
         recyclerCashActivity = findViewById(R.id.recyclerCashActivity)
         recyclerCashActivity.layoutManager = LinearLayoutManager(this)
         recyclerCashActivity.adapter = cashActivityAdapter
 
         headerCashActivity.setOnClickListener { toggleCashActivity() }
-        findViewById<LinearLayout>(R.id.rowStartingCash).setOnClickListener { showSetStartingCashDialog() }
+        rowStartingCash.setOnClickListener { showSetStartingCashDialog() }
 
         txtSelectedDate.text = dateFmt.format(selectedDate)
 
@@ -137,7 +157,15 @@ class CashFlowActivity : AppCompatActivity() {
         btnChangeBatch.setOnClickListener { showBatchPicker() }
         btnChangeDate.setOnClickListener { showDatePicker() }
 
-        loadOpenBatchAndStart()
+        val intentBatchId = intent.getStringExtra(EXTRA_BATCH_ID)
+        val isBatchClosed = intent.getBooleanExtra(EXTRA_BATCH_CLOSED, false)
+        pendingDrawerSummary = isBatchClosed
+
+        if (intentBatchId != null) {
+            loadSpecificBatch(intentBatchId, isBatchClosed)
+        } else {
+            loadOpenBatchAndStart()
+        }
     }
 
     override fun onDestroy() {
@@ -216,22 +244,25 @@ class CashFlowActivity : AppCompatActivity() {
             .addOnSuccessListener { snap ->
                 progressBar.visibility = View.GONE
                 val dateFmtShort = SimpleDateFormat("MM/dd/yyyy h:mm a", Locale.getDefault())
-                batchList = snap.documents.map { doc ->
+                val openBatches = mutableListOf<BatchInfo>()
+                val closedBatches = mutableListOf<BatchInfo>()
+                for (doc in snap.documents) {
                     val closed = doc.getBoolean("closed") == true
                     val createdAt = doc.getDate("createdAt")
                     val closedAt = doc.getDate("closedAt")
-                    val label = if (closed) {
-                        "Closed – ${dateFmtShort.format(closedAt ?: createdAt ?: Date())}"
-                    } else {
-                        "Open – ${dateFmtShort.format(createdAt ?: Date())}"
-                    }
-                    BatchInfo(
+                    val info = BatchInfo(
                         id = doc.id,
-                        label = label,
+                        label = if (closed) {
+                            "Closed – ${dateFmtShort.format(closedAt ?: createdAt ?: Date())}"
+                        } else {
+                            "Current Open Batch"
+                        },
                         closed = closed,
                         startingCash = doc.getDouble("startingCash") ?: 0.0
                     )
+                    if (closed) closedBatches.add(info) else openBatches.add(info)
                 }
+                batchList = openBatches + closedBatches
                 if (batchList.isEmpty()) {
                     Toast.makeText(this, "No batches found", Toast.LENGTH_SHORT).show()
                     return@addOnSuccessListener
@@ -243,8 +274,10 @@ class CashFlowActivity : AppCompatActivity() {
                         val selected = batchList[which]
                         currentBatchId = selected.id
                         currentBatchLabel = selected.label
+                        currentBatchClosed = selected.closed
                         startingCash = selected.startingCash
                         txtSelectedBatch.text = selected.label
+                        updateStartingCashEditability()
                         reloadData()
                     }
                     .setNegativeButton("Cancel", null)
@@ -258,10 +291,37 @@ class CashFlowActivity : AppCompatActivity() {
 
     // ── Set Starting Cash ────────────────────────────────────────────────
 
+    private fun updateStartingCashEditability() {
+        val locked = startingCash > 0.0 && !currentBatchClosed
+        if (locked) {
+            imgEditStartingCash.visibility = View.GONE
+            rowStartingCash.isClickable = false
+            rowStartingCash.isFocusable = false
+            rowStartingCash.background = null
+        } else {
+            imgEditStartingCash.visibility = View.VISIBLE
+            rowStartingCash.isClickable = true
+            rowStartingCash.isFocusable = true
+            rowStartingCash.setBackgroundResource(
+                android.R.attr.selectableItemBackground.let { attr ->
+                    val ta = obtainStyledAttributes(intArrayOf(attr))
+                    val resId = ta.getResourceId(0, 0)
+                    ta.recycle()
+                    resId
+                }
+            )
+        }
+    }
+
     private fun showSetStartingCashDialog() {
         val batchId = currentBatchId
         if (batchId == null) {
             Toast.makeText(this, "No open batch to set starting cash", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (startingCash > 0.0 && !currentBatchClosed) {
+            Toast.makeText(this, "Starting cash is locked while the batch is open", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -300,11 +360,53 @@ class CashFlowActivity : AppCompatActivity() {
             .addOnSuccessListener {
                 startingCash = amount
                 valStartingCash.text = currencyFmt.format(amount)
+                updateStartingCashEditability()
                 reloadData()
                 Toast.makeText(this, "Starting cash set to ${currencyFmt.format(amount)}", Toast.LENGTH_SHORT).show()
             }
             .addOnFailureListener { e ->
                 Toast.makeText(this, "Failed to save: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+    }
+
+    // ── Load a specific batch (e.g. after batch close) ────────────────
+
+    private fun loadSpecificBatch(batchId: String, showClosedBanner: Boolean) {
+        progressBar.visibility = View.VISIBLE
+
+        if (showClosedBanner) {
+            bannerBatchClosed.visibility = View.VISIBLE
+        }
+
+        db.collection("Batches").document(batchId).get()
+            .addOnSuccessListener { doc ->
+                if (doc.exists()) {
+                    currentBatchId = doc.id
+                    startingCash = doc.getDouble("startingCash") ?: 0.0
+                    val closed = doc.getBoolean("closed") == true
+                    currentBatchClosed = closed
+                    val dateFmtShort = SimpleDateFormat("MM/dd/yyyy h:mm a", Locale.getDefault())
+                    val closedAt = doc.getDate("closedAt")
+                    val createdAt = doc.getDate("createdAt")
+                    currentBatchLabel = if (closed) {
+                        "Closed – ${dateFmtShort.format(closedAt ?: createdAt ?: Date())}"
+                    } else {
+                        "Open – ${dateFmtShort.format(createdAt ?: Date())}"
+                    }
+                    txtSelectedBatch.text = currentBatchLabel
+                } else {
+                    currentBatchId = batchId
+                    startingCash = 0.0
+                    currentBatchClosed = false
+                    currentBatchLabel = "Batch $batchId"
+                    txtSelectedBatch.text = currentBatchLabel
+                }
+                updateStartingCashEditability()
+                reloadData()
+            }
+            .addOnFailureListener { e ->
+                progressBar.visibility = View.GONE
+                Toast.makeText(this, "Failed to load batch: ${e.message}", Toast.LENGTH_LONG).show()
             }
     }
 
@@ -322,14 +424,17 @@ class CashFlowActivity : AppCompatActivity() {
                     val doc = snap.documents[0]
                     currentBatchId = doc.id
                     startingCash = doc.getDouble("startingCash") ?: 0.0
+                    currentBatchClosed = false
                     currentBatchLabel = "Current Open Batch"
                     txtSelectedBatch.text = currentBatchLabel
                 } else {
                     currentBatchId = null
                     startingCash = 0.0
+                    currentBatchClosed = false
                     currentBatchLabel = "No open batch"
                     txtSelectedBatch.text = currentBatchLabel
                 }
+                updateStartingCashEditability()
                 reloadData()
             }
             .addOnFailureListener { e ->
@@ -431,12 +536,13 @@ class CashFlowActivity : AppCompatActivity() {
 
     // ── Shared transaction processing ──────────────────────────────────
 
-    private fun processSnapshots(documents: List<com.google.firebase.firestore.DocumentSnapshot>) {
+    private fun processSnapshots(documents: List<DocumentSnapshot>) {
         var cashSales = 0.0
         var cashAdded = 0.0
         var cashRefunds = 0.0
         var paidOuts = 0.0
         val activityItems = mutableListOf<CashActivityItem>()
+        val unresolvedRefunds = mutableListOf<DocumentSnapshot>()
 
         for (doc in documents) {
             if (doc.getBoolean("voided") == true) continue
@@ -463,19 +569,21 @@ class CashFlowActivity : AppCompatActivity() {
                     }
                 }
                 "REFUND" -> {
-                    if (isCashTransaction(doc)) {
-                        val amount = resolveAmount(doc)
-                        cashRefunds += amount
+                    val cashAmount = extractCashRefundAmount(doc)
+                    if (cashAmount > 0.0) {
+                        cashRefunds += cashAmount
                         activityItems.add(
                             CashActivityItem(
                                 timestamp = createdAt,
                                 orderNumber = orderNumber,
                                 type = type,
-                                amountDueCents = (amount * 100).toLong(),
+                                amountDueCents = (cashAmount * 100).toLong(),
                                 tenderedCents = 0L,
                                 changeCents = 0L
                             )
                         )
+                    } else if (!hasPaymentTypeInfo(doc)) {
+                        unresolvedRefunds.add(doc)
                     }
                 }
                 "CASH_ADD" -> {
@@ -509,9 +617,58 @@ class CashFlowActivity : AppCompatActivity() {
             }
         }
 
-        activityItems.sortByDescending { it.timestamp }
-        bindData(startingCash, cashSales, cashAdded, cashRefunds, paidOuts)
-        bindActivityLog(activityItems)
+        if (unresolvedRefunds.isEmpty()) {
+            activityItems.sortByDescending { it.timestamp }
+            bindData(startingCash, cashSales, cashAdded, cashRefunds, paidOuts)
+            bindActivityLog(activityItems)
+            return
+        }
+
+        val refundsWithOrigId = unresolvedRefunds.filter {
+            it.getString("originalReferenceId")?.isNotBlank() == true
+        }
+
+        if (refundsWithOrigId.isEmpty()) {
+            activityItems.sortByDescending { it.timestamp }
+            bindData(startingCash, cashSales, cashAdded, cashRefunds, paidOuts)
+            bindActivityLog(activityItems)
+            return
+        }
+
+        val lookupTasks = refundsWithOrigId.map { refundDoc ->
+            db.collection("Transactions").document(refundDoc.getString("originalReferenceId")!!).get()
+        }
+
+        Tasks.whenAllSuccess<DocumentSnapshot>(lookupTasks)
+            .addOnSuccessListener { origDocs ->
+                for (i in origDocs.indices) {
+                    val origDoc = origDocs[i]
+                    if (!origDoc.exists()) continue
+                    val refundDoc = refundsWithOrigId[i]
+                    if (isCashTransaction(origDoc)) {
+                        val amount = resolveAmount(refundDoc)
+                        cashRefunds += amount
+                        activityItems.add(
+                            CashActivityItem(
+                                timestamp = refundDoc.getDate("createdAt") ?: Date(),
+                                orderNumber = refundDoc.getLong("orderNumber") ?: 0L,
+                                type = "REFUND",
+                                amountDueCents = (amount * 100).toLong(),
+                                tenderedCents = 0L,
+                                changeCents = 0L
+                            )
+                        )
+                    }
+                }
+                activityItems.sortByDescending { it.timestamp }
+                bindData(startingCash, cashSales, cashAdded, cashRefunds, paidOuts)
+                bindActivityLog(activityItems)
+            }
+            .addOnFailureListener {
+                activityItems.sortByDescending { it.timestamp }
+                bindData(startingCash, cashSales, cashAdded, cashRefunds, paidOuts)
+                bindActivityLog(activityItems)
+            }
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────
@@ -523,8 +680,39 @@ class CashFlowActivity : AppCompatActivity() {
         val timestamp: Date?
     )
 
+    private fun hasPaymentTypeInfo(doc: DocumentSnapshot): Boolean {
+        if (doc.getString("paymentType") != null) return true
+        @Suppress("UNCHECKED_CAST")
+        val payments = doc.get("payments") as? List<Map<String, Any>>
+        return payments != null && payments.isNotEmpty()
+    }
+
     @Suppress("UNCHECKED_CAST")
-    private fun extractCashPaymentInfo(doc: com.google.firebase.firestore.DocumentSnapshot): CashPaymentInfo? {
+    private fun extractCashRefundAmount(doc: DocumentSnapshot): Double {
+        val pt = doc.getString("paymentType")
+        if (pt != null) {
+            return if (pt.equals("Cash", ignoreCase = true)) resolveAmount(doc) else 0.0
+        }
+
+        val payments = doc.get("payments") as? List<Map<String, Any>>
+        if (payments != null && payments.isNotEmpty()) {
+            var cashTotal = 0.0
+            for (p in payments) {
+                if ((p["status"] as? String) == "VOIDED") continue
+                val method = (p["paymentType"] as? String) ?: ""
+                if (method.equals("Cash", ignoreCase = true)) {
+                    val cents = (p["amountInCents"] as? Number)?.toLong() ?: 0L
+                    cashTotal += cents / 100.0
+                }
+            }
+            return cashTotal
+        }
+
+        return 0.0
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun extractCashPaymentInfo(doc: DocumentSnapshot): CashPaymentInfo? {
         val payments = doc.get("payments") as? List<Map<String, Any>> ?: emptyList()
 
         for (p in payments) {
@@ -548,7 +736,7 @@ class CashFlowActivity : AppCompatActivity() {
         return null
     }
 
-    private fun isCashTransaction(doc: com.google.firebase.firestore.DocumentSnapshot): Boolean {
+    private fun isCashTransaction(doc: DocumentSnapshot): Boolean {
         val pt = doc.getString("paymentType")
         if (pt != null) return pt.equals("Cash", ignoreCase = true)
 
@@ -559,7 +747,7 @@ class CashFlowActivity : AppCompatActivity() {
         }
     }
 
-    private fun resolveAmount(doc: com.google.firebase.firestore.DocumentSnapshot): Double {
+    private fun resolveAmount(doc: DocumentSnapshot): Double {
         val cents = doc.getLong("amountInCents")
         if (cents != null && cents > 0L) return cents / 100.0
 
@@ -593,6 +781,121 @@ class CashFlowActivity : AppCompatActivity() {
 
         val expectedDrawer = startingCash + cashSales + cashAdded - cashRefunds - paidOuts
         valExpectedDrawer.text = currencyFmt.format(expectedDrawer)
+
+        if (pendingDrawerSummary) {
+            pendingDrawerSummary = false
+            showDrawerSummaryDialog(startingCash, cashSales, cashAdded, cashRefunds, paidOuts, expectedDrawer)
+        }
+    }
+
+    // ── Cash Drawer Summary dialog (shown after batch close) ─────────
+
+    private fun showDrawerSummaryDialog(
+        startingCash: Double,
+        cashSales: Double,
+        cashAdded: Double,
+        cashRefunds: Double,
+        paidOuts: Double,
+        expectedDrawer: Double
+    ) {
+        val dp = resources.displayMetrics.density
+        fun dp(v: Int) = (v * dp).toInt()
+
+        fun sectionHeader(text: String, color: Int): TextView =
+            TextView(this).apply {
+                this.text = text
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(color)
+                setPadding(0, dp(14), 0, dp(6))
+            }
+
+        fun lineRow(label: String, value: String, bold: Boolean = false): LinearLayout =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, dp(5), 0, dp(5))
+                addView(TextView(this@CashFlowActivity).apply {
+                    this.text = label
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                    setTextColor(Color.parseColor("#424242"))
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                addView(TextView(this@CashFlowActivity).apply {
+                    this.text = value
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                    setTextColor(Color.parseColor("#212121"))
+                    if (bold) setTypeface(null, Typeface.BOLD)
+                })
+            }
+
+        fun divider(): View =
+            View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
+                ).apply { topMargin = dp(10); bottomMargin = dp(4) }
+                setBackgroundColor(Color.parseColor("#E0E0E0"))
+            }
+
+        val totalCashIn = cashSales + cashAdded
+        val totalCashOut = cashRefunds + paidOuts
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), dp(8))
+
+            addView(sectionHeader("Starting Cash", Color.parseColor("#1565C0")))
+            addView(lineRow("Starting Cash", currencyFmt.format(startingCash)))
+
+            addView(sectionHeader("Cash In", Color.parseColor("#2E7D32")))
+            addView(lineRow("Cash Sales", currencyFmt.format(cashSales)))
+            addView(lineRow("Cash Added", currencyFmt.format(cashAdded)))
+            addView(lineRow("Total Cash In", currencyFmt.format(totalCashIn), bold = true))
+
+            addView(sectionHeader("Cash Out", Color.parseColor("#C62828")))
+            addView(lineRow("Refunds", currencyFmt.format(cashRefunds)))
+            addView(lineRow("Paid Outs", currencyFmt.format(paidOuts)))
+            addView(lineRow("Total Cash Out", currencyFmt.format(totalCashOut), bold = true))
+
+            addView(divider())
+
+            addView(TextView(this@CashFlowActivity).apply {
+                text = "Expected Cash in Drawer"
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setTextColor(Color.parseColor("#757575"))
+                gravity = Gravity.CENTER
+                setPadding(0, dp(16), 0, dp(4))
+            })
+
+            addView(TextView(this@CashFlowActivity).apply {
+                text = currencyFmt.format(expectedDrawer)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 28f)
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor("#1565C0"))
+                gravity = Gravity.CENTER
+                setPadding(0, 0, 0, dp(8))
+            })
+
+            addView(TextView(this@CashFlowActivity).apply {
+                text = "Please verify that the cash drawer contains this amount."
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                setTextColor(Color.parseColor("#757575"))
+                gravity = Gravity.CENTER
+                setPadding(0, 0, 0, dp(8))
+            })
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Cash Drawer Summary")
+            .setView(content)
+            .setCancelable(false)
+            .setPositiveButton("Confirm") { _, _ ->
+                val intent = android.content.Intent(this, MainActivity::class.java)
+                intent.flags = android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                startActivity(intent)
+                finish()
+            }
+            .show()
     }
 
     private fun bindActivityLog(items: List<CashActivityItem>) {

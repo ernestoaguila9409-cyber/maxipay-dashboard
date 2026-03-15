@@ -733,57 +733,80 @@ class TransactionActivity : AppCompatActivity() {
     private fun createLocalRefund(original: Transaction, amount: Double) {
         val refundAmountCents = (amount * 100).toLong()
 
-        val refundMap = hashMapOf(
-            "referenceId" to UUID.randomUUID().toString(),
-            "originalReferenceId" to original.referenceId,
-            "amount" to amount,
-            "amountInCents" to refundAmountCents,
-            "type" to "REFUND",
-            "paymentType" to "Cash",
-            "cardBrand" to "",
-            "last4" to "",
-            "entryType" to "",
-            "voided" to false,
-            "settled" to false,
-            "createdAt" to Date(),
-            "refundedBy" to currentEmployeeName
-        )
+        db.collection("Batches")
+            .whereEqualTo("closed", false)
+            .limit(1)
+            .get()
+            .addOnSuccessListener { batchSnap ->
+                val openBatchId = if (!batchSnap.isEmpty) batchSnap.documents.first().id else ""
 
-        db.collection("Transactions")
-            .add(refundMap)
-            .addOnSuccessListener {
-                db.collection("Transactions").document(original.referenceId).get()
-                    .addOnSuccessListener { saleDoc ->
-                        val orderId = saleDoc.getString("orderId")
-                        if (!saleDoc.exists() || orderId.isNullOrBlank()) {
-                            Toast.makeText(this, "Cash refund saved", Toast.LENGTH_LONG).show()
-                            return@addOnSuccessListener
+                val refundMap = hashMapOf(
+                    "referenceId" to UUID.randomUUID().toString(),
+                    "originalReferenceId" to original.referenceId,
+                    "amount" to amount,
+                    "amountInCents" to refundAmountCents,
+                    "type" to "REFUND",
+                    "paymentType" to "Cash",
+                    "cardBrand" to "",
+                    "last4" to "",
+                    "entryType" to "",
+                    "voided" to false,
+                    "settled" to false,
+                    "createdAt" to Date(),
+                    "refundedBy" to currentEmployeeName,
+                    "batchId" to openBatchId,
+                    "orderId" to original.orderId,
+                    "orderNumber" to original.orderNumber
+                )
+
+                db.collection("Transactions")
+                    .add(refundMap)
+                    .addOnSuccessListener {
+                        if (openBatchId.isNotBlank()) {
+                            db.collection("Batches").document(openBatchId)
+                                .update(mapOf(
+                                    "totalRefundsInCents" to FieldValue.increment(refundAmountCents),
+                                    "netTotalInCents" to FieldValue.increment(-refundAmountCents),
+                                    "transactionCount" to FieldValue.increment(1)
+                                ))
                         }
-                        val orderRef = db.collection("Orders").document(orderId)
-                        orderRef.get()
-                            .addOnSuccessListener { orderDoc ->
-                                if (!orderDoc.exists()) {
-                                    ReceiptPromptHelper.promptForReceipt(this, ReceiptPromptHelper.ReceiptType.REFUND, orderId, original.referenceId)
+
+                        db.collection("Transactions").document(original.referenceId).get()
+                            .addOnSuccessListener { saleDoc ->
+                                val orderId = saleDoc.getString("orderId")
+                                if (!saleDoc.exists() || orderId.isNullOrBlank()) {
+                                    Toast.makeText(this, "Cash refund saved", Toast.LENGTH_LONG).show()
                                     return@addOnSuccessListener
                                 }
-                                val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
-                                val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
-                                val newTotalRefunded = currentRefunded + refundAmountCents
-                                val updates = mutableMapOf<String, Any>(
-                                    "totalRefundedInCents" to newTotalRefunded,
-                                    "refundedAt" to Date()
-                                )
-                                if (newTotalRefunded >= totalInCents) {
-                                    updates["status"] = "REFUNDED"
-                                }
-                                orderRef.update(updates)
-                                    .addOnSuccessListener {
-                                        ReceiptPromptHelper.promptForReceipt(this, ReceiptPromptHelper.ReceiptType.REFUND, orderId, original.referenceId)
+                                val orderRef = db.collection("Orders").document(orderId)
+                                orderRef.get()
+                                    .addOnSuccessListener { orderDoc ->
+                                        if (!orderDoc.exists()) {
+                                            ReceiptPromptHelper.promptForReceipt(this, ReceiptPromptHelper.ReceiptType.REFUND, orderId, original.referenceId)
+                                            return@addOnSuccessListener
+                                        }
+                                        val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+                                        val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
+                                        val newTotalRefunded = currentRefunded + refundAmountCents
+                                        val updates = mutableMapOf<String, Any>(
+                                            "totalRefundedInCents" to newTotalRefunded,
+                                            "refundedAt" to Date()
+                                        )
+                                        if (newTotalRefunded >= totalInCents) {
+                                            updates["status"] = "REFUNDED"
+                                        }
+                                        orderRef.update(updates)
+                                            .addOnSuccessListener {
+                                                ReceiptPromptHelper.promptForReceipt(this, ReceiptPromptHelper.ReceiptType.REFUND, orderId, original.referenceId)
+                                            }
                                     }
+                            }
+                            .addOnFailureListener {
+                                Toast.makeText(this, "Cash refund saved", Toast.LENGTH_LONG).show()
                             }
                     }
                     .addOnFailureListener {
-                        Toast.makeText(this, "Cash refund saved", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "Failed to save refund: ${it.message}", Toast.LENGTH_LONG).show()
                     }
             }
             .addOnFailureListener {
@@ -818,7 +841,9 @@ class TransactionActivity : AppCompatActivity() {
             referenceId = transaction.referenceId,
             refundAmount = amount,
             paymentType = transaction.paymentType,
-            refundedBy = currentEmployeeName
+            refundedBy = currentEmployeeName,
+            orderId = transaction.orderId,
+            orderNumber = transaction.orderNumber
         )
     }
 
@@ -829,7 +854,9 @@ class TransactionActivity : AppCompatActivity() {
         referenceId: String? = null,
         refundAmount: Double? = null,
         paymentType: String? = null,
-        refundedBy: String = ""
+        refundedBy: String = "",
+        orderId: String = "",
+        orderNumber: Long = 0L
     ) {
         Log.d("TX_API", "[$type] URL: $url")
         Log.d("TX_API", "[$type] Request: $json")
@@ -898,60 +925,81 @@ class TransactionActivity : AppCompatActivity() {
                     if (type == "REFUND" && referenceId != null && refundAmount != null) {
 
                         val refundAmountCents = (refundAmount * 100).toLong()
-                        val refundMap = hashMapOf(
-                            "referenceId" to UUID.randomUUID().toString(),
-                            "originalReferenceId" to referenceId,
-                            "amount" to refundAmount,
-                            "amountInCents" to refundAmountCents,
-                            "type" to "REFUND",
-                            "paymentType" to (paymentType ?: ""),
-                            "cardBrand" to "",
-                            "last4" to "",
-                            "entryType" to "",
-                            "voided" to false,
-                            "settled" to false,
-                            "createdAt" to Date(),
-                            "refundedBy" to refundedBy
-                        )
 
-                        db.collection("Transactions").add(refundMap)
-                            .addOnSuccessListener {
-                                db.collection("Transactions").document(referenceId).get()
-                                    .addOnSuccessListener { saleDoc ->
-                                        val orderId = saleDoc.getString("orderId")
-                                        if (!saleDoc.exists() || orderId.isNullOrBlank()) {
-                                            Toast.makeText(this@TransactionActivity, "REFUND APPROVED", Toast.LENGTH_LONG).show()
-                                            return@addOnSuccessListener
+                        db.collection("Batches")
+                            .whereEqualTo("closed", false)
+                            .limit(1)
+                            .get()
+                            .addOnSuccessListener batchLookup@{ batchSnap ->
+                                val openBatchId = if (!batchSnap.isEmpty) batchSnap.documents.first().id else ""
+
+                                val refundMap = hashMapOf(
+                                    "referenceId" to UUID.randomUUID().toString(),
+                                    "originalReferenceId" to referenceId,
+                                    "amount" to refundAmount,
+                                    "amountInCents" to refundAmountCents,
+                                    "type" to "REFUND",
+                                    "paymentType" to (paymentType ?: ""),
+                                    "cardBrand" to "",
+                                    "last4" to "",
+                                    "entryType" to "",
+                                    "voided" to false,
+                                    "settled" to false,
+                                    "createdAt" to Date(),
+                                    "refundedBy" to refundedBy,
+                                    "batchId" to openBatchId,
+                                    "orderId" to orderId,
+                                    "orderNumber" to orderNumber
+                                )
+
+                                db.collection("Transactions").add(refundMap)
+                                    .addOnSuccessListener {
+                                        if (openBatchId.isNotBlank()) {
+                                            db.collection("Batches").document(openBatchId)
+                                                .update(mapOf(
+                                                    "totalRefundsInCents" to FieldValue.increment(refundAmountCents),
+                                                    "netTotalInCents" to FieldValue.increment(-refundAmountCents),
+                                                    "transactionCount" to FieldValue.increment(1)
+                                                ))
                                         }
-                                        val orderRef = db.collection("Orders").document(orderId)
-                                        orderRef.get()
-                                            .addOnSuccessListener { orderDoc ->
-                                                if (!orderDoc.exists()) {
-                                                    ReceiptPromptHelper.promptForReceipt(this@TransactionActivity, ReceiptPromptHelper.ReceiptType.REFUND, orderId, referenceId)
+
+                                        db.collection("Transactions").document(referenceId).get()
+                                            .addOnSuccessListener { saleDoc ->
+                                                val saleOrderId = saleDoc.getString("orderId")
+                                                if (!saleDoc.exists() || saleOrderId.isNullOrBlank()) {
+                                                    Toast.makeText(this@TransactionActivity, "REFUND APPROVED", Toast.LENGTH_LONG).show()
                                                     return@addOnSuccessListener
                                                 }
-                                                val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
-                                                val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
-                                                val newTotalRefunded = currentRefunded + refundAmountCents
-                                                val updates = mutableMapOf<String, Any>(
-                                                    "totalRefundedInCents" to newTotalRefunded,
-                                                    "refundedAt" to Date()
-                                                )
-                                                if (newTotalRefunded >= totalInCents) {
-                                                    updates["status"] = "REFUNDED"
-                                                }
-                                                orderRef.update(updates)
-                                                    .addOnSuccessListener {
-                                                        ReceiptPromptHelper.promptForReceipt(this@TransactionActivity, ReceiptPromptHelper.ReceiptType.REFUND, orderId, referenceId)
+                                                val orderRef = db.collection("Orders").document(saleOrderId)
+                                                orderRef.get()
+                                                    .addOnSuccessListener { orderDoc ->
+                                                        if (!orderDoc.exists()) {
+                                                            ReceiptPromptHelper.promptForReceipt(this@TransactionActivity, ReceiptPromptHelper.ReceiptType.REFUND, saleOrderId, referenceId)
+                                                            return@addOnSuccessListener
+                                                        }
+                                                        val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+                                                        val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
+                                                        val newTotalRefunded = currentRefunded + refundAmountCents
+                                                        val updates = mutableMapOf<String, Any>(
+                                                            "totalRefundedInCents" to newTotalRefunded,
+                                                            "refundedAt" to Date()
+                                                        )
+                                                        if (newTotalRefunded >= totalInCents) {
+                                                            updates["status"] = "REFUNDED"
+                                                        }
+                                                        orderRef.update(updates)
+                                                            .addOnSuccessListener {
+                                                                ReceiptPromptHelper.promptForReceipt(this@TransactionActivity, ReceiptPromptHelper.ReceiptType.REFUND, saleOrderId, referenceId)
+                                                            }
                                                     }
+                                            }
+                                            .addOnFailureListener {
+                                                Toast.makeText(this@TransactionActivity, "REFUND APPROVED", Toast.LENGTH_LONG).show()
                                             }
                                     }
                                     .addOnFailureListener {
-                                        Toast.makeText(this@TransactionActivity, "REFUND APPROVED", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(this@TransactionActivity, "REFUND APPROVED but failed to save: ${it.message}", Toast.LENGTH_LONG).show()
                                     }
-                            }
-                            .addOnFailureListener {
-                                Toast.makeText(this@TransactionActivity, "REFUND APPROVED but failed to save: ${it.message}", Toast.LENGTH_LONG).show()
                             }
                         return@runOnUiThread
                     }

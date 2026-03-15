@@ -544,6 +544,36 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
 });
 
 // ---------------------------------------------------------------------------
+// 4. PIN Verification (returns a custom auth token)
+// ---------------------------------------------------------------------------
+
+exports.verifyPin = onCall(async (request) => {
+  const { pin } = request.data || {};
+
+  if (!pin) {
+    return { success: false, error: "PIN is required." };
+  }
+
+  const db = admin.firestore();
+  const snap = await db
+    .collection("Employees")
+    .where("pin", "==", pin)
+    .where("active", "==", true)
+    .limit(1)
+    .get();
+
+  if (snap.empty) {
+    return { success: false, error: "Invalid PIN" };
+  }
+
+  const employee = snap.docs[0];
+  const name = employee.data().name ?? "";
+  const role = employee.data().role ?? "";
+
+  return { success: true, name, role };
+});
+
+// ---------------------------------------------------------------------------
 
 function escapeHtml(str) {
   if (typeof str !== "string") return "";

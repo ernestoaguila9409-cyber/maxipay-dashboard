@@ -199,6 +199,56 @@
                 android:textStyle="bold"
                 android:textColor="#333333"/>
         </LinearLayout>
+
+        <!-- Partial refund info (shown when order has partial refund without specific line keys) -->
+        <LinearLayout
+            android:id="@+id/partialRefundContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:layout_marginTop="8dp"
+            android:background="#FFF3E0"
+            android:padding="10dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="Refunded"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#E65100"/>
+                <TextView
+                    android:id="@+id/txtPartialRefundAmount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#E65100"/>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/txtPartialRefundBy"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="#BF360C"
+                android:layout_marginTop="2dp"
+                android:visibility="gone"/>
+
+            <TextView
+                android:id="@+id/txtPartialRefundDate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="#BF360C"
+                android:visibility="gone"/>
+        </LinearLayout>
     </LinearLayout>
 
     <!-- OPEN BUTTON -->

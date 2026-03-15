@@ -6,11 +6,13 @@ import android.widget.Button
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.functions.FirebaseFunctions
 
 class LoginActivity : AppCompatActivity() {
 
-    private val db = FirebaseFirestore.getInstance()
+    private val functions = FirebaseFunctions.getInstance()
+    private val auth = FirebaseAuth.getInstance()
     private var isLoggingIn = false
     private val pinBuilder = StringBuilder()
     private val maxPinLength = 4
@@ -18,8 +20,6 @@ class LoginActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_login)
-
-        TerminalPrefs.initFromFirestore()
 
         fun onPinChanged() {
             updateDots()
@@ -64,32 +64,49 @@ class LoginActivity : AppCompatActivity() {
         if (isLoggingIn) return
         isLoggingIn = true
 
-        db.collection("Employees")
-            .whereEqualTo("pin", pin)
-            .whereEqualTo("active", true)
-            .get()
-            .addOnSuccessListener { documents ->
-                isLoggingIn = false
-                if (!documents.isEmpty) {
-                    val employee = documents.documents[0]
-                    val name = employee.getString("name") ?: ""
-                    val role = employee.getString("role") ?: ""
+        val data = hashMapOf("pin" to pin)
 
-                    SessionEmployee.setEmployee(this, name, role)
+        functions.getHttpsCallable("verifyPin")
+            .call(data)
+            .addOnSuccessListener { result ->
+                @Suppress("UNCHECKED_CAST")
+                val response = result.data as? Map<String, Any?> ?: emptyMap()
+                val success = response["success"] as? Boolean ?: false
 
-                    val intent = Intent(this, MainActivity::class.java)
-                    intent.putExtra("employeeName", name)
-                    intent.putExtra("employeeRole", role)
-                    startActivity(intent)
-                    finish()
-                } else {
+                if (!success) {
+                    isLoggingIn = false
                     pinBuilder.clear()
                     updateDots()
                     Toast.makeText(this, "Invalid PIN", Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
                 }
+
+                val name = response["name"] as? String ?: ""
+                val role = response["role"] as? String ?: ""
+
+                auth.signInAnonymously()
+                    .addOnSuccessListener {
+                        isLoggingIn = false
+                        TerminalPrefs.initFromFirestore()
+                        SessionEmployee.setEmployee(this, name, role)
+
+                        val intent = Intent(this, MainActivity::class.java)
+                        intent.putExtra("employeeName", name)
+                        intent.putExtra("employeeRole", role)
+                        startActivity(intent)
+                        finish()
+                    }
+                    .addOnFailureListener {
+                        isLoggingIn = false
+                        pinBuilder.clear()
+                        updateDots()
+                        Toast.makeText(this, "Login failed", Toast.LENGTH_SHORT).show()
+                    }
             }
             .addOnFailureListener {
                 isLoggingIn = false
+                pinBuilder.clear()
+                updateDots()
                 Toast.makeText(this, "Login failed", Toast.LENGTH_SHORT).show()
             }
     }
