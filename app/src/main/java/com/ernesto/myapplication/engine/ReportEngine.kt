@@ -5,6 +5,20 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.QuerySnapshot
 import java.util.Calendar
 import java.util.Date
+import kotlin.math.roundToInt
+
+data class SalesByOrderType(
+    val dineInCents: Long = 0L,
+    val toGoCents: Long = 0L,
+    val barCents: Long = 0L
+) {
+    val totalCents: Long get() = dineInCents + toGoCents + barCents
+
+    fun percentOf(partCents: Long): Int {
+        if (totalCents == 0L) return 0
+        return ((partCents * 100.0) / totalCents).roundToInt()
+    }
+}
 
 data class DailySalesSummary(
     val grossSales: Double,
@@ -133,6 +147,79 @@ class ReportEngine(private val db: FirebaseFirestore) {
                     }
 
                     tipCents += doc.getLong("tipAmountInCents") ?: 0L
+                }
+                tryComplete()
+            }
+            .addOnFailureListener { e -> firstError = firstError ?: e; tryComplete() }
+    }
+
+    /**
+     * Aggregates approved (non-voided SALE/CAPTURE) transaction amounts by order type
+     * (DINE_IN, TO_GO, BAR). Accepts arbitrary date ranges to support daily, weekly,
+     * or monthly reports and future chart visualisation.
+     */
+    fun getSalesByOrderType(
+        startOfDay: Date,
+        endOfDay: Date,
+        onSuccess: (SalesByOrderType) -> Unit,
+        onFailure: (Exception) -> Unit
+    ) {
+        val txByOrder = mutableMapOf<String, Long>()
+        val orderTypes = mutableMapOf<String, String>()
+        var remaining = 2
+        var firstError: Exception? = null
+
+        fun tryComplete() {
+            if (--remaining > 0) return
+            firstError?.let { onFailure(it); return }
+
+            var dineInCents = 0L
+            var toGoCents = 0L
+            var barCents = 0L
+
+            for ((orderId, cents) in txByOrder) {
+                when (orderTypes[orderId]) {
+                    "DINE_IN" -> dineInCents += cents
+                    "TO_GO"   -> toGoCents += cents
+                    "BAR"     -> barCents += cents
+                }
+            }
+
+            onSuccess(
+                SalesByOrderType(
+                    dineInCents = dineInCents,
+                    toGoCents = toGoCents,
+                    barCents = barCents
+                )
+            )
+        }
+
+        queryTransactions(startOfDay, endOfDay,
+            onSuccess = { snap ->
+                for (doc in snap.documents) {
+                    if (doc.getBoolean("voided") == true) continue
+                    when (doc.getString("type")) {
+                        "SALE", "CAPTURE" -> {
+                            val orderId = doc.getString("orderId") ?: continue
+                            val cents = sumPaymentsInCents(doc)
+                            if (cents > 0L) {
+                                txByOrder[orderId] = (txByOrder[orderId] ?: 0L) + cents
+                            }
+                        }
+                    }
+                }
+                tryComplete()
+            },
+            onFailure = { e -> firstError = firstError ?: e; tryComplete() }
+        )
+
+        db.collection("Orders")
+            .whereGreaterThanOrEqualTo("createdAt", startOfDay)
+            .whereLessThan("createdAt", endOfDay)
+            .get()
+            .addOnSuccessListener { snap ->
+                for (doc in snap.documents) {
+                    orderTypes[doc.id] = doc.getString("orderType") ?: ""
                 }
                 tryComplete()
             }

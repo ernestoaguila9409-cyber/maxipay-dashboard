@@ -47,9 +47,9 @@
                 app:layout_constraintTop_toTopOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintDimensionRatio="3:4"
+                app:layout_constraintDimensionRatio="3:5"
                 app:columnCount="3"
-                app:rowCount="4"
+                app:rowCount="5"
                 app:useDefaultMargins="false"
                 app:alignmentMode="alignBounds">
 
@@ -607,6 +607,48 @@
                     android:textSize="12sp"
                     android:fontFamily="sans-serif-medium"
                     android:maxLines="2"
+                    android:gravity="center"/>
+            </LinearLayout>
+
+            <!-- Row 4: CASH FLOW -->
+            <LinearLayout
+                android:id="@+id/btnCashFlow"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_margin="8dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/bg_order_type_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:padding="16dp"
+                android:minHeight="0dp"
+                app:layout_columnWeight="1"
+                app:layout_rowWeight="1"
+                app:layout_row="4"
+                app:layout_column="0"
+                app:layout_gravity="fill">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_cash"
+                    android:contentDescription="Cash Flow"
+                    app:tint="@android:color/white"/>
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="8dp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="CASH FLOW"
+                    android:textColor="@android:color/white"
+                    android:textSize="11sp"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
                     android:gravity="center"/>
             </LinearLayout>
 

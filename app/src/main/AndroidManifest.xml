@@ -127,6 +127,10 @@
             android:name=".SplitPaymentActivity"
             android:exported="false"
             android:parentActivityName=".PaymentActivity" />
+        <activity
+            android:name=".CashPaymentActivity"
+            android:exported="false"
+            android:parentActivityName=".PaymentActivity" />
 
         <activity
             android:name=".EmployeesActivity"
@@ -170,6 +174,10 @@
             android:exported="false"
             android:parentActivityName=".MainActivity" />
         <activity android:name=".GlobalModifierActivity" />
+        <activity
+            android:name=".CashFlowActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
         <activity android:name=".AssignModifierToItemActivity" />
 
     </application>

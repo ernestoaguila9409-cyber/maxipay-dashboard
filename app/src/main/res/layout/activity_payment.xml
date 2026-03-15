@@ -1,40 +1,220 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent">
-
-<LinearLayout
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center_horizontal"
-    android:background="#F5F5F5"
-    android:padding="24dp">
+    android:background="#F5F5F5">
 
-    <TextView
-        android:id="@+id/txtPaymentTotal"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textSize="22sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="24dp"/>
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
 
-    <!-- 🔥 STATUS CONTAINER -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <!-- ==================== Amount Due ==================== -->
+
+            <TextView
+                android:id="@+id/txtAmountDueLabel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Amount Due"
+                android:textSize="16sp"
+                android:textColor="#757575"
+                android:gravity="center"
+                android:layout_marginTop="12dp" />
+
+            <TextView
+                android:id="@+id/txtPaymentTotal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="44sp"
+                android:textStyle="bold"
+                android:textColor="#212121"
+                android:gravity="center"
+                android:layout_marginTop="4dp" />
+
+            <!-- ==================== Order Summary ==================== -->
+
+            <TextView
+                android:id="@+id/txtOrderSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:textColor="#757575"
+                android:gravity="center"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="20dp" />
+
+            <!-- ==================== Divider ==================== -->
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#E0E0E0" />
+
+            <!-- ==================== Card Payments ==================== -->
+
+            <TextView
+                android:id="@+id/labelCardPayments"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="CARD PAYMENTS"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#9E9E9E"
+                android:letterSpacing="0.1"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="12dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCredit"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:text="Credit"
+                android:textSize="16sp"
+                android:textAllCaps="false"
+                app:icon="@drawable/ic_credit_card"
+                app:iconGravity="textStart"
+                app:iconPadding="12dp"
+                app:cornerRadius="12dp"
+                app:backgroundTint="#1565C0" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnDebit"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:text="Debit"
+                android:textSize="16sp"
+                android:textAllCaps="false"
+                android:layout_marginTop="10dp"
+                app:icon="@drawable/ic_credit_card"
+                app:iconGravity="textStart"
+                app:iconPadding="12dp"
+                app:cornerRadius="12dp"
+                app:backgroundTint="#00695C" />
+
+            <!-- ==================== Cash Payments ==================== -->
+
+            <TextView
+                android:id="@+id/labelCashPayments"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="CASH PAYMENTS"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#9E9E9E"
+                android:letterSpacing="0.1"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="12dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCash"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:text="Cash"
+                android:textSize="16sp"
+                android:textAllCaps="false"
+                app:icon="@drawable/ic_cash"
+                app:iconGravity="textStart"
+                app:iconPadding="12dp"
+                app:cornerRadius="12dp"
+                app:backgroundTint="#2E7D32" />
+
+            <!-- ==================== Other ==================== -->
+
+            <TextView
+                android:id="@+id/labelOther"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="OTHER"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#9E9E9E"
+                android:letterSpacing="0.1"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="12dp" />
+
+            <com.google.android.material.button.MaterialButton
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:id="@+id/btnMixMode"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:text="Mix Payments"
+                android:textSize="16sp"
+                android:textAllCaps="false"
+                app:icon="@drawable/ic_split"
+                app:iconGravity="textStart"
+                app:iconPadding="12dp"
+                app:iconTint="#424242"
+                app:cornerRadius="12dp"
+                app:strokeColor="#BDBDBD" />
+
+            <com.google.android.material.button.MaterialButton
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:id="@+id/btnSplitPayments"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:text="Split Payment"
+                android:textSize="16sp"
+                android:textAllCaps="false"
+                android:layout_marginTop="10dp"
+                app:icon="@drawable/ic_split"
+                app:iconGravity="textStart"
+                app:iconPadding="12dp"
+                app:iconTint="#424242"
+                app:cornerRadius="12dp"
+                app:strokeColor="#BDBDBD" />
+
+            <!-- ==================== Divider ==================== -->
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#E0E0E0"
+                android:layout_marginTop="24dp" />
+
+            <!-- ==================== Cancel ==================== -->
+
+            <com.google.android.material.button.MaterialButton
+                style="@style/Widget.Material3.Button.TextButton"
+                android:id="@+id/btnCancel"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="Cancel Payment"
+                android:textSize="15sp"
+                android:textAllCaps="false"
+                android:textColor="#C62828"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="16dp"
+                app:cornerRadius="12dp"
+                app:rippleColor="#33C62828" />
+
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- ==================== Status Overlay ==================== -->
+
     <LinearLayout
         android:id="@+id/statusContainer"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:orientation="vertical"
         android:gravity="center"
+        android:background="#F0F5F5F5"
         android:visibility="gone"
-        android:padding="24dp">
+        android:elevation="8dp"
+        android:clickable="true"
+        android:focusable="true">
 
         <ProgressBar
             android:id="@+id/progressBar"
             android:layout_width="48dp"
             android:layout_height="48dp"
-            android:layout_marginBottom="16dp"/>
+            android:layout_marginBottom="16dp" />
 
         <TextView
             android:id="@+id/txtStatus"
@@ -43,7 +223,7 @@
             android:text="Waiting for card..."
             android:textSize="20sp"
             android:textStyle="bold"
-            android:textColor="#FF9800"/>
+            android:textColor="#FF9800" />
 
         <TextView
             android:id="@+id/txtSubStatus"
@@ -52,62 +232,16 @@
             android:text="Please present card on terminal"
             android:textSize="14sp"
             android:textColor="#777777"
-            android:layout_marginTop="8dp"/>
+            android:layout_marginTop="8dp" />
     </LinearLayout>
 
-    <Button
-        android:id="@+id/btnCredit"
+    <!-- ==================== Fireworks Overlay ==================== -->
+
+    <com.ernesto.myapplication.FireworksView
+        android:id="@+id/fireworksView"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Credit"
-        android:layout_marginTop="24dp"/>
-
-    <Button
-        android:id="@+id/btnDebit"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Debit"
-        android:layout_marginTop="16dp"/>
-
-    <Button
-        android:id="@+id/btnCash"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Cash"
-        android:layout_marginTop="16dp"/>
-
-    <Button
-        android:id="@+id/btnMixMode"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="MIX PAYMENTS" />
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="start"
-        android:layout_marginTop="16dp">
-
-        <Button
-            android:id="@+id/btnSplitPayments"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Split Payments"
-            android:minWidth="120dp" />
-    </LinearLayout>
-</LinearLayout>
-
-<com.ernesto.myapplication.FireworksView
-    android:id="@+id/fireworksView"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:clickable="false"
-    android:focusable="false" />
+        android:layout_height="match_parent"
+        android:clickable="false"
+        android:focusable="false" />
 
 </FrameLayout>

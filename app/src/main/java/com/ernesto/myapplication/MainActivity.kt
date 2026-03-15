@@ -123,6 +123,10 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, ReportsActivity::class.java))
         }
 
+        findViewById<android.view.View>(R.id.btnCashFlow).setOnClickListener {
+            startActivity(Intent(this, CashFlowActivity::class.java))
+        }
+
         findViewById<ImageButton>(R.id.btnLogout).setOnClickListener {
             val intent = Intent(this, LoginActivity::class.java)
             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK

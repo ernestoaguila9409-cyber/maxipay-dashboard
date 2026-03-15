@@ -7,6 +7,7 @@ import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.button.MaterialButton
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Source
 import okhttp3.*
@@ -22,17 +23,23 @@ import java.util.Locale
 import com.ernesto.myapplication.engine.PaymentEngine
 import android.util.Log
 import com.ernesto.myapplication.engine.MoneyUtils
+
 class PaymentActivity : AppCompatActivity() {
 
     private var isMixMode = false
 
-    private lateinit var btnMixMode: Button
-    private lateinit var btnSplitPayments: Button
-    private lateinit var btnCredit: Button
-    private lateinit var btnDebit: Button
-    private lateinit var btnCash: Button
+    private lateinit var btnMixMode: MaterialButton
+    private lateinit var btnSplitPayments: MaterialButton
+    private lateinit var btnCredit: MaterialButton
+    private lateinit var btnDebit: MaterialButton
+    private lateinit var btnCash: MaterialButton
+    private lateinit var btnCancel: MaterialButton
 
     private lateinit var txtPaymentTotal: TextView
+    private lateinit var txtOrderSummary: TextView
+    private lateinit var labelCardPayments: TextView
+    private lateinit var labelCashPayments: TextView
+    private lateinit var labelOther: TextView
     private lateinit var statusContainer: LinearLayout
     private lateinit var progressBar: ProgressBar
     private lateinit var txtSubStatus: TextView
@@ -58,6 +65,19 @@ class PaymentActivity : AppCompatActivity() {
             loadRemainingBalance()
         }
 
+    private var lastCashTenderedCents: Long = 0L
+    private var lastCashChangeCents: Long = 0L
+
+    private val cashPaymentLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                lastCashTenderedCents = result.data?.getLongExtra(CashPaymentActivity.EXTRA_TENDERED_CENTS, 0L) ?: 0L
+                lastCashChangeCents = result.data?.getLongExtra(CashPaymentActivity.EXTRA_CHANGE_CENTS, 0L) ?: 0L
+                showWaitingStatus()
+                completePayment("Cash")
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_payment)
@@ -65,11 +85,16 @@ class PaymentActivity : AppCompatActivity() {
         paymentEngine = PaymentEngine(db)
 
         txtPaymentTotal = findViewById(R.id.txtPaymentTotal)
+        txtOrderSummary = findViewById(R.id.txtOrderSummary)
+        labelCardPayments = findViewById(R.id.labelCardPayments)
+        labelCashPayments = findViewById(R.id.labelCashPayments)
+        labelOther = findViewById(R.id.labelOther)
         btnCredit = findViewById(R.id.btnCredit)
         btnDebit = findViewById(R.id.btnDebit)
         btnCash = findViewById(R.id.btnCash)
         btnMixMode = findViewById(R.id.btnMixMode)
         btnSplitPayments = findViewById(R.id.btnSplitPayments)
+        btnCancel = findViewById(R.id.btnCancel)
 
         statusContainer = findViewById(R.id.statusContainer)
         progressBar = findViewById(R.id.progressBar)
@@ -83,11 +108,11 @@ class PaymentActivity : AppCompatActivity() {
 
         updateMixPaymentsVisibility()
 
+        btnCancel.setOnClickListener { finish() }
+
         btnMixMode.setOnClickListener {
             isMixMode = !isMixMode
-            btnMixMode.text =
-                if (isMixMode) "MIX MODE ON"
-                else "MIX PAYMENTS"
+            btnMixMode.text = if (isMixMode) "Mix Mode ON" else "Mix Payments"
         }
 
         btnCredit.setOnClickListener {
@@ -102,7 +127,7 @@ class PaymentActivity : AppCompatActivity() {
 
         btnCash.setOnClickListener {
             if (isMixMode) showAmountDialog("Cash")
-            else processFullPayment("Cash")
+            else launchCashPayment(remainingBalance)
         }
 
         btnSplitPayments.setOnClickListener {
@@ -134,6 +159,17 @@ class PaymentActivity : AppCompatActivity() {
             btnCash.visibility = if (PaymentMethodsConfig.isCashEnabled(this)) View.VISIBLE else View.GONE
             btnSplitPayments.visibility = if (PaymentMethodsConfig.isSplitPaymentsEnabled(this)) View.VISIBLE else View.GONE
         }
+        updateSectionLabelsVisibility()
+    }
+
+    private fun updateSectionLabelsVisibility() {
+        val anyCard = btnCredit.visibility == View.VISIBLE || btnDebit.visibility == View.VISIBLE
+        labelCardPayments.visibility = if (anyCard) View.VISIBLE else View.GONE
+
+        labelCashPayments.visibility = btnCash.visibility
+
+        val anyOther = btnMixMode.visibility == View.VISIBLE || btnSplitPayments.visibility == View.VISIBLE
+        labelOther.visibility = if (anyOther) View.VISIBLE else View.GONE
     }
 
     /**
@@ -166,6 +202,7 @@ class PaymentActivity : AppCompatActivity() {
 
                 orderType = snap.getString("orderType") ?: ""
                 updateMixPaymentsVisibility()
+                bindOrderSummary(snap)
 
                 val remainingInCents =
                     snap.getLong("remainingInCents")
@@ -180,8 +217,7 @@ class PaymentActivity : AppCompatActivity() {
                     return@addOnSuccessListener
                 }
 
-                txtPaymentTotal.text =
-                    "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
+                txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
 
                 if (maybeLaunchTipScreen()) return@addOnSuccessListener
                 showSplitPayShareDialogIfNeeded()
@@ -192,6 +228,7 @@ class PaymentActivity : AppCompatActivity() {
 
                         orderType = snap.getString("orderType") ?: ""
                         updateMixPaymentsVisibility()
+                        bindOrderSummary(snap)
 
                         val remainingInCents =
                             snap.getLong("remainingInCents")
@@ -206,13 +243,35 @@ class PaymentActivity : AppCompatActivity() {
                             return@addOnSuccessListener
                         }
 
-                        txtPaymentTotal.text =
-                            "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
+                        txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
 
                         if (maybeLaunchTipScreen()) return@addOnSuccessListener
                         showSplitPayShareDialogIfNeeded()
                     }
             }
+    }
+
+    private fun bindOrderSummary(snap: com.google.firebase.firestore.DocumentSnapshot) {
+        val parts = mutableListOf<String>()
+
+        val type = snap.getString("orderType") ?: ""
+        val tableName = snap.getString("tableName") ?: ""
+        val guestCount = (snap.getLong("guestCount") ?: 0L).toInt()
+        val orderNumber = snap.getLong("orderNumber") ?: 0L
+
+        when (type) {
+            "DINE_IN" -> {
+                if (tableName.isNotBlank()) parts.add(tableName)
+                if (guestCount > 0) parts.add("$guestCount Guest${if (guestCount > 1) "s" else ""}")
+            }
+            "TO_GO" -> parts.add("To-Go")
+            "BAR", "BAR_TAB" -> parts.add("Bar")
+            else -> if (type.isNotBlank()) parts.add(type.replace("_", " "))
+        }
+        if (orderNumber > 0L) parts.add("Order #$orderNumber")
+
+        txtOrderSummary.text = parts.joinToString(" • ")
+        txtOrderSummary.visibility = if (parts.isEmpty()) View.GONE else View.VISIBLE
     }
 
     private fun maybeLaunchTipScreen(): Boolean {
@@ -269,8 +328,7 @@ class PaymentActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cash") { _, _ ->
                 paymentAmount = actualAmount
-                showWaitingStatus()
-                completePayment("Cash")
+                launchCashPayment(actualAmount)
             }
             .setCancelable(true)
             .show()
@@ -295,6 +353,17 @@ class PaymentActivity : AppCompatActivity() {
         Handler(Looper.getMainLooper()).postDelayed({
             showSplitPayShareDialogWithTitle(amount, title)
         }, 1500)
+    }
+
+    private fun launchCashPayment(amount: Double) {
+        if (batchId.isNullOrBlank()) {
+            Toast.makeText(this, "Open a batch first", Toast.LENGTH_LONG).show()
+            return
+        }
+        paymentAmount = amount
+        val intent = Intent(this, CashPaymentActivity::class.java)
+        intent.putExtra(CashPaymentActivity.EXTRA_AMOUNT_DUE_CENTS, MoneyUtils.dollarsToCents(amount))
+        cashPaymentLauncher.launch(intent)
     }
 
     private fun processFullPayment(paymentType: String) {
@@ -372,13 +441,12 @@ class PaymentActivity : AppCompatActivity() {
 
                 paymentAmount = roundMoney(entered)
 
-                dialog.dismiss()  // 🔥 CLOSES DIALOG BEFORE PROCESSING
-
-                showWaitingStatus()
+                dialog.dismiss()
 
                 if (paymentType == "Cash") {
-                    completePayment("Cash")
+                    launchCashPayment(paymentAmount)
                 } else {
+                    showWaitingStatus()
                     processCardPayment(paymentType)
                 }
             }
@@ -532,8 +600,7 @@ class PaymentActivity : AppCompatActivity() {
                         splitPaymentsDone = 0
                         Handler(Looper.getMainLooper()).postDelayed({ onOrderFullyPaid() }, 2000)
                     } else {
-                        txtPaymentTotal.text =
-                            "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
+                        txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
                         setButtonsEnabled(true)
                         scheduleNextSplitDialogIfNeeded()
                     }
@@ -547,6 +614,7 @@ class PaymentActivity : AppCompatActivity() {
             }
         )
     }
+
     private fun completePayment(paymentType: String) {
 
         val oid = orderId ?: return
@@ -558,11 +626,16 @@ class PaymentActivity : AppCompatActivity() {
         }
         val amountInCents = MoneyUtils.dollarsToCents(paymentAmount)
 
+        val tenderedCents = if (paymentType == "Cash") lastCashTenderedCents else 0L
+        val changeCents = if (paymentType == "Cash") lastCashChangeCents else 0L
+
         paymentEngine.processPayment(
             orderId = oid,
             batchId = bid,
             paymentType = paymentType,
             amountInCents = amountInCents,
+            cashTenderedInCents = tenderedCents,
+            cashChangeInCents = changeCents,
             onSuccess = { remainingInCents ->
 
                 runOnUiThread {
@@ -577,10 +650,7 @@ class PaymentActivity : AppCompatActivity() {
                         splitPaymentsDone = 0
                         onOrderFullyPaid()
                     } else {
-
-                        txtPaymentTotal.text =
-                            "Remaining: ${MoneyUtils.centsToDisplay(remainingInCents)}"
-
+                        txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
                         progressBar.visibility = View.GONE
                         setButtonsEnabled(true)
                         scheduleNextSplitDialogIfNeeded()

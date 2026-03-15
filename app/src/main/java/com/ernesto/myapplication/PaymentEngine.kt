@@ -22,6 +22,9 @@ class PaymentEngine(private val db: FirebaseFirestore) {
         transactionNumber: String = "",
         invoiceNumber: String = "",
 
+        cashTenderedInCents: Long = 0L,
+        cashChangeInCents: Long = 0L,
+
         onSuccess: (Long) -> Unit,
         onFailure: (Exception) -> Unit
     ) {
@@ -48,7 +51,7 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                 transactionsRef.document()
             }
 
-            val paymentEntry = hashMapOf(
+            val paymentEntry = hashMapOf<String, Any>(
                 "paymentId" to UUID.randomUUID().toString(),
                 "paymentType" to paymentType,
                 "amountInCents" to amountInCents,
@@ -63,6 +66,11 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                 "transactionNumber" to transactionNumber,
                 "invoiceNumber" to invoiceNumber
             )
+
+            if (cashTenderedInCents > 0L) {
+                paymentEntry["cashTenderedInCents"] = cashTenderedInCents
+                paymentEntry["cashChangeInCents"] = cashChangeInCents
+            }
 
             if (saleId == null) {
 
