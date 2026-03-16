@@ -180,6 +180,11 @@
             android:parentActivityName=".MainActivity" />
         <activity android:name=".AssignModifierToItemActivity" />
 
+        <activity
+            android:name=".InventoryConfigActivity"
+            android:exported="false"
+            android:parentActivityName=".ConfigurationActivity" />
+
     </application>
 
 </manifest>

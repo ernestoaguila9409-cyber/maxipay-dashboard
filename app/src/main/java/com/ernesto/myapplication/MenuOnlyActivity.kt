@@ -2,10 +2,12 @@ package com.ernesto.myapplication
 
 import android.graphics.Color
 import android.os.Bundle
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
+import android.view.View
 import android.widget.CheckBox
 import android.widget.EditText
-import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
@@ -20,26 +22,33 @@ class MenuOnlyActivity : AppCompatActivity() {
 
     private lateinit var categoryRecycler: RecyclerView
     private lateinit var itemRecycler: RecyclerView
+    private lateinit var editSearch: EditText
+    private lateinit var txtItemCount: TextView
 
     private val db = FirebaseFirestore.getInstance()
     private var selectedCategoryId: String? = null
     private var selectedCategoryAvailability: List<String> = emptyList()
+    private var stockCountingEnabled: Boolean = true
+    private var currentAdapter: ItemAdapter? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_menu_only)
+        supportActionBar?.hide()
 
         categoryRecycler = findViewById(R.id.categoryRecycler)
         itemRecycler = findViewById(R.id.itemRecycler)
+        editSearch = findViewById(R.id.editSearch)
+        txtItemCount = findViewById(R.id.txtItemCount)
 
         categoryRecycler.layoutManager = LinearLayoutManager(this)
         itemRecycler.layoutManager = LinearLayoutManager(this)
 
-        findViewById<ImageButton>(R.id.btnAddCategory).setOnClickListener {
+        findViewById<View>(R.id.btnAddCategory).setOnClickListener {
             showAddCategoryDialog()
         }
 
-        findViewById<ImageButton>(R.id.btnAddItem).setOnClickListener {
+        findViewById<View>(R.id.btnAddItem).setOnClickListener {
             if (selectedCategoryId == null) {
                 Toast.makeText(this, "Select a category first", Toast.LENGTH_SHORT).show()
             } else {
@@ -47,7 +56,32 @@ class MenuOnlyActivity : AppCompatActivity() {
             }
         }
 
-        loadCategories()
+        editSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                currentAdapter?.filter(s?.toString() ?: "")
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
+        loadStockSetting()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        loadStockSetting()
+    }
+
+    private fun loadStockSetting() {
+        db.collection("Settings").document("inventory").get()
+            .addOnSuccessListener { doc ->
+                stockCountingEnabled = doc.getBoolean("stockCountingEnabled") ?: true
+                loadCategories()
+            }
+            .addOnFailureListener {
+                stockCountingEnabled = true
+                loadCategories()
+            }
     }
 
     // =========================================================
@@ -55,11 +89,9 @@ class MenuOnlyActivity : AppCompatActivity() {
     // =========================================================
 
     private fun loadCategories() {
-
         db.collection("Categories")
             .get()
             .addOnSuccessListener { documents ->
-
                 val categoryList = mutableListOf<CategoryModel>()
 
                 for (doc in documents) {
@@ -77,6 +109,8 @@ class MenuOnlyActivity : AppCompatActivity() {
                     )
                 }
 
+                categoryList.sortBy { it.name.lowercase() }
+
                 categoryRecycler.adapter =
                     CategoryAdapter(
                         categories = categoryList,
@@ -85,6 +119,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                             selectedCategoryAvailability =
                                 categoryList.find { it.id == categoryId }?.availableOrderTypes
                                     ?: emptyList()
+                            editSearch.setText("")
                             loadItems(categoryId)
                         },
                         context = this,
@@ -92,6 +127,10 @@ class MenuOnlyActivity : AppCompatActivity() {
                             loadCategories()
                         }
                     )
+
+                if (selectedCategoryId != null) {
+                    loadItems(selectedCategoryId!!)
+                }
             }
     }
 
@@ -100,12 +139,10 @@ class MenuOnlyActivity : AppCompatActivity() {
     // =========================================================
 
     private fun loadItems(categoryId: String) {
-
         db.collection("MenuItems")
             .whereEqualTo("categoryId", categoryId)
             .get()
             .addOnSuccessListener { documents ->
-
                 val itemList = mutableListOf<ItemModel>()
 
                 for (doc in documents) {
@@ -127,12 +164,20 @@ class MenuOnlyActivity : AppCompatActivity() {
                     )
                 }
 
-                itemRecycler.adapter = ItemAdapter(
+                itemList.sortBy { it.name.lowercase() }
+
+                val count = itemList.size
+                txtItemCount.text = "$count item${if (count != 1) "s" else ""}"
+
+                val adapter = ItemAdapter(
                     context = this,
                     itemList = itemList,
                     categoryAvailability = selectedCategoryAvailability,
+                    stockCountingEnabled = stockCountingEnabled,
                     refresh = { loadItems(categoryId) }
                 )
+                currentAdapter = adapter
+                itemRecycler.adapter = adapter
             }
     }
 
@@ -141,7 +186,6 @@ class MenuOnlyActivity : AppCompatActivity() {
     // =========================================================
 
     private fun showAddCategoryDialog() {
-
         val layout = LinearLayout(this)
         layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(50, 40, 50, 10)
@@ -190,18 +234,13 @@ class MenuOnlyActivity : AppCompatActivity() {
             .create()
 
         dialog.setOnShowListener {
-
             val addButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             addButton.isEnabled = false
 
-            input.addTextChangedListener(object : android.text.TextWatcher {
-
-                override fun afterTextChanged(s: android.text.Editable?) {}
-
+            input.addTextChangedListener(object : TextWatcher {
+                override fun afterTextChanged(s: Editable?) {}
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-
                 override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {
-
                     val name = text.toString().trim()
 
                     if (name.isEmpty()) {
@@ -211,7 +250,6 @@ class MenuOnlyActivity : AppCompatActivity() {
                     }
 
                     checkCategoryExists(name) { exists ->
-
                         if (exists) {
                             input.error = "Category already exists"
                             addButton.isEnabled = false
@@ -235,15 +273,12 @@ class MenuOnlyActivity : AppCompatActivity() {
     }
 
     private fun checkCategoryExists(name: String, callback: (Boolean) -> Unit) {
-
         val normalizedName = name.trim().lowercase()
 
         db.collection("Categories")
             .get()
             .addOnSuccessListener { documents ->
-
                 var exists = false
-
                 for (doc in documents) {
                     val existingName = doc.getString("name") ?: continue
                     if (existingName.trim().lowercase() == normalizedName) {
@@ -251,21 +286,17 @@ class MenuOnlyActivity : AppCompatActivity() {
                         break
                     }
                 }
-
                 callback(exists)
             }
     }
 
     private fun saveCategory(name: String, availableOrderTypes: List<String>) {
-
         val normalizedName = name.trim().lowercase()
 
         db.collection("Categories")
             .get()
             .addOnSuccessListener { documents ->
-
                 var exists = false
-
                 for (doc in documents) {
                     val existingName = doc.getString("name") ?: continue
                     if (existingName.trim().lowercase() == normalizedName) {
@@ -275,13 +306,8 @@ class MenuOnlyActivity : AppCompatActivity() {
                 }
 
                 if (exists) {
-                    Toast.makeText(
-                        this,
-                        "Category already exists",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    Toast.makeText(this, "Category already exists", Toast.LENGTH_SHORT).show()
                 } else {
-
                     val category = hashMapOf(
                         "name" to name,
                         "availableOrderTypes" to availableOrderTypes
@@ -291,11 +317,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                         .add(category)
                         .addOnSuccessListener {
                             loadCategories()
-                            Toast.makeText(
-                                this,
-                                "Category added",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            Toast.makeText(this, "Category added", Toast.LENGTH_SHORT).show()
                         }
                 }
             }
@@ -306,7 +328,6 @@ class MenuOnlyActivity : AppCompatActivity() {
     // =========================================================
 
     private fun showAddItemDialog() {
-
         val layout = LinearLayout(this)
         layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(40, 40, 40, 40)
@@ -325,7 +346,9 @@ class MenuOnlyActivity : AppCompatActivity() {
 
         layout.addView(nameInput)
         layout.addView(priceInput)
-        layout.addView(stockInput)
+        if (stockCountingEnabled) {
+            layout.addView(stockInput)
+        }
 
         val divider = android.view.View(this)
         divider.setBackgroundColor(Color.LTGRAY)
@@ -375,10 +398,12 @@ class MenuOnlyActivity : AppCompatActivity() {
             .setTitle("Add Item")
             .setView(layout)
             .setPositiveButton("Add") { _, _ ->
-
                 val name = nameInput.text.toString().trim()
                 val price = priceInput.text.toString().toDoubleOrNull()
-                val stock = stockInput.text.toString().toLongOrNull() ?: 0L
+                val stock = if (stockCountingEnabled)
+                    stockInput.text.toString().toLongOrNull() ?: 0L
+                else
+                    9999L
 
                 if (name.isEmpty()) {
                     Toast.makeText(this, "Please enter item name", Toast.LENGTH_SHORT).show()

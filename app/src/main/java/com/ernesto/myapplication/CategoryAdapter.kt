@@ -2,6 +2,7 @@ package com.ernesto.myapplication
 
 import android.app.AlertDialog
 import android.content.Context
+import android.graphics.Typeface
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -20,6 +21,7 @@ class CategoryAdapter(
 ) : RecyclerView.Adapter<CategoryAdapter.CategoryViewHolder>() {
 
     private val db = FirebaseFirestore.getInstance()
+    private var selectedPosition: Int = RecyclerView.NO_POSITION
 
     companion object {
         val ALL_ORDER_TYPES = listOf("BAR_TAB", "TO_GO", "DINE_IN")
@@ -33,6 +35,8 @@ class CategoryAdapter(
 
     inner class CategoryViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val nameText: TextView = view.findViewById(R.id.txtCategoryName)
+        val indicator: View = view.findViewById(R.id.selectedIndicator)
+        val root: View = view.findViewById(R.id.categoryRoot)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CategoryViewHolder {
@@ -42,12 +46,25 @@ class CategoryAdapter(
     }
 
     override fun onBindViewHolder(holder: CategoryViewHolder, position: Int) {
-
         val category = categories[position]
+        val isSelected = position == selectedPosition
 
         holder.nameText.text = category.name
+        holder.nameText.setTypeface(null, if (isSelected) Typeface.BOLD else Typeface.NORMAL)
+        holder.nameText.setTextColor(
+            if (isSelected) 0xFF6366F1.toInt() else 0xFF334155.toInt()
+        )
+
+        holder.indicator.visibility = if (isSelected) View.VISIBLE else View.GONE
+        holder.root.setBackgroundResource(
+            if (isSelected) R.drawable.bg_category_selected else R.drawable.bg_category_default
+        )
 
         holder.itemView.setOnClickListener {
+            val prev = selectedPosition
+            selectedPosition = holder.adapterPosition
+            if (prev != RecyclerView.NO_POSITION) notifyItemChanged(prev)
+            notifyItemChanged(selectedPosition)
             onCategoryClick(category.id)
         }
 
@@ -59,12 +76,7 @@ class CategoryAdapter(
 
     override fun getItemCount(): Int = categories.size
 
-    // =========================================================
-    // CATEGORY OPTIONS
-    // =========================================================
-
     private fun showCategoryOptions(category: CategoryModel) {
-
         val options = arrayOf("Edit", "Delete")
 
         AlertDialog.Builder(context)
@@ -79,7 +91,6 @@ class CategoryAdapter(
     }
 
     private fun showEditDialog(category: CategoryModel) {
-
         val layout = LinearLayout(context)
         layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(50, 40, 50, 10)
@@ -142,7 +153,6 @@ class CategoryAdapter(
     }
 
     private fun deleteCategory(categoryId: String) {
-
         db.collection("Categories")
             .document(categoryId)
             .delete()

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/categoryRoot"
+    android:id="@+id/groupRoot"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
@@ -12,7 +12,6 @@
     android:clickable="true"
     android:focusable="true">
 
-    <!-- Accent indicator bar (visible when selected) -->
     <View
         android:id="@+id/selectedIndicator"
         android:layout_width="4dp"
@@ -21,21 +20,27 @@
         android:layout_marginEnd="12dp"
         android:visibility="gone" />
 
-    <TextView
-        android:id="@+id/txtCategoryName"
+    <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:textSize="15sp"
-        android:textColor="#334155"
-        android:maxLines="2"
-        android:ellipsize="end" />
+        android:orientation="vertical">
 
-    <TextView
-        android:id="@+id/txtCategoryCount"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textSize="12sp"
-        android:textColor="#94A3B8"
-        android:visibility="gone" />
+        <TextView
+            android:id="@+id/txtGroupName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="15sp"
+            android:textColor="#334155"
+            android:maxLines="2"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/txtGroupType"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="11sp"
+            android:textColor="#94A3B8"
+            android:paddingTop="2dp" />
+    </LinearLayout>
 </LinearLayout>

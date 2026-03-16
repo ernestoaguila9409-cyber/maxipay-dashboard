@@ -4,77 +4,211 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F4F6F9">
+    android:background="#F1F5F9">
 
     <!-- ================= HEADER ================= -->
 
     <LinearLayout
         android:id="@+id/headerBar"
         android:layout_width="0dp"
-        android:layout_height="60dp"
-        android:background="#1F2937"
+        android:layout_height="56dp"
+        android:background="#FFFFFF"
+        android:elevation="2dp"
         android:gravity="center_vertical"
+        android:orientation="horizontal"
         android:paddingHorizontal="20dp"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
         <TextView
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Inventory Management"
-            android:textColor="@android:color/white"
-            android:textSize="18sp"
-            android:textStyle="bold"/>
+            android:layout_weight="1"
+            android:text="Inventory"
+            android:textColor="#1E293B"
+            android:textSize="20sp"
+            android:textStyle="bold" />
     </LinearLayout>
+
+    <!-- Thin divider below header -->
+    <View
+        android:id="@+id/headerDivider"
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:background="#E2E8F0"
+        app:layout_constraintTop_toBottomOf="@id/headerBar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <!-- ================= LEFT PANEL (CATEGORIES) ================= -->
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/categoryRecycler"
-        android:layout_width="180dp"
+    <LinearLayout
+        android:id="@+id/categoryPanel"
+        android:layout_width="240dp"
         android:layout_height="0dp"
-        android:background="#E5E7EB"
-        android:padding="12dp"
-        app:layout_constraintTop_toBottomOf="@id/headerBar"
+        android:orientation="vertical"
+        android:background="@drawable/bg_category_panel"
+        app:layout_constraintTop_toBottomOf="@id/headerDivider"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"/>
+        app:layout_constraintStart_toStartOf="parent">
 
-    <!-- Add Category Button (bottom of sidebar) -->
-    <ImageButton
-        android:id="@+id/btnAddCategory"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:background="@android:color/transparent"
-        android:src="@android:drawable/ic_input_add"
-        android:tint="#1F2937"
+        <!-- Category header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="12dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Categories"
+                android:textColor="#475569"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.05" />
+
+            <ImageButton
+                android:id="@+id/btnAddCategory"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_input_add"
+                android:scaleType="centerInside"
+                android:contentDescription="Add category"
+                app:tint="#6366F1" />
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/categoryRecycler"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="12dp" />
+    </LinearLayout>
+
+    <!-- Vertical divider -->
+    <View
+        android:id="@+id/panelDivider"
+        android:layout_width="1dp"
+        android:layout_height="0dp"
+        android:background="#E2E8F0"
+        app:layout_constraintTop_toBottomOf="@id/headerDivider"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="@id/categoryRecycler"
-        app:layout_constraintEnd_toEndOf="@id/categoryRecycler"
-        android:layout_marginBottom="16dp"/>
+        app:layout_constraintStart_toEndOf="@id/categoryPanel" />
 
     <!-- ================= RIGHT PANEL (ITEMS) ================= -->
+
+    <!-- Search bar -->
+    <LinearLayout
+        android:id="@+id/searchContainer"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/bg_search_bar"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="2dp"
+        android:layout_marginStart="20dp"
+        android:layout_marginEnd="20dp"
+        android:layout_marginTop="16dp"
+        app:layout_constraintTop_toBottomOf="@id/headerDivider"
+        app:layout_constraintStart_toEndOf="@id/panelDivider"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <ImageView
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:src="@drawable/ic_search"
+            android:layout_marginEnd="10dp"
+            android:contentDescription="Search" />
+
+        <EditText
+            android:id="@+id/editSearch"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:background="@android:color/transparent"
+            android:hint="Search items…"
+            android:textColorHint="#94A3B8"
+            android:textColor="#1E293B"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:imeOptions="actionSearch"
+            android:inputType="text" />
+    </LinearLayout>
+
+    <!-- Items count label -->
+    <TextView
+        android:id="@+id/txtItemCount"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Select a category"
+        android:textColor="#94A3B8"
+        android:textSize="12sp"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="4dp"
+        app:layout_constraintTop_toBottomOf="@id/searchContainer"
+        app:layout_constraintStart_toEndOf="@id/panelDivider"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/itemRecycler"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:padding="16dp"
-        app:layout_constraintTop_toBottomOf="@id/headerBar"
-        app:layout_constraintStart_toEndOf="@id/categoryRecycler"
+        android:clipToPadding="false"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="80dp"
+        app:layout_constraintTop_toBottomOf="@id/txtItemCount"
+        app:layout_constraintStart_toEndOf="@id/panelDivider"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent"/>
+        app:layout_constraintBottom_toBottomOf="parent" />
 
     <!-- Floating Add Item Button -->
-    <ImageButton
+    <LinearLayout
         android:id="@+id/btnAddItem"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:background="@android:color/holo_green_dark"
-        android:src="@android:drawable/ic_input_add"
-        android:tint="@android:color/white"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:background="@drawable/bg_fab_add"
+        android:elevation="6dp"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingHorizontal="20dp"
+        android:clickable="true"
+        android:focusable="true"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        android:layout_margin="24dp"/>
+        android:layout_marginBottom="20dp"
+        android:layout_marginEnd="20dp">
+
+        <ImageView
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:src="@android:drawable/ic_input_add"
+            app:tint="#FFFFFF"
+            android:layout_marginEnd="8dp"
+            android:contentDescription="Add" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Add Item"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

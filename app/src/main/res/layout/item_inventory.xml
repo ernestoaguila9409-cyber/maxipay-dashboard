@@ -2,15 +2,63 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:padding="16dp"
-    android:background="@android:color/white"
-    android:layout_marginBottom="8dp">
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/bg_item_card"
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="14dp"
+    android:layout_marginBottom="8dp"
+    android:elevation="1dp"
+    android:clickable="true"
+    android:focusable="true">
 
-    <TextView
-        android:id="@+id/txtItemName"
-        android:layout_width="match_parent"
+    <!-- Left: Name + Price -->
+    <LinearLayout
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:textSize="14sp"
-        android:textColor="#000000" />
+        android:layout_weight="1"
+        android:orientation="vertical">
 
+        <TextView
+            android:id="@+id/txtItemName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="15sp"
+            android:textColor="#1E293B"
+            android:textStyle="bold"
+            android:maxLines="2"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/txtItemPrice"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="13sp"
+            android:textColor="#64748B"
+            android:paddingTop="2dp" />
+    </LinearLayout>
+
+    <!-- Center: Stock count -->
+    <TextView
+        android:id="@+id/txtItemStock"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="#475569"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:minWidth="50dp"
+        android:layout_marginHorizontal="12dp" />
+
+    <!-- Right: Status badge -->
+    <TextView
+        android:id="@+id/txtStockStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="4dp"
+        android:gravity="center"
+        android:minWidth="72dp" />
 </LinearLayout>

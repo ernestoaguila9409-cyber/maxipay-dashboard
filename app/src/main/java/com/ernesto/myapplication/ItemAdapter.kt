@@ -21,10 +21,12 @@ class ItemAdapter(
     private val context: Context,
     private val itemList: List<ItemModel>,
     private val categoryAvailability: List<String> = emptyList(),
+    private val stockCountingEnabled: Boolean = true,
     private val refresh: () -> Unit
 ) : RecyclerView.Adapter<ItemAdapter.ViewHolder>() {
 
     private val db = FirebaseFirestore.getInstance()
+    private var filteredList: List<ItemModel> = itemList
 
     private val orderTypeShortLabels = mapOf(
         "BAR_TAB" to "BAR",
@@ -34,6 +36,9 @@ class ItemAdapter(
 
     inner class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val txtItemName: TextView = view.findViewById(R.id.txtItemName)
+        val txtItemPrice: TextView = view.findViewById(R.id.txtItemPrice)
+        val txtItemStock: TextView = view.findViewById(R.id.txtItemStock)
+        val txtStockStatus: TextView = view.findViewById(R.id.txtStockStatus)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -42,25 +47,49 @@ class ItemAdapter(
         return ViewHolder(view)
     }
 
-    override fun getItemCount(): Int = itemList.size
+    override fun getItemCount(): Int = filteredList.size
+
+    fun filter(query: String) {
+        filteredList = if (query.isBlank()) {
+            itemList
+        } else {
+            itemList.filter { it.name.contains(query, ignoreCase = true) }
+        }
+        notifyDataSetChanged()
+    }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        val item = filteredList[position]
 
-        val item = itemList[position]
+        holder.txtItemName.text = item.name
+        holder.txtItemPrice.text = "$${String.format("%.2f", item.price)}"
 
-        holder.txtItemName.text =
-            "${item.name}  |  $${String.format("%.2f", item.price)}  |  Stock: ${item.stock}"
+        if (stockCountingEnabled) {
+            holder.txtItemStock.visibility = View.VISIBLE
+            holder.txtStockStatus.visibility = View.VISIBLE
 
-        when {
-            item.stock <= 0 -> {
-                holder.itemView.setBackgroundColor(Color.parseColor("#FFCDD2"))
+            holder.txtItemStock.text = item.stock.toString()
+
+            when {
+                item.stock <= 0 -> {
+                    holder.txtStockStatus.text = "Out of stock"
+                    holder.txtStockStatus.setTextColor(0xFFDC2626.toInt())
+                    holder.txtStockStatus.setBackgroundResource(R.drawable.bg_stock_badge_red)
+                }
+                item.stock <= 10 -> {
+                    holder.txtStockStatus.text = "Low stock"
+                    holder.txtStockStatus.setTextColor(0xFFA16207.toInt())
+                    holder.txtStockStatus.setBackgroundResource(R.drawable.bg_stock_badge_yellow)
+                }
+                else -> {
+                    holder.txtStockStatus.text = "In stock"
+                    holder.txtStockStatus.setTextColor(0xFF16A34A.toInt())
+                    holder.txtStockStatus.setBackgroundResource(R.drawable.bg_stock_badge_green)
+                }
             }
-            item.stock <= 5 -> {
-                holder.itemView.setBackgroundColor(Color.parseColor("#FFE0B2"))
-            }
-            else -> {
-                holder.itemView.setBackgroundColor(Color.WHITE)
-            }
+        } else {
+            holder.txtItemStock.visibility = View.GONE
+            holder.txtStockStatus.visibility = View.GONE
         }
 
         holder.itemView.setOnClickListener {
@@ -73,18 +102,14 @@ class ItemAdapter(
     // =========================================================
 
     private fun showOptionsDialog(item: ItemModel) {
-
         val options = arrayOf("Edit", "Delete", "Assign Modifiers")
 
         AlertDialog.Builder(context)
             .setTitle(item.name)
             .setItems(options) { _, which ->
                 when (which) {
-
                     0 -> showEditDialog(item)
-
-                    1 -> deleteItem(item.id)
-
+                    1 -> confirmDelete(item)
                     2 -> {
                         val intent = Intent(context, AssignModifierToItemActivity::class.java)
                         intent.putExtra("ITEM_ID", item.id)
@@ -97,11 +122,33 @@ class ItemAdapter(
     }
 
     // =========================================================
+    // DELETE ITEM (with confirmation)
+    // =========================================================
+
+    private fun confirmDelete(item: ItemModel) {
+        AlertDialog.Builder(context)
+            .setTitle("Delete ${item.name}?")
+            .setMessage("This will permanently remove this item.")
+            .setPositiveButton("Delete") { _, _ -> deleteItem(item.id) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun deleteItem(itemId: String) {
+        db.collection("MenuItems")
+            .document(itemId)
+            .delete()
+            .addOnSuccessListener {
+                Toast.makeText(context, "Deleted", Toast.LENGTH_SHORT).show()
+                refresh()
+            }
+    }
+
+    // =========================================================
     // EDIT ITEM
     // =========================================================
 
     private fun showEditDialog(item: ItemModel) {
-
         val layout = LinearLayout(context)
         layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(50, 40, 50, 10)
@@ -132,8 +179,10 @@ class ItemAdapter(
         layout.addView(createLabel("Price"))
         layout.addView(priceInput)
 
-        layout.addView(createLabel("Stock"))
-        layout.addView(stockInput)
+        if (stockCountingEnabled) {
+            layout.addView(createLabel("Stock"))
+            layout.addView(stockInput)
+        }
 
         val divider = View(context)
         divider.setBackgroundColor(Color.LTGRAY)
@@ -185,18 +234,21 @@ class ItemAdapter(
             .setTitle("Edit Item")
             .setView(layout)
             .setPositiveButton("Save") { _, _ ->
-
                 val newName = nameInput.text.toString().trim()
                 val newPrice = priceInput.text.toString().toDoubleOrNull()
-                val newStock = stockInput.text.toString().toLongOrNull()
+                val newStock = if (stockCountingEnabled)
+                    stockInput.text.toString().toLongOrNull()
+                else
+                    item.stock
 
                 if (newName.isNotEmpty() && newPrice != null && newStock != null) {
-
                     val updates = mutableMapOf<String, Any>(
                         "name" to newName,
-                        "price" to newPrice,
-                        "stock" to newStock
+                        "price" to newPrice
                     )
+                    if (stockCountingEnabled) {
+                        updates["stock"] = newStock
+                    }
 
                     if (useCategorySwitch.isChecked) {
                         updates["availableOrderTypes"] =
@@ -217,20 +269,5 @@ class ItemAdapter(
             }
             .setNegativeButton("Cancel", null)
             .show()
-    }
-
-    // =========================================================
-    // DELETE ITEM
-    // =========================================================
-
-    private fun deleteItem(itemId: String) {
-
-        db.collection("MenuItems")
-            .document(itemId)
-            .delete()
-            .addOnSuccessListener {
-                Toast.makeText(context, "Deleted", Toast.LENGTH_SHORT).show()
-                refresh()
-            }
     }
 }

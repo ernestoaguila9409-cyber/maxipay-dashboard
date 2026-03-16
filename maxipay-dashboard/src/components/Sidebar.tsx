@@ -1,25 +1,42 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   ClipboardList,
   UtensilsCrossed,
+  SlidersHorizontal,
   Users,
   BarChart3,
   Settings,
   LogOut,
   ChevronLeft,
+  ChevronDown,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
 import { useRouter } from "next/navigation";
 
-const navItems = [
+interface NavItem {
+  label: string;
+  href: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  children?: { label: string; href: string; icon: React.ComponentType<{ size?: number; className?: string }> }[];
+}
+
+const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Orders", href: "/dashboard/orders", icon: ClipboardList },
-  { label: "Menu", href: "/dashboard/menu", icon: UtensilsCrossed },
+  {
+    label: "Menu",
+    href: "/dashboard/menu",
+    icon: UtensilsCrossed,
+    children: [
+      { label: "Modifiers", href: "/dashboard/modifiers", icon: SlidersHorizontal },
+    ],
+  },
   { label: "Employees", href: "/dashboard/employees", icon: Users },
   { label: "Reports", href: "/dashboard/reports", icon: BarChart3 },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
@@ -33,6 +50,13 @@ interface SidebarProps {
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+
+  const isMenuSectionActive = pathname.startsWith("/dashboard/menu") || pathname.startsWith("/dashboard/modifiers");
+  const [menuExpanded, setMenuExpanded] = useState(isMenuSectionActive);
+
+  useEffect(() => {
+    if (isMenuSectionActive) setMenuExpanded(true);
+  }, [isMenuSectionActive]);
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -64,6 +88,72 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
         {navItems.map((item) => {
+          if (item.children) {
+            const parentActive = pathname === item.href;
+            const childActive = item.children.some((c) => pathname.startsWith(c.href));
+            const sectionActive = parentActive || childActive || pathname.startsWith(item.href);
+
+            return (
+              <div key={item.href}>
+                {/* Parent: Menu */}
+                <div className="flex items-center">
+                  <Link
+                    href={item.href}
+                    className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                      sectionActive
+                        ? "bg-blue-50 text-blue-600"
+                        : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                    } ${collapsed ? "justify-center" : ""}`}
+                    title={collapsed ? item.label : undefined}
+                  >
+                    <item.icon size={20} className="flex-shrink-0" />
+                    {!collapsed && <span>{item.label}</span>}
+                  </Link>
+                  {!collapsed && (
+                    <button
+                      onClick={() => setMenuExpanded((prev) => !prev)}
+                      className={`p-1.5 rounded-lg transition-all ${
+                        sectionActive
+                          ? "text-blue-400 hover:bg-blue-100"
+                          : "text-slate-400 hover:bg-slate-100"
+                      }`}
+                    >
+                      <ChevronDown
+                        size={16}
+                        className={`transition-transform duration-200 ${
+                          menuExpanded ? "rotate-0" : "-rotate-90"
+                        }`}
+                      />
+                    </button>
+                  )}
+                </div>
+
+                {/* Children */}
+                {!collapsed && menuExpanded && (
+                  <div className="ml-5 pl-3 border-l border-slate-200 mt-1 space-y-0.5">
+                    {item.children.map((child) => {
+                      const isChildActive = pathname.startsWith(child.href);
+                      return (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                            isChildActive
+                              ? "bg-blue-50 text-blue-600"
+                              : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                          }`}
+                        >
+                          <child.icon size={16} className="flex-shrink-0" />
+                          <span>{child.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
           const isActive =
             pathname === item.href ||
             (item.href !== "/dashboard" && pathname.startsWith(item.href));

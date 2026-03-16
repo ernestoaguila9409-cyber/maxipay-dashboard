@@ -70,25 +70,31 @@ class MenuActivity : AppCompatActivity() {
     private var preAuthCardBrand: String? = null
     private var preAuthFirestoreDocId: String? = null
     private var currentBatchId: String? = null
+    private var stockCountingEnabled: Boolean = true
 
     private val paymentLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
-                deductStockTransaction(
-                    onSuccess = {
-                        clearCart()
-                        // Start a brand‑new order after a successful payment
-                        currentOrderId = null
-                        Toast.makeText(this, "Stock updated successfully", Toast.LENGTH_SHORT).show()
+                if (stockCountingEnabled) {
+                    deductStockTransaction(
+                        onSuccess = {
+                            clearCart()
+                            currentOrderId = null
+                            Toast.makeText(this, "Stock updated successfully", Toast.LENGTH_SHORT).show()
 
-                        currentCategoryId?.let {
-                            loadItems(it)   // 🔥 reload only current category
+                            currentCategoryId?.let {
+                                loadItems(it)
+                            }
+                        },
+                        onFailure = { msg ->
+                            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                         }
-                    },
-                    onFailure = { msg ->
-                        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-                    }
-                )
+                    )
+                } else {
+                    clearCart()
+                    currentOrderId = null
+                    currentCategoryId?.let { loadItems(it) }
+                }
             }
         }
 
@@ -129,7 +135,15 @@ class MenuActivity : AppCompatActivity() {
             selectedGuest = 1
         }
 
-        loadCategories()
+        db.collection("Settings").document("inventory").get()
+            .addOnSuccessListener { doc ->
+                stockCountingEnabled = doc.getBoolean("stockCountingEnabled") ?: true
+                loadCategories()
+            }
+            .addOnFailureListener {
+                stockCountingEnabled = true
+                loadCategories()
+            }
         loadEnabledTaxes()
         updateCustomerDisplay()
 
@@ -497,18 +511,23 @@ class MenuActivity : AppCompatActivity() {
 
                     val button = Button(this)
 
-                    if (stock <= 0) {
+                    if (stockCountingEnabled && stock <= 0) {
                         button.text = "$name\n$${String.format(Locale.US, "%.2f", price)}\nOUT OF STOCK"
                         button.setBackgroundColor(Color.LTGRAY)
                         button.setTextColor(Color.DKGRAY)
                         button.isEnabled = false
                     } else {
-                        button.text = "$name\n$${String.format(Locale.US, "%.2f", price)}\nStock: $stock"
+                        val label = if (stockCountingEnabled)
+                            "$name\n$${String.format(Locale.US, "%.2f", price)}\nStock: $stock"
+                        else
+                            "$name\n$${String.format(Locale.US, "%.2f", price)}"
+                        button.text = label
                         button.setTextColor(Color.WHITE)
                         button.setBackgroundColor(Color.parseColor("#6A4FB3"))
 
+                        val effectiveStock = if (stockCountingEnabled) stock else Long.MAX_VALUE
                         button.setOnClickListener {
-                            checkAndShowModifiers(itemId, name, price, stock)
+                            checkAndShowModifiers(itemId, name, price, effectiveStock)
                         }
                     }
 
@@ -807,14 +826,16 @@ class MenuActivity : AppCompatActivity() {
                 val existingItem = cartMap[lineKey]
                 val currentQtyInCart = existingItem?.quantity ?: 0
 
-                if (stock <= 0) {
-                    Toast.makeText(this, "Out of stock", Toast.LENGTH_SHORT).show()
-                    return@ensureOrder
-                }
+                if (stockCountingEnabled) {
+                    if (stock <= 0) {
+                        Toast.makeText(this, "Out of stock", Toast.LENGTH_SHORT).show()
+                        return@ensureOrder
+                    }
 
-                if (currentQtyInCart + 1 > stock) {
-                    Toast.makeText(this, "Only $stock in stock", Toast.LENGTH_SHORT).show()
-                    return@ensureOrder
+                    if (currentQtyInCart + 1 > stock) {
+                        Toast.makeText(this, "Only $stock in stock", Toast.LENGTH_SHORT).show()
+                        return@ensureOrder
+                    }
                 }
 
                 if (existingItem != null) {
@@ -1049,12 +1070,14 @@ class MenuActivity : AppCompatActivity() {
         itemLayout.addView(subtotalText)
 
         itemLayout.setOnClickListener {
-            val currentStock = item.stock
-            val currentQty = item.quantity
+            if (stockCountingEnabled) {
+                val currentStock = item.stock
+                val currentQty = item.quantity
 
-            if (currentStock > 0 && currentQty + 1 > currentStock) {
-                Toast.makeText(this, "Only $currentStock in stock", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
+                if (currentStock > 0 && currentQty + 1 > currentStock) {
+                    Toast.makeText(this, "Only $currentStock in stock", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
             }
 
             item.quantity += 1
@@ -1288,31 +1311,35 @@ class MenuActivity : AppCompatActivity() {
                 batch.update(orderRef, orderUpdates)
             }.addOnSuccessListener {
                 hideCaptureLoading()
-                deductStockTransaction(
-                    onSuccess = {
-                        clearCart()
-                        currentOrderId = null
-                        Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_SHORT).show()
-                        val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
-                            putExtra("ORDER_ID", orderId)
-                            if (!customerEmail.isNullOrBlank()) putExtra("CUSTOMER_EMAIL", customerEmail)
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        }
-                        startActivity(intent)
-                        finish()
-                    },
-                    onFailure = { msg ->
-                        Toast.makeText(this, "Tab closed but stock error: $msg", Toast.LENGTH_LONG).show()
-                        finish()
+                val afterCapture = {
+                    clearCart()
+                    currentOrderId = null
+                    Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_SHORT).show()
+                    val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
+                        putExtra("ORDER_ID", orderId)
+                        if (!customerEmail.isNullOrBlank()) putExtra("CUSTOMER_EMAIL", customerEmail)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                     }
-                )
+                    startActivity(intent)
+                    finish()
+                }
+                if (stockCountingEnabled) {
+                    deductStockTransaction(
+                        onSuccess = { afterCapture() },
+                        onFailure = { msg ->
+                            Toast.makeText(this, "Tab closed but stock error: $msg", Toast.LENGTH_LONG).show()
+                            finish()
+                        }
+                    )
+                } else {
+                    afterCapture()
+                }
             }.addOnFailureListener { e ->
                 hideCaptureLoading()
                 btnCheckout.isEnabled = true
                 Toast.makeText(this, "Capture approved but save failed: ${e.message}", Toast.LENGTH_LONG).show()
             }
         } else {
-            // Fallback for older orders without preAuthFirestoreDocId: create new CAPTURE transaction
             val txRef = db.collection("Transactions").document()
             orderUpdates["saleTransactionId"] = txRef.id
 
@@ -1333,24 +1360,29 @@ class MenuActivity : AppCompatActivity() {
                 batch.update(orderRef, orderUpdates)
             }.addOnSuccessListener {
                 hideCaptureLoading()
-                deductStockTransaction(
-                    onSuccess = {
-                        clearCart()
-                        currentOrderId = null
-                        Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_SHORT).show()
-                        val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
-                            putExtra("ORDER_ID", orderId)
-                            if (!customerEmail.isNullOrBlank()) putExtra("CUSTOMER_EMAIL", customerEmail)
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        }
-                        startActivity(intent)
-                        finish()
-                    },
-                    onFailure = { msg ->
-                        Toast.makeText(this, "Tab closed but stock error: $msg", Toast.LENGTH_LONG).show()
-                        finish()
+                val afterCapture = {
+                    clearCart()
+                    currentOrderId = null
+                    Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_SHORT).show()
+                    val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
+                        putExtra("ORDER_ID", orderId)
+                        if (!customerEmail.isNullOrBlank()) putExtra("CUSTOMER_EMAIL", customerEmail)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                     }
-                )
+                    startActivity(intent)
+                    finish()
+                }
+                if (stockCountingEnabled) {
+                    deductStockTransaction(
+                        onSuccess = { afterCapture() },
+                        onFailure = { msg ->
+                            Toast.makeText(this, "Tab closed but stock error: $msg", Toast.LENGTH_LONG).show()
+                            finish()
+                        }
+                    )
+                } else {
+                    afterCapture()
+                }
             }.addOnFailureListener { e ->
                 hideCaptureLoading()
                 btnCheckout.isEnabled = true

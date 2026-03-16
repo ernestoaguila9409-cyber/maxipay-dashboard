@@ -9,6 +9,7 @@ import {
   where,
   writeBatch,
   updateDoc,
+  addDoc,
   onSnapshot,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
@@ -19,11 +20,15 @@ import {
   Search,
   Plus,
   Upload,
+  Download,
   Trash2,
   Pencil,
   AlertTriangle,
   Package,
+  X,
+  SlidersHorizontal,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 
 const ALL_ORDER_TYPES = ["DINE_IN", "TO_GO", "BAR_TAB"] as const;
 const ORDER_TYPE_LABELS: Record<string, string> = {
@@ -49,6 +54,12 @@ interface MenuItem {
   effectiveOrderTypes: string[];
 }
 
+interface ModifierGroup {
+  id: string;
+  name: string;
+  groupType: string;
+}
+
 export default function MenuPage() {
   const { user } = useAuth();
   const [categories, setCategories] = useState<Category[]>([]);
@@ -65,6 +76,24 @@ export default function MenuPage() {
   const [editUseCategoryTypes, setEditUseCategoryTypes] = useState(true);
   const [editOrderTypes, setEditOrderTypes] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addPrice, setAddPrice] = useState("");
+  const [addStock, setAddStock] = useState("");
+  const [addCategoryId, setAddCategoryId] = useState("");
+  const [addUseCategoryTypes, setAddUseCategoryTypes] = useState(true);
+  const [addOrderTypes, setAddOrderTypes] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(ALL_ORDER_TYPES.map((t) => [t, true]))
+  );
+  const [addSaving, setAddSaving] = useState(false);
+  const [addModifiers, setAddModifiers] = useState<Record<string, boolean>>({});
+  const [stockCountingEnabled, setStockCountingEnabled] = useState(true);
+
+  // Modifier groups + assignment state
+  const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
+  const [editModifiers, setEditModifiers] = useState<Record<string, boolean>>({});
+  const [editModifierLinks, setEditModifierLinks] = useState<Record<string, string>>({});
 
   const catSnap = useRef<Map<string, { name: string; availableOrderTypes: string[] }>>(new Map());
   const itemSnap = useRef<
@@ -133,9 +162,28 @@ export default function MenuPage() {
       rebuild();
     });
 
+    const unsubSettings = onSnapshot(doc(db, "Settings", "inventory"), (snap) => {
+      const data = snap.data();
+      setStockCountingEnabled(data?.stockCountingEnabled ?? true);
+    });
+
+    const unsubModGroups = onSnapshot(collection(db, "ModifierGroups"), (snap) => {
+      const list: ModifierGroup[] = [];
+      snap.forEach((d) => {
+        const data = d.data();
+        if (data.name) {
+          list.push({ id: d.id, name: data.name, groupType: data.groupType ?? "ADD" });
+        }
+      });
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      setModifierGroups(list);
+    });
+
     return () => {
       unsubCats();
       unsubItems();
+      unsubSettings();
+      unsubModGroups();
       bothReady.current = { cats: false, items: false };
     };
   }, [user]);
@@ -188,7 +236,7 @@ export default function MenuPage() {
 
   // ── Edit ──
 
-  const openEdit = (item: MenuItem) => {
+  const openEdit = async (item: MenuItem) => {
     setEditTarget(item);
     setEditPrice(item.price.toFixed(2));
     setEditStock(String(item.stock));
@@ -202,18 +250,43 @@ export default function MenuPage() {
       types[t] = active.includes(t);
     }
     setEditOrderTypes(types);
+
+    // Load current modifier assignments
+    const assigned: Record<string, boolean> = {};
+    const links: Record<string, string> = {};
+    try {
+      const snap = await getDocs(
+        query(collection(db, "ItemModifierGroups"), where("itemId", "==", item.id))
+      );
+      snap.forEach((d) => {
+        const groupId = d.data().groupId;
+        if (groupId) {
+          assigned[groupId] = true;
+          links[groupId] = d.id;
+        }
+      });
+    } catch (err) {
+      console.error("Failed to load modifier assignments:", err);
+    }
+    setEditModifiers(assigned);
+    setEditModifierLinks(links);
   };
 
   const handleSave = async () => {
     if (!editTarget) return;
     const price = parseFloat(editPrice);
-    const stock = parseInt(editStock, 10);
     if (isNaN(price) || price < 0) return;
-    if (isNaN(stock) || stock < 0) return;
+
+    const update: Record<string, unknown> = { price };
+
+    if (stockCountingEnabled) {
+      const stock = parseInt(editStock, 10);
+      if (isNaN(stock) || stock < 0) return;
+      update.stock = stock;
+    }
 
     setSaving(true);
     try {
-      const update: Record<string, unknown> = { price, stock };
 
       if (editUseCategoryTypes) {
         update.availableOrderTypes = (await import("firebase/firestore")).deleteField();
@@ -222,12 +295,133 @@ export default function MenuPage() {
       }
 
       await updateDoc(doc(db, "MenuItems", editTarget.id), update);
+
+      // Sync modifier assignments
+      const batch = writeBatch(db);
+      const currentlyAssigned = new Set(Object.keys(editModifierLinks));
+      const wantAssigned = new Set(
+        Object.entries(editModifiers).filter(([, v]) => v).map(([k]) => k)
+      );
+
+      // Remove unchecked
+      for (const groupId of currentlyAssigned) {
+        if (!wantAssigned.has(groupId)) {
+          batch.delete(doc(db, "ItemModifierGroups", editModifierLinks[groupId]));
+        }
+      }
+
+      // Add newly checked
+      let nextOrder = wantAssigned.size;
+      for (const groupId of wantAssigned) {
+        if (!currentlyAssigned.has(groupId)) {
+          const ref = doc(collection(db, "ItemModifierGroups"));
+          batch.set(ref, {
+            itemId: editTarget.id,
+            groupId,
+            displayOrder: ++nextOrder,
+          });
+        }
+      }
+
+      await batch.commit();
     } catch (err) {
       console.error("Failed to update item:", err);
     } finally {
       setSaving(false);
       setEditTarget(null);
     }
+  };
+
+  // ── Add Item ──
+
+  const resetAddForm = () => {
+    setAddName("");
+    setAddPrice("");
+    setAddStock("");
+    setAddCategoryId("");
+    setAddUseCategoryTypes(true);
+    setAddOrderTypes(Object.fromEntries(ALL_ORDER_TYPES.map((t) => [t, true])));
+    setAddModifiers({});
+  };
+
+  const handleAddItem = async () => {
+    const name = addName.trim();
+    if (!name) return;
+    const price = parseFloat(addPrice);
+    const stock = stockCountingEnabled ? parseInt(addStock, 10) : 9999;
+    if (isNaN(price) || price < 0) return;
+    if (stockCountingEnabled && (isNaN(stock) || stock < 0)) return;
+    if (!addCategoryId) return;
+
+    setAddSaving(true);
+    try {
+      const data: Record<string, unknown> = {
+        name,
+        price,
+        stock,
+        categoryId: addCategoryId,
+      };
+
+      if (!addUseCategoryTypes) {
+        data.availableOrderTypes = ALL_ORDER_TYPES.filter((t) => addOrderTypes[t]);
+      }
+
+      const newItemRef = await addDoc(collection(db, "MenuItems"), data);
+
+      // Create modifier assignments
+      const selectedGroups = Object.entries(addModifiers)
+        .filter(([, v]) => v)
+        .map(([k]) => k);
+      if (selectedGroups.length > 0) {
+        const batch = writeBatch(db);
+        selectedGroups.forEach((groupId, idx) => {
+          const ref = doc(collection(db, "ItemModifierGroups"));
+          batch.set(ref, {
+            itemId: newItemRef.id,
+            groupId,
+            displayOrder: idx + 1,
+          });
+        });
+        await batch.commit();
+      }
+
+      resetAddForm();
+      setAddOpen(false);
+    } catch (err) {
+      console.error("Failed to add item:", err);
+    } finally {
+      setAddSaving(false);
+    }
+  };
+
+  // ── Download Menu as Excel ──
+
+  const handleDownloadMenu = () => {
+    const rows = items.map((item) => {
+      const row: Record<string, string | number> = {
+        Name: item.name,
+        Category: item.categoryName,
+        Price: item.price,
+      };
+      if (stockCountingEnabled) {
+        row.Stock = item.stock;
+      }
+      row["Order Types"] = item.effectiveOrderTypes
+        .map((t) => ORDER_TYPE_LABELS[t] ?? t)
+        .join(", ");
+      return row;
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+
+    const colWidths = stockCountingEnabled
+      ? [{ wch: 30 }, { wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 25 }]
+      : [{ wch: 30 }, { wch: 20 }, { wch: 10 }, { wch: 25 }];
+    ws["!cols"] = colWidths;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Menu");
+    XLSX.writeFile(wb, "menu.xlsx");
   };
 
   // ── Stats ──
@@ -262,7 +456,7 @@ export default function MenuPage() {
               <span className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 font-medium">
                 {totalCategories} categories
               </span>
-              {outOfStock > 0 && (
+              {stockCountingEnabled && outOfStock > 0 && (
                 <span className="px-2.5 py-1 bg-red-50 rounded-lg border border-red-200 font-medium text-red-600">
                   {outOfStock} out of stock
                 </span>
@@ -272,13 +466,24 @@ export default function MenuPage() {
 
           <div className="flex items-center gap-3">
             <button
+              onClick={handleDownloadMenu}
+              disabled={items.length === 0}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Download size={16} />
+              Download Menu
+            </button>
+            <button
               onClick={() => setUploadOpen(true)}
               className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
             >
               <Upload size={16} />
               Upload Menu
             </button>
-            <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors">
+            <button
+              onClick={() => { resetAddForm(); setAddOpen(true); }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+            >
               <Plus size={16} />
               Add Item
             </button>
@@ -344,7 +549,7 @@ export default function MenuPage() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {groupItems.map((item) => {
-                    const inStock = item.stock > 0;
+                    const inStock = !stockCountingEnabled || item.stock > 0;
                     return (
                       <div
                         key={item.id}
@@ -384,18 +589,20 @@ export default function MenuPage() {
                           ${item.price.toFixed(2)}
                         </p>
 
+                        {stockCountingEnabled && (
                         <div className="flex items-center gap-1.5 text-xs mb-2">
-                          <Package size={12} className={inStock ? "text-emerald-500" : "text-red-400"} />
+                          <Package size={12} className={item.stock > 0 ? "text-emerald-500" : "text-red-400"} />
                           <span
                             className={`font-medium ${
-                              inStock ? "text-emerald-600" : "text-red-500"
+                              item.stock > 0 ? "text-emerald-600" : "text-red-500"
                             }`}
                           >
-                            {inStock
+                            {item.stock > 0
                               ? `Stock: ${item.stock}`
                               : "OUT OF STOCK"}
                           </span>
                         </div>
+                        )}
 
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {item.effectiveOrderTypes.length > 0 ? (
@@ -489,6 +696,217 @@ export default function MenuPage() {
         </div>
       )}
 
+      {/* ── Add item modal ── */}
+      {addOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => !addSaving && setAddOpen(false)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
+            <div className="px-6 py-5 space-y-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-slate-800">
+                  Add New Item
+                </h3>
+                <button
+                  onClick={() => setAddOpen(false)}
+                  disabled={addSaving}
+                  className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    value={addName}
+                    onChange={(e) => setAddName(e.target.value)}
+                    placeholder="e.g. Margherita Pizza"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    Category
+                  </label>
+                  <select
+                    value={addCategoryId}
+                    onChange={(e) => setAddCategoryId(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                  >
+                    <option value="">Select a category</option>
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {stockCountingEnabled ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      Price ($)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={addPrice}
+                      onChange={(e) => setAddPrice(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      Stock
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={addStock}
+                      onChange={(e) => setAddStock(e.target.value)}
+                      placeholder="0"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                    />
+                  </div>
+                </div>
+                ) : (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    Price ($)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={addPrice}
+                    onChange={(e) => setAddPrice(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                  />
+                </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Order Types
+                  </label>
+                  <label className="flex items-center gap-2 mb-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={addUseCategoryTypes}
+                      onChange={(e) => setAddUseCategoryTypes(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-slate-600">
+                      Use category availability
+                    </span>
+                  </label>
+                  {!addUseCategoryTypes && (
+                    <div className="flex flex-col gap-2 pl-1">
+                      {ALL_ORDER_TYPES.map((t) => (
+                        <label
+                          key={t}
+                          className="flex items-center gap-2 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={addOrderTypes[t] ?? false}
+                            onChange={(e) =>
+                              setAddOrderTypes((prev) => ({
+                                ...prev,
+                                [t]: e.target.checked,
+                              }))
+                            }
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-slate-700">
+                            {ORDER_TYPE_LABELS[t]}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Assign Modifiers ── */}
+                {modifierGroups.length > 0 && (
+                  <div>
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+                      <SlidersHorizontal size={15} />
+                      Assign Modifiers
+                    </label>
+                    <div className="flex flex-col gap-2 pl-1 max-h-40 overflow-y-auto">
+                      {modifierGroups.map((g) => (
+                        <label
+                          key={g.id}
+                          className="flex items-center gap-2 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={addModifiers[g.id] ?? false}
+                            onChange={(e) =>
+                              setAddModifiers((prev) => ({
+                                ...prev,
+                                [g.id]: e.target.checked,
+                              }))
+                            }
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-slate-700">{g.name}</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                            g.groupType === "REMOVE"
+                              ? "bg-red-50 text-red-500"
+                              : "bg-slate-100 text-slate-400"
+                          }`}>
+                            {g.groupType === "REMOVE" ? "Remove" : "Add-on"}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setAddOpen(false)}
+                  disabled={addSaving}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddItem}
+                  disabled={addSaving || !addName.trim() || !addCategoryId || !addPrice || (stockCountingEnabled && !addStock)}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {addSaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Adding…
+                    </>
+                  ) : (
+                    "Add Item"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Edit item modal ── */}
       {editTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -496,7 +914,7 @@ export default function MenuPage() {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => !saving && setEditTarget(null)}
           />
-          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 overflow-hidden">
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
             <div className="px-6 py-5 space-y-5">
               <div>
                 <h3 className="text-lg font-semibold text-slate-800">
@@ -522,6 +940,7 @@ export default function MenuPage() {
                   />
                 </div>
 
+                {stockCountingEnabled && (
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">
                     Stock
@@ -535,6 +954,7 @@ export default function MenuPage() {
                     className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
                   />
                 </div>
+                )}
 
                 {/* ── Order Types ── */}
                 <div>
@@ -582,6 +1002,44 @@ export default function MenuPage() {
                     </div>
                   )}
                 </div>
+
+                {/* ── Assign Modifiers ── */}
+                {modifierGroups.length > 0 && (
+                  <div>
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+                      <SlidersHorizontal size={15} />
+                      Assign Modifiers
+                    </label>
+                    <div className="flex flex-col gap-2 pl-1 max-h-40 overflow-y-auto">
+                      {modifierGroups.map((g) => (
+                        <label
+                          key={g.id}
+                          className="flex items-center gap-2 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={editModifiers[g.id] ?? false}
+                            onChange={(e) =>
+                              setEditModifiers((prev) => ({
+                                ...prev,
+                                [g.id]: e.target.checked,
+                              }))
+                            }
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-slate-700">{g.name}</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                            g.groupType === "REMOVE"
+                              ? "bg-red-50 text-red-500"
+                              : "bg-slate-100 text-slate-400"
+                          }`}>
+                            {g.groupType === "REMOVE" ? "Remove" : "Add-on"}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-3 pt-1">
