@@ -17,7 +17,9 @@ class OrderEngine(private val db: FirebaseFirestore) {
         val quantity: Int,
         val basePrice: Double,
         val modifiers: List<OrderModifier>,
-        val guestNumber: Int = 0
+        val guestNumber: Int = 0,
+        val taxMode: String = "INHERIT",
+        val taxIds: List<String> = emptyList()
     )
 
     /** Create an order if orderId is null; otherwise keep existing orderId */
@@ -27,6 +29,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
         orderType: String = "",
         tableId: String? = null,
         tableName: String? = null,
+        sectionId: String? = null,
+        sectionName: String? = null,
         guestCount: Int? = null,
         guestNames: List<String>? = null,
         seatName: String? = null,
@@ -60,6 +64,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
 
                 if (!tableId.isNullOrBlank()) orderMap["tableId"] = tableId
                 if (!tableName.isNullOrBlank()) orderMap["tableName"] = tableName
+                if (!sectionId.isNullOrBlank()) orderMap["sectionId"] = sectionId
+                if (!sectionName.isNullOrBlank()) orderMap["sectionName"] = sectionName
                 if (guestCount != null && guestCount > 0) orderMap["guestCount"] = guestCount
                 if (!guestNames.isNullOrEmpty()) orderMap["guestNames"] = guestNames!!
                 if (!seatName.isNullOrBlank()) orderMap["seatName"] = seatName
@@ -136,8 +142,10 @@ class OrderEngine(private val db: FirebaseFirestore) {
             "unitPriceInCents" to unitPriceInCents,
             "lineTotalInCents" to lineTotalInCents,
             "modifiers" to modifierMaps,
+            "taxMode" to input.taxMode,
             "updatedAt" to Date()
         )
+        if (input.taxIds.isNotEmpty()) itemMap["taxIds"] = input.taxIds
         if (input.guestNumber > 0) itemMap["guestNumber"] = input.guestNumber
 
         val orderRef = db.collection("Orders").document(orderId)
@@ -224,31 +232,46 @@ class OrderEngine(private val db: FirebaseFirestore) {
 
                 var subtotalInCents = 0L
 
-                for (doc in itemsSnap.documents) {
-                    val lineTotal =
-                        doc.getLong("lineTotalInCents") ?: 0L
+                data class LineInfo(val lineTotalInCents: Long, val taxMode: String, val taxIds: List<String>)
+                val lineInfos = mutableListOf<LineInfo>()
 
+                for (doc in itemsSnap.documents) {
+                    val lineTotal = doc.getLong("lineTotalInCents") ?: 0L
                     subtotalInCents += lineTotal
+                    val mode = doc.getString("taxMode") ?: "INHERIT"
+                    @Suppress("UNCHECKED_CAST")
+                    val ids = (doc.get("taxIds") as? List<String>) ?: emptyList()
+                    lineInfos.add(LineInfo(lineTotal, mode, ids))
                 }
 
                 db.collection("Taxes")
-                    .whereEqualTo("enabled", true)
                     .get()
                     .addOnSuccessListener { taxesSnap ->
                         var newTotalInCents = subtotalInCents
-                        val subtotalDollars = subtotalInCents / 100.0
                         val taxBreakdown = mutableListOf<Map<String, Any>>()
 
-                        for (doc in taxesSnap.documents) {
-                            val name = doc.getString("name") ?: continue
-                            val type = doc.getString("type") ?: continue
-                            val amount = doc.getDouble("amount") ?: doc.getLong("amount")?.toDouble() ?: continue
-                            val taxAmount = if (type == "PERCENTAGE") {
-                                subtotalDollars * amount / 100.0
-                            } else {
-                                amount
+                        for (taxDoc in taxesSnap.documents) {
+                            val taxId = taxDoc.id
+                            val name = taxDoc.getString("name") ?: continue
+                            val type = taxDoc.getString("type") ?: continue
+                            val amount = taxDoc.getDouble("amount") ?: taxDoc.getLong("amount")?.toDouble() ?: continue
+                            val taxEnabled = taxDoc.getBoolean("enabled") ?: true
+
+                            var taxableBaseCents = 0L
+                            for (li in lineInfos) {
+                                if (li.taxMode == "FORCE_APPLY") {
+                                    if (li.taxIds.contains(taxId)) taxableBaseCents += li.lineTotalInCents
+                                } else if (taxEnabled) {
+                                    taxableBaseCents += li.lineTotalInCents
+                                }
                             }
-                            val taxCents = (taxAmount * 100).toLong()
+                            if (taxableBaseCents <= 0L) continue
+
+                            val taxCents = if (type == "PERCENTAGE") {
+                                ((taxableBaseCents / 100.0) * amount / 100.0 * 100).toLong()
+                            } else {
+                                (amount * 100).toLong()
+                            }
                             newTotalInCents += taxCents
                             taxBreakdown.add(mapOf(
                                 "name" to name,

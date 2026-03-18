@@ -75,10 +75,12 @@ class OrderDetailActivity : AppCompatActivity() {
                 val data = result.data ?: return@registerForActivityResult
                 val tableId = data.getStringExtra("tableId") ?: ""
                 val tableName = data.getStringExtra("tableName") ?: ""
+                val sectionId = data.getStringExtra("sectionId") ?: ""
+                val sectionName = data.getStringExtra("sectionName") ?: ""
                 val guestCount = data.getIntExtra("guestCount", 0)
                 val guestNames = data.getStringArrayListExtra("guestNames") ?: arrayListOf()
 
-                switchToDineIn(tableId, tableName, guestCount, guestNames)
+                switchToDineIn(tableId, tableName, sectionId, sectionName, guestCount, guestNames)
             }
         }
 
@@ -613,13 +615,22 @@ class OrderDetailActivity : AppCompatActivity() {
         }
     }
 
-    private fun switchToDineIn(tableId: String, tableName: String, guestCount: Int, guestNames: List<String>) {
+    private fun switchToDineIn(
+        tableId: String,
+        tableName: String,
+        sectionId: String,
+        sectionName: String,
+        guestCount: Int,
+        guestNames: List<String>
+    ) {
         val updates = mutableMapOf<String, Any>(
             "orderType" to "DINE_IN",
             "updatedAt" to Date()
         )
         if (tableId.isNotBlank()) updates["tableId"] = tableId
         if (tableName.isNotBlank()) updates["tableName"] = tableName
+        if (sectionId.isNotBlank()) updates["sectionId"] = sectionId
+        if (sectionName.isNotBlank()) updates["sectionName"] = sectionName
         if (guestCount > 0) updates["guestCount"] = guestCount
         if (guestNames.isNotEmpty()) updates["guestNames"] = guestNames
 
@@ -640,6 +651,8 @@ class OrderDetailActivity : AppCompatActivity() {
             "orderType" to "TO_GO",
             "tableId" to FieldValue.delete(),
             "tableName" to FieldValue.delete(),
+            "sectionId" to FieldValue.delete(),
+            "sectionName" to FieldValue.delete(),
             "guestCount" to FieldValue.delete(),
             "guestNames" to FieldValue.delete(),
             "updatedAt" to Date()

@@ -102,7 +102,7 @@ class ItemAdapter(
     // =========================================================
 
     private fun showOptionsDialog(item: ItemModel) {
-        val options = arrayOf("Edit", "Delete", "Assign Modifiers")
+        val options = arrayOf("Edit", "Delete", "Assign Modifiers", "Assign Taxes")
 
         AlertDialog.Builder(context)
             .setTitle(item.name)
@@ -116,6 +116,7 @@ class ItemAdapter(
                         intent.putExtra("ITEM_NAME", item.name)
                         context.startActivity(intent)
                     }
+                    3 -> showAssignTaxesDialog(item)
                 }
             }
             .show()
@@ -269,5 +270,146 @@ class ItemAdapter(
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    // =========================================================
+    // ASSIGN TAXES
+    // =========================================================
+
+    private fun showAssignTaxesDialog(item: ItemModel) {
+        db.collection("MenuItems").document(item.id).get()
+            .addOnSuccessListener { itemDoc ->
+                @Suppress("UNCHECKED_CAST")
+                val existingTaxIds = (itemDoc.get("taxIds") as? List<String>) ?: emptyList()
+                loadTaxesAndShowDialog(item, existingTaxIds)
+            }
+            .addOnFailureListener {
+                loadTaxesAndShowDialog(item, emptyList())
+            }
+    }
+
+    private fun loadTaxesAndShowDialog(item: ItemModel, existingTaxIds: List<String>) {
+        db.collection("Taxes").get()
+            .addOnSuccessListener { snap ->
+                val taxes = snap.documents.mapNotNull { doc ->
+                    val type = doc.getString("type") ?: return@mapNotNull null
+                    val name = doc.getString("name") ?: return@mapNotNull null
+                    val amount = (doc.getDouble("amount")
+                        ?: doc.getLong("amount")?.toDouble()) ?: return@mapNotNull null
+                    TaxItem(id = doc.id, type = type, name = name, amount = amount)
+                }
+
+                if (taxes.isEmpty()) {
+                    Toast.makeText(context, "No taxes configured", Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+
+                val selectedIds = existingTaxIds.toMutableSet()
+
+                val layout = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(50, 40, 50, 10)
+                }
+
+                val subtitle = TextView(context).apply {
+                    text = "Select taxes to apply to this item"
+                    textSize = 13f
+                    setTextColor(Color.GRAY)
+                    setPadding(0, 0, 0, 24)
+                }
+                layout.addView(subtitle)
+
+                for (tax in taxes) {
+                    val row = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                        setPadding(0, 12, 0, 12)
+                    }
+
+                    val cb = CheckBox(context).apply {
+                        isChecked = selectedIds.contains(tax.id)
+                    }
+
+                    val info = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                        setPadding(16, 0, 0, 0)
+                    }
+
+                    val nameView = TextView(context).apply {
+                        text = tax.name
+                        textSize = 15f
+                        setTextColor(Color.parseColor("#1A1A1A"))
+                    }
+
+                    val detailView = TextView(context).apply {
+                        text = if (tax.type == "FIXED") {
+                            String.format(java.util.Locale.US, "Fixed · $%.2f", tax.amount)
+                        } else {
+                            String.format(java.util.Locale.US, "Percentage · %.1f%%", tax.amount)
+                        }
+                        textSize = 13f
+                        setTextColor(Color.parseColor("#6A4FB3"))
+                    }
+
+                    info.addView(nameView)
+                    info.addView(detailView)
+
+                    row.addView(cb)
+                    row.addView(info)
+
+                    row.setOnClickListener { cb.isChecked = !cb.isChecked }
+
+                    cb.setOnCheckedChangeListener { _, isChecked ->
+                        if (isChecked) selectedIds.add(tax.id) else selectedIds.remove(tax.id)
+                    }
+
+                    layout.addView(row)
+
+                    val divider = View(context).apply {
+                        setBackgroundColor(Color.parseColor("#E0E0E0"))
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, 1
+                        )
+                    }
+                    layout.addView(divider)
+                }
+
+                AlertDialog.Builder(context)
+                    .setTitle("Assign Taxes — ${item.name}")
+                    .setView(layout)
+                    .setPositiveButton("Save") { _, _ ->
+                        saveTaxAssignment(item.id, selectedIds)
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+            .addOnFailureListener {
+                Toast.makeText(context, "Failed to load taxes", Toast.LENGTH_SHORT).show()
+            }
+    }
+
+    private fun saveTaxAssignment(itemId: String, selectedIds: Set<String>) {
+        val updates: Map<String, Any> = if (selectedIds.isEmpty()) {
+            mapOf(
+                "taxIds" to com.google.firebase.firestore.FieldValue.delete(),
+                "taxMode" to "INHERIT"
+            )
+        } else {
+            mapOf(
+                "taxIds" to selectedIds.toList(),
+                "taxMode" to "FORCE_APPLY"
+            )
+        }
+
+        db.collection("MenuItems").document(itemId)
+            .update(updates)
+            .addOnSuccessListener {
+                val msg = if (selectedIds.isEmpty()) "Taxes cleared (inherit)" else "Taxes assigned"
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(context, "Failed to save: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
     }
 }

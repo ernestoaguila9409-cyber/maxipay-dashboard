@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -8,9 +8,11 @@ import {
   ClipboardList,
   UtensilsCrossed,
   SlidersHorizontal,
+  Tags,
   Users,
   BarChart3,
   Settings,
+  LayoutGrid,
   LogOut,
   ChevronLeft,
   ChevronDown,
@@ -35,11 +37,19 @@ const navItems: NavItem[] = [
     icon: UtensilsCrossed,
     children: [
       { label: "Modifiers", href: "/dashboard/modifiers", icon: SlidersHorizontal },
+      { label: "Discounts", href: "/dashboard/discounts", icon: Tags },
     ],
   },
   { label: "Employees", href: "/dashboard/employees", icon: Users },
   { label: "Reports", href: "/dashboard/reports", icon: BarChart3 },
-  { label: "Settings", href: "/dashboard/settings", icon: Settings },
+  {
+    label: "Settings",
+    href: "/dashboard/settings",
+    icon: Settings,
+    children: [
+      { label: "Customize Dashboard", href: "/dashboard/settings/customize-dashboard", icon: LayoutGrid },
+    ],
+  },
 ];
 
 interface SidebarProps {
@@ -51,12 +61,37 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const isMenuSectionActive = pathname.startsWith("/dashboard/menu") || pathname.startsWith("/dashboard/modifiers");
-  const [menuExpanded, setMenuExpanded] = useState(isMenuSectionActive);
+  const isSectionActive = useCallback(
+    (item: NavItem) => {
+      if (pathname === item.href) return true;
+      if (item.children?.some((c) => pathname.startsWith(c.href))) return true;
+      if (item.href !== "/dashboard" && pathname.startsWith(item.href)) return true;
+      return false;
+    },
+    [pathname]
+  );
+
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    navItems.forEach((item) => {
+      if (item.children && isSectionActive(item)) {
+        initial[item.href] = true;
+      }
+    });
+    return initial;
+  });
 
   useEffect(() => {
-    if (isMenuSectionActive) setMenuExpanded(true);
-  }, [isMenuSectionActive]);
+    navItems.forEach((item) => {
+      if (item.children && isSectionActive(item)) {
+        setExpanded((prev) => ({ ...prev, [item.href]: true }));
+      }
+    });
+  }, [pathname, isSectionActive]);
+
+  const toggleSection = (href: string) => {
+    setExpanded((prev) => ({ ...prev, [href]: !prev[href] }));
+  };
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -89,13 +124,11 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
         {navItems.map((item) => {
           if (item.children) {
-            const parentActive = pathname === item.href;
-            const childActive = item.children.some((c) => pathname.startsWith(c.href));
-            const sectionActive = parentActive || childActive || pathname.startsWith(item.href);
+            const sectionActive = isSectionActive(item);
+            const isExpanded = expanded[item.href] ?? false;
 
             return (
               <div key={item.href}>
-                {/* Parent: Menu */}
                 <div className="flex items-center">
                   <Link
                     href={item.href}
@@ -111,7 +144,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   </Link>
                   {!collapsed && (
                     <button
-                      onClick={() => setMenuExpanded((prev) => !prev)}
+                      onClick={() => toggleSection(item.href)}
                       className={`p-1.5 rounded-lg transition-all ${
                         sectionActive
                           ? "text-blue-400 hover:bg-blue-100"
@@ -121,15 +154,14 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                       <ChevronDown
                         size={16}
                         className={`transition-transform duration-200 ${
-                          menuExpanded ? "rotate-0" : "-rotate-90"
+                          isExpanded ? "rotate-0" : "-rotate-90"
                         }`}
                       />
                     </button>
                   )}
                 </div>
 
-                {/* Children */}
-                {!collapsed && menuExpanded && (
+                {!collapsed && isExpanded && (
                   <div className="ml-5 pl-3 border-l border-slate-200 mt-1 space-y-0.5">
                     {item.children.map((child) => {
                       const isChildActive = pathname.startsWith(child.href);

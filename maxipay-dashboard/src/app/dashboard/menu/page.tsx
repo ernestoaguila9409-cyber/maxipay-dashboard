@@ -10,6 +10,7 @@ import {
   writeBatch,
   updateDoc,
   addDoc,
+  deleteDoc,
   onSnapshot,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
@@ -27,6 +28,7 @@ import {
   Package,
   X,
   SlidersHorizontal,
+  FolderPlus,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -89,6 +91,24 @@ export default function MenuPage() {
   const [addSaving, setAddSaving] = useState(false);
   const [addModifiers, setAddModifiers] = useState<Record<string, boolean>>({});
   const [stockCountingEnabled, setStockCountingEnabled] = useState(true);
+
+  // Add category modal
+  const [addCategoryOpen, setAddCategoryOpen] = useState(false);
+  const [addCategoryName, setAddCategoryName] = useState("");
+  const [addCategoryOrderTypes, setAddCategoryOrderTypes] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(ALL_ORDER_TYPES.map((t) => [t, true]))
+  );
+  const [addCategorySaving, setAddCategorySaving] = useState(false);
+  const [addCategoryError, setAddCategoryError] = useState("");
+
+  // Edit category modal
+  const [editCategoryTarget, setEditCategoryTarget] = useState<Category | null>(null);
+  const [editCategoryOrderTypes, setEditCategoryOrderTypes] = useState<Record<string, boolean>>({});
+  const [editCategorySaving, setEditCategorySaving] = useState(false);
+
+  // Delete category
+  const [deleteCategoryTarget, setDeleteCategoryTarget] = useState<Category | null>(null);
+  const [deletingCategory, setDeletingCategory] = useState(false);
 
   // Modifier groups + assignment state
   const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
@@ -344,6 +364,82 @@ export default function MenuPage() {
     setAddModifiers({});
   };
 
+  // ── Add Category ──
+
+  const openEditCategory = (cat: Category) => {
+    setEditCategoryTarget(cat);
+    setEditCategoryOrderTypes(
+      Object.fromEntries(
+        ALL_ORDER_TYPES.map((t) => [t, cat.availableOrderTypes.includes(t)])
+      )
+    );
+  };
+
+  const handleSaveCategory = async () => {
+    if (!editCategoryTarget) return;
+    const availableOrderTypes = ALL_ORDER_TYPES.filter((t) => editCategoryOrderTypes[t]);
+    if (availableOrderTypes.length === 0) return;
+
+    setEditCategorySaving(true);
+    try {
+      await updateDoc(doc(db, "Categories", editCategoryTarget.id), {
+        availableOrderTypes,
+      });
+      setEditCategoryTarget(null);
+    } catch (err) {
+      console.error("Failed to update category:", err);
+    } finally {
+      setEditCategorySaving(false);
+    }
+  };
+
+  const handleDeleteCategory = async () => {
+    if (!deleteCategoryTarget) return;
+    setDeletingCategory(true);
+    try {
+      await deleteDoc(doc(db, "Categories", deleteCategoryTarget.id));
+      setDeleteCategoryTarget(null);
+    } catch (err) {
+      console.error("Failed to delete category:", err);
+    } finally {
+      setDeletingCategory(false);
+    }
+  };
+
+  const handleAddCategory = async () => {
+    const name = addCategoryName.trim();
+    setAddCategoryError("");
+    if (!name) return;
+
+    const normalized = name.toLowerCase();
+    const exists = categories.some((c) => c.name.toLowerCase() === normalized);
+    if (exists) {
+      setAddCategoryError("A category with this name already exists.");
+      return;
+    }
+
+    const availableOrderTypes = ALL_ORDER_TYPES.filter((t) => addCategoryOrderTypes[t]);
+    if (availableOrderTypes.length === 0) {
+      setAddCategoryError("Select at least one order type.");
+      return;
+    }
+
+    setAddCategorySaving(true);
+    try {
+      await addDoc(collection(db, "Categories"), {
+        name,
+        availableOrderTypes,
+      });
+      setAddCategoryName("");
+      setAddCategoryOrderTypes(Object.fromEntries(ALL_ORDER_TYPES.map((t) => [t, true])));
+      setAddCategoryOpen(false);
+    } catch (err) {
+      console.error("Failed to add category:", err);
+    } finally {
+      setAddCategorySaving(false);
+    }
+  };
+
   const handleAddItem = async () => {
     const name = addName.trim();
     if (!name) return;
@@ -481,6 +577,18 @@ export default function MenuPage() {
               Upload Menu
             </button>
             <button
+              onClick={() => {
+                setAddCategoryName("");
+                setAddCategoryOrderTypes(Object.fromEntries(ALL_ORDER_TYPES.map((t) => [t, true])));
+                setAddCategoryError("");
+                setAddCategoryOpen(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              <FolderPlus size={16} />
+              Add Category
+            </button>
+            <button
               onClick={() => { resetAddForm(); setAddOpen(true); }}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
             >
@@ -504,21 +612,49 @@ export default function MenuPage() {
               All
             </button>
             {categories.map((cat) => (
-              <button
+              <div
                 key={cat.id}
-                onClick={() =>
-                  setActiveCategory(
-                    activeCategory === cat.id ? null : cat.id
-                  )
-                }
-                className={`shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors group/cat ${
                   activeCategory === cat.id
                     ? "bg-blue-600 text-white"
                     : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
                 }`}
               >
-                {cat.name}
-              </button>
+                <button
+                  onClick={() =>
+                    setActiveCategory(
+                      activeCategory === cat.id ? null : cat.id
+                    )
+                  }
+                  className="pr-0.5"
+                >
+                  {cat.name}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEditCategory(cat);
+                  }}
+                  className={`p-0.5 rounded hover:bg-black/10 transition-colors ${
+                    activeCategory === cat.id ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-slate-600 opacity-0 group-hover/cat:opacity-100"
+                  }`}
+                  title="Edit category order types"
+                >
+                  <Pencil size={12} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteCategoryTarget(cat);
+                  }}
+                  className={`p-0.5 rounded hover:bg-red-500/20 transition-colors ${
+                    activeCategory === cat.id ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500 opacity-0 group-hover/cat:opacity-100"
+                  }`}
+                  title="Delete category"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -641,7 +777,277 @@ export default function MenuPage() {
         onImportComplete={() => {}}
       />
 
-      {/* ── Delete confirmation modal ── */}
+      {/* ── Add category modal ── */}
+      {addCategoryOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => !addCategorySaving && setAddCategoryOpen(false)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="px-6 py-5 space-y-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-slate-800">
+                  Add Category
+                </h3>
+                <button
+                  onClick={() => setAddCategoryOpen(false)}
+                  disabled={addCategorySaving}
+                  className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <p className="text-sm text-slate-500">
+                Choose which order types can use this category. Check all for every order type, or uncheck to limit where it appears — same as the app.
+              </p>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Category Name
+                </label>
+                <input
+                  type="text"
+                  value={addCategoryName}
+                  onChange={(e) => {
+                    setAddCategoryName(e.target.value);
+                    setAddCategoryError("");
+                  }}
+                  placeholder="e.g. Desserts, Drinks"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                />
+                {addCategoryError && (
+                  <p className="mt-1.5 text-sm text-red-600">{addCategoryError}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Show in order types
+                </label>
+                <p className="text-xs text-slate-500 mb-2">
+                  All checked = shows everywhere. Uncheck to limit to Dine In, To Go, and/or Bar only.
+                </p>
+                <div className="flex flex-col gap-2 pl-1">
+                  {ALL_ORDER_TYPES.map((t) => (
+                    <label
+                      key={t}
+                      className="flex items-center gap-2 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={addCategoryOrderTypes[t] ?? false}
+                        onChange={(e) =>
+                          setAddCategoryOrderTypes((prev) => ({
+                            ...prev,
+                            [t]: e.target.checked,
+                          }))
+                        }
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-slate-700">
+                        {ORDER_TYPE_LABELS[t]}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setAddCategoryOpen(false)}
+                  disabled={addCategorySaving}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddCategory}
+                  disabled={
+                    addCategorySaving ||
+                    !addCategoryName.trim() ||
+                    ALL_ORDER_TYPES.every((t) => !addCategoryOrderTypes[t])
+                  }
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {addCategorySaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Adding…
+                    </>
+                  ) : (
+                    "Add Category"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit category modal ── */}
+      {editCategoryTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => !editCategorySaving && setEditCategoryTarget(null)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="px-6 py-5 space-y-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-slate-800">
+                  Edit Category
+                </h3>
+                <button
+                  onClick={() => setEditCategoryTarget(null)}
+                  disabled={editCategorySaving}
+                  className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <p className="text-sm text-slate-600 font-medium">
+                {editCategoryTarget.name}
+              </p>
+
+              <p className="text-sm text-slate-500">
+                Choose which order types can use this category. All checked = everywhere. Uncheck to limit — syncs to the app.
+              </p>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Show in order types
+                </label>
+                <div className="flex flex-col gap-2 pl-1">
+                  {ALL_ORDER_TYPES.map((t) => (
+                    <label
+                      key={t}
+                      className="flex items-center gap-2 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={editCategoryOrderTypes[t] ?? false}
+                        onChange={(e) =>
+                          setEditCategoryOrderTypes((prev) => ({
+                            ...prev,
+                            [t]: e.target.checked,
+                          }))
+                        }
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-slate-700">
+                        {ORDER_TYPE_LABELS[t]}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setEditCategoryTarget(null)}
+                  disabled={editCategorySaving}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveCategory}
+                  disabled={
+                    editCategorySaving ||
+                    ALL_ORDER_TYPES.every((t) => !editCategoryOrderTypes[t])
+                  }
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {editCategorySaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Saving…
+                    </>
+                  ) : (
+                    "Save"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete category confirmation modal ── */}
+      {deleteCategoryTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => !deletingCategory && setDeleteCategoryTarget(null)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 overflow-hidden">
+            <div className="px-6 py-5 space-y-4">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center">
+                  <AlertTriangle size={24} className="text-red-500" />
+                </div>
+                <h3 className="text-lg font-semibold text-slate-800">
+                  Delete Category
+                </h3>
+              </div>
+
+              {(() => {
+                const itemCount = items.filter(
+                  (i) => i.categoryId === deleteCategoryTarget.id
+                ).length;
+                return (
+                  <p className="text-sm text-slate-500 text-center">
+                    {itemCount > 0 ? (
+                      <>
+                        <strong className="text-slate-700">
+                          {deleteCategoryTarget.name}
+                        </strong>{" "}
+                        contains <strong>{itemCount} item{itemCount !== 1 ? "s" : ""}</strong>.
+                        They will become uncategorized. Are you sure you want to delete this
+                        category?
+                      </>
+                    ) : (
+                      <>
+                        Delete <strong className="text-slate-700">{deleteCategoryTarget.name}</strong>?
+                        This cannot be undone.
+                      </>
+                    )}
+                  </p>
+                );
+              })()}
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setDeleteCategoryTarget(null)}
+                  disabled={deletingCategory}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteCategory}
+                  disabled={deletingCategory}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {deletingCategory ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Deleting…
+                    </>
+                  ) : (
+                    "Delete"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete item confirmation modal ── */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div

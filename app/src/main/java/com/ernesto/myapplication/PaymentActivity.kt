@@ -58,12 +58,6 @@ class PaymentActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
     private lateinit var paymentEngine: PaymentEngine
-    private var tipScreenShown = false
-
-    private val tipLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            loadRemainingBalance()
-        }
 
     private var lastCashTenderedCents: Long = 0L
     private var lastCashChangeCents: Long = 0L
@@ -219,7 +213,6 @@ class PaymentActivity : AppCompatActivity() {
 
                 txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
 
-                if (maybeLaunchTipScreen()) return@addOnSuccessListener
                 showSplitPayShareDialogIfNeeded()
             }
             .addOnFailureListener {
@@ -245,7 +238,6 @@ class PaymentActivity : AppCompatActivity() {
 
                         txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
 
-                        if (maybeLaunchTipScreen()) return@addOnSuccessListener
                         showSplitPayShareDialogIfNeeded()
                     }
             }
@@ -272,20 +264,6 @@ class PaymentActivity : AppCompatActivity() {
 
         txtOrderSummary.text = parts.joinToString(" • ")
         txtOrderSummary.visibility = if (parts.isEmpty()) View.GONE else View.VISIBLE
-    }
-
-    private fun maybeLaunchTipScreen(): Boolean {
-        if (tipScreenShown) return false
-        if (!TipConfig.isTipsEnabled(this)) return false
-
-        val splitAmount = intent.getDoubleExtra("SPLIT_PAY_AMOUNT", -1.0)
-        if (splitAmount > 0) return false
-
-        tipScreenShown = true
-        val tipIntent = Intent(this, TipActivity::class.java)
-        tipIntent.putExtra("ORDER_ID", orderId)
-        tipLauncher.launch(tipIntent)
-        return true
     }
 
     private fun showSplitPayShareDialogIfNeeded() {

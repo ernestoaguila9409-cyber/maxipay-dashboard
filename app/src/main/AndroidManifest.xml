@@ -173,6 +173,22 @@
             android:name=".ReportsActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity" />
+        <activity
+            android:name=".MenuPerformanceActivity"
+            android:exported="false"
+            android:parentActivityName=".ReportsActivity" />
+        <activity
+            android:name=".ItemSalesReportActivity"
+            android:exported="false"
+            android:parentActivityName=".MenuPerformanceActivity" />
+        <activity
+            android:name=".CategorySalesReportActivity"
+            android:exported="false"
+            android:parentActivityName=".MenuPerformanceActivity" />
+        <activity
+            android:name=".ModifierSalesReportActivity"
+            android:exported="false"
+            android:parentActivityName=".MenuPerformanceActivity" />
         <activity android:name=".GlobalModifierActivity" />
         <activity
             android:name=".CashFlowActivity"
@@ -184,6 +200,16 @@
             android:name=".InventoryConfigActivity"
             android:exported="false"
             android:parentActivityName=".ConfigurationActivity" />
+
+        <activity
+            android:name=".DiscountsActivity"
+            android:exported="false"
+            android:parentActivityName=".ConfigurationActivity" />
+
+        <activity
+            android:name=".AddDiscountActivity"
+            android:exported="false"
+            android:parentActivityName=".DiscountsActivity" />
 
     </application>
 

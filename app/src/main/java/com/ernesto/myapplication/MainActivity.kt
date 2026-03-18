@@ -6,9 +6,10 @@ import android.view.View
 import android.widget.ImageButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
-import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
 
@@ -18,20 +19,21 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var txtTodayTotal: TextView
     private lateinit var txtTodayCount: TextView
-
-    private lateinit var dineInBadge: TextView
-    private lateinit var toGoBadge: TextView
-    private lateinit var barBadge: TextView
+    private lateinit var dashboardAdapter: DashboardAdapter
 
     private var openOrdersListener: ListenerRegistration? = null
+    private var dashboardConfigListener: ListenerRegistration? = null
     private var currentBatchId: String = ""
+
+    private var employeeName: String = ""
+    private var employeeRole: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        var employeeName = intent.getStringExtra("employeeName") ?: ""
-        var employeeRole = intent.getStringExtra("employeeRole") ?: ""
+        employeeName = intent.getStringExtra("employeeName") ?: ""
+        employeeRole = intent.getStringExtra("employeeRole") ?: ""
         if (employeeName.isNotBlank()) {
             SessionEmployee.setEmployee(this, employeeName, employeeRole)
         } else {
@@ -45,86 +47,12 @@ class MainActivity : AppCompatActivity() {
         txtTodayTotal = findViewById(R.id.txtTodayTotal)
         txtTodayCount = findViewById(R.id.txtTodayCount)
 
-        dineInBadge = findViewById(R.id.dineInBadge)
-        toGoBadge = findViewById(R.id.toGoBadge)
-        barBadge = findViewById(R.id.barBadge)
-
+        setupDashboardGrid()
         listenForOpenOrders()
         ensureOpenBatch()
 
-        findViewById<android.view.View>(R.id.btnDineIn).setOnClickListener {
-            val intent = Intent(this, TableSelectionActivity::class.java)
-            intent.putExtra("batchId", currentBatchId)
-            intent.putExtra("employeeName", employeeName)
-            startActivity(intent)
-        }
-
-        findViewById<android.view.View>(R.id.btnToGo).setOnClickListener {
-            val intent = Intent(this, MenuActivity::class.java)
-            intent.putExtra("batchId", currentBatchId)
-            intent.putExtra("employeeName", employeeName)
-            intent.putExtra("orderType", "TO_GO")
-            startActivity(intent)
-        }
-
-        findViewById<android.view.View>(R.id.btnBar).setOnClickListener {
-            val intent = Intent(this, BarTabsActivity::class.java)
-            intent.putExtra("batchId", currentBatchId)
-            intent.putExtra("employeeName", employeeName)
-            startActivity(intent)
-        }
-
-        findViewById<android.view.View>(R.id.btnTransactions).setOnClickListener {
-            val intent = Intent(this, TransactionActivity::class.java)
-            intent.putExtra("employeeName", employeeName)
-            startActivity(intent)
-        }
-
-        findViewById<android.view.View>(R.id.btnSettle).setOnClickListener {
-            startActivity(Intent(this, BatchManagementActivity::class.java))
-        }
-
-        findViewById<android.view.View>(R.id.todaySalesArea).setOnClickListener {
+        findViewById<View>(R.id.todaySalesArea).setOnClickListener {
             startActivity(Intent(this, TodaySalesActivity::class.java))
-        }
-
-        findViewById<android.view.View>(R.id.btnEmployees).setOnClickListener {
-            startActivity(Intent(this, EmployeesActivity::class.java))
-        }
-
-        findViewById<android.view.View>(R.id.btnCustomers).setOnClickListener {
-            startActivity(Intent(this, CustomersActivity::class.java))
-        }
-
-        findViewById<android.view.View>(R.id.btnOrders).setOnClickListener {
-            val intent = Intent(this, OrdersActivity::class.java)
-            intent.putExtra("employeeName", employeeName)
-            startActivity(intent)
-        }
-
-        findViewById<android.view.View>(R.id.btnSetup).setOnClickListener {
-            val intent = Intent(this, SideMenuActivity::class.java)
-            intent.putExtra("employeeName", employeeName)
-            intent.putExtra("employeeRole", employeeRole)
-            startActivity(intent)
-        }
-
-        findViewById<android.view.View>(R.id.btnModifiers).setOnClickListener {
-            startActivity(Intent(this, GlobalModifierActivity::class.java))
-        }
-
-        findViewById<android.view.View>(R.id.btnInventory).setOnClickListener {
-            val intent = Intent(this, MenuOnlyActivity::class.java)
-            intent.putExtra("batchId", currentBatchId)
-            startActivity(intent)
-        }
-
-        findViewById<android.view.View>(R.id.btnReports).setOnClickListener {
-            startActivity(Intent(this, ReportsActivity::class.java))
-        }
-
-        findViewById<android.view.View>(R.id.btnCashFlow).setOnClickListener {
-            startActivity(Intent(this, CashFlowActivity::class.java))
         }
 
         findViewById<ImageButton>(R.id.btnLogout).setOnClickListener {
@@ -136,50 +64,125 @@ class MainActivity : AppCompatActivity() {
         loadCurrentSales()
     }
 
+    private fun setupDashboardGrid() {
+        val rv = findViewById<RecyclerView>(R.id.dashboardGrid)
+        rv.layoutManager = GridLayoutManager(this, 3)
+
+        dashboardAdapter = DashboardAdapter(mutableListOf()) { module ->
+            handleModuleClick(module)
+        }
+        rv.adapter = dashboardAdapter
+
+        dashboardConfigListener = DashboardConfigManager.listenConfig(
+            db,
+            onUpdate = { modules ->
+                if (!isDestroyed) {
+                    dashboardAdapter.setModules(modules)
+                    applyOrderTypeVisibility()
+                }
+            },
+            onCacheThenServer = { serverModules ->
+                if (!isDestroyed && serverModules.isNotEmpty()) {
+                    dashboardAdapter.setModules(serverModules)
+                }
+            }
+        )
+    }
+
+    private fun handleModuleClick(module: DashboardModule) {
+        when (module.key) {
+            "dine_in" -> {
+                val i = Intent(this, TableSelectionActivity::class.java)
+                i.putExtra("batchId", currentBatchId)
+                i.putExtra("employeeName", employeeName)
+                startActivity(i)
+            }
+            "to_go" -> {
+                val i = Intent(this, MenuActivity::class.java)
+                i.putExtra("batchId", currentBatchId)
+                i.putExtra("employeeName", employeeName)
+                i.putExtra("orderType", "TO_GO")
+                startActivity(i)
+            }
+            "bar" -> {
+                val i = Intent(this, BarTabsActivity::class.java)
+                i.putExtra("batchId", currentBatchId)
+                i.putExtra("employeeName", employeeName)
+                startActivity(i)
+            }
+            "transactions" -> {
+                val i = Intent(this, TransactionActivity::class.java)
+                i.putExtra("employeeName", employeeName)
+                startActivity(i)
+            }
+            "settle_batch" -> startActivity(Intent(this, BatchManagementActivity::class.java))
+            "employees" -> startActivity(Intent(this, EmployeesActivity::class.java))
+            "customers" -> startActivity(Intent(this, CustomersActivity::class.java))
+            "orders" -> {
+                val i = Intent(this, OrdersActivity::class.java)
+                i.putExtra("employeeName", employeeName)
+                startActivity(i)
+            }
+            "setup" -> {
+                val i = Intent(this, SideMenuActivity::class.java)
+                i.putExtra("employeeName", employeeName)
+                i.putExtra("employeeRole", employeeRole)
+                startActivity(i)
+            }
+            "modifiers" -> startActivity(Intent(this, GlobalModifierActivity::class.java))
+            "inventory" -> {
+                val i = Intent(this, MenuOnlyActivity::class.java)
+                i.putExtra("batchId", currentBatchId)
+                startActivity(i)
+            }
+            "reports" -> startActivity(Intent(this, ReportsActivity::class.java))
+            "cash_flow" -> startActivity(Intent(this, CashFlowActivity::class.java))
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         loadCurrentSales()
         applyOrderTypeVisibility()
+        refreshDashboardFromServer()
+    }
+
+    private fun refreshDashboardFromServer() {
+        DashboardConfigManager.loadFromServer(db) { modules ->
+            if (!isDestroyed && modules.isNotEmpty()) {
+                dashboardAdapter.setModules(modules)
+            }
+        }
     }
 
     private fun applyOrderTypeVisibility() {
-        findViewById<android.view.View>(R.id.btnDineIn).visibility =
-            if (OrderTypePrefs.isDineInEnabled(this)) android.view.View.VISIBLE else android.view.View.GONE
-        findViewById<android.view.View>(R.id.btnToGo).visibility =
-            if (OrderTypePrefs.isToGoEnabled(this)) android.view.View.VISIBLE else android.view.View.GONE
-        findViewById<android.view.View>(R.id.btnBar).visibility =
-            if (OrderTypePrefs.isBarTabEnabled(this)) android.view.View.VISIBLE else android.view.View.GONE
+        // Order type visibility is now handled via the adapter; hidden modules
+        // still exist in config but we skip rendering disabled ones.
+        // For now we keep all visible — the config screen controls order.
     }
 
     private fun ensureOpenBatch() {
-
         db.collection("Batches")
             .whereEqualTo("closed", false)
             .limit(1)
             .get()
             .addOnSuccessListener { documents ->
-
                 if (!documents.isEmpty) {
                     currentBatchId = documents.documents[0].id
                 } else {
-
                     val newBatchId = "BATCH_${System.currentTimeMillis()}"
-
                     val batchData = hashMapOf(
                         "batchId" to newBatchId,
                         "total" to 0.0,
                         "count" to 0,
                         "closed" to false,
-                        "createdAt" to Date(),
-                        "type" to "OPEN" // distinguish from settlement batches
+                        "createdAt" to java.util.Date(),
+                        "type" to "OPEN"
                     )
-
                     db.collection("Batches")
                         .document(newBatchId)
                         .set(batchData)
-                        .addOnSuccessListener {
-                            currentBatchId = newBatchId
-                        }
+                        .addOnSuccessListener { currentBatchId = newBatchId }
                 }
             }
     }
@@ -187,6 +190,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         openOrdersListener?.remove()
+        dashboardConfigListener?.remove()
     }
 
     private fun listenForOpenOrders() {
@@ -207,19 +211,10 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                updateBadge(dineInBadge, dineIn)
-                updateBadge(toGoBadge, toGo)
-                updateBadge(barBadge, bar)
+                dashboardAdapter.updateBadge("dine_in", dineIn)
+                dashboardAdapter.updateBadge("to_go", toGo)
+                dashboardAdapter.updateBadge("bar", bar)
             }
-    }
-
-    private fun updateBadge(badge: TextView, count: Int) {
-        if (count > 0) {
-            badge.text = count.toString()
-            badge.visibility = View.VISIBLE
-        } else {
-            badge.visibility = View.GONE
-        }
     }
 
     private fun loadCurrentSales() {

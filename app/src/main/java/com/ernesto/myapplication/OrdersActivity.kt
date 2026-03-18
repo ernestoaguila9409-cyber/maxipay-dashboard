@@ -5,8 +5,11 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
+import android.view.View
+import android.widget.ArrayAdapter
 import android.widget.ImageButton
 import android.widget.RadioButton
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -33,6 +36,7 @@ class OrdersActivity : AppCompatActivity() {
 
     private lateinit var chipGroupStatus: ChipGroup
     private lateinit var chipGroupOrderType: ChipGroup
+    private lateinit var txtRefundCountSummary: TextView
 
     private val db: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
 
@@ -48,8 +52,11 @@ class OrdersActivity : AppCompatActivity() {
     // Advanced filter (from filter dialog)
     private var statusFilter: String = "ALL" // ALL, OPEN, CLOSED, VOIDED, REFUNDED_FULLY, PARTIALLY_REFUNDED
     private var orderTypeFilter: String = "ALL" // ALL, DINE_IN, TO_GO
+    private var employeeFilter: String? = null
     private var dateFromMillis: Long? = null
     private var dateToMillis: Long? = null
+
+    private var employeeNames: List<String> = emptyList()
 
     // Selection mode
     private var selectionMode = false
@@ -72,6 +79,7 @@ class OrdersActivity : AppCompatActivity() {
 
         chipGroupStatus = findViewById(R.id.chipGroupFilter)
         chipGroupOrderType = findViewById(R.id.chipGroupOrderType)
+        txtRefundCountSummary = findViewById(R.id.txtRefundCountSummary)
 
         adapter = OrdersAdapter(
             onOrderClick = { order ->
@@ -163,7 +171,16 @@ class OrdersActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        loadEmployeeNames()
         startListening()
+    }
+
+    private fun loadEmployeeNames() {
+        db.collection("Employees").get()
+            .addOnSuccessListener { snap ->
+                employeeNames = snap.mapNotNull { it.getString("name")?.takeIf { n -> n.isNotBlank() } }
+                    .distinct().sorted()
+            }
     }
 
     override fun onStop() {
@@ -249,6 +266,7 @@ class OrdersActivity : AppCompatActivity() {
                 orders.addAll(applyFilters(allOrders))
                 adapter.submit(orders)
                 updateDeleteButtonState()
+                updateRefundCountSummary()
 
                 if (currentOrderView && orders.isEmpty()) {
                     AlertDialog.Builder(this@OrdersActivity)
@@ -265,6 +283,17 @@ class OrdersActivity : AppCompatActivity() {
         orders.clear()
         orders.addAll(applyFilters(allOrders))
         adapter.submit(orders)
+        updateRefundCountSummary()
+    }
+
+    private fun updateRefundCountSummary() {
+        if (employeeFilter == null) {
+            txtRefundCountSummary.visibility = View.GONE
+            return
+        }
+        val fullyRefundedCount = allOrders.count { it.employeeName == employeeFilter && isFullyRefunded(it) }
+        txtRefundCountSummary.text = "$fullyRefundedCount order(s) fully refunded by $employeeFilter"
+        txtRefundCountSummary.visibility = View.VISIBLE
     }
 
     private fun applyFilters(list: List<OrderRow>): List<OrderRow> {
@@ -276,8 +305,14 @@ class OrdersActivity : AppCompatActivity() {
                 result.filter { it.orderType == orderTypeFilter }
             }
         }
+        if (employeeFilter != null) {
+            result = result.filter { it.employeeName == employeeFilter }
+        }
         return result
     }
+
+    private fun isFullyRefunded(order: OrderRow): Boolean =
+        order.status == "REFUNDED" || order.totalRefundedInCents >= order.totalCents
 
     private fun applyStatusFilter(list: List<OrderRow>): List<OrderRow> {
         return when (statusFilter) {
@@ -299,8 +334,14 @@ class OrdersActivity : AppCompatActivity() {
         val radioVoided = view.findViewById<RadioButton>(R.id.radioVoided)
         val radioRefundedFully = view.findViewById<RadioButton>(R.id.radioRefundedFully)
         val radioPartiallyRefunded = view.findViewById<RadioButton>(R.id.radioPartiallyRefunded)
+        val spinnerEmployee = view.findViewById<Spinner>(R.id.spinnerEmployee)
         val txtDateFrom = view.findViewById<TextView>(R.id.txtDateFrom)
         val txtDateTo = view.findViewById<TextView>(R.id.txtDateTo)
+
+        val options = listOf("All Employees") + employeeNames
+        spinnerEmployee.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
+        val empIndex = employeeFilter?.let { name -> employeeNames.indexOf(name).takeIf { it >= 0 }?.plus(1) } ?: 0
+        spinnerEmployee.setSelection(empIndex.coerceAtMost(options.size - 1))
 
         when (statusFilter) {
             "OPEN" -> radioOpen.isChecked = true
@@ -345,6 +386,7 @@ class OrdersActivity : AppCompatActivity() {
             val datesChanged = dateFromMillis != null || dateToMillis != null
             statusFilter = "ALL"
             orderTypeFilter = "ALL"
+            employeeFilter = null
             dateFromMillis = null
             dateToMillis = null
             filter = "ALL"
@@ -363,6 +405,8 @@ class OrdersActivity : AppCompatActivity() {
                 R.id.radioPartiallyRefunded -> "PARTIALLY_REFUNDED"
                 else -> "ALL"
             }
+            val empPos = spinnerEmployee.selectedItemPosition
+            employeeFilter = if (empPos > 0 && empPos <= employeeNames.size) employeeNames[empPos - 1] else null
             filter = if (statusFilter in listOf("ALL", "OPEN", "CLOSED")) statusFilter else "ALL"
             when (filter) {
                 "OPEN" -> chipGroupStatus.check(R.id.chipOpen)
@@ -370,7 +414,7 @@ class OrdersActivity : AppCompatActivity() {
                 else -> chipGroupStatus.check(R.id.chipAll)
             }
             dialog.dismiss()
-            startListening()
+            applyAndRefresh()
         }
         dialog.show()
     }

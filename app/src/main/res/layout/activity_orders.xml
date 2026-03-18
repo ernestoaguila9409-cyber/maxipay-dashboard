@@ -108,6 +108,17 @@
 
     </com.google.android.material.chip.ChipGroup>
 
+    <!-- Refund count summary (visible when employee filter is active) -->
+    <TextView
+        android:id="@+id/txtRefundCountSummary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp"
+        android:textSize="14sp"
+        android:textColor="#757575"/>
+
     <!-- Orders List -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerOrders"

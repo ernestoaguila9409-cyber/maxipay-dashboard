@@ -31,6 +31,10 @@ class ConfigurationActivity : AppCompatActivity() {
         findViewById<android.view.View>(R.id.optionInventory).setOnClickListener {
             startActivity(Intent(this, InventoryConfigActivity::class.java))
         }
+
+        findViewById<android.view.View>(R.id.optionDiscounts).setOnClickListener {
+            startActivity(Intent(this, DiscountsActivity::class.java))
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {

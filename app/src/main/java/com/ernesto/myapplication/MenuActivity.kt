@@ -28,7 +28,9 @@ data class CartItem(
     val basePrice: Double,
     val stock: Long,
     val modifiers: List<OrderModifier>,
-    val guestNumber: Int = 0
+    val guestNumber: Int = 0,
+    val taxMode: String = "INHERIT",
+    val taxIds: List<String> = emptyList()
 )
 
 class MenuActivity : AppCompatActivity() {
@@ -48,13 +50,15 @@ class MenuActivity : AppCompatActivity() {
     private var selectedGuest: Int = 0
 
     private var totalAmount = 0.0
-    private var enabledTaxes = mutableListOf<Triple<String, String, Double>>()
+    private var allTaxes = mutableListOf<TaxItem>()
     private var employeeName: String = ""
     private var orderType: String = ""
     private var currentOrderId: String? = null
     private var isCreatingOrder = false
     private var tableId: String? = null
     private var tableName: String? = null
+    private var sectionId: String? = null
+    private var sectionName: String? = null
     private var guestCount: Int = 0
     private var guestNames: MutableList<String> = mutableListOf()
 
@@ -107,6 +111,8 @@ class MenuActivity : AppCompatActivity() {
         orderType = intent.getStringExtra("orderType") ?: ""
         tableId = intent.getStringExtra("tableId")
         tableName = intent.getStringExtra("tableName")
+        sectionId = intent.getStringExtra("sectionId")
+        sectionName = intent.getStringExtra("sectionName")
         guestCount = intent.getIntExtra("guestCount", 0)
         guestNames = intent.getStringArrayListExtra("guestNames")?.toMutableList() ?: mutableListOf()
         currentBatchId = intent.getStringExtra("batchId")
@@ -144,7 +150,7 @@ class MenuActivity : AppCompatActivity() {
                 stockCountingEnabled = true
                 loadCategories()
             }
-        loadEnabledTaxes()
+        loadAllTaxes()
         updateCustomerDisplay()
 
         // ✅ Load existing order items into cart if ORDER_ID was provided
@@ -172,9 +178,11 @@ class MenuActivity : AppCompatActivity() {
                         orderId = oid,
                         onSuccess = {
                             btnCheckout.isEnabled = true
-                            val intent = Intent(this, PaymentActivity::class.java)
-                            intent.putExtra("ORDER_ID", oid)
-                            intent.putExtra("BATCH_ID", currentBatchId ?: "")
+                            val targetActivity = if (TipConfig.isTipsEnabled(this)) TipActivity::class.java else PaymentActivity::class.java
+                            val intent = Intent(this, targetActivity).apply {
+                                putExtra("ORDER_ID", oid)
+                                putExtra("BATCH_ID", currentBatchId ?: "")
+                            }
                             paymentLauncher.launch(intent)
                         },
                         onFailure = {
@@ -189,21 +197,20 @@ class MenuActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        loadEnabledTaxes()
+        loadAllTaxes()
     }
 
-    private fun loadEnabledTaxes() {
+    private fun loadAllTaxes() {
         db.collection("Taxes")
             .get()
             .addOnSuccessListener { snap ->
-                enabledTaxes.clear()
+                allTaxes.clear()
                 for (doc in snap.documents) {
-                    val enabled = doc.getBoolean("enabled") ?: true
-                    if (!enabled) continue
                     val name = doc.getString("name") ?: continue
                     val type = doc.getString("type") ?: continue
                     val amount = doc.getDouble("amount") ?: doc.getLong("amount")?.toDouble() ?: continue
-                    enabledTaxes.add(Triple(name, type, amount))
+                    val enabled = doc.getBoolean("enabled") ?: true
+                    allTaxes.add(TaxItem(id = doc.id, type = type, name = name, amount = amount, enabled = enabled))
                 }
                 refreshCart()
             }
@@ -246,6 +253,12 @@ class MenuActivity : AppCompatActivity() {
                 }
                 if (tableName.isNullOrBlank()) {
                     tableName = orderDoc.getString("tableName")
+                }
+                if (sectionId.isNullOrBlank()) {
+                    sectionId = orderDoc.getString("sectionId")
+                }
+                if (sectionName.isNullOrBlank()) {
+                    sectionName = orderDoc.getString("sectionName")
                 }
                 val docGuestCount = (orderDoc.getLong("guestCount") ?: 0L).toInt()
                 if (guestCount == 0 && docGuestCount > 0) {
@@ -295,6 +308,9 @@ class MenuActivity : AppCompatActivity() {
                             val modifiers = parseModifiers(doc.get("modifiers"))
                             val stock = 0L
                             val guest = (doc.getLong("guestNumber") ?: 0L).toInt()
+                            val lineTaxMode = doc.getString("taxMode") ?: "INHERIT"
+                            @Suppress("UNCHECKED_CAST")
+                            val lineTaxIds = (doc.get("taxIds") as? List<String>) ?: emptyList()
 
                             cartMap[lineKey] = CartItem(
                                 itemId = itemId,
@@ -303,7 +319,9 @@ class MenuActivity : AppCompatActivity() {
                                 basePrice = basePrice,
                                 stock = stock,
                                 modifiers = modifiers,
-                                guestNumber = guest
+                                guestNumber = guest,
+                                taxMode = lineTaxMode,
+                                taxIds = lineTaxIds
                             )
                         }
 
@@ -497,6 +515,9 @@ class MenuActivity : AppCompatActivity() {
                     val name = doc.getString("name") ?: continue
                     val price = doc.getDouble("price") ?: 0.0
                     val stock = doc.getLong("stock") ?: 0L
+                    val itemTaxMode = doc.getString("taxMode") ?: "INHERIT"
+                    @Suppress("UNCHECKED_CAST")
+                    val itemTaxIds = (doc.get("taxIds") as? List<String>) ?: emptyList()
 
                     @Suppress("UNCHECKED_CAST")
                     val itemAvailability =
@@ -527,7 +548,7 @@ class MenuActivity : AppCompatActivity() {
 
                         val effectiveStock = if (stockCountingEnabled) stock else Long.MAX_VALUE
                         button.setOnClickListener {
-                            checkAndShowModifiers(itemId, name, price, effectiveStock)
+                            checkAndShowModifiers(itemId, name, price, effectiveStock, itemTaxMode, itemTaxIds)
                         }
                     }
 
@@ -551,7 +572,9 @@ class MenuActivity : AppCompatActivity() {
         itemId: String,
         name: String,
         basePrice: Double,
-        stock: Long
+        stock: Long,
+        taxMode: String = "INHERIT",
+        taxIds: List<String> = emptyList()
     ) {
         db.collection("ItemModifierGroups")
             .whereEqualTo("itemId", itemId)
@@ -559,10 +582,10 @@ class MenuActivity : AppCompatActivity() {
             .get()
             .addOnSuccessListener { documents ->
                 if (documents.isEmpty) {
-                    addToCart(itemId, name, basePrice, stock, emptyList())
+                    addToCart(itemId, name, basePrice, stock, emptyList(), taxMode, taxIds)
                 } else {
                     val groupIds = documents.mapNotNull { it.getString("groupId") }
-                    showModifierDialog(itemId, name, basePrice, stock, groupIds)
+                    showModifierDialog(itemId, name, basePrice, stock, groupIds, taxMode, taxIds)
                 }
             }
     }
@@ -572,7 +595,9 @@ class MenuActivity : AppCompatActivity() {
         name: String,
         basePrice: Double,
         stock: Long,
-        groupIds: List<String>
+        groupIds: List<String>,
+        taxMode: String = "INHERIT",
+        taxIds: List<String> = emptyList()
     ) {
         val selectedModifiers = mutableListOf<OrderModifier>()
         val selectedCountPerGroup = mutableMapOf<String, Int>()
@@ -604,7 +629,8 @@ class MenuActivity : AppCompatActivity() {
                         )
                         buildAndShowModifierDialog(
                             itemId, name, basePrice, stock,
-                            sorted, requiredGroups, selectedModifiers, selectedCountPerGroup
+                            sorted, requiredGroups, selectedModifiers, selectedCountPerGroup,
+                            taxMode, taxIds
                         )
                     }
                 }
@@ -619,7 +645,9 @@ class MenuActivity : AppCompatActivity() {
         sortedGroups: List<GroupInfo>,
         requiredGroups: Set<String>,
         selectedModifiers: MutableList<OrderModifier>,
-        selectedCountPerGroup: MutableMap<String, Int>
+        selectedCountPerGroup: MutableMap<String, Int>,
+        taxMode: String = "INHERIT",
+        taxIds: List<String> = emptyList()
     ) {
         val mainLayout = LinearLayout(this)
         mainLayout.orientation = LinearLayout.VERTICAL
@@ -641,7 +669,7 @@ class MenuActivity : AppCompatActivity() {
                         return@setOnClickListener
                     }
                 }
-                addToCart(itemId, name, basePrice, stock, selectedModifiers)
+                addToCart(itemId, name, basePrice, stock, selectedModifiers, taxMode, taxIds)
                 dialog.dismiss()
             }
         }
@@ -792,7 +820,9 @@ class MenuActivity : AppCompatActivity() {
         name: String,
         basePrice: Double,
         stock: Long,
-        modifiers: List<OrderModifier>
+        modifiers: List<OrderModifier>,
+        taxMode: String = "INHERIT",
+        taxIds: List<String> = emptyList()
     ) {
 
         if (currentOrderId == null && isCreatingOrder) {
@@ -810,6 +840,8 @@ class MenuActivity : AppCompatActivity() {
             orderType = orderType,
             tableId = tableId,
             tableName = tableName,
+            sectionId = sectionId,
+            sectionName = sectionName,
             guestCount = if (guestCount > 0) guestCount else null,
             guestNames = if (guestNames.isNotEmpty()) guestNames else null,
             customerId = customerId,
@@ -849,7 +881,9 @@ class MenuActivity : AppCompatActivity() {
                         basePrice = basePrice,
                         stock = stock,
                         modifiers = modifiers,
-                        guestNumber = guest
+                        guestNumber = guest,
+                        taxMode = taxMode,
+                        taxIds = taxIds
                     )
                 }
 
@@ -867,7 +901,9 @@ class MenuActivity : AppCompatActivity() {
                         quantity = cartItem.quantity,
                         basePrice = cartItem.basePrice,
                         modifiers = cartItem.modifiers,
-                        guestNumber = cartItem.guestNumber
+                        guestNumber = cartItem.guestNumber,
+                        taxMode = cartItem.taxMode,
+                        taxIds = cartItem.taxIds
                     ),
                     isNewLine = isNew,
                     onSuccess = {},
@@ -991,11 +1027,22 @@ class MenuActivity : AppCompatActivity() {
         subtotalLabel.setTypeface(null, android.graphics.Typeface.BOLD)
         cartTaxSummary.addView(subtotalLabel)
 
-        for ((name, type, amount) in enabledTaxes) {
-            val taxAmount = if (type == "PERCENTAGE") subtotal * amount / 100.0 else amount
+        for (tax in allTaxes) {
+            var taxableBase = 0.0
+            for ((_, item) in cartMap.entries) {
+                val modTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+                val lineTotal = (item.basePrice + modTotal) * item.quantity
+                if (item.taxMode == "FORCE_APPLY") {
+                    if (item.taxIds.contains(tax.id)) taxableBase += lineTotal
+                } else if (tax.enabled) {
+                    taxableBase += lineTotal
+                }
+            }
+            if (taxableBase <= 0.0) continue
+            val taxAmount = if (tax.type == "PERCENTAGE") taxableBase * tax.amount / 100.0 else tax.amount
             totalAmount += taxAmount
             val taxLine = TextView(this)
-            val label = if (type == "PERCENTAGE") "$name (${String.format(Locale.US, "%.1f", amount)}%)" else name
+            val label = if (tax.type == "PERCENTAGE") "${tax.name} (${String.format(Locale.US, "%.1f", tax.amount)}%)" else tax.name
             taxLine.text = "$label: ${MoneyUtils.centsToDisplay((taxAmount * 100).toLong())}"
             taxLine.textSize = 13f
             taxLine.setTextColor(Color.parseColor("#5D4E7B"))
@@ -1094,7 +1141,9 @@ class MenuActivity : AppCompatActivity() {
                     quantity = item.quantity,
                     basePrice = item.basePrice,
                     modifiers = item.modifiers,
-                    guestNumber = item.guestNumber
+                    guestNumber = item.guestNumber,
+                    taxMode = item.taxMode,
+                    taxIds = item.taxIds
                 ),
                 onSuccess = {},
                 onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }

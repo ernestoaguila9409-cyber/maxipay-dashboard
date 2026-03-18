@@ -1,5 +1,6 @@
 package com.ernesto.myapplication
 
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -11,6 +12,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.ernesto.myapplication.engine.MoneyUtils
@@ -24,15 +26,25 @@ class TipActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
     private var orderId: String? = null
+    private var batchId: String? = null
     private var subtotalCents: Long = 0L
     private var taxCents: Long = 0L
     private var totalCents: Long = 0L
+
+    private val paymentLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                setResult(RESULT_OK)
+            }
+            finish()
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_tip)
 
         orderId = intent.getStringExtra("ORDER_ID")
+        batchId = intent.getStringExtra("BATCH_ID")
         if (orderId.isNullOrBlank()) {
             setResult(RESULT_CANCELED)
             finish()
@@ -174,8 +186,7 @@ class TipActivity : AppCompatActivity() {
         val oid = orderId ?: return
 
         if (tipCents <= 0L) {
-            setResult(RESULT_OK)
-            finish()
+            navigateToPayment()
             return
         }
 
@@ -196,14 +207,20 @@ class TipActivity : AppCompatActivity() {
                             "updatedAt" to Date()
                         )
                     )
-                    .addOnSuccessListener {
-                        setResult(RESULT_OK)
-                        finish()
-                    }
+                    .addOnSuccessListener { navigateToPayment() }
                     .addOnFailureListener { e ->
                         Toast.makeText(this, "Failed to save tip: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
             }
+    }
+
+    private fun navigateToPayment() {
+        val oid = orderId ?: return
+        val intent = Intent(this, PaymentActivity::class.java).apply {
+            putExtra("ORDER_ID", oid)
+            putExtra("BATCH_ID", batchId ?: "")
+        }
+        paymentLauncher.launch(intent)
     }
 
     private fun roundCents(value: Double): Long {

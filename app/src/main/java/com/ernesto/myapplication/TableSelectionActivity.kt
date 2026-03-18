@@ -359,22 +359,30 @@ class TableSelectionActivity : AppCompatActivity() {
     }
 
     private fun navigateToExistingOrder(tableId: String, orderId: String) {
+        val sectionName = tableSections[tableId]?.takeIf { it.isNotBlank() } ?: ""
         val intent = Intent(this, MenuActivity::class.java)
         intent.putExtra("batchId", batchId)
         intent.putExtra("employeeName", employeeName)
         intent.putExtra("orderType", "DINE_IN")
         intent.putExtra("tableId", tableId)
         intent.putExtra("tableName", tableNames[tableId] ?: "Table")
+        intent.putExtra("sectionId", sectionName)
+        intent.putExtra("sectionName", sectionName)
         intent.putExtra("ORDER_ID", orderId)
         startActivity(intent)
         finish()
     }
 
     private fun navigateToMenu(tableId: String, tableName: String, guestCount: Int, guestNames: List<String>) {
+        val sectionName = tableSections[tableId]?.takeIf { it.isNotBlank() } ?: ""
+        val sectionId = sectionName
+
         if (intent.getBooleanExtra("SELECT_TABLE_ONLY", false)) {
             val result = Intent().apply {
                 putExtra("tableId", tableId)
                 putExtra("tableName", tableName)
+                putExtra("sectionId", sectionId)
+                putExtra("sectionName", sectionName)
                 putExtra("guestCount", guestCount)
                 putStringArrayListExtra("guestNames", ArrayList(guestNames))
             }
@@ -389,6 +397,8 @@ class TableSelectionActivity : AppCompatActivity() {
             orderType = "DINE_IN",
             tableId = tableId,
             tableName = tableName,
+            sectionId = sectionId.takeIf { it.isNotBlank() },
+            sectionName = sectionName.takeIf { it.isNotBlank() },
             guestCount = if (guestCount > 0) guestCount else null,
             guestNames = if (guestNames.isNotEmpty()) guestNames else null,
             onSuccess = { orderId ->
@@ -398,6 +408,8 @@ class TableSelectionActivity : AppCompatActivity() {
                 intent.putExtra("orderType", "DINE_IN")
                 intent.putExtra("tableId", tableId)
                 intent.putExtra("tableName", tableName)
+                intent.putExtra("sectionId", sectionId)
+                intent.putExtra("sectionName", sectionName)
                 intent.putExtra("guestCount", guestCount)
                 intent.putStringArrayListExtra("guestNames", ArrayList(guestNames))
                 intent.putExtra("ORDER_ID", orderId)

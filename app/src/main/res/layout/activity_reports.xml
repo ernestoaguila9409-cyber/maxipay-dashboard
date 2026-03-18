@@ -43,13 +43,84 @@
                     android:textStyle="bold"
                     android:textColor="#212121" />
 
-                <TextView
-                    android:id="@+id/txtReportDate"
+                <LinearLayout
+                    android:id="@+id/rowDateFilter"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textSize="14sp"
-                    android:textColor="#757575" />
+                    android:orientation="vertical"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:paddingEnd="4dp">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/txtReportDateFrom"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="13sp"
+                            android:textColor="#757575"
+                            android:paddingEnd="4dp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="–"
+                            android:textSize="13sp"
+                            android:textColor="#9E9E9E"
+                            android:paddingHorizontal="2dp" />
+
+                        <TextView
+                            android:id="@+id/txtReportDateTo"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="13sp"
+                            android:textColor="#757575"
+                            android:paddingEnd="8dp" />
+
+                        <ImageView
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:src="@drawable/ic_calendar"
+                            android:contentDescription="Filter by date range"
+                            app:tint="#757575" />
+                    </LinearLayout>
+                </LinearLayout>
             </LinearLayout>
+        </LinearLayout>
+
+        <!-- ==================== Employee Filter ==================== -->
+
+        <LinearLayout
+            android:id="@+id/rowEmployeeFilter"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Employee:"
+                android:textSize="14sp"
+                android:textColor="#757575"
+                android:paddingEnd="10dp" />
+
+            <Spinner
+                android:id="@+id/spinnerEmployeeFilter"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@android:drawable/btn_dropdown"
+                android:popupBackground="#FFFFFF" />
         </LinearLayout>
 
         <!-- ==================== Daily Sales Summary ==================== -->
@@ -167,27 +238,59 @@
                             android:textColor="#E65100" />
                     </LinearLayout>
 
-                    <!-- Tax Collected -->
+                    <!-- Tax Collected (expandable) -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:paddingVertical="12dp">
-                        <TextView
-                            android:layout_width="0dp"
+                        android:orientation="vertical">
+
+                        <LinearLayout
+                            android:id="@+id/rowTaxCollected"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="Tax Collected"
-                            android:textSize="15sp"
-                            android:textColor="#424242" />
-                        <TextView
-                            android:id="@+id/valTaxCollected"
-                            android:layout_width="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:paddingVertical="12dp"
+                            android:background="?attr/selectableItemBackground"
+                            android:clickable="true"
+                            android:focusable="true">
+
+                            <TextView
+                                android:id="@+id/arrowTax"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="▶"
+                                android:textSize="11sp"
+                                android:textColor="#9E9E9E"
+                                android:paddingEnd="8dp"
+                                android:visibility="gone" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Tax Collected"
+                                android:textSize="15sp"
+                                android:textColor="#424242" />
+
+                            <TextView
+                                android:id="@+id/valTaxCollected"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="$0.00"
+                                android:textSize="15sp"
+                                android:textStyle="bold"
+                                android:textColor="#212121" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/contentTaxBreakdown"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="$0.00"
-                            android:textSize="15sp"
-                            android:textStyle="bold"
-                            android:textColor="#212121" />
+                            android:orientation="vertical"
+                            android:visibility="gone"
+                            android:paddingStart="16dp"
+                            android:paddingBottom="8dp" />
                     </LinearLayout>
 
                     <!-- Tips -->
@@ -523,45 +626,75 @@
                         android:layout_height="1dp"
                         android:background="#E0E0E0" />
 
-                    <!-- Dine-In -->
+                    <!-- Dine-In (expandable row with table breakdown) -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:paddingVertical="12dp">
+                        android:orientation="vertical">
 
-                        <View
-                            android:layout_width="10dp"
-                            android:layout_height="10dp"
-                            android:background="#1565C0"
-                            android:layout_marginEnd="10dp" />
-
-                        <TextView
-                            android:layout_width="0dp"
+                        <LinearLayout
+                            android:id="@+id/rowDineIn"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="Dine-In"
-                            android:textSize="15sp"
-                            android:textColor="#424242" />
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:paddingVertical="12dp"
+                            android:background="?attr/selectableItemBackground"
+                            android:clickable="true"
+                            android:focusable="true">
 
-                        <TextView
-                            android:id="@+id/valDineInPct"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text=""
-                            android:textSize="13sp"
-                            android:textColor="#757575"
-                            android:paddingEnd="8dp" />
+                            <TextView
+                                android:id="@+id/arrowDineIn"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="▶"
+                                android:textSize="11sp"
+                                android:textColor="#9E9E9E"
+                                android:paddingEnd="8dp"
+                                android:visibility="gone" />
 
-                        <TextView
-                            android:id="@+id/valDineIn"
-                            android:layout_width="wrap_content"
+                            <View
+                                android:layout_width="10dp"
+                                android:layout_height="10dp"
+                                android:background="#1565C0"
+                                android:layout_marginEnd="10dp" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Dine-In"
+                                android:textSize="15sp"
+                                android:textColor="#424242" />
+
+                            <TextView
+                                android:id="@+id/valDineInPct"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text=""
+                                android:textSize="13sp"
+                                android:textColor="#757575"
+                                android:paddingEnd="8dp" />
+
+                            <TextView
+                                android:id="@+id/valDineIn"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="$0.00"
+                                android:textSize="15sp"
+                                android:textStyle="bold"
+                                android:textColor="#212121" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/contentDineInTables"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="$0.00"
-                            android:textSize="15sp"
-                            android:textStyle="bold"
-                            android:textColor="#212121" />
+                            android:orientation="vertical"
+                            android:visibility="gone"
+                            android:paddingStart="28dp"
+                            android:paddingEnd="0dp"
+                            android:paddingBottom="8dp" />
                     </LinearLayout>
 
                     <!-- To-Go -->
@@ -683,6 +816,71 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- ==================== Hourly Sales by Order Type ==================== -->
+
+        <ProgressBar
+            android:id="@+id/progressHourlySales"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginTop="24dp"
+            android:visibility="gone" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardHourlySales"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="2dp"
+            app:strokeWidth="0dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:id="@+id/headerHourlySales"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingHorizontal="20dp"
+                    android:paddingVertical="16dp">
+
+                    <TextView
+                        android:id="@+id/arrowHourlySales"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="▶"
+                        android:textSize="12sp"
+                        android:textColor="#757575"
+                        android:paddingEnd="10dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Hourly Sales by Order Type"
+                        android:textSize="17sp"
+                        android:textStyle="bold"
+                        android:textColor="#212121" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/contentHourlySales"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="20dp"
+                    android:paddingBottom="20dp"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- ==================== Sales by Card Brand ==================== -->
 
         <ProgressBar
@@ -745,6 +943,78 @@
                     android:paddingHorizontal="20dp"
                     android:paddingBottom="20dp"
                     android:visibility="gone" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ==================== Menu Performance ==================== -->
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardMenuPerformance"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="2dp"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:id="@+id/headerMenuPerformance"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingHorizontal="20dp"
+                    android:paddingVertical="16dp">
+
+                    <TextView
+                        android:id="@+id/arrowMenuPerformance"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="▶"
+                        android:textSize="12sp"
+                        android:textColor="#757575"
+                        android:paddingEnd="10dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Menu Performance"
+                        android:textSize="17sp"
+                        android:textStyle="bold"
+                        android:textColor="#212121" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/contentMenuPerformance"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="20dp"
+                    android:paddingBottom="20dp"
+                    android:visibility="gone">
+
+                    <ProgressBar
+                        android:id="@+id/progressMenuPerf"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:layout_marginVertical="16dp" />
+
+                    <LinearLayout
+                        android:id="@+id/containerMenuPerf"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone" />
+
+                </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
