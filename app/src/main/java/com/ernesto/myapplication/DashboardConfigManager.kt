@@ -1,5 +1,6 @@
 package com.ernesto.myapplication
 
+import android.util.Log
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.MetadataChanges
@@ -7,6 +8,7 @@ import com.google.firebase.firestore.Source
 
 object DashboardConfigManager {
 
+    private const val TAG = "DashboardConfig"
     private const val COLLECTION = "Settings"
     private const val DOCUMENT = "dashboard"
     private const val FIELD_MODULES = "modules"
@@ -25,14 +27,17 @@ object DashboardConfigManager {
                 if (doc.exists()) {
                     val modules = parseModules(doc.get(FIELD_MODULES))
                     if (modules.isNotEmpty()) {
+                        Log.d(TAG, "Server returned ${modules.size} modules")
                         onResult(modules.sortedBy { it.position })
                         return@addOnSuccessListener
                     }
                 }
+                Log.d(TAG, "Server doc empty or missing, using defaults")
                 onResult(DashboardModule.getDefaults())
             }
-            .addOnFailureListener {
-                onResult(emptyList())
+            .addOnFailureListener { e ->
+                Log.w(TAG, "Server fetch failed, using defaults", e)
+                onResult(DashboardModule.getDefaults())
             }
     }
 
@@ -53,7 +58,8 @@ object DashboardConfigManager {
                 saveConfig(db, defaults) {}
                 onResult(defaults)
             }
-            .addOnFailureListener {
+            .addOnFailureListener { e ->
+                Log.w(TAG, "loadConfig failed", e)
                 onResult(DashboardModule.getDefaults())
             }
     }
@@ -65,15 +71,26 @@ object DashboardConfigManager {
     ): ListenerRegistration {
         return db.collection(COLLECTION).document(DOCUMENT)
             .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
-                if (error != null || snapshot == null) return@addSnapshotListener
+                if (error != null) {
+                    Log.w(TAG, "Listener error, forcing server fetch", error)
+                    loadFromServer(db) { modules -> onUpdate(modules) }
+                    return@addSnapshotListener
+                }
+                if (snapshot == null) return@addSnapshotListener
+
+                val fromCache = snapshot.metadata.isFromCache
+                Log.d(TAG, "Snapshot received (fromCache=$fromCache, exists=${snapshot.exists()})")
+
                 if (snapshot.exists()) {
                     val modules = parseModules(snapshot.get(FIELD_MODULES))
                     if (modules.isNotEmpty()) {
                         val sorted = modules.sortedBy { it.position }
                         onUpdate(sorted)
-                        if (snapshot.metadata.isFromCache && onCacheThenServer != null) {
+                        if (fromCache) {
                             loadFromServer(db) { serverModules ->
-                                if (serverModules.isNotEmpty()) onCacheThenServer(serverModules)
+                                if (serverModules.isNotEmpty()) {
+                                    (onCacheThenServer ?: onUpdate).invoke(serverModules)
+                                }
                             }
                         }
                         return@addSnapshotListener
@@ -94,7 +111,10 @@ object DashboardConfigManager {
         db.collection(COLLECTION).document(DOCUMENT)
             .set(mapOf(FIELD_MODULES to indexed))
             .addOnSuccessListener { onComplete(true) }
-            .addOnFailureListener { onComplete(false) }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "saveConfig failed", e)
+                onComplete(false)
+            }
     }
 
     @Suppress("UNCHECKED_CAST")

@@ -75,6 +75,7 @@ class MenuActivity : AppCompatActivity() {
     private var preAuthFirestoreDocId: String? = null
     private var currentBatchId: String? = null
     private var stockCountingEnabled: Boolean = true
+    private var activeScheduleIds: Set<String> = emptySet()
 
     private val paymentLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -144,11 +145,11 @@ class MenuActivity : AppCompatActivity() {
         db.collection("Settings").document("inventory").get()
             .addOnSuccessListener { doc ->
                 stockCountingEnabled = doc.getBoolean("stockCountingEnabled") ?: true
-                loadCategories()
+                loadActiveSchedules { loadCategories() }
             }
             .addOnFailureListener {
                 stockCountingEnabled = true
-                loadCategories()
+                loadActiveSchedules { loadCategories() }
             }
         loadAllTaxes()
         updateCustomerDisplay()
@@ -453,6 +454,49 @@ class MenuActivity : AppCompatActivity() {
     }
 
     // ----------------------------
+    // LOAD ACTIVE SCHEDULES
+    // ----------------------------
+
+    private fun loadActiveSchedules(onComplete: () -> Unit) {
+        db.collection("menuSchedules").get()
+            .addOnSuccessListener { snap ->
+                val now = java.util.Calendar.getInstance()
+                val dayOfWeek = when (now.get(java.util.Calendar.DAY_OF_WEEK)) {
+                    java.util.Calendar.MONDAY -> "MON"
+                    java.util.Calendar.TUESDAY -> "TUE"
+                    java.util.Calendar.WEDNESDAY -> "WED"
+                    java.util.Calendar.THURSDAY -> "THU"
+                    java.util.Calendar.FRIDAY -> "FRI"
+                    java.util.Calendar.SATURDAY -> "SAT"
+                    java.util.Calendar.SUNDAY -> "SUN"
+                    else -> ""
+                }
+                val currentTime = String.format(
+                    Locale.US, "%02d:%02d",
+                    now.get(java.util.Calendar.HOUR_OF_DAY),
+                    now.get(java.util.Calendar.MINUTE)
+                )
+
+                val active = mutableSetOf<String>()
+                for (doc in snap.documents) {
+                    @Suppress("UNCHECKED_CAST")
+                    val days = doc.get("days") as? List<String> ?: continue
+                    val startTime = doc.getString("startTime") ?: continue
+                    val endTime = doc.getString("endTime") ?: continue
+                    if (days.contains(dayOfWeek) && currentTime >= startTime && currentTime <= endTime) {
+                        active.add(doc.id)
+                    }
+                }
+                activeScheduleIds = active
+                onComplete()
+            }
+            .addOnFailureListener {
+                activeScheduleIds = emptySet()
+                onComplete()
+            }
+    }
+
+    // ----------------------------
     // LOAD CATEGORIES / ITEMS
     // ----------------------------
 
@@ -475,6 +519,15 @@ class MenuActivity : AppCompatActivity() {
                 for (doc in documents) {
                     val name = doc.getString("name") ?: continue
                     val categoryId = doc.id
+
+                    @Suppress("UNCHECKED_CAST")
+                    val catScheduleIds = (doc.get("scheduleIds") as? List<String>) ?: emptyList()
+                    if (catScheduleIds.isNotEmpty()) {
+                        if (activeScheduleIds.isEmpty() || catScheduleIds.none { it in activeScheduleIds }) {
+                            continue
+                        }
+                    }
+
                     @Suppress("UNCHECKED_CAST")
                     val availableOrderTypes =
                         (doc.get("availableOrderTypes") as? List<String>) ?: emptyList()
@@ -510,10 +563,34 @@ class MenuActivity : AppCompatActivity() {
             .get()
             .addOnSuccessListener { documents ->
 
+                val seen = mutableSetOf<String>()
+
                 for (doc in documents) {
                     val itemId = doc.id
+                    if (seen.contains(itemId)) continue
+
+                    val isScheduled = doc.getBoolean("isScheduled") ?: false
+
+                    if (isScheduled) {
+                        @Suppress("UNCHECKED_CAST")
+                        val scheduleIds = (doc.get("scheduleIds") as? List<String>) ?: emptyList()
+                        if (activeScheduleIds.isEmpty() || scheduleIds.none { it in activeScheduleIds }) {
+                            continue
+                        }
+                    }
+
+                    seen.add(itemId)
+
                     val name = doc.getString("name") ?: continue
-                    val price = doc.getDouble("price") ?: 0.0
+                    @Suppress("UNCHECKED_CAST")
+                    val pricesRaw = doc.get("prices") as? Map<String, Any>
+                    val pricesMap = pricesRaw?.mapValues {
+                        (it.value as? Number)?.toDouble() ?: 0.0
+                    } ?: emptyMap()
+                    val price = if (pricesMap.isNotEmpty())
+                        pricesMap.values.first()
+                    else
+                        doc.getDouble("price") ?: 0.0
                     val stock = doc.getLong("stock") ?: 0L
                     val itemTaxMode = doc.getString("taxMode") ?: "INHERIT"
                     @Suppress("UNCHECKED_CAST")
@@ -544,7 +621,9 @@ class MenuActivity : AppCompatActivity() {
                             "$name\n$${String.format(Locale.US, "%.2f", price)}"
                         button.text = label
                         button.setTextColor(Color.WHITE)
-                        button.setBackgroundColor(Color.parseColor("#6A4FB3"))
+                        button.setBackgroundColor(
+                            if (isScheduled) Color.parseColor("#2196F3") else Color.parseColor("#6A4FB3")
+                        )
 
                         val effectiveStock = if (stockCountingEnabled) stock else Long.MAX_VALUE
                         button.setOnClickListener {
@@ -565,7 +644,7 @@ class MenuActivity : AppCompatActivity() {
     }
 
     // ----------------------------
-    // MODIFIERS
+    // MODIFIERS (relational model with backward compatibility)
     // ----------------------------
 
     private fun checkAndShowModifiers(
@@ -576,16 +655,26 @@ class MenuActivity : AppCompatActivity() {
         taxMode: String = "INHERIT",
         taxIds: List<String> = emptyList()
     ) {
-        db.collection("ItemModifierGroups")
-            .whereEqualTo("itemId", itemId)
-            .orderBy("displayOrder")
-            .get()
-            .addOnSuccessListener { documents ->
-                if (documents.isEmpty) {
-                    addToCart(itemId, name, basePrice, stock, emptyList(), taxMode, taxIds)
+        db.collection("MenuItems").document(itemId).get()
+            .addOnSuccessListener { itemDoc ->
+                @Suppress("UNCHECKED_CAST")
+                val modifierGroupIds = itemDoc.get("modifierGroupIds") as? List<String>
+
+                if (modifierGroupIds != null && modifierGroupIds.isNotEmpty()) {
+                    showModifierDialog(itemId, name, basePrice, stock, modifierGroupIds, taxMode, taxIds)
                 } else {
-                    val groupIds = documents.mapNotNull { it.getString("groupId") }
-                    showModifierDialog(itemId, name, basePrice, stock, groupIds, taxMode, taxIds)
+                    db.collection("ItemModifierGroups")
+                        .whereEqualTo("itemId", itemId)
+                        .orderBy("displayOrder")
+                        .get()
+                        .addOnSuccessListener { documents ->
+                            if (documents.isEmpty) {
+                                addToCart(itemId, name, basePrice, stock, emptyList(), taxMode, taxIds)
+                            } else {
+                                val groupIds = documents.mapNotNull { it.getString("groupId") }
+                                showModifierDialog(itemId, name, basePrice, stock, groupIds, taxMode, taxIds)
+                            }
+                        }
                 }
             }
     }
@@ -599,6 +688,11 @@ class MenuActivity : AppCompatActivity() {
         taxMode: String = "INHERIT",
         taxIds: List<String> = emptyList()
     ) {
+        if (groupIds.isEmpty()) {
+            addToCart(itemId, name, basePrice, stock, emptyList(), taxMode, taxIds)
+            return
+        }
+
         val selectedModifiers = mutableListOf<OrderModifier>()
         val selectedCountPerGroup = mutableMapOf<String, Int>()
         val requiredGroups = mutableSetOf<String>()
@@ -616,9 +710,19 @@ class MenuActivity : AppCompatActivity() {
                     val isRequired = groupDoc.getBoolean("required") ?: false
                     val maxSelection = groupDoc.getLong("maxSelection")?.toInt() ?: 1
                     val groupType = groupDoc.getString("groupType") ?: "ADD"
+
+                    @Suppress("UNCHECKED_CAST")
+                    val embeddedOptions = (groupDoc.get("options") as? List<Map<String, Any>>)
+                        ?.mapNotNull { map ->
+                            val optName = map["name"]?.toString() ?: return@mapNotNull null
+                            val optPrice = (map["price"] as? Number)?.toDouble() ?: 0.0
+                            val optId = map["id"]?.toString() ?: ""
+                            ModifierOptionEntry(optId, optName, optPrice)
+                        } ?: emptyList()
+
                     if (groupName.isNotEmpty()) {
                         synchronized(fetchedGroups) {
-                            fetchedGroups.add(GroupInfo(groupId, groupName, isRequired, maxSelection, groupType))
+                            fetchedGroups.add(GroupInfo(groupId, groupName, isRequired, maxSelection, groupType, embeddedOptions))
                         }
                         if (isRequired) requiredGroups.add(groupId)
                     }
@@ -675,7 +779,7 @@ class MenuActivity : AppCompatActivity() {
         }
 
         for (group in sortedGroups) {
-            val (groupId, groupName, isRequired, maxSelection, groupType) = group
+            val (groupId, groupName, isRequired, maxSelection, groupType, embeddedOptions) = group
             val isRemoveGroup = groupType == "REMOVE"
 
             val groupContainer = LinearLayout(this)
@@ -722,85 +826,100 @@ class MenuActivity : AppCompatActivity() {
 
             mainLayout.addView(groupContainer)
 
-            db.collection("ModifierOptions")
-                .whereEqualTo("groupId", groupId)
-                .get()
-                .addOnSuccessListener { options ->
-                    if (isRemoveGroup) {
-                        for (doc in options) {
-                            val optionName = doc.getString("name") ?: continue
-
-                            val checkBox = CheckBox(this)
-                            checkBox.text = optionName
-                            checkBox.setTextColor(Color.parseColor("#D32F2F"))
-                            groupContainer.addView(checkBox)
-
-                            checkBox.setOnCheckedChangeListener { _, isChecked ->
-                                if (isChecked) {
-                                    selectedModifiers.add(OrderModifier(optionName, "REMOVE", 0.0))
-                                } else {
-                                    selectedModifiers.removeAll { it.name == optionName && it.action == "REMOVE" }
-                                }
-                            }
+            if (embeddedOptions.isNotEmpty()) {
+                renderModifierOptions(embeddedOptions, isRemoveGroup, maxSelection, groupId,
+                    groupContainer, selectedModifiers, selectedCountPerGroup)
+            } else {
+                db.collection("ModifierOptions")
+                    .whereEqualTo("groupId", groupId)
+                    .get()
+                    .addOnSuccessListener { optionDocs ->
+                        val legacyOptions = optionDocs.mapNotNull { doc ->
+                            val optName = doc.getString("name") ?: return@mapNotNull null
+                            val optPrice = doc.getDouble("price") ?: 0.0
+                            ModifierOptionEntry(doc.id, optName, optPrice)
                         }
-                    } else if (maxSelection == 1) {
-                        val radioGroup = RadioGroup(this)
-                        radioGroup.orientation = RadioGroup.VERTICAL
-                        groupContainer.addView(radioGroup)
-
-                        for (doc in options) {
-                            val optionName = doc.getString("name") ?: continue
-                            val optionPrice = doc.getDouble("price") ?: 0.0
-
-                            val radioButton = RadioButton(this)
-                            radioButton.text = "$optionName +$${String.format(Locale.US, "%.2f", optionPrice)}"
-                            radioGroup.addView(radioButton)
-
-                            radioButton.setOnClickListener {
-                                selectedModifiers.removeAll { it.name == optionName && it.action == "ADD" }
-                                selectedModifiers.add(OrderModifier(optionName, "ADD", optionPrice))
-                                selectedCountPerGroup[groupId] = 1
-                            }
-                        }
-                    } else {
-                        selectedCountPerGroup[groupId] = 0
-
-                        for (doc in options) {
-                            val optionName = doc.getString("name") ?: continue
-                            val optionPrice = doc.getDouble("price") ?: 0.0
-
-                            val checkBox = CheckBox(this)
-                            checkBox.text = "$optionName +$${String.format(Locale.US, "%.2f", optionPrice)}"
-                            groupContainer.addView(checkBox)
-
-                            checkBox.setOnCheckedChangeListener { _, isChecked ->
-                                var count = selectedCountPerGroup[groupId] ?: 0
-
-                                if (isChecked) {
-                                    if (count >= maxSelection) {
-                                        checkBox.isChecked = false
-                                        Toast.makeText(
-                                            this,
-                                            "Maximum $maxSelection selections allowed",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                        return@setOnCheckedChangeListener
-                                    }
-                                    selectedModifiers.add(OrderModifier(optionName, "ADD", optionPrice))
-                                    count++
-                                } else {
-                                    selectedModifiers.removeAll { it.name == optionName && it.action == "ADD" && it.price == optionPrice }
-                                    count--
-                                }
-
-                                selectedCountPerGroup[groupId] = count
-                            }
-                        }
+                        renderModifierOptions(legacyOptions, isRemoveGroup, maxSelection, groupId,
+                            groupContainer, selectedModifiers, selectedCountPerGroup)
                     }
-                }
+            }
         }
 
         dialog.show()
+    }
+
+    private fun renderModifierOptions(
+        options: List<ModifierOptionEntry>,
+        isRemoveGroup: Boolean,
+        maxSelection: Int,
+        groupId: String,
+        groupContainer: LinearLayout,
+        selectedModifiers: MutableList<OrderModifier>,
+        selectedCountPerGroup: MutableMap<String, Int>
+    ) {
+        if (isRemoveGroup) {
+            for (opt in options) {
+                val checkBox = CheckBox(this)
+                checkBox.text = opt.name
+                checkBox.setTextColor(Color.parseColor("#D32F2F"))
+                groupContainer.addView(checkBox)
+
+                checkBox.setOnCheckedChangeListener { _, isChecked ->
+                    if (isChecked) {
+                        selectedModifiers.add(OrderModifier(opt.name, "REMOVE", 0.0))
+                    } else {
+                        selectedModifiers.removeAll { it.name == opt.name && it.action == "REMOVE" }
+                    }
+                }
+            }
+        } else if (maxSelection == 1) {
+            val radioGroup = RadioGroup(this)
+            radioGroup.orientation = RadioGroup.VERTICAL
+            groupContainer.addView(radioGroup)
+
+            for (opt in options) {
+                val radioButton = RadioButton(this)
+                radioButton.text = "${opt.name} +$${String.format(Locale.US, "%.2f", opt.price)}"
+                radioGroup.addView(radioButton)
+
+                radioButton.setOnClickListener {
+                    selectedModifiers.removeAll { it.name == opt.name && it.action == "ADD" }
+                    selectedModifiers.add(OrderModifier(opt.name, "ADD", opt.price))
+                    selectedCountPerGroup[groupId] = 1
+                }
+            }
+        } else {
+            selectedCountPerGroup[groupId] = 0
+
+            for (opt in options) {
+                val checkBox = CheckBox(this)
+                checkBox.text = "${opt.name} +$${String.format(Locale.US, "%.2f", opt.price)}"
+                groupContainer.addView(checkBox)
+
+                checkBox.setOnCheckedChangeListener { _, isChecked ->
+                    var count = selectedCountPerGroup[groupId] ?: 0
+
+                    if (isChecked) {
+                        if (count >= maxSelection) {
+                            checkBox.isChecked = false
+                            Toast.makeText(
+                                this,
+                                "Maximum $maxSelection selections allowed",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            return@setOnCheckedChangeListener
+                        }
+                        selectedModifiers.add(OrderModifier(opt.name, "ADD", opt.price))
+                        count++
+                    } else {
+                        selectedModifiers.removeAll { it.name == opt.name && it.action == "ADD" && it.price == opt.price }
+                        count--
+                    }
+
+                    selectedCountPerGroup[groupId] = count
+                }
+            }
+        }
     }
 
     private data class GroupInfo(
@@ -808,7 +927,8 @@ class MenuActivity : AppCompatActivity() {
         val groupName: String,
         val isRequired: Boolean,
         val maxSelection: Int,
-        val groupType: String = "ADD"
+        val groupType: String = "ADD",
+        val options: List<ModifierOptionEntry> = emptyList()
     )
 
     // ----------------------------

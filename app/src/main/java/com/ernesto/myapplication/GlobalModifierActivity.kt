@@ -13,6 +13,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 
 class GlobalModifierActivity : AppCompatActivity() {
@@ -79,13 +80,23 @@ class GlobalModifierActivity : AppCompatActivity() {
                     val maxSelection = doc.getLong("maxSelection")?.toInt() ?: 1
                     val groupType = doc.getString("groupType") ?: "ADD"
 
+                    val rawOptions = doc.get("options") as? List<Map<String, Any>> ?: emptyList()
+                    val options = rawOptions.mapIndexed { i, opt ->
+                        ModifierOptionEntry(
+                            id = opt["id"] as? String ?: "opt_${i}",
+                            name = opt["name"] as? String ?: "",
+                            price = (opt["price"] as? Number)?.toDouble() ?: 0.0
+                        )
+                    }
+
                     list.add(
                         ModifierGroupModel(
                             id = doc.id,
                             name = name,
                             required = required,
                             maxSelection = maxSelection,
-                            groupType = groupType
+                            groupType = groupType,
+                            options = options
                         )
                     )
                 }
@@ -122,39 +133,76 @@ class GlobalModifierActivity : AppCompatActivity() {
     }
 
     private fun loadOptions(groupId: String) {
-        db.collection("ModifierOptions")
-            .whereEqualTo("groupId", groupId)
-            .get()
-            .addOnSuccessListener { documents ->
-                val selected = selectedGroup ?: return@addOnSuccessListener
-                if (selected.id != groupId) return@addOnSuccessListener
+        val selected = selectedGroup ?: return
+        if (selected.id != groupId) return
 
-                val optionList = mutableListOf<ModifierOptionDisplay>()
-                for (doc in documents) {
-                    val name = doc.getString("name") ?: continue
-                    val price = doc.getDouble("price") ?: 0.0
-                    optionList.add(
+        val isRemove = selected.groupType == "REMOVE"
+
+        db.collection("ModifierGroups").document(groupId).get()
+            .addOnSuccessListener { groupDoc ->
+                if (selectedGroup?.id != groupId) return@addOnSuccessListener
+
+                @Suppress("UNCHECKED_CAST")
+                val rawEmbedded = groupDoc.get("options") as? List<Map<String, Any>> ?: emptyList()
+
+                if (rawEmbedded.isNotEmpty()) {
+                    val optionList = rawEmbedded.mapIndexed { i, opt ->
                         ModifierOptionDisplay(
-                            id = doc.id,
-                            name = name,
-                            price = price,
-                            isRemove = selected.groupType == "REMOVE"
+                            id = (opt["id"] as? String) ?: "opt_$i",
+                            name = (opt["name"] as? String) ?: "",
+                            price = (opt["price"] as? Number)?.toDouble() ?: 0.0,
+                            isRemove = isRemove
                         )
+                    }.sortedBy { it.name.lowercase() }
+
+                    val count = optionList.size
+                    txtOptionCount.text = "$count option${if (count != 1) "s" else ""}"
+
+                    currentOptionAdapter = ModifierOptionAdapter(
+                        context = this,
+                        optionList = optionList,
+                        refresh = { loadGroups() },
+                        groupId = groupId,
+                        useEmbeddedOptions = true
                     )
+                    optionRecycler.adapter = currentOptionAdapter
+                    return@addOnSuccessListener
                 }
 
-                optionList.sortBy { it.name.lowercase() }
+                db.collection("ModifierOptions")
+                    .whereEqualTo("groupId", groupId)
+                    .get()
+                    .addOnSuccessListener { documents ->
+                        if (selectedGroup?.id != groupId) return@addOnSuccessListener
 
-                val count = optionList.size
-                txtOptionCount.text = "$count option${if (count != 1) "s" else ""}"
+                        val optionList = mutableListOf<ModifierOptionDisplay>()
+                        for (doc in documents) {
+                            val name = doc.getString("name") ?: continue
+                            val price = doc.getDouble("price") ?: 0.0
+                            optionList.add(
+                                ModifierOptionDisplay(
+                                    id = doc.id,
+                                    name = name,
+                                    price = price,
+                                    isRemove = isRemove
+                                )
+                            )
+                        }
 
-                val adapter = ModifierOptionAdapter(
-                    context = this,
-                    optionList = optionList,
-                    refresh = { loadOptions(groupId) }
-                )
-                currentOptionAdapter = adapter
-                optionRecycler.adapter = adapter
+                        optionList.sortBy { it.name.lowercase() }
+
+                        val count = optionList.size
+                        txtOptionCount.text = "$count option${if (count != 1) "s" else ""}"
+
+                        currentOptionAdapter = ModifierOptionAdapter(
+                            context = this,
+                            optionList = optionList,
+                            refresh = { loadOptions(groupId) },
+                            groupId = groupId,
+                            useEmbeddedOptions = false
+                        )
+                        optionRecycler.adapter = currentOptionAdapter
+                    }
             }
     }
 
@@ -238,17 +286,22 @@ class GlobalModifierActivity : AppCompatActivity() {
                     else priceInput.text.toString().toDoubleOrNull() ?: 0.0
 
                 if (name.isNotEmpty()) {
+                    val optId = "opt_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(5)}"
                     val option = hashMapOf(
+                        "id" to optId,
                         "name" to name,
-                        "price" to price,
-                        "groupId" to group.id
+                        "price" to price
                     )
 
-                    db.collection("ModifierOptions")
-                        .add(option)
+                    db.collection("ModifierGroups")
+                        .document(group.id)
+                        .update("options", FieldValue.arrayUnion(option))
                         .addOnSuccessListener {
-                            loadOptions(group.id)
+                            loadGroups()
                             Toast.makeText(this, "$name added", Toast.LENGTH_SHORT).show()
+                        }
+                        .addOnFailureListener {
+                            Toast.makeText(this, "Failed to add option", Toast.LENGTH_SHORT).show()
                         }
                 }
             }

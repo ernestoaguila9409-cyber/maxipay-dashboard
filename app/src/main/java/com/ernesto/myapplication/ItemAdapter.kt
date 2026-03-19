@@ -150,6 +150,22 @@ class ItemAdapter(
     // =========================================================
 
     private fun showEditDialog(item: ItemModel) {
+        db.collection("menus").get()
+            .addOnSuccessListener { menuDocs ->
+                val menus = menuDocs.mapNotNull { doc ->
+                    val name = doc.getString("name") ?: return@mapNotNull null
+                    val isActive = doc.getBoolean("isActive") ?: true
+                    if (!isActive) return@mapNotNull null
+                    Pair(doc.id, name)
+                }.filter { (menuId, _) ->
+                    item.prices.containsKey(menuId)
+                }.sortedBy { it.second }
+                buildEditDialog(item, menus)
+            }
+            .addOnFailureListener { buildEditDialog(item, emptyList()) }
+    }
+
+    private fun buildEditDialog(item: ItemModel, menus: List<Pair<String, String>>) {
         val layout = LinearLayout(context)
         layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(50, 40, 50, 10)
@@ -159,26 +175,46 @@ class ItemAdapter(
             label.text = text
             label.textSize = 13f
             label.setTextColor(Color.DKGRAY)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            lp.topMargin = 8
+            label.layoutParams = lp
             return label
         }
 
         val nameInput = EditText(context)
         nameInput.setText(item.name)
 
-        val priceInput = EditText(context)
-        priceInput.inputType =
-            InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-        priceInput.setText(item.price.toString())
+        layout.addView(createLabel("Item Name"))
+        layout.addView(nameInput)
+
+        val priceInputs = mutableMapOf<String, EditText>()
+        if (menus.isEmpty()) {
+            layout.addView(createLabel("Price"))
+            val input = EditText(context)
+            input.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            val currentPrice = item.prices["default"] ?: item.price
+            input.setText(currentPrice.toString())
+            layout.addView(input)
+            priceInputs["default"] = input
+        } else {
+            layout.addView(createLabel("Prices per Menu"))
+            for ((menuId, menuName) in menus) {
+                layout.addView(createLabel("$menuName Price"))
+                val input = EditText(context)
+                input.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                val existing = item.prices[menuId]
+                if (existing != null) input.setText(existing.toString())
+                layout.addView(input)
+                priceInputs[menuId] = input
+            }
+        }
 
         val stockInput = EditText(context)
         stockInput.inputType = InputType.TYPE_CLASS_NUMBER
         stockInput.setText(item.stock.toString())
-
-        layout.addView(createLabel("Item Name"))
-        layout.addView(nameInput)
-
-        layout.addView(createLabel("Price"))
-        layout.addView(priceInput)
 
         if (stockCountingEnabled) {
             layout.addView(createLabel("Stock"))
@@ -236,16 +272,22 @@ class ItemAdapter(
             .setView(layout)
             .setPositiveButton("Save") { _, _ ->
                 val newName = nameInput.text.toString().trim()
-                val newPrice = priceInput.text.toString().toDoubleOrNull()
+                val newPrices = mutableMapOf<String, Double>()
+                for ((key, input) in priceInputs) {
+                    val v = input.text.toString().toDoubleOrNull()
+                    if (v != null && v >= 0) newPrices[key] = v
+                }
                 val newStock = if (stockCountingEnabled)
                     stockInput.text.toString().toLongOrNull()
                 else
                     item.stock
 
-                if (newName.isNotEmpty() && newPrice != null && newStock != null) {
+                if (newName.isNotEmpty() && newPrices.isNotEmpty() && newStock != null) {
+                    val defaultPrice = newPrices.values.first()
                     val updates = mutableMapOf<String, Any>(
                         "name" to newName,
-                        "price" to newPrice
+                        "prices" to newPrices,
+                        "price" to defaultPrice
                     )
                     if (stockCountingEnabled) {
                         updates["stock"] = newStock

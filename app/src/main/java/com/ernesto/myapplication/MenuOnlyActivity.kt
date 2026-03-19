@@ -17,6 +17,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.FirebaseFirestore
+import java.util.Calendar
+import java.util.Locale
 
 class MenuOnlyActivity : AppCompatActivity() {
 
@@ -28,8 +30,10 @@ class MenuOnlyActivity : AppCompatActivity() {
     private val db = FirebaseFirestore.getInstance()
     private var selectedCategoryId: String? = null
     private var selectedCategoryAvailability: List<String> = emptyList()
+    private var selectedCategoryScheduled: Boolean = false
     private var stockCountingEnabled: Boolean = true
     private var currentAdapter: ItemAdapter? = null
+    private var activeScheduleIds: Set<String> = emptySet()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,11 +80,50 @@ class MenuOnlyActivity : AppCompatActivity() {
         db.collection("Settings").document("inventory").get()
             .addOnSuccessListener { doc ->
                 stockCountingEnabled = doc.getBoolean("stockCountingEnabled") ?: true
-                loadCategories()
+                loadActiveSchedules { loadCategories() }
             }
             .addOnFailureListener {
                 stockCountingEnabled = true
-                loadCategories()
+                loadActiveSchedules { loadCategories() }
+            }
+    }
+
+    private fun loadActiveSchedules(onComplete: () -> Unit) {
+        db.collection("menuSchedules").get()
+            .addOnSuccessListener { snap ->
+                val now = Calendar.getInstance()
+                val dayOfWeek = when (now.get(Calendar.DAY_OF_WEEK)) {
+                    Calendar.MONDAY -> "MON"
+                    Calendar.TUESDAY -> "TUE"
+                    Calendar.WEDNESDAY -> "WED"
+                    Calendar.THURSDAY -> "THU"
+                    Calendar.FRIDAY -> "FRI"
+                    Calendar.SATURDAY -> "SAT"
+                    Calendar.SUNDAY -> "SUN"
+                    else -> ""
+                }
+                val currentTime = String.format(
+                    Locale.US, "%02d:%02d",
+                    now.get(Calendar.HOUR_OF_DAY),
+                    now.get(Calendar.MINUTE)
+                )
+
+                val active = mutableSetOf<String>()
+                for (doc in snap.documents) {
+                    @Suppress("UNCHECKED_CAST")
+                    val days = doc.get("days") as? List<String> ?: continue
+                    val startTime = doc.getString("startTime") ?: continue
+                    val endTime = doc.getString("endTime") ?: continue
+                    if (days.contains(dayOfWeek) && currentTime >= startTime && currentTime <= endTime) {
+                        active.add(doc.id)
+                    }
+                }
+                activeScheduleIds = active
+                onComplete()
+            }
+            .addOnFailureListener {
+                activeScheduleIds = emptySet()
+                onComplete()
             }
     }
 
@@ -99,12 +142,22 @@ class MenuOnlyActivity : AppCompatActivity() {
                     @Suppress("UNCHECKED_CAST")
                     val availableOrderTypes =
                         (doc.get("availableOrderTypes") as? List<String>) ?: emptyList()
+                    @Suppress("UNCHECKED_CAST")
+                    val scheduleIds =
+                        (doc.get("scheduleIds") as? List<String>) ?: emptyList()
+
+                    if (scheduleIds.isNotEmpty()) {
+                        if (activeScheduleIds.isEmpty() || scheduleIds.none { it in activeScheduleIds }) {
+                            continue
+                        }
+                    }
 
                     categoryList.add(
                         CategoryModel(
                             id = doc.id,
                             name = name,
-                            availableOrderTypes = availableOrderTypes
+                            availableOrderTypes = availableOrderTypes,
+                            scheduleIds = scheduleIds
                         )
                     )
                 }
@@ -116,9 +169,11 @@ class MenuOnlyActivity : AppCompatActivity() {
                         categories = categoryList,
                         onCategoryClick = { categoryId ->
                             selectedCategoryId = categoryId
+                            val cat = categoryList.find { it.id == categoryId }
                             selectedCategoryAvailability =
-                                categoryList.find { it.id == categoryId }?.availableOrderTypes
-                                    ?: emptyList()
+                                cat?.availableOrderTypes ?: emptyList()
+                            selectedCategoryScheduled =
+                                cat?.scheduleIds?.isNotEmpty() == true
                             editSearch.setText("")
                             loadItems(categoryId)
                         },
@@ -147,19 +202,35 @@ class MenuOnlyActivity : AppCompatActivity() {
 
                 for (doc in documents) {
                     val name = doc.getString("name") ?: continue
-                    val price = doc.getDouble("price") ?: 0.0
+                    @Suppress("UNCHECKED_CAST")
+                    val pricesRaw = doc.get("prices") as? Map<String, Any>
+                    val pricesMap = pricesRaw?.mapValues {
+                        (it.value as? Number)?.toDouble() ?: 0.0
+                    } ?: emptyMap()
+                    val legacyPrice = doc.getDouble("price")
+                    val effectivePrices = if (pricesMap.isNotEmpty()) pricesMap
+                        else mapOf("default" to (legacyPrice ?: 0.0))
+                    val displayPrice = effectivePrices.values.firstOrNull() ?: 0.0
+
                     val stock = doc.getLong("stock") ?: 0L
                     @Suppress("UNCHECKED_CAST")
                     val availableOrderTypes =
                         doc.get("availableOrderTypes") as? List<String>
+                    val isScheduled = doc.getBoolean("isScheduled") ?: false
+                    @Suppress("UNCHECKED_CAST")
+                    val scheduleIds =
+                        (doc.get("scheduleIds") as? List<String>) ?: emptyList()
 
                     itemList.add(
                         ItemModel(
                             id = doc.id,
                             name = name,
-                            price = price,
+                            price = displayPrice,
+                            prices = effectivePrices,
                             stock = stock,
-                            availableOrderTypes = availableOrderTypes
+                            availableOrderTypes = availableOrderTypes,
+                            isScheduled = isScheduled,
+                            scheduleIds = scheduleIds
                         )
                     )
                 }
@@ -328,24 +399,64 @@ class MenuOnlyActivity : AppCompatActivity() {
     // =========================================================
 
     private fun showAddItemDialog() {
+        db.collection("menus").get()
+            .addOnSuccessListener { menuDocs ->
+                val menus = menuDocs.mapNotNull { doc ->
+                    val name = doc.getString("name") ?: return@mapNotNull null
+                    val isActive = doc.getBoolean("isActive") ?: true
+                    if (!isActive) return@mapNotNull null
+                    Pair(doc.id, name)
+                }.sortedBy { it.second }
+                buildAddItemDialog(menus)
+            }
+            .addOnFailureListener { buildAddItemDialog(emptyList()) }
+    }
+
+    private fun buildAddItemDialog(menus: List<Pair<String, String>>) {
         val layout = LinearLayout(this)
         layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(40, 40, 40, 40)
 
+        fun createSmallLabel(text: String): TextView {
+            val tv = TextView(this)
+            tv.text = text
+            tv.textSize = 13f
+            tv.setTextColor(Color.DKGRAY)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            lp.topMargin = 12
+            tv.layoutParams = lp
+            return tv
+        }
+
         val nameInput = EditText(this)
         nameInput.hint = "Item name"
+        layout.addView(nameInput)
 
-        val priceInput = EditText(this)
-        priceInput.hint = "Price"
-        priceInput.inputType =
-            InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        val priceInputs = mutableMapOf<String, EditText>()
+        if (menus.isEmpty()) {
+            val input = EditText(this)
+            input.hint = "Price"
+            input.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            layout.addView(input)
+            priceInputs["default"] = input
+        } else {
+            layout.addView(createSmallLabel("Prices per Menu"))
+            for ((menuId, menuName) in menus) {
+                layout.addView(createSmallLabel("$menuName Price"))
+                val input = EditText(this)
+                input.hint = "0.00"
+                input.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                layout.addView(input)
+                priceInputs[menuId] = input
+            }
+        }
 
         val stockInput = EditText(this)
         stockInput.hint = "Stock"
         stockInput.inputType = InputType.TYPE_CLASS_NUMBER
-
-        layout.addView(nameInput)
-        layout.addView(priceInput)
         if (stockCountingEnabled) {
             layout.addView(stockInput)
         }
@@ -399,7 +510,11 @@ class MenuOnlyActivity : AppCompatActivity() {
             .setView(layout)
             .setPositiveButton("Add") { _, _ ->
                 val name = nameInput.text.toString().trim()
-                val price = priceInput.text.toString().toDoubleOrNull()
+                val prices = mutableMapOf<String, Double>()
+                for ((key, input) in priceInputs) {
+                    val v = input.text.toString().toDoubleOrNull()
+                    if (v != null && v >= 0) prices[key] = v
+                }
                 val stock = if (stockCountingEnabled)
                     stockInput.text.toString().toLongOrNull() ?: 0L
                 else
@@ -409,8 +524,8 @@ class MenuOnlyActivity : AppCompatActivity() {
                     Toast.makeText(this, "Please enter item name", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                if (price == null) {
-                    Toast.makeText(this, "Please enter a valid price", Toast.LENGTH_SHORT).show()
+                if (prices.isEmpty()) {
+                    Toast.makeText(this, "Enter at least one price", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
                 if (selectedCategoryId == null) {
@@ -418,11 +533,15 @@ class MenuOnlyActivity : AppCompatActivity() {
                     return@setPositiveButton
                 }
 
+                val defaultPrice = prices.values.first()
                 val item = hashMapOf<String, Any>(
                     "name" to name,
-                    "price" to price,
+                    "prices" to prices,
+                    "price" to defaultPrice,
                     "stock" to stock,
-                    "categoryId" to selectedCategoryId!!
+                    "categoryId" to selectedCategoryId!!,
+                    "isScheduled" to false,
+                    "scheduleIds" to emptyList<String>()
                 )
 
                 if (!useCategorySwitch.isChecked) {

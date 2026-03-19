@@ -6,5 +6,12 @@ data class ModifierGroupModel(
     var required: Boolean = false,
     var maxSelection: Int = 1,
     var isExpanded: Boolean = false,
-    var groupType: String = "ADD"
+    var groupType: String = "ADD",
+    var options: List<ModifierOptionEntry> = emptyList()
+)
+
+data class ModifierOptionEntry(
+    val id: String = "",
+    val name: String = "",
+    val price: Double = 0.0
 )

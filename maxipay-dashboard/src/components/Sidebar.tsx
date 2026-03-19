@@ -9,6 +9,7 @@ import {
   UtensilsCrossed,
   SlidersHorizontal,
   Tags,
+  Receipt,
   Users,
   BarChart3,
   Settings,
@@ -16,6 +17,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronDown,
+  CalendarClock,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
@@ -36,8 +38,8 @@ const navItems: NavItem[] = [
     href: "/dashboard/menu",
     icon: UtensilsCrossed,
     children: [
+      { label: "Menus", href: "/dashboard/menus", icon: CalendarClock },
       { label: "Modifiers", href: "/dashboard/modifiers", icon: SlidersHorizontal },
-      { label: "Discounts", href: "/dashboard/discounts", icon: Tags },
     ],
   },
   { label: "Employees", href: "/dashboard/employees", icon: Users },
@@ -47,6 +49,8 @@ const navItems: NavItem[] = [
     href: "/dashboard/settings",
     icon: Settings,
     children: [
+      { label: "Taxes", href: "/dashboard/taxes", icon: Receipt },
+      { label: "Discounts", href: "/dashboard/discounts", icon: Tags },
       { label: "Customize Dashboard", href: "/dashboard/settings/customize-dashboard", icon: LayoutGrid },
     ],
   },

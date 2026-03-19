@@ -25,7 +25,9 @@ data class ModifierOptionDisplay(
 class ModifierOptionAdapter(
     private val context: Context,
     private val optionList: List<ModifierOptionDisplay>,
-    private val refresh: () -> Unit
+    private val refresh: () -> Unit,
+    private val groupId: String? = null,
+    private val useEmbeddedOptions: Boolean = false
 ) : RecyclerView.Adapter<ModifierOptionAdapter.OptionViewHolder>() {
 
     private val db = FirebaseFirestore.getInstance()
@@ -79,19 +81,34 @@ class ModifierOptionAdapter(
         AlertDialog.Builder(context)
             .setTitle("Delete ${option.name}?")
             .setMessage("This will permanently remove this option.")
-            .setPositiveButton("Delete") { _, _ -> deleteOption(option.id) }
+            .setPositiveButton("Delete") { _, _ -> deleteOption(option) }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun deleteOption(optionId: String) {
-        db.collection("ModifierOptions")
-            .document(optionId)
-            .delete()
-            .addOnSuccessListener {
-                Toast.makeText(context, "Deleted", Toast.LENGTH_SHORT).show()
-                refresh()
-            }
+    private fun deleteOption(option: ModifierOptionDisplay) {
+        if (useEmbeddedOptions && groupId != null) {
+            db.collection("ModifierGroups").document(groupId).get()
+                .addOnSuccessListener { doc ->
+                    @Suppress("UNCHECKED_CAST")
+                    val rawOptions = doc.get("options") as? List<Map<String, Any>> ?: emptyList()
+                    val updated = rawOptions.filter { (it["id"] as? String) != option.id }
+                    db.collection("ModifierGroups").document(groupId)
+                        .update("options", updated)
+                        .addOnSuccessListener {
+                            Toast.makeText(context, "Deleted", Toast.LENGTH_SHORT).show()
+                            refresh()
+                        }
+                }
+        } else {
+            db.collection("ModifierOptions")
+                .document(option.id)
+                .delete()
+                .addOnSuccessListener {
+                    Toast.makeText(context, "Deleted", Toast.LENGTH_SHORT).show()
+                    refresh()
+                }
+        }
     }
 
     private fun showEditOptionDialog(option: ModifierOptionDisplay) {
@@ -122,13 +139,38 @@ class ModifierOptionAdapter(
                     else priceInput.text.toString().toDoubleOrNull() ?: 0.0
 
                 if (newName.isNotEmpty()) {
-                    db.collection("ModifierOptions")
-                        .document(option.id)
-                        .update(mapOf("name" to newName, "price" to newPrice))
-                        .addOnSuccessListener {
-                            Toast.makeText(context, "Updated", Toast.LENGTH_SHORT).show()
-                            refresh()
-                        }
+                    if (useEmbeddedOptions && groupId != null) {
+                        db.collection("ModifierGroups").document(groupId).get()
+                            .addOnSuccessListener { doc ->
+                                @Suppress("UNCHECKED_CAST")
+                                val rawOptions = doc.get("options") as? List<Map<String, Any>> ?: emptyList()
+                                val updated = rawOptions.map { opt ->
+                                    if ((opt["id"] as? String) == option.id) {
+                                        mutableMapOf<String, Any>(
+                                            "id" to option.id,
+                                            "name" to newName,
+                                            "price" to newPrice
+                                        )
+                                    } else {
+                                        opt
+                                    }
+                                }
+                                db.collection("ModifierGroups").document(groupId)
+                                    .update("options", updated)
+                                    .addOnSuccessListener {
+                                        Toast.makeText(context, "Updated", Toast.LENGTH_SHORT).show()
+                                        refresh()
+                                    }
+                            }
+                    } else {
+                        db.collection("ModifierOptions")
+                            .document(option.id)
+                            .update(mapOf("name" to newName, "price" to newPrice))
+                            .addOnSuccessListener {
+                                Toast.makeText(context, "Updated", Toast.LENGTH_SHORT).show()
+                                refresh()
+                            }
+                    }
                 }
             }
             .setNegativeButton("Cancel", null)

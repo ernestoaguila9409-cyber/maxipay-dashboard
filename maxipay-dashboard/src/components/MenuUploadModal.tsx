@@ -8,12 +8,15 @@ import {
   CheckCircle2,
   AlertTriangle,
   Loader2,
+  Info,
 } from "lucide-react";
 import {
   parseCloverExcel,
   importMenuToFirestore,
   type ParsedMenu,
   type ImportProgress,
+  type ImportResult,
+  type ImportLogEntry,
 } from "@/lib/menuImporter";
 
 interface Props {
@@ -35,7 +38,7 @@ export default function MenuUploadModal({
   const [fileName, setFileName] = useState("");
   const [parsed, setParsed] = useState<ParsedMenu | null>(null);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
-  const [result, setResult] = useState<Record<string, number> | null>(null);
+  const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState("");
 
   const reset = useCallback(() => {
@@ -82,9 +85,7 @@ export default function MenuUploadModal({
       setStage("done");
       onImportComplete();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Import failed"
-      );
+      setError(err instanceof Error ? err.message : "Import failed");
       setStage("error");
     }
   };
@@ -93,18 +94,15 @@ export default function MenuUploadModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
         onClick={handleClose}
       />
 
-      {/* Modal */}
-      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
-        {/* Header */}
+      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <h2 className="text-lg font-semibold text-slate-800">
-            Upload Clover Menu
+            Upload Menu
           </h2>
           <button
             onClick={handleClose}
@@ -114,17 +112,24 @@ export default function MenuUploadModal({
           </button>
         </div>
 
-        {/* Body */}
         <div className="px-6 py-5 space-y-5">
-          {/* ── File picker ── */}
           {stage === "pick" && (
             <>
               <p className="text-sm text-slate-500">
-                Select a Clover inventory export file (.xlsx) containing{" "}
+                Select an Excel file (.xlsx) with sheets:{" "}
                 <strong>Items</strong>, <strong>Categories</strong>,{" "}
-                <strong>Modifier Groups</strong>, and{" "}
-                <strong>Tax Rates</strong> sheets.
+                <strong>Modifier Groups</strong>, <strong>Modifier Options</strong>,{" "}
+                and <strong>Taxes</strong>.
               </p>
+
+              <div className="bg-slate-50 rounded-xl p-4 text-xs text-slate-500 space-y-2">
+                <p className="font-medium text-slate-600">Expected sheet columns (Clover format):</p>
+                <p><strong>Items:</strong> Item ID, Name, Price, Category ID, Modifier Group IDs, Tax IDs, Order Types</p>
+                <p><strong>Categories:</strong> Category ID, Category Name</p>
+                <p><strong>Modifier Groups:</strong> Modifier Group ID, Modifier Group Name</p>
+                <p><strong>Modifier Options:</strong> Option ID, Modifier Group ID, Option Name, Price</p>
+                <p><strong>Taxes:</strong> Tax ID, Tax Name, Rate</p>
+              </div>
 
               <label className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-colors">
                 <Upload size={32} className="text-slate-400" />
@@ -142,7 +147,6 @@ export default function MenuUploadModal({
             </>
           )}
 
-          {/* ── Preview ── */}
           {stage === "preview" && parsed && (
             <>
               <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
@@ -153,19 +157,11 @@ export default function MenuUploadModal({
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <SummaryCard
-                  label="Categories"
-                  count={parsed.categories.length}
-                />
                 <SummaryCard label="Items" count={parsed.items.length} />
-                <SummaryCard
-                  label="Modifier Groups"
-                  count={parsed.modifierGroups.length}
-                />
-                <SummaryCard
-                  label="Tax Rates"
-                  count={parsed.taxRates.length}
-                />
+                <SummaryCard label="Categories" count={parsed.categories.length} />
+                <SummaryCard label="Modifier Groups" count={parsed.modifierGroups.length} />
+                <SummaryCard label="Modifier Options" count={parsed.modifierGroups.reduce((s, g) => s + g.options.length, 0)} />
+                <SummaryCard label="Taxes" count={parsed.taxRates.length} />
               </div>
 
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
@@ -176,8 +172,8 @@ export default function MenuUploadModal({
                   />
                   <p className="text-xs text-amber-800">
                     This will <strong>replace</strong> all existing categories,
-                    menu items, modifier groups, and taxes. The POS app will
-                    update automatically via real-time listeners.
+                    menu items, modifier groups, and taxes. Items will be linked
+                    to modifiers and taxes by ID.
                   </p>
                 </div>
               </div>
@@ -199,7 +195,6 @@ export default function MenuUploadModal({
             </>
           )}
 
-          {/* ── Importing ── */}
           {stage === "importing" && (
             <div className="flex flex-col items-center gap-4 py-6">
               <Loader2 size={36} className="text-blue-600 animate-spin" />
@@ -222,34 +217,47 @@ export default function MenuUploadModal({
             </div>
           )}
 
-          {/* ── Done ── */}
           {stage === "done" && result && (
-            <div className="flex flex-col items-center gap-4 py-4">
-              <CheckCircle2 size={44} className="text-emerald-500" />
-              <p className="text-base font-semibold text-slate-800">
-                Import complete
-              </p>
-
-              <div className="grid grid-cols-2 gap-3 w-full">
-                <SummaryCard
-                  label="Categories"
-                  count={result.categories}
-                  success
-                />
-                <SummaryCard label="Items" count={result.items} success />
-                <SummaryCard
-                  label="Modifier Groups"
-                  count={result.modifierGroups}
-                  success
-                />
-                <SummaryCard
-                  label="Tax Rates"
-                  count={result.taxRates}
-                  success
-                />
+            <div className="flex flex-col gap-4 py-4">
+              <div className="flex flex-col items-center gap-3">
+                <CheckCircle2 size={44} className="text-emerald-500" />
+                <p className="text-base font-semibold text-slate-800">
+                  Import complete
+                </p>
               </div>
 
-              <p className="text-xs text-slate-400">
+              <div className="grid grid-cols-2 gap-3">
+                <SummaryCard label="Items" count={result.items} success />
+                <SummaryCard label="Categories" count={result.categories} success />
+                <SummaryCard label="Modifier Groups" count={result.modifierGroups} success />
+                <SummaryCard label="Modifier Options" count={result.modifierOptions} success />
+                <SummaryCard label="Taxes" count={result.taxRates} success />
+              </div>
+
+              {result.logs.length > 0 && (
+                <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
+                  <div className="px-4 py-2.5 border-b border-slate-200 flex items-center gap-2">
+                    <Info size={14} className="text-slate-400" />
+                    <span className="text-xs font-medium text-slate-600">Import Log</span>
+                    <span className="text-xs text-slate-400">
+                      ({result.logs.filter((l) => l.level === "warn").length} warnings,{" "}
+                      {result.logs.filter((l) => l.level === "error").length} errors)
+                    </span>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto p-3 space-y-1">
+                    {result.logs
+                      .filter((l) => l.level !== "info")
+                      .map((entry, i) => (
+                        <LogLine key={i} entry={entry} />
+                      ))}
+                    {result.logs.every((l) => l.level === "info") && (
+                      <p className="text-xs text-emerald-600">All items imported successfully with no warnings.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-slate-400 text-center">
                 Your POS app will pick up the changes automatically
               </p>
 
@@ -262,7 +270,6 @@ export default function MenuUploadModal({
             </div>
           )}
 
-          {/* ── Error ── */}
           {stage === "error" && (
             <div className="flex flex-col items-center gap-4 py-4">
               <AlertTriangle size={44} className="text-red-500" />
@@ -304,5 +311,22 @@ function SummaryCard({
       <p className="text-2xl font-bold text-slate-800">{count}</p>
       <p className="text-xs text-slate-500">{label}</p>
     </div>
+  );
+}
+
+function LogLine({ entry }: { entry: ImportLogEntry }) {
+  const color =
+    entry.level === "error"
+      ? "text-red-600"
+      : entry.level === "warn"
+      ? "text-amber-600"
+      : "text-slate-500";
+  const icon =
+    entry.level === "error" ? "✕" : entry.level === "warn" ? "⚠" : "•";
+  return (
+    <p className={`text-xs ${color} flex items-start gap-1.5`}>
+      <span className="flex-shrink-0 w-3 text-center">{icon}</span>
+      <span>{entry.message}</span>
+    </p>
   );
 }

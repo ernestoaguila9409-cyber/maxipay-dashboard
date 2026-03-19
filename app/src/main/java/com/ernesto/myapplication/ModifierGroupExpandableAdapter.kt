@@ -184,38 +184,69 @@ class ModifierGroupExpandableAdapter(
     // LOAD OPTIONS
     // =====================================================
     private fun loadOptions(group: ModifierGroupModel, holder: GroupViewHolder) {
+        db.collection("ModifierGroups").document(group.id).get()
+            .addOnSuccessListener { groupDoc ->
+                @Suppress("UNCHECKED_CAST")
+                val embedded = groupDoc.get("options") as? List<Map<String, Any>> ?: emptyList()
 
-        db.collection("ModifierOptions")
-            .whereEqualTo("groupId", group.id)
-            .get()
-            .addOnSuccessListener { documents ->
+                if (embedded.isNotEmpty()) {
+                    for ((i, opt) in embedded.withIndex()) {
+                        val name = (opt["name"] as? String) ?: continue
+                        val price = (opt["price"] as? Number)?.toDouble() ?: 0.0
+                        val optId = (opt["id"] as? String) ?: "opt_$i"
 
-                for (doc in documents) {
+                        val optionText = TextView(holder.layout.context)
+                        if (group.groupType == "REMOVE") {
+                            optionText.text = "✕ $name"
+                            optionText.setTextColor(0xFFD32F2F.toInt())
+                        } else {
+                            optionText.text =
+                                "• $name   +$${String.format(Locale.US, "%.2f", price)}"
+                        }
+                        optionText.setPadding(80, 20, 40, 20)
+                        holder.layout.addView(optionText)
 
-                    val name = doc.getString("name") ?: continue
-                    val price = doc.getDouble("price") ?: 0.0
-
-                    val optionText = TextView(holder.layout.context)
-                    if (group.groupType == "REMOVE") {
-                        optionText.text = "✕ $name"
-                        optionText.setTextColor(0xFFD32F2F.toInt())
-                    } else {
-                        optionText.text =
-                            "• $name   +$${String.format(Locale.US, "%.2f", price)}"
+                        optionText.setOnClickListener {
+                            showEditOptionDialog(
+                                holder.layout.context,
+                                optId,
+                                name,
+                                price
+                            )
+                        }
                     }
-                    optionText.setPadding(80, 20, 40, 20)
-
-                    holder.layout.addView(optionText)
-
-                    optionText.setOnClickListener {
-                        showEditOptionDialog(
-                            holder.layout.context,
-                            doc.id,
-                            name,
-                            price
-                        )
-                    }
+                    return@addOnSuccessListener
                 }
+
+                db.collection("ModifierOptions")
+                    .whereEqualTo("groupId", group.id)
+                    .get()
+                    .addOnSuccessListener { documents ->
+                        for (doc in documents) {
+                            val name = doc.getString("name") ?: continue
+                            val price = doc.getDouble("price") ?: 0.0
+
+                            val optionText = TextView(holder.layout.context)
+                            if (group.groupType == "REMOVE") {
+                                optionText.text = "✕ $name"
+                                optionText.setTextColor(0xFFD32F2F.toInt())
+                            } else {
+                                optionText.text =
+                                    "• $name   +$${String.format(Locale.US, "%.2f", price)}"
+                            }
+                            optionText.setPadding(80, 20, 40, 20)
+                            holder.layout.addView(optionText)
+
+                            optionText.setOnClickListener {
+                                showEditOptionDialog(
+                                    holder.layout.context,
+                                    doc.id,
+                                    name,
+                                    price
+                                )
+                            }
+                        }
+                    }
             }
     }
 

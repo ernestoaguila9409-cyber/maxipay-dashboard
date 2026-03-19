@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Header from "@/components/Header";
 import { db } from "@/firebase/firebaseConfig";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, setDoc, onSnapshot } from "firebase/firestore";
 import {
   DndContext,
   closestCenter,
@@ -636,33 +636,35 @@ export default function CustomizeDashboardPage() {
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
-  const loadConfig = useCallback(async () => {
-    try {
-      const snap = await getDoc(doc(db, "Settings", "dashboard"));
-      if (snap.exists()) {
-        const data = snap.data();
-        const raw = (data.modules || []) as DashboardModule[];
-        if (raw.length > 0) {
-          const normalized = raw.map((m, i) => ({
-            ...m,
-            colorKey: m.colorKey ?? (m.key === "dine_in" ? "green" : m.key === "to_go" ? "orange" : m.key === "bar" ? "teal" : "purple"),
-            position: m.position ?? i,
-          })).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-          setModules(normalized);
-          setLoading(false);
-          return;
-        }
-      }
-      setModules(DEFAULT_MODULES);
-    } catch {
-      setModules(DEFAULT_MODULES);
-    }
-    setLoading(false);
-  }, []);
-
   useEffect(() => {
-    loadConfig();
-  }, [loadConfig]);
+    const unsub = onSnapshot(
+      doc(db, "Settings", "dashboard"),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          const raw = (data.modules || []) as DashboardModule[];
+          if (raw.length > 0) {
+            const normalized = raw.map((m, i) => ({
+              ...m,
+              colorKey: m.colorKey ?? (m.key === "dine_in" ? "green" : m.key === "to_go" ? "orange" : m.key === "bar" ? "teal" : "purple"),
+              position: m.position ?? i,
+            })).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+            if (!hasChanges) setModules(normalized);
+            setLoading(false);
+            return;
+          }
+        }
+        if (!hasChanges) setModules(DEFAULT_MODULES);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Failed to listen to dashboard config:", err);
+        setModules(DEFAULT_MODULES);
+        setLoading(false);
+      }
+    );
+    return () => unsub();
+  }, [hasChanges]);
 
   const handleSave = useCallback(async () => {
     if (!hasChanges) return;
