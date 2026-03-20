@@ -4,9 +4,10 @@
     android:orientation="horizontal"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
     android:background="#F5F5F5">
 
-    <!-- LEFT PANEL – Categories (vertical, scrollable) -->
+    <!-- LEFT PANEL – Categories (scrollable) -->
     <ScrollView
         android:layout_width="0dp"
         android:layout_height="match_parent"
@@ -23,7 +24,7 @@
             android:padding="8dp"/>
     </ScrollView>
 
-    <!-- CENTER PANEL – Menu items (vertical list, uses height first) -->
+    <!-- CENTER PANEL – Menu items (scrollable) -->
     <ScrollView
         android:layout_width="0dp"
         android:layout_height="match_parent"
@@ -39,108 +40,147 @@
             android:padding="4dp"/>
     </ScrollView>
 
-    <!-- RIGHT PANEL – Cart (wider for order details) -->
+    <!-- RIGHT PANEL – Cart (scrollable items + fixed bottom) -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_weight="1.3"
         android:orientation="vertical"
         android:background="#FFFFFF"
-        android:padding="12dp"
         android:elevation="2dp">
 
-        <TextView
-            android:id="@+id/txtTableHeader"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="14sp"
-            android:textColor="#6A4FB3"
-            android:textStyle="bold"
-            android:visibility="gone"
-            android:paddingBottom="4dp"/>
-
-        <TextView
-            android:text="Cart"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-
-        <!-- Customer section -->
+        <!-- Cart header area (compact) -->
         <LinearLayout
-            android:id="@+id/customerSection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp">
+            android:orientation="vertical"
+            android:paddingHorizontal="12dp"
+            android:paddingTop="8dp">
 
             <TextView
-                android:id="@+id/txtCustomerLabel"
-                android:text="Customer: "
-                android:textSize="14sp"
+                android:id="@+id/txtTableHeader"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="#6A4FB3"
+                android:textStyle="bold"
+                android:visibility="gone"
+                android:paddingBottom="2dp"/>
+
+            <TextView
+                android:text="Cart"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+
+            <!-- Customer section -->
+            <LinearLayout
+                android:id="@+id/customerSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp">
+
+                <TextView
+                    android:id="@+id/txtCustomerLabel"
+                    android:text="Customer: "
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="#5D4E7B"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+
+                <TextView
+                    android:id="@+id/txtCustomerValue"
+                    android:text="+ Add Customer"
+                    android:textSize="13sp"
+                    android:textColor="#6A4FB3"
+                    android:padding="4dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/txtCartItemsLabel"
+                android:text="Cart Items"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:textColor="#5D4E7B"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"/>
-
-            <TextView
-                android:id="@+id/txtCustomerValue"
-                android:text="+ Add Customer"
-                android:textSize="14sp"
-                android:textColor="#6A4FB3"
-                android:padding="4dp"
-                android:background="?attr/selectableItemBackground"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"/>
+                android:layout_height="wrap_content"
+                android:paddingBottom="4dp"/>
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/txtCartItemsLabel"
-            android:text="Cart Items"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="#5D4E7B"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingBottom="4dp"/>
-
+        <!-- Scrollable area: cart items + tax/discount details -->
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:fillViewport="true">
+            android:fillViewport="true"
+            android:paddingHorizontal="12dp">
 
             <LinearLayout
-                android:id="@+id/cartContainer"
-                android:orientation="vertical"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"/>
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:id="@+id/cartContainer"
+                    android:orientation="vertical"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"/>
+
+                <LinearLayout
+                    android:id="@+id/cartTaxDetails"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingTop="8dp"/>
+            </LinearLayout>
         </ScrollView>
 
+        <!-- Fixed bottom: subtotal / total / checkout – ALWAYS visible -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#E0E0E0"/>
+
         <LinearLayout
-            android:id="@+id/cartTaxSummary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingTop="8dp"/>
+            android:paddingHorizontal="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="8dp"
+            android:background="#FFFFFF"
+            android:elevation="4dp">
 
-        <TextView
-            android:id="@+id/txtTotal"
-            android:text="Total: $0.00"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingTop="4dp"/>
+            <LinearLayout
+                android:id="@+id/cartTaxSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"/>
 
-        <Button
-            android:id="@+id/btnCheckout"
-            android:text="Checkout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"/>
+            <TextView
+                android:id="@+id/txtTotal"
+                android:text="Total: $0.00"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingTop="4dp"/>
+
+            <Button
+                android:id="@+id/btnCheckout"
+                android:text="Checkout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"/>
+        </LinearLayout>
 
     </LinearLayout>
 

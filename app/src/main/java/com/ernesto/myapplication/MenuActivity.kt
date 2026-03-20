@@ -47,6 +47,7 @@ class MenuActivity : AppCompatActivity() {
     private lateinit var categoryContainer: LinearLayout
     private lateinit var itemContainer: LinearLayout
     private lateinit var cartContainer: LinearLayout
+    private lateinit var cartTaxDetails: LinearLayout
     private lateinit var cartTaxSummary: LinearLayout
     private lateinit var txtTotal: TextView
     private lateinit var btnCheckout: Button
@@ -127,6 +128,7 @@ class MenuActivity : AppCompatActivity() {
         categoryContainer = findViewById(R.id.categoryContainer)
         itemContainer = findViewById(R.id.itemContainer)
         cartContainer = findViewById(R.id.cartContainer)
+        cartTaxDetails = findViewById(R.id.cartTaxDetails)
         cartTaxSummary = findViewById(R.id.cartTaxSummary)
         txtTotal = findViewById(R.id.txtTotal)
         btnCheckout = findViewById(R.id.btnCheckout)
@@ -1152,21 +1154,17 @@ class MenuActivity : AppCompatActivity() {
 
         val subtotal = totalAmount
         val subtotalCents = (subtotal * 100).toLong()
+        cartTaxDetails.removeAllViews()
         cartTaxSummary.removeAllViews()
 
-        val subtotalLabel = TextView(this)
-        subtotalLabel.text = "Subtotal: ${MoneyUtils.centsToDisplay(subtotalCents)}"
-        subtotalLabel.textSize = 14f
-        subtotalLabel.setTypeface(null, android.graphics.Typeface.BOLD)
-        cartTaxSummary.addView(subtotalLabel)
-
+        // Discount details + tax lines go in scrollable area
         if (discountTotalCents > 0L) {
             val discountSummary = TextView(this)
             discountSummary.text = "Discount: -${MoneyUtils.centsToDisplay(discountTotalCents)}"
             discountSummary.textSize = 14f
             discountSummary.setTypeface(null, android.graphics.Typeface.BOLD)
             discountSummary.setTextColor(Color.parseColor("#2E7D32"))
-            cartTaxSummary.addView(discountSummary)
+            cartTaxDetails.addView(discountSummary)
 
             for (ad in appliedDiscounts) {
                 val detailLine = TextView(this)
@@ -1183,14 +1181,11 @@ class MenuActivity : AppCompatActivity() {
                 detailLine.text = "  ${ad.discountName} ($valueStr · $scopeStr)"
                 detailLine.textSize = 12f
                 detailLine.setTextColor(Color.parseColor("#388E3C"))
-                cartTaxSummary.addView(detailLine)
+                cartTaxDetails.addView(detailLine)
             }
 
             totalAmount -= discountTotalCents / 100.0
         }
-
-        // Taxes are computed on discounted amount
-        val discountedSubtotal = subtotal - (discountTotalCents / 100.0)
 
         for (tax in allTaxes) {
             var taxableBase = 0.0
@@ -1198,14 +1193,12 @@ class MenuActivity : AppCompatActivity() {
                 val modTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
                 var lineTotal = (item.basePrice + modTotal) * item.quantity
 
-                // Subtract item-level discounts from this line's taxable base
                 val lineDiscounts = appliedDiscounts.filter { it.lineKey == lineKey }
                 if (lineDiscounts.isNotEmpty()) {
                     val lineDiscountAmount = lineDiscounts.sumOf { it.amountInCents } / 100.0
                     lineTotal = (lineTotal - lineDiscountAmount).coerceAtLeast(0.0)
                 }
 
-                // Apply proportional order-level discount
                 val orderDiscount = appliedDiscounts.find {
                     (it.applyScope == "order" || it.applyScope == "manual") && it.lineKey == null
                 }
@@ -1231,6 +1224,13 @@ class MenuActivity : AppCompatActivity() {
             taxLine.setTextColor(Color.parseColor("#5D4E7B"))
             cartTaxSummary.addView(taxLine)
         }
+
+        // Fixed bottom: subtotal + total
+        val subtotalLabel = TextView(this)
+        subtotalLabel.text = "Subtotal: ${MoneyUtils.centsToDisplay(subtotalCents)}"
+        subtotalLabel.textSize = 14f
+        subtotalLabel.setTypeface(null, android.graphics.Typeface.BOLD)
+        cartTaxSummary.addView(subtotalLabel)
 
         txtTotal.text = "Total: ${MoneyUtils.centsToDisplay((totalAmount * 100).toLong())}"
 
@@ -1531,6 +1531,7 @@ class MenuActivity : AppCompatActivity() {
         customerPhone = null
         customerEmail = null
         cartContainer.removeAllViews()
+        cartTaxDetails.removeAllViews()
         cartTaxSummary.removeAllViews()
         txtTotal.text = "Total: $0.00"
         updateCustomerDisplay()

@@ -680,8 +680,13 @@ class PaymentActivity : AppCompatActivity() {
     private fun showDeclined(message: String) {
         progressBar.visibility = View.GONE
         txtStatus.text = "DECLINED ❌"
+        txtStatus.setTextColor(android.graphics.Color.parseColor("#C62828"))
         txtSubStatus.text = message
         setButtonsEnabled(true)
+
+        Handler(Looper.getMainLooper()).postDelayed({
+            statusContainer.visibility = View.GONE
+        }, 2500)
     }
 
     private fun setButtonsEnabled(enabled: Boolean) {
