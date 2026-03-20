@@ -1,5 +1,7 @@
 package com.ernesto.myapplication
 
+import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Bundle
 import android.view.Gravity
 import android.widget.LinearLayout
@@ -21,6 +23,8 @@ class BatchDetailsActivity : AppCompatActivity() {
     private lateinit var txtCardRefunds: TextView
     private lateinit var taxBreakdownContainer: LinearLayout
     private lateinit var orderTypeBreakdownContainer: LinearLayout
+    private lateinit var discountBreakdownContainer: LinearLayout
+    private lateinit var tipBreakdownContainer: LinearLayout
     private lateinit var txtNetCash: TextView
     private lateinit var txtNetCard: TextView
     private lateinit var txtBatchTotal: TextView
@@ -40,6 +44,8 @@ class BatchDetailsActivity : AppCompatActivity() {
         txtCardRefunds = findViewById(R.id.txtCardRefunds)
         taxBreakdownContainer = findViewById(R.id.taxBreakdownContainer)
         orderTypeBreakdownContainer = findViewById(R.id.orderTypeBreakdownContainer)
+        discountBreakdownContainer = findViewById(R.id.discountBreakdownContainer)
+        tipBreakdownContainer = findViewById(R.id.tipBreakdownContainer)
         txtNetCash = findViewById(R.id.txtNetCash)
         txtNetCard = findViewById(R.id.txtNetCard)
         txtBatchTotal = findViewById(R.id.txtBatchTotal)
@@ -50,10 +56,10 @@ class BatchDetailsActivity : AppCompatActivity() {
         loadBatchTransactions()
     }
 
+    private data class OrderPaymentInfo(var cashCents: Long = 0L, var cardCents: Long = 0L)
+
     private fun loadBatchTransactions() {
 
-        // Use the new Transactions schema (payments[] + totalPaidInCents) and
-        // aggregate amounts per payment type for this batch.
         db.collection("Transactions")
             .whereEqualTo("settled", true)
             .whereEqualTo("voided", false)
@@ -69,6 +75,7 @@ class BatchDetailsActivity : AppCompatActivity() {
 
                 val orderIds = mutableSetOf<String>()
                 val orderAmounts = mutableMapOf<String, Double>()
+                val orderPayments = mutableMapOf<String, OrderPaymentInfo>()
 
                 for (doc in documents) {
                     val txBatchId = doc.getString("batchId") ?: ""
@@ -81,6 +88,8 @@ class BatchDetailsActivity : AppCompatActivity() {
                         orderId?.let { orderIds.add(it) }
 
                         var txTotal = 0.0
+                        var txCashCents = 0L
+                        var txCardCents = 0L
                         val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
                         if (payments.isNotEmpty()) {
                             for (p in payments) {
@@ -93,9 +102,9 @@ class BatchDetailsActivity : AppCompatActivity() {
                                 txTotal += amount
 
                                 when (paymentType) {
-                                    "Cash" -> cashSales += amount
-                                    "Credit" -> creditSales += amount
-                                    "Debit" -> debitSales += amount
+                                    "Cash" -> { cashSales += amount; txCashCents += cents }
+                                    "Credit" -> { creditSales += amount; txCardCents += cents }
+                                    "Debit" -> { debitSales += amount; txCardCents += cents }
                                 }
                             }
                         } else {
@@ -105,15 +114,21 @@ class BatchDetailsActivity : AppCompatActivity() {
                                     ?: doc.getDouble("amount")
                                     ?: 0.0
                             txTotal = amount
+                            val cents = (amount * 100).toLong()
                             when (paymentType) {
-                                "Cash" -> cashSales += amount
-                                "Credit" -> creditSales += amount
-                                "Debit" -> debitSales += amount
+                                "Cash" -> { cashSales += amount; txCashCents += cents }
+                                "Credit" -> { creditSales += amount; txCardCents += cents }
+                                "Debit" -> { debitSales += amount; txCardCents += cents }
                             }
                         }
 
                         if (orderId != null && txTotal > 0.0) {
                             orderAmounts[orderId] = (orderAmounts[orderId] ?: 0.0) + txTotal
+                        }
+                        if (orderId != null) {
+                            val info = orderPayments.getOrPut(orderId) { OrderPaymentInfo() }
+                            info.cashCents += txCashCents
+                            info.cardCents += txCardCents
                         }
                     } else if (type == "REFUND") {
                         val paymentType = doc.getString("paymentType") ?: ""
@@ -153,6 +168,7 @@ class BatchDetailsActivity : AppCompatActivity() {
 
                 loadAndDisplayOrderTypeBreakdown(orderAmounts)
                 loadAndDisplayTaxBreakdown(orderIds.toList())
+                loadAndDisplayDiscountsAndTips(orderIds.toList(), orderPayments)
 
                 txtNetCash.text = "Net Cash: $${format(netCash)}"
                 txtNetCard.text = "Net Card: $${format(netCard)}"
@@ -299,6 +315,129 @@ class BatchDetailsActivity : AppCompatActivity() {
                 .addOnFailureListener { maybeDisplayTaxes() }
         }
     }
+
+    private fun loadAndDisplayDiscountsAndTips(
+        orderIds: List<String>,
+        orderPayments: Map<String, OrderPaymentInfo>
+    ) {
+        discountBreakdownContainer.removeAllViews()
+        tipBreakdownContainer.removeAllViews()
+        if (orderIds.isEmpty()) return
+
+        val discountByName = mutableMapOf<String, Long>()
+        var totalDiscountCents = 0L
+        var cashTipCents = 0L
+        var cardTipCents = 0L
+        var pending = orderIds.size
+
+        fun maybeDisplay() {
+            pending--
+            if (pending > 0) return
+
+            if (totalDiscountCents > 0L) {
+                discountBreakdownContainer.addView(sectionHeader("Discounts:"))
+
+                for ((name, cents) in discountByName.entries.sortedByDescending { it.value }) {
+                    discountBreakdownContainer.addView(
+                        summaryRow("  $name", "-$${format(cents / 100.0)}", Color.parseColor("#BF360C"))
+                    )
+                }
+
+                discountBreakdownContainer.addView(
+                    summaryRow("Total Discounts", "-$${format(totalDiscountCents / 100.0)}", bold = true)
+                )
+            }
+
+            val totalTipCents = cashTipCents + cardTipCents
+            if (totalTipCents > 0L) {
+                tipBreakdownContainer.addView(sectionHeader("Tips:"))
+                tipBreakdownContainer.addView(
+                    summaryRow("Cash Tips", "$${format(cashTipCents / 100.0)}")
+                )
+                tipBreakdownContainer.addView(
+                    summaryRow("Card Tips", "$${format(cardTipCents / 100.0)}")
+                )
+                tipBreakdownContainer.addView(
+                    summaryRow("Total Tips", "$${format(totalTipCents / 100.0)}", bold = true)
+                )
+            }
+        }
+
+        for (oid in orderIds) {
+            db.collection("Orders").document(oid).get()
+                .addOnSuccessListener { snap ->
+                    val tipCents = snap.getLong("tipAmountInCents") ?: 0L
+                    if (tipCents > 0L) {
+                        val payInfo = orderPayments[oid]
+                        if (payInfo != null) {
+                            val total = payInfo.cashCents + payInfo.cardCents
+                            if (total > 0L) {
+                                cashTipCents += (tipCents * payInfo.cashCents) / total
+                                cardTipCents += (tipCents * payInfo.cardCents) / total
+                            }
+                        }
+                    }
+
+                    @Suppress("UNCHECKED_CAST")
+                    val applied = snap.get("appliedDiscounts") as? List<Map<String, Any>>
+                    if (applied != null) {
+                        for (d in applied) {
+                            val name = d["discountName"]?.toString() ?: "Unknown"
+                            val cents = (d["amountInCents"] as? Number)?.toLong() ?: 0L
+                            if (cents > 0L) {
+                                discountByName[name] = (discountByName[name] ?: 0L) + cents
+                                totalDiscountCents += cents
+                            }
+                        }
+                    } else {
+                        val discCents = snap.getLong("discountInCents") ?: 0L
+                        if (discCents > 0L) {
+                            discountByName["Discount"] = (discountByName["Discount"] ?: 0L) + discCents
+                            totalDiscountCents += discCents
+                        }
+                    }
+
+                    maybeDisplay()
+                }
+                .addOnFailureListener { maybeDisplay() }
+        }
+    }
+
+    private fun sectionHeader(text: String): TextView =
+        TextView(this).apply {
+            this.text = text
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 8, 0, 4)
+        }
+
+    private fun summaryRow(
+        label: String,
+        value: String,
+        color: Int = Color.parseColor("#212121"),
+        bold: Boolean = false
+    ): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 4, 0, 4) }
+
+            addView(TextView(this@BatchDetailsActivity).apply {
+                this.text = label
+                textSize = 16f
+                if (bold) setTypeface(null, Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            addView(TextView(this@BatchDetailsActivity).apply {
+                this.text = value
+                textSize = 16f
+                setTextColor(color)
+                if (bold) setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.END
+            })
+        }
 
     private fun format(value: Double): String {
         return String.format("%.2f", value)

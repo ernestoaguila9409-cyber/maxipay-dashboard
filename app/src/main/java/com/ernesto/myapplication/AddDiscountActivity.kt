@@ -1,11 +1,13 @@
 package com.ernesto.myapplication
 
 import android.app.TimePickerDialog
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
 import android.view.View
 import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
@@ -24,6 +26,7 @@ class AddDiscountActivity : AppCompatActivity() {
     private lateinit var radioApplyTo: RadioGroup
     private lateinit var switchActive: SwitchCompat
     private lateinit var switchAutoApply: SwitchCompat
+    private lateinit var autoApplyContainer: View
     private lateinit var btnSave: Button
     private lateinit var btnDelete: Button
     private lateinit var itemSelectorContainer: View
@@ -40,6 +43,18 @@ class AddDiscountActivity : AppCompatActivity() {
     private var selectedItemIds = mutableListOf<String>()
     private var selectedItemNames = mutableListOf<String>()
 
+    private val itemSelectorLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            selectedItemIds = result.data
+                ?.getStringArrayListExtra("SELECTED_IDS")?.toMutableList() ?: mutableListOf()
+            selectedItemNames = result.data
+                ?.getStringArrayListExtra("SELECTED_NAMES")?.toMutableList() ?: mutableListOf()
+            updateSelectedItemsDisplay()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_add_discount)
@@ -51,6 +66,7 @@ class AddDiscountActivity : AppCompatActivity() {
         radioApplyTo = findViewById(R.id.radioDiscountApplyTo)
         switchActive = findViewById(R.id.switchDiscountActive)
         switchAutoApply = findViewById(R.id.switchAutoApply)
+        autoApplyContainer = findViewById(R.id.autoApplyContainer)
         btnSave = findViewById(R.id.btnSaveDiscount)
         btnDelete = findViewById(R.id.btnDeleteDiscount)
         itemSelectorContainer = findViewById(R.id.itemSelectorContainer)
@@ -197,45 +213,20 @@ class AddDiscountActivity : AppCompatActivity() {
     }
 
     private fun updateItemSelectorVisibility() {
+        val isManual = radioApplyTo.checkedRadioButtonId == R.id.radioApplyManual
         itemSelectorContainer.visibility =
             if (radioApplyTo.checkedRadioButtonId == R.id.radioApplyItem) View.VISIBLE else View.GONE
+        autoApplyContainer.visibility = if (isManual) View.GONE else View.VISIBLE
+        if (isManual) {
+            switchAutoApply.isChecked = false
+        }
     }
 
     private fun showItemSelectorDialog() {
-        db.collection("MenuItems").get()
-            .addOnSuccessListener { snap ->
-                val items = snap.documents.mapNotNull { doc ->
-                    val name = doc.getString("name") ?: return@mapNotNull null
-                    doc.id to name
-                }
-                if (items.isEmpty()) {
-                    Toast.makeText(this, "No menu items found", Toast.LENGTH_SHORT).show()
-                    return@addOnSuccessListener
-                }
-
-                val names = items.map { it.second }.toTypedArray()
-                val ids = items.map { it.first }
-                val checked = BooleanArray(items.size) { ids[it] in selectedItemIds }
-
-                AlertDialog.Builder(this)
-                    .setTitle("Select Items")
-                    .setMultiChoiceItems(names, checked) { _, which, isChecked ->
-                        checked[which] = isChecked
-                    }
-                    .setPositiveButton("Done") { _, _ ->
-                        selectedItemIds.clear()
-                        selectedItemNames.clear()
-                        for (i in items.indices) {
-                            if (checked[i]) {
-                                selectedItemIds.add(ids[i])
-                                selectedItemNames.add(names[i])
-                            }
-                        }
-                        updateSelectedItemsDisplay()
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-            }
+        val intent = Intent(this, ItemSelectorActivity::class.java).apply {
+            putStringArrayListExtra("SELECTED_IDS", ArrayList(selectedItemIds))
+        }
+        itemSelectorLauncher.launch(intent)
     }
 
     private fun updateSelectedItemsDisplay() {
@@ -285,7 +276,7 @@ class AddDiscountActivity : AppCompatActivity() {
         }
 
         val active = switchActive.isChecked
-        val autoApply = switchAutoApply.isChecked
+        val autoApply = if (applyScope == "manual") false else switchAutoApply.isChecked
 
         val applyTo = when (applyScope) {
             "item" -> "ITEM"

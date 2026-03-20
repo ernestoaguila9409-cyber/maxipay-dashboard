@@ -162,7 +162,7 @@ class DiscountEngine(private val db: FirebaseFirestore) {
      */
     fun getAvailableManualDiscounts(): List<DiscountItem> {
         return cachedDiscounts.filter {
-            it.active && it.applyScope == "manual" && it.isScheduleValid()
+            it.active && (it.applyScope == "manual" || !it.autoApply) && it.isScheduleValid()
         }
     }
 

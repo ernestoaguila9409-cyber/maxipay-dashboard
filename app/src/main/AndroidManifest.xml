@@ -211,6 +211,10 @@
             android:exported="false"
             android:parentActivityName=".DiscountsActivity" />
 
+        <activity
+            android:name=".ItemSelectorActivity"
+            android:exported="false" />
+
     </application>
 
 </manifest>

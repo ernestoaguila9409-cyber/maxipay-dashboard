@@ -89,6 +89,28 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"/>
 
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="16dp"/>
+
+            <!-- Discounts (populated dynamically) -->
+            <LinearLayout
+                android:id="@+id/discountBreakdownContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"/>
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="16dp"/>
+
+            <!-- Tips (populated dynamically) -->
+            <LinearLayout
+                android:id="@+id/tipBreakdownContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"/>
+
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"

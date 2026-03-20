@@ -2,7 +2,9 @@ package com.ernesto.myapplication
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -11,6 +13,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.*
+import kotlinx.coroutines.tasks.await
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -23,13 +27,25 @@ import java.util.concurrent.TimeUnit
 
 class BatchManagementActivity : AppCompatActivity() {
 
+    companion object {
+        private val httpClient = OkHttpClient.Builder()
+            .connectTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(180, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+    }
+
     private val db = FirebaseFirestore.getInstance()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private lateinit var txtOpenBatch: TextView
     private lateinit var btnCloseBatch: Button
     private lateinit var recyclerBatches: RecyclerView
+    private lateinit var progressBar: ProgressBar
 
     private var openTransactionCount = 0
+    private var isSettling = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,15 +54,26 @@ class BatchManagementActivity : AppCompatActivity() {
         txtOpenBatch = findViewById(R.id.txtOpenBatch)
         btnCloseBatch = findViewById(R.id.btnCloseBatch)
         recyclerBatches = findViewById(R.id.recyclerBatches)
+        progressBar = findViewById(R.id.progressBatchMgmt)
 
         recyclerBatches.layoutManager = LinearLayoutManager(this)
-
-        loadOpenBatch()
-        loadClosedBatches()
 
         btnCloseBatch.setOnClickListener {
             confirmCloseBatch()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!isSettling) {
+            loadOpenBatch()
+            loadClosedBatches()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        scope.cancel()
     }
 
     private var hasOpenPreAuths = false
@@ -129,8 +156,15 @@ class BatchManagementActivity : AppCompatActivity() {
             }
     }
 
-    // 🔹 CONFIRM CLOSE
+    private fun setSettlingState(settling: Boolean) {
+        isSettling = settling
+        btnCloseBatch.isEnabled = !settling && openTransactionCount > 0
+        progressBar.visibility = if (settling) View.VISIBLE else View.GONE
+    }
+
     private fun confirmCloseBatch() {
+        if (isSettling) return
+
         if (hasOpenPreAuths) {
             AlertDialog.Builder(this)
                 .setTitle("Open Pre-Auths")
@@ -150,8 +184,8 @@ class BatchManagementActivity : AppCompatActivity() {
             .show()
     }
 
-    // 🔥 SEND SETTLEMENT REQUEST TO Z8
     private fun sendSettleRequest() {
+        setSettlingState(true)
 
         val tpn = TerminalPrefs.getTpn(this)
         val registerId = TerminalPrefs.getRegisterId(this)
@@ -169,13 +203,6 @@ class BatchManagementActivity : AppCompatActivity() {
 
         Log.d("SETTLE_REQUEST", json)
 
-        val client = OkHttpClient.Builder()
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(180, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
-            .build()
-
         val body = json.toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
@@ -184,11 +211,12 @@ class BatchManagementActivity : AppCompatActivity() {
             .addHeader("Content-Type", "application/json")
             .build()
 
-        client.newCall(request).enqueue(object : Callback {
+        httpClient.newCall(request).enqueue(object : Callback {
 
             override fun onFailure(call: Call, e: IOException) {
                 Log.e("SETTLE_ERROR", "Network error: ${e.message}", e)
                 runOnUiThread {
+                    setSettlingState(false)
                     Toast.makeText(
                         this@BatchManagementActivity,
                         "Settlement Failed: ${e.message}",
@@ -234,6 +262,7 @@ class BatchManagementActivity : AppCompatActivity() {
                             closeBatchInFirebase()
 
                         } else {
+                            setSettlingState(false)
                             val msg = if (resultText.isNotBlank()) resultText else "Code: $resultCode"
                             Log.w("SETTLE_ERROR", "Settlement declined – $msg\n$responseText")
                             Toast.makeText(
@@ -244,6 +273,7 @@ class BatchManagementActivity : AppCompatActivity() {
                         }
 
                     } catch (e: Exception) {
+                        setSettlingState(false)
                         Log.e("SETTLE_ERROR", "Parse error: ${e.message}\n$responseText", e)
                         Toast.makeText(
                             this@BatchManagementActivity,
@@ -289,21 +319,23 @@ class BatchManagementActivity : AppCompatActivity() {
     }
 
     private fun settleOpenBatch(batchId: String) {
-        val batchRef = db.collection("Batches").document(batchId)
+        scope.launch {
+            try {
+                val batchRef = db.collection("Batches").document(batchId)
 
-        db.collection("Transactions")
-            .whereEqualTo("settled", false)
-            .whereEqualTo("voided", false)
-            .get()
-            .addOnSuccessListener { transactions ->
+                val transactions = withContext(Dispatchers.IO) {
+                    db.collection("Transactions")
+                        .whereEqualTo("settled", false)
+                        .whereEqualTo("voided", false)
+                        .get()
+                        .await()
+                }
 
                 val batchWrite = db.batch()
-
                 var totalSales = 0.0
                 var count = 0
 
                 for (tx in transactions) {
-
                     val net = computeNetAmount(tx)
                     if (net != 0.0) {
                         totalSales += net
@@ -330,18 +362,27 @@ class BatchManagementActivity : AppCompatActivity() {
                     )
                 )
 
-                batchWrite.commit()
-                    .addOnSuccessListener {
-                        val cashFlowIntent = Intent(this, CashFlowActivity::class.java).apply {
-                            putExtra(CashFlowActivity.EXTRA_BATCH_ID, batchId)
-                            putExtra(CashFlowActivity.EXTRA_BATCH_CLOSED, true)
-                        }
-                        startActivity(cashFlowIntent)
+                withContext(Dispatchers.IO) {
+                    batchWrite.commit().await()
+                }
 
-                        loadOpenBatch()
-                        loadClosedBatches()
-                    }
+                setSettlingState(false)
+
+                val cashFlowIntent = Intent(this@BatchManagementActivity, CashFlowActivity::class.java).apply {
+                    putExtra(CashFlowActivity.EXTRA_BATCH_ID, batchId)
+                    putExtra(CashFlowActivity.EXTRA_BATCH_CLOSED, true)
+                }
+                startActivity(cashFlowIntent)
+            } catch (e: Exception) {
+                Log.e("SETTLE_BATCH", "Failed to settle batch in Firebase: ${e.message}", e)
+                setSettlingState(false)
+                Toast.makeText(
+                    this@BatchManagementActivity,
+                    "Failed to close batch: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
             }
+        }
     }
 
     // 🔹 Helper to compute net amount for a transaction document
