@@ -20,10 +20,13 @@ import com.google.firebase.firestore.FirebaseFirestore
 class ItemAdapter(
     private val context: Context,
     private val itemList: List<ItemModel>,
-    private val categoryAvailability: List<String> = emptyList(),
+    private val categoryAvailabilityMap: Map<String, List<String>> = emptyMap(),
     private val stockCountingEnabled: Boolean = true,
     private val refresh: () -> Unit
 ) : RecyclerView.Adapter<ItemAdapter.ViewHolder>() {
+
+    private fun getCategoryAvailability(categoryId: String): List<String> =
+        categoryAvailabilityMap[categoryId] ?: emptyList()
 
     private val db = FirebaseFirestore.getInstance()
     private var filteredList: List<ItemModel> = itemList
@@ -255,7 +258,7 @@ class ItemAdapter(
             cb.isChecked = if (item.availableOrderTypes != null) {
                 item.availableOrderTypes.contains(orderType)
             } else {
-                categoryAvailability.contains(orderType)
+                getCategoryAvailability(item.categoryId).contains(orderType)
             }
             checkBoxContainer.addView(cb)
             checkBoxes[orderType] = cb

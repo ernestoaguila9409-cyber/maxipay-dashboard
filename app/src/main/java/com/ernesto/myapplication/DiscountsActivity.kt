@@ -34,8 +34,19 @@ class DiscountsActivity : AppCompatActivity() {
                     putExtra("DISCOUNT_VALUE", item.value)
                     putExtra("DISCOUNT_APPLY_TO", item.applyTo)
                     putExtra("DISCOUNT_ACTIVE", item.active)
+                    putExtra("DISCOUNT_APPLY_SCOPE", item.applyScope)
+                    putExtra("DISCOUNT_AUTO_APPLY", item.autoApply)
+                    putStringArrayListExtra("DISCOUNT_ITEM_IDS", ArrayList(item.itemIds))
+                    item.schedule?.let { sched ->
+                        putStringArrayListExtra("DISCOUNT_DAYS", ArrayList(sched.days))
+                        putExtra("DISCOUNT_START_TIME", sched.startTime)
+                        putExtra("DISCOUNT_END_TIME", sched.endTime)
+                    }
                 }
-                startActivity(intent)
+                loadItemNamesForDiscount(item) { names ->
+                    intent.putStringArrayListExtra("DISCOUNT_ITEM_NAMES", ArrayList(names))
+                    startActivity(intent)
+                }
             },
             onToggleActive = { item, active -> setDiscountActive(item, active) }
         )
@@ -51,6 +62,7 @@ class DiscountsActivity : AppCompatActivity() {
         loadDiscounts()
     }
 
+    @Suppress("UNCHECKED_CAST")
     private fun loadDiscounts() {
         db.collection("discounts")
             .get()
@@ -61,7 +73,31 @@ class DiscountsActivity : AppCompatActivity() {
                     val value = (doc.getDouble("value") ?: doc.getLong("value")?.toDouble()) ?: return@mapNotNull null
                     val applyTo = doc.getString("applyTo") ?: "ORDER"
                     val active = doc.getBoolean("active") ?: true
-                    DiscountItem(id = doc.id, name = name, type = type, value = value, applyTo = applyTo, active = active)
+                    val applyScope = doc.getString("applyScope") ?: if (applyTo == "ITEM") "item" else "order"
+                    val autoApply = doc.getBoolean("autoApply") ?: true
+                    val itemIds = (doc.get("itemIds") as? List<String>) ?: emptyList()
+
+                    val schedMap = doc.get("schedule") as? Map<String, Any>
+                    val schedule = if (schedMap != null) {
+                        DiscountSchedule(
+                            days = (schedMap["days"] as? List<String>) ?: emptyList(),
+                            startTime = schedMap["startTime"]?.toString() ?: "",
+                            endTime = schedMap["endTime"]?.toString() ?: ""
+                        )
+                    } else null
+
+                    DiscountItem(
+                        id = doc.id,
+                        name = name,
+                        type = type,
+                        value = value,
+                        applyTo = applyTo,
+                        active = active,
+                        applyScope = applyScope,
+                        itemIds = itemIds,
+                        schedule = schedule,
+                        autoApply = autoApply
+                    )
                 }
                 adapter.submitList(list)
                 if (list.isEmpty()) {
@@ -72,6 +108,20 @@ class DiscountsActivity : AppCompatActivity() {
                     txtNoDiscounts.visibility = View.GONE
                 }
             }
+    }
+
+    private fun loadItemNamesForDiscount(item: DiscountItem, onLoaded: (List<String>) -> Unit) {
+        if (item.itemIds.isEmpty()) {
+            onLoaded(emptyList())
+            return
+        }
+        db.collection("discounts").document(item.id).get()
+            .addOnSuccessListener { doc ->
+                @Suppress("UNCHECKED_CAST")
+                val names = (doc.get("itemNames") as? List<String>) ?: emptyList()
+                onLoaded(names)
+            }
+            .addOnFailureListener { onLoaded(emptyList()) }
     }
 
     private fun setDiscountActive(item: DiscountItem, active: Boolean) {

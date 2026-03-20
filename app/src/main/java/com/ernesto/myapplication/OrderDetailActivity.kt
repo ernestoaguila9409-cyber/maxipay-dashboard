@@ -358,6 +358,8 @@ class OrderDetailActivity : AppCompatActivity() {
         val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
         val taxBreakdown = orderDoc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
         val tipAmountInCents = orderDoc.getLong("tipAmountInCents") ?: 0L
+        val discountInCents = orderDoc.getLong("discountInCents") ?: 0L
+        val appliedDiscounts = orderDoc.get("appliedDiscounts") as? List<Map<String, Any>> ?: emptyList()
 
         if (totalInCents <= 0L) {
             orderSummaryContainer.visibility = View.GONE
@@ -365,7 +367,7 @@ class OrderDetailActivity : AppCompatActivity() {
             return
         }
 
-        renderSummary(totalInCents, taxBreakdown, tipAmountInCents)
+        renderSummary(totalInCents, taxBreakdown, tipAmountInCents, discountInCents, appliedDiscounts)
     }
 
     private fun recomputeAndRefreshSummary() {
@@ -379,8 +381,11 @@ class OrderDetailActivity : AppCompatActivity() {
                             @Suppress("UNCHECKED_CAST")
                             val taxBreakdown = doc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
                             val tipAmountInCents = doc.getLong("tipAmountInCents") ?: 0L
+                            val discountInCents = doc.getLong("discountInCents") ?: 0L
+                            @Suppress("UNCHECKED_CAST")
+                            val appliedDiscounts = doc.get("appliedDiscounts") as? List<Map<String, Any>> ?: emptyList()
                             if (totalInCents > 0L) {
-                                renderSummary(totalInCents, taxBreakdown, tipAmountInCents)
+                                renderSummary(totalInCents, taxBreakdown, tipAmountInCents, discountInCents, appliedDiscounts)
                             }
                         }
                     }
@@ -390,9 +395,57 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun renderSummary(totalInCents: Long, taxBreakdown: List<Map<String, Any>>, tipAmountInCents: Long = 0L) {
+    private fun renderSummary(totalInCents: Long, taxBreakdown: List<Map<String, Any>>, tipAmountInCents: Long = 0L, discountInCents: Long = 0L, appliedDiscounts: List<Map<String, Any>> = emptyList()) {
         var taxTotalCents = 0L
         taxBreakdownContainer.removeAllViews()
+
+        if (discountInCents > 0L) {
+            val discountLabelText = if (appliedDiscounts.isNotEmpty()) {
+                appliedDiscounts.joinToString(", ") { ad ->
+                    val name = (ad["discountName"] as? String) ?: "Discount"
+                    val type = (ad["type"] as? String)?.lowercase() ?: ""
+                    val value = (ad["value"] as? Number)?.toDouble()
+                    when {
+                        type == "percentage" && value != null -> {
+                            val pct = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(java.util.Locale.US, "%.1f", value)
+                            "$name $pct% off"
+                        }
+                        type == "fixed" && value != null -> "$name $${String.format(java.util.Locale.US, "%.2f", value)} off"
+                        else -> name
+                    }
+                }
+            } else {
+                "Discount"
+            }
+
+            val discountRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = 4 }
+            }
+            val discountLabel = TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                text = discountLabelText
+                textSize = 14f
+                setTextColor(android.graphics.Color.parseColor("#2E7D32"))
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            }
+            val discountAmount = TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                text = "-${MoneyUtils.centsToDisplay(discountInCents)}"
+                textSize = 14f
+                setTextColor(android.graphics.Color.parseColor("#2E7D32"))
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            }
+            discountRow.addView(discountLabel)
+            discountRow.addView(discountAmount)
+            taxBreakdownContainer.addView(discountRow)
+        }
 
         for (entry in taxBreakdown) {
             val name = entry["name"]?.toString() ?: "Tax"
@@ -426,7 +479,7 @@ class OrderDetailActivity : AppCompatActivity() {
             taxBreakdownContainer.addView(row)
         }
 
-        val subtotalCents = totalInCents - taxTotalCents - tipAmountInCents
+        val subtotalCents = totalInCents + discountInCents - taxTotalCents - tipAmountInCents
         txtSubtotal.text = MoneyUtils.centsToDisplay(subtotalCents)
 
         if (tipAmountInCents > 0L) {

@@ -218,7 +218,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
         }
     }
 
-    /** Recompute total from items subcollection + taxes; update total + remainingBalance + status. */
+    /** Recompute total from items subcollection + taxes – discounts; update total + remainingBalance + status. */
     fun recomputeOrderTotals(
         orderId: String,
         onSuccess: () -> Unit,
@@ -232,7 +232,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
 
                 var subtotalInCents = 0L
 
-                data class LineInfo(val lineTotalInCents: Long, val taxMode: String, val taxIds: List<String>)
+                data class LineInfo(val lineKey: String, val lineTotalInCents: Long, val taxMode: String, val taxIds: List<String>)
                 val lineInfos = mutableListOf<LineInfo>()
 
                 for (doc in itemsSnap.documents) {
@@ -241,74 +241,86 @@ class OrderEngine(private val db: FirebaseFirestore) {
                     val mode = doc.getString("taxMode") ?: "INHERIT"
                     @Suppress("UNCHECKED_CAST")
                     val ids = (doc.get("taxIds") as? List<String>) ?: emptyList()
-                    lineInfos.add(LineInfo(lineTotal, mode, ids))
+                    lineInfos.add(LineInfo(doc.id, lineTotal, mode, ids))
                 }
 
                 db.collection("Taxes")
                     .get()
                     .addOnSuccessListener { taxesSnap ->
-                        var newTotalInCents = subtotalInCents
-                        val taxBreakdown = mutableListOf<Map<String, Any>>()
 
-                        for (taxDoc in taxesSnap.documents) {
-                            val taxId = taxDoc.id
-                            val name = taxDoc.getString("name") ?: continue
-                            val type = taxDoc.getString("type") ?: continue
-                            val amount = taxDoc.getDouble("amount") ?: taxDoc.getLong("amount")?.toDouble() ?: continue
-                            val taxEnabled = taxDoc.getBoolean("enabled") ?: true
+                        orderRef.get().addOnSuccessListener { orderDoc ->
+                            val discountInCents = orderDoc.getLong("discountInCents") ?: 0L
+                            val discountedSubtotalInCents = (subtotalInCents - discountInCents).coerceAtLeast(0L)
 
-                            var taxableBaseCents = 0L
-                            for (li in lineInfos) {
-                                if (li.taxMode == "FORCE_APPLY") {
-                                    if (li.taxIds.contains(taxId)) taxableBaseCents += li.lineTotalInCents
-                                } else if (taxEnabled) {
-                                    taxableBaseCents += li.lineTotalInCents
+                            var newTotalInCents = discountedSubtotalInCents
+                            val taxBreakdown = mutableListOf<Map<String, Any>>()
+
+                            for (taxDoc in taxesSnap.documents) {
+                                val taxId = taxDoc.id
+                                val name = taxDoc.getString("name") ?: continue
+                                val type = taxDoc.getString("type") ?: continue
+                                val amount = taxDoc.getDouble("amount") ?: taxDoc.getLong("amount")?.toDouble() ?: continue
+                                val taxEnabled = taxDoc.getBoolean("enabled") ?: true
+
+                                var taxableBaseCents = 0L
+                                for (li in lineInfos) {
+                                    val effectiveLineCents = if (subtotalInCents > 0) {
+                                        (li.lineTotalInCents.toDouble() / subtotalInCents * discountedSubtotalInCents).toLong()
+                                    } else 0L
+
+                                    if (li.taxMode == "FORCE_APPLY") {
+                                        if (li.taxIds.contains(taxId)) taxableBaseCents += effectiveLineCents
+                                    } else if (taxEnabled) {
+                                        taxableBaseCents += effectiveLineCents
+                                    }
                                 }
-                            }
-                            if (taxableBaseCents <= 0L) continue
+                                if (taxableBaseCents <= 0L) continue
 
-                            val taxCents = if (type == "PERCENTAGE") {
-                                ((taxableBaseCents / 100.0) * amount / 100.0 * 100).toLong()
-                            } else {
-                                (amount * 100).toLong()
-                            }
-                            newTotalInCents += taxCents
-                            taxBreakdown.add(mapOf(
-                                "name" to name,
-                                "amountInCents" to taxCents
-                            ))
-                        }
-
-                        db.runTransaction { trx ->
-
-                            val orderSnap = trx.get(orderRef)
-
-                            val totalPaidInCents =
-                                orderSnap.getLong("totalPaidInCents") ?: 0L
-
-                            val remainingInCents =
-                                (newTotalInCents - totalPaidInCents)
-                                    .coerceAtLeast(0L)
-
-                            val newStatus = when {
-                                remainingInCents > 0L -> "OPEN"
-                                totalPaidInCents > 0L -> "CLOSED"
-                                else -> orderSnap.getString("status") ?: "OPEN"
+                                val taxCents = if (type == "PERCENTAGE") {
+                                    ((taxableBaseCents / 100.0) * amount / 100.0 * 100).toLong()
+                                } else {
+                                    (amount * 100).toLong()
+                                }
+                                newTotalInCents += taxCents
+                                taxBreakdown.add(mapOf(
+                                    "name" to name,
+                                    "rate" to amount,
+                                    "taxType" to type,
+                                    "amountInCents" to taxCents
+                                ))
                             }
 
-                            val updates = mutableMapOf<String, Any>(
-                                "totalInCents" to newTotalInCents,
-                                "remainingInCents" to remainingInCents,
-                                "status" to newStatus,
-                                "updatedAt" to Date()
-                            )
-                            if (taxBreakdown.isNotEmpty()) {
-                                updates["taxBreakdown"] = taxBreakdown
+                            db.runTransaction { trx ->
+
+                                val orderSnap = trx.get(orderRef)
+
+                                val totalPaidInCents =
+                                    orderSnap.getLong("totalPaidInCents") ?: 0L
+
+                                val remainingInCents =
+                                    (newTotalInCents - totalPaidInCents)
+                                        .coerceAtLeast(0L)
+
+                                val newStatus = when {
+                                    remainingInCents > 0L -> "OPEN"
+                                    totalPaidInCents > 0L -> "CLOSED"
+                                    else -> orderSnap.getString("status") ?: "OPEN"
+                                }
+
+                                val updates = mutableMapOf<String, Any>(
+                                    "totalInCents" to newTotalInCents,
+                                    "remainingInCents" to remainingInCents,
+                                    "status" to newStatus,
+                                    "updatedAt" to Date()
+                                )
+                                if (taxBreakdown.isNotEmpty()) {
+                                    updates["taxBreakdown"] = taxBreakdown
+                                }
+                                trx.update(orderRef, updates)
                             }
-                            trx.update(orderRef, updates)
-                        }
-                            .addOnSuccessListener { onSuccess() }
-                            .addOnFailureListener { e -> onFailure(e) }
+                                .addOnSuccessListener { onSuccess() }
+                                .addOnFailureListener { e -> onFailure(e) }
+                        }.addOnFailureListener { e -> onFailure(e) }
                     }
                     .addOnFailureListener { e -> onFailure(e) }
             }

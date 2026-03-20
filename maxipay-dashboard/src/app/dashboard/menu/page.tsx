@@ -60,6 +60,7 @@ interface MenuEntity {
   id: string;
   name: string;
   isActive: boolean;
+  scheduleIds: string[];
 }
 
 interface MenuItem {
@@ -78,6 +79,7 @@ interface MenuItem {
   isScheduled: boolean;
   scheduleIds: string[];
   categoryScheduled: boolean;
+  categoryScheduleIds: string[];
 }
 
 interface ModifierGroup {
@@ -160,6 +162,7 @@ export default function MenuPage() {
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [viewMode, setViewMode] = useState<"compact" | "card">("compact");
   const [menuTypeFilter, setMenuTypeFilter] = useState<string | null>(null);
+  const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
 
   const catSnap = useRef<Map<string, { name: string; availableOrderTypes: string[]; scheduleIds: string[] }>>(new Map());
   const itemSnap = useRef<
@@ -189,6 +192,7 @@ export default function MenuPage() {
           categoryName: cat?.name ?? "Uncategorized",
           effectiveOrderTypes: effective,
           categoryScheduled: (cat?.scheduleIds.length ?? 0) > 0,
+          categoryScheduleIds: cat?.scheduleIds ?? [],
         };
       });
       menuItems.sort((a, b) => a.name.localeCompare(b.name));
@@ -311,6 +315,7 @@ export default function MenuPage() {
             id: d.id,
             name: data.name,
             isActive: data.isActive ?? true,
+            scheduleIds: Array.isArray(data.scheduleIds) ? data.scheduleIds : [],
           });
         }
       });
@@ -335,16 +340,27 @@ export default function MenuPage() {
   const itemsForMenuType = items.filter((item) => {
     if (menuTypeFilter === "POS" && (item.categoryScheduled || item.isScheduled))
       return false;
-    if (menuTypeFilter && menuTypeFilter !== "POS" && item.menuId !== menuTypeFilter)
+    if (menuTypeFilter && menuTypeFilter !== "POS") {
+      if (item.menuId === menuTypeFilter) return true;
+      const menuEntity = menuEntities.find((m) => m.id === menuTypeFilter);
+      if (!menuEntity) return false;
+      const menuSchedIds = new Set(menuEntity.scheduleIds);
+      const itemSchedIds = item.scheduleIds.length > 0 ? item.scheduleIds : item.categoryScheduleIds;
+      if (itemSchedIds.some((sid) => menuSchedIds.has(sid))) return true;
       return false;
+    }
     return true;
   });
 
   const visibleCategoryIds = new Set(itemsForMenuType.map((i) => i.categoryId));
 
   const filtered = itemsForMenuType.filter((item) => {
-    if (search && !item.name.toLowerCase().includes(search.toLowerCase()))
-      return false;
+    const q = search.trim().toLowerCase();
+    if (q) {
+      const name = item.name.toLowerCase();
+      const words = q.split(/\s+/).filter(Boolean);
+      return words.every((w) => name.includes(w));
+    }
     if (activeCategory && item.categoryId !== activeCategory) return false;
     return true;
   });
@@ -355,6 +371,13 @@ export default function MenuPage() {
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key)!.push(item);
   }
+
+  // Clear selected item if it's no longer in filtered list
+  useEffect(() => {
+    if (selectedItem && !filtered.some((i) => i.id === selectedItem.id)) {
+      setSelectedItem(null);
+    }
+  }, [filtered, selectedItem?.id]);
   const sortedGroups = Array.from(grouped.entries()).sort(([a], [b]) => {
     if (a === "Uncategorized") return 1;
     if (b === "Uncategorized") return -1;
@@ -423,12 +446,21 @@ export default function MenuPage() {
   const openEdit = (item: MenuItem) => {
     setEditTarget(item);
     const priceStrings: Record<string, string> = {};
+    // Populate from item.prices for all existing keys
+    for (const [key, val] of Object.entries(item.prices)) {
+      priceStrings[key] = (typeof val === "number" ? val : 0).toFixed(2);
+    }
+    // Ensure "default" exists for POS items (no menuId) - use item.price as fallback
+    if (!item.menuId && !priceStrings["default"]) {
+      priceStrings["default"] = item.price.toFixed(2);
+    }
+    // For menu entities, ensure each menu has a price (use default or 0)
     if (menuEntities.length > 0) {
       for (const m of menuEntities) {
-        priceStrings[m.id] = item.prices[m.id]?.toFixed(2) ?? "";
+        if (!(m.id in priceStrings)) {
+          priceStrings[m.id] = item.prices[m.id]?.toFixed(2) ?? item.price.toFixed(2) ?? "0.00";
+        }
       }
-    } else {
-      priceStrings["default"] = item.price.toFixed(2);
     }
     setEditPrices(priceStrings);
     setEditStock(String(item.stock));
@@ -737,8 +769,8 @@ export default function MenuPage() {
 
   return (
     <>
-      <Header title="Menu" />
-      <div className="px-4 pt-3 pb-4 space-y-3">
+      <Header title="Menu" searchValue={search} onSearchChange={setSearch} />
+      <div className="px-5 pt-3 pb-6 space-y-4">
         {/* ── Top bar ── */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
@@ -901,67 +933,67 @@ export default function MenuPage() {
             <div className="w-5 h-5 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin" />
           </div>
         ) : (
-          <div className="flex gap-4">
-            {/* ── Category sidebar ── */}
+          <div className="flex gap-5 min-h-[calc(100vh-11rem)]">
+            {/* ── Category sidebar (fixed 220px) ── */}
             {categories.length > 0 && (
-              <div className="w-48 shrink-0 hidden md:block">
-                <div className="sticky top-4 bg-white rounded-lg border border-slate-200 overflow-hidden">
-                  <div className="px-3.5 py-2 border-b border-slate-100">
-                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Categories</p>
+              <div className="hidden lg:block w-[280px] shrink-0">
+                <div className="sticky top-4 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="px-4 py-3 border-b border-slate-100">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Categories</p>
                   </div>
-                  <nav className="flex flex-col max-h-[calc(100vh-10rem)] overflow-y-auto py-0.5">
+                  <nav className="flex flex-col max-h-[calc(100vh-12rem)] overflow-y-auto py-1">
                     <button
                       onClick={() => setActiveCategory(null)}
-                      className={`w-full flex items-center justify-between h-[42px] px-3.5 text-[14px] transition-colors ${
+                      className={`w-full flex items-center justify-between px-4 py-3 text-base transition-all duration-150 ${
                         activeCategory === null
-                          ? "bg-blue-50/70 text-blue-700 font-semibold border-l-[3px] border-blue-600"
-                          : "text-slate-600 font-medium hover:bg-slate-50 border-l-[3px] border-transparent"
+                          ? "bg-blue-50 text-blue-700 font-bold border-l-4 border-blue-600"
+                          : "text-slate-600 font-semibold hover:bg-slate-50 border-l-4 border-transparent"
                       }`}
                     >
                       <span>All Items</span>
-                      <span className="text-[11px] text-slate-400 font-normal tabular-nums">{itemsForMenuType.length}</span>
+                      <span className="text-xs text-slate-400 font-medium tabular-nums bg-slate-100 px-2 py-0.5 rounded-full">{itemsForMenuType.length}</span>
                     </button>
                     {categories.filter((cat) => !menuTypeFilter || visibleCategoryIds.has(cat.id)).map((cat) => {
                       const catItemCount = itemsForMenuType.filter((i) => i.categoryId === cat.id).length;
                       return (
                         <div
                           key={cat.id}
-                          className={`group/cat flex items-center h-[42px] transition-colors ${
+                          className={`group/cat flex items-center transition-all duration-150 ${
                             activeCategory === cat.id
-                              ? "bg-blue-50/70 border-l-[3px] border-blue-600"
-                              : "hover:bg-slate-50 border-l-[3px] border-transparent"
+                              ? "bg-blue-50 border-l-4 border-blue-600"
+                              : "hover:bg-slate-50 border-l-4 border-transparent"
                           }`}
                         >
                           <button
                             onClick={() => setActiveCategory(activeCategory === cat.id ? null : cat.id)}
-                            className={`flex-1 flex items-center justify-between h-full px-3.5 text-[14px] truncate ${
-                              activeCategory === cat.id ? "text-blue-700 font-semibold" : "text-slate-600 font-medium"
+                            className={`flex-1 flex items-center justify-between px-4 py-3 text-base truncate ${
+                              activeCategory === cat.id ? "text-blue-700 font-bold" : "text-slate-600 font-semibold"
                             }`}
                           >
-                            <span className="flex items-center gap-1.5 truncate">
+                            <span className="flex items-center gap-2 truncate">
                               <span className="truncate">{cat.name}</span>
                               {cat.scheduleIds.length > 0 && (
-                                <span className="text-[8px] px-1 py-0.5 rounded bg-blue-50 text-blue-500 font-semibold leading-none shrink-0" title={cat.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}>
+                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-500 font-bold leading-none shrink-0" title={cat.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}>
                                   Sched
                                 </span>
                               )}
                             </span>
-                            <span className="text-[11px] text-slate-400 font-normal ml-2 tabular-nums">{catItemCount}</span>
+                            <span className="text-xs text-slate-400 font-medium ml-2 tabular-nums bg-slate-100 px-2 py-0.5 rounded-full">{catItemCount}</span>
                           </button>
-                          <div className="flex items-center gap-0.5 pr-1.5 opacity-0 group-hover/cat:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover/cat:opacity-100 transition-opacity">
                             <button
                               onClick={(e) => { e.stopPropagation(); openEditCategory(cat); }}
-                              className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors"
+                              className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors"
                               title="Edit category"
                             >
-                              <Pencil size={11} />
+                              <Pencil size={12} />
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); setDeleteCategoryTarget(cat); }}
-                              className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                              className="p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
                               title="Delete category"
                             >
-                              <Trash2 size={11} />
+                              <Trash2 size={12} />
                             </button>
                           </div>
                         </div>
@@ -974,11 +1006,11 @@ export default function MenuPage() {
 
             {/* ── Mobile category bar ── */}
             {categories.length > 0 && (
-              <div className="md:hidden flex gap-1.5 overflow-x-auto pb-1 -mt-1 mb-1 w-full">
+              <div className="lg:hidden flex gap-2 overflow-x-auto pb-1 -mt-1 mb-1 w-full">
                 <button
                   onClick={() => setActiveCategory(null)}
-                  className={`shrink-0 px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-                    activeCategory === null ? "bg-blue-600 text-white" : "bg-white border border-slate-200 text-slate-600"
+                  className={`shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                    activeCategory === null ? "bg-blue-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600"
                   }`}
                 >
                   All
@@ -987,8 +1019,8 @@ export default function MenuPage() {
                   <button
                     key={cat.id}
                     onClick={() => setActiveCategory(activeCategory === cat.id ? null : cat.id)}
-                    className={`shrink-0 px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-                      activeCategory === cat.id ? "bg-blue-600 text-white" : "bg-white border border-slate-200 text-slate-600"
+                    className={`shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                      activeCategory === cat.id ? "bg-blue-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600"
                     }`}
                   >
                     {cat.name}
@@ -997,47 +1029,47 @@ export default function MenuPage() {
               </div>
             )}
 
-            {/* ── Content ── */}
-            <div className="flex-1 min-w-0">
+            {/* ── Items list (fills all remaining width) ── */}
+            <div className="flex-1 min-w-0 overflow-y-auto">
               {filtered.length === 0 ? (
-                <div className="bg-white rounded-lg border border-slate-100 p-10 text-center">
-                  <p className="text-slate-400 text-sm">No menu items found</p>
-                  <p className="text-slate-300 text-xs mt-1">Items from your POS will appear here</p>
+                <div className="bg-white rounded-xl border border-slate-100 p-16 text-center">
+                  <p className="text-slate-400 text-base">No menu items found</p>
+                  <p className="text-slate-300 text-sm mt-1">Items from your POS will appear here</p>
                 </div>
               ) : viewMode === "compact" ? (
                 /* ── Compact list view ── */
-                <div className="space-y-4">
+                <div className="space-y-6">
                   {sortedGroups.map(([categoryName, groupItems]) => (
-                    <section key={categoryName}>
-                      <div className="flex items-center gap-2 mb-1 px-1">
-                        <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{categoryName}</h2>
-                        <span className="text-[11px] text-slate-300">({groupItems.length})</span>
+                    <section key={categoryName} className="animate-in fade-in duration-200">
+                      <div className="flex items-center gap-3 mb-2 px-1">
+                        <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider">{categoryName}</h2>
+                        <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">{groupItems.length}</span>
                       </div>
-                      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                        <div className="hidden sm:flex items-center gap-3 px-3 py-1.5 bg-slate-50/80 border-b border-slate-100">
-                          {selectMode && <div className="w-4 shrink-0" />}
-                          <div className="flex-1 min-w-0 text-[11px] font-medium text-slate-400 uppercase tracking-wider">Item</div>
-                          <div className="w-28 text-center shrink-0 text-[11px] font-medium text-slate-400 uppercase tracking-wider">Type</div>
-                          <div className="w-12 text-center shrink-0 text-[11px] font-medium text-slate-400 uppercase tracking-wider">Info</div>
-                          <div className="w-[72px] text-right shrink-0 text-[11px] font-medium text-slate-400 uppercase tracking-wider">Price</div>
-                          {!selectMode && <div className="w-16 shrink-0" />}
+                      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                        <div className="hidden sm:flex items-center gap-4 px-5 py-3 bg-slate-50 border-b border-slate-200">
+                          {selectMode && <div className="w-5 shrink-0" />}
+                          <div className="flex-1 min-w-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Item</div>
+                          <div className="w-44 text-center shrink-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Type</div>
+                          <div className="w-36 text-center shrink-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Info</div>
+                          <div className="w-24 text-right shrink-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Price</div>
+                          {!selectMode && <div className="w-20 shrink-0" />}
                         </div>
-                        <div className="divide-y divide-slate-50">
+                        <div className="divide-y divide-slate-200">
                           {groupItems.map((item) => {
                             const inStock = !stockCountingEnabled || item.stock > 0;
                             const isSelected = selectedItems.has(item.id);
                             return (
                               <div
                                 key={item.id}
-                                onClick={selectMode ? () => toggleSelectItem(item.id) : undefined}
-                                className={`flex items-center gap-3 px-3 h-[50px] transition-colors group ${
-                                  selectMode ? "cursor-pointer" : ""
-                                } ${
-                                  isSelected
+                                onClick={selectMode ? () => toggleSelectItem(item.id) : () => setSelectedItem((prev) => (prev?.id === item.id ? null : item))}
+                                className={`flex items-center gap-4 px-5 py-4 transition-all duration-150 group cursor-pointer ${
+                                  selectedItem?.id === item.id
+                                    ? "bg-blue-50 ring-1 ring-inset ring-blue-200"
+                                    : isSelected
                                     ? "bg-blue-50/60"
                                     : !inStock
-                                    ? "bg-red-50/20"
-                                    : "hover:bg-slate-50/60"
+                                    ? "bg-red-50/30"
+                                    : "hover:bg-slate-50"
                                 }`}
                               >
                                 {selectMode && (
@@ -1045,62 +1077,65 @@ export default function MenuPage() {
                                     type="checkbox"
                                     checked={isSelected}
                                     readOnly
-                                    className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 pointer-events-none shrink-0"
+                                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 pointer-events-none shrink-0"
                                   />
                                 )}
-                                <div className="flex-1 min-w-0 flex items-center gap-2">
-                                  <span className={`text-[13px] font-semibold truncate ${inStock ? "text-slate-800" : "text-slate-400 line-through"}`}>
+                                <div className="flex-1 min-w-0 flex items-center gap-3">
+                                  <span className={`text-[17px] font-semibold truncate ${inStock ? "text-slate-800" : "text-slate-400 line-through"}`}>
                                     {item.name}
                                   </span>
                                   {!inStock && (
-                                    <span className="text-[9px] px-1 py-0.5 rounded bg-red-100 text-red-600 font-bold leading-none shrink-0">OUT</span>
+                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-bold shrink-0">OUT</span>
                                   )}
                                   {stockCountingEnabled && inStock && item.stock <= 10 && (
-                                    <span className="text-[10px] text-amber-500 font-medium shrink-0">{item.stock} left</span>
+                                    <span className="text-xs text-amber-500 font-semibold shrink-0">{item.stock} left</span>
                                   )}
                                 </div>
-                                <div className="w-28 hidden sm:flex items-center justify-center gap-1 shrink-0 flex-wrap">
+                                <div className="w-44 hidden sm:flex items-center justify-center gap-1.5 shrink-0 flex-wrap">
                                   {item.effectiveOrderTypes.map((t) => (
-                                    <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-semibold leading-none">
+                                    <span key={t} className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-semibold">
                                       {ORDER_TYPE_LABELS[t] ?? t}
                                     </span>
                                   ))}
                                 </div>
-                                <div className="w-20 hidden sm:flex items-center justify-center gap-1 shrink-0 flex-wrap">
+                                <div className="w-36 hidden sm:flex items-center justify-center gap-1.5 shrink-0 flex-wrap">
                                   {!item.categoryScheduled && !item.isScheduled && (
-                                    <span className="text-[8px] px-1 py-0.5 rounded bg-emerald-50 text-emerald-600 font-semibold leading-none">
+                                    <span className="text-[11px] px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-semibold">
                                       POS
                                     </span>
                                   )}
                                   {item.menuId && (
                                     <span
-                                      className="text-[8px] px-1 py-0.5 rounded bg-purple-50 text-purple-600 font-semibold leading-none truncate max-w-full"
+                                      className="text-[11px] px-2 py-0.5 rounded-md bg-purple-50 text-purple-600 font-semibold truncate max-w-[72px]"
                                       title={menuEntityMap.get(item.menuId) ?? ""}
                                     >
                                       {menuEntityMap.get(item.menuId) ?? "Menu"}
                                     </span>
                                   )}
-                                  {item.isScheduled && (
-                                    <span className="text-[8px] px-1 py-0.5 rounded bg-blue-50 text-blue-600 font-semibold leading-none">
-                                      Sched
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="w-12 hidden sm:flex items-center justify-center gap-1.5 shrink-0">
+                                  {(() => {
+                                    const sIds = item.scheduleIds.length > 0
+                                      ? item.scheduleIds
+                                      : item.categoryScheduleIds;
+                                    return sIds.map((sid) => (
+                                      <span key={sid} className="text-[11px] px-2 py-0.5 rounded-md bg-blue-50 text-blue-600 font-semibold truncate max-w-[72px]" title={scheduleMap.get(sid) ?? sid}>
+                                        {scheduleMap.get(sid) ?? "Sched"}
+                                      </span>
+                                    ));
+                                  })()}
                                   {item.modifierGroupIds.length > 0 && (
                                     <span
-                                      className="w-2 h-2 rounded-full bg-purple-400 shrink-0"
+                                      className="w-2.5 h-2.5 rounded-full bg-purple-400 shrink-0"
                                       title={item.modifierGroupIds.map((id) => modGroupMap.get(id) ?? id).join(", ")}
                                     />
                                   )}
                                   {item.taxIds.length > 0 && (
                                     <span
-                                      className="w-2 h-2 rounded-full bg-amber-400 shrink-0"
+                                      className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0"
                                       title={item.taxIds.map((id) => taxMap.get(id) ?? id).join(", ")}
                                     />
                                   )}
                                 </div>
-                                <span className="w-[72px] text-right text-[13px] font-semibold text-slate-700 shrink-0 tabular-nums">
+                                <span className="w-24 text-right text-lg font-bold text-slate-800 shrink-0 tabular-nums">
                                   {Object.keys(item.prices).length > 1 ? (
                                     <span title={Object.entries(item.prices).map(([k, v]) => `${menuEntityMap.get(k) ?? k}: $${v.toFixed(2)}`).join(", ")}>
                                       ${Math.min(...Object.values(item.prices)).toFixed(2)}+
@@ -1110,20 +1145,20 @@ export default function MenuPage() {
                                   )}
                                 </span>
                                 {!selectMode && (
-                                  <div className="w-16 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                  <div className="w-20 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                                     <button
-                                      onClick={() => openEdit(item)}
-                                      className="p-1.5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                      onClick={(e) => { e.stopPropagation(); openEdit(item); }}
+                                      className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                                       title="Edit"
                                     >
-                                      <Pencil size={13} />
+                                      <Pencil size={15} />
                                     </button>
                                     <button
-                                      onClick={() => setDeleteTarget(item)}
-                                      className="p-1.5 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                      onClick={(e) => { e.stopPropagation(); setDeleteTarget(item); }}
+                                      className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
                                       title="Delete"
                                     >
-                                      <Trash2 size={13} />
+                                      <Trash2 size={15} />
                                     </button>
                                   </div>
                                 )}
@@ -1137,118 +1172,123 @@ export default function MenuPage() {
                 </div>
               ) : (
                 /* ── Card view ── */
-                <div className="space-y-5">
+                <div className="space-y-6">
                   {sortedGroups.map(([categoryName, groupItems]) => (
-                    <section key={categoryName}>
-                      <div className="flex items-center gap-2 mb-2 px-0.5">
-                        <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{categoryName}</h2>
-                        <span className="text-[11px] text-slate-300">({groupItems.length})</span>
+                    <section key={categoryName} className="animate-in fade-in duration-200">
+                      <div className="flex items-center gap-3 mb-3 px-1">
+                        <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider">{categoryName}</h2>
+                        <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">{groupItems.length}</span>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
                         {groupItems.map((item) => {
                           const inStock = !stockCountingEnabled || item.stock > 0;
                           const isSelected = selectedItems.has(item.id);
                           return (
                             <div
                               key={item.id}
-                              onClick={selectMode ? () => toggleSelectItem(item.id) : undefined}
-                              className={`group bg-white rounded-lg p-3.5 border hover:shadow-sm transition-all ${
-                                selectMode ? "cursor-pointer" : ""
-                              } ${
-                                isSelected
+                              onClick={selectMode ? () => toggleSelectItem(item.id) : () => setSelectedItem((prev) => (prev?.id === item.id ? null : item))}
+                              className={`group bg-white rounded-xl p-5 border hover:shadow-md transition-all duration-200 cursor-pointer ${
+                                selectedItem?.id === item.id
+                                  ? "border-blue-400 bg-blue-50/60 ring-2 ring-blue-400/40 shadow-md"
+                                  : isSelected
                                   ? "border-blue-400 bg-blue-50/40 ring-1 ring-blue-400/30"
                                   : inStock
-                                  ? "border-slate-200"
+                                  ? "border-slate-200 hover:border-slate-300"
                                   : "border-red-200 bg-red-50/30"
                               }`}
                             >
-                              <div className="flex items-start justify-between mb-2">
+                              <div className="flex items-start justify-between mb-3">
                                 <div className="flex items-center gap-2 min-w-0">
                                   {selectMode && (
                                     <input
                                       type="checkbox"
                                       checked={isSelected}
                                       readOnly
-                                      className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 pointer-events-none shrink-0"
+                                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 pointer-events-none shrink-0"
                                     />
                                   )}
-                                  <h3 className={`text-sm font-semibold truncate ${inStock ? "text-slate-800" : "text-slate-400"}`}>
+                                  <h3 className={`text-base font-bold truncate ${inStock ? "text-slate-800" : "text-slate-400"}`}>
                                     {item.name}
                                   </h3>
                                 </div>
                                 {!selectMode && (
                                   <div className="flex items-center gap-0.5 shrink-0">
                                     <button
-                                      onClick={() => openEdit(item)}
-                                      className="p-1 rounded text-slate-300 opacity-0 group-hover:opacity-100 hover:bg-blue-50 hover:text-blue-500 transition-all"
+                                      onClick={(e) => { e.stopPropagation(); openEdit(item); }}
+                                      className="p-1.5 rounded-lg text-slate-300 opacity-0 group-hover:opacity-100 hover:bg-blue-50 hover:text-blue-500 transition-all"
                                       title="Edit"
                                     >
-                                      <Pencil size={13} />
+                                      <Pencil size={14} />
                                     </button>
                                     <button
-                                      onClick={() => setDeleteTarget(item)}
-                                      className="p-1 rounded text-slate-300 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 transition-all"
+                                      onClick={(e) => { e.stopPropagation(); setDeleteTarget(item); }}
+                                      className="p-1.5 rounded-lg text-slate-300 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 transition-all"
                                       title="Delete"
                                     >
-                                      <Trash2 size={13} />
+                                      <Trash2 size={14} />
                                     </button>
                                   </div>
                                 )}
                               </div>
 
-                              <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center justify-between mb-3">
                                 <div>
                                   {Object.keys(item.prices).length > 1 ? (
-                                    <div className="flex flex-col">
+                                    <div className="flex flex-col gap-0.5">
                                       {Object.entries(item.prices).map(([k, v]) => (
-                                        <span key={k} className="text-sm font-semibold text-slate-700 tabular-nums">
-                                          <span className="text-[10px] text-slate-400 font-medium">{menuEntityMap.get(k) ?? k}: </span>
+                                        <span key={k} className="text-base font-bold text-slate-700 tabular-nums">
+                                          <span className="text-xs text-slate-400 font-medium">{menuEntityMap.get(k) ?? k}: </span>
                                           ${v.toFixed(2)}
                                         </span>
                                       ))}
                                     </div>
                                   ) : (
-                                    <p className="text-lg font-bold text-slate-800 tabular-nums">${item.price.toFixed(2)}</p>
+                                    <p className="text-xl font-bold text-slate-800 tabular-nums">${item.price.toFixed(2)}</p>
                                   )}
                                 </div>
                                 {stockCountingEnabled && (
-                                  <div className="flex items-center gap-1 text-xs">
-                                    <Package size={11} className={item.stock > 0 ? "text-emerald-500" : "text-red-400"} />
-                                    <span className={`font-medium ${item.stock > 0 ? "text-emerald-600" : "text-red-500"}`}>
+                                  <div className="flex items-center gap-1.5 text-sm">
+                                    <Package size={14} className={item.stock > 0 ? "text-emerald-500" : "text-red-400"} />
+                                    <span className={`font-semibold ${item.stock > 0 ? "text-emerald-600" : "text-red-500"}`}>
                                       {item.stock > 0 ? item.stock : "OUT"}
                                     </span>
                                   </div>
                                 )}
                               </div>
 
-                              <div className="flex items-center gap-1 flex-wrap">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 {item.menuId && (
-                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 font-semibold leading-none">
+                                  <span className="text-[11px] px-2 py-1 rounded-full bg-purple-50 text-purple-600 font-semibold">
                                     {menuEntityMap.get(item.menuId) ?? "Menu"}
                                   </span>
                                 )}
                                 {!item.categoryScheduled && !item.isScheduled && (
-                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 font-semibold leading-none">
+                                  <span className="text-[11px] px-2 py-1 rounded-full bg-emerald-50 text-emerald-600 font-semibold">
                                     POS
                                   </span>
                                 )}
-                                {item.isScheduled && (
-                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-semibold leading-none">
-                                    Scheduled
-                                  </span>
-                                )}
+                                {(() => {
+                                  const sIds = item.scheduleIds.length > 0
+                                    ? item.scheduleIds
+                                    : item.categoryScheduleIds;
+                                  return sIds.map((sid) => (
+                                    <span key={sid} className="text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-600 font-semibold" title={scheduleMap.get(sid) ?? sid}>
+                                      {scheduleMap.get(sid) ?? "Scheduled"}
+                                    </span>
+                                  ));
+                                })()}
                                 {item.effectiveOrderTypes.map((t) => (
-                                  <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-semibold leading-none">
+                                  <span key={t} className="text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 font-semibold">
                                     {ORDER_TYPE_LABELS[t] ?? t}
                                   </span>
                                 ))}
                                 {item.modifierGroupIds.length > 0 && item.modifierGroupIds.map((id) => (
-                                  <span key={id} className="text-[9px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 font-medium leading-none">
+                                  <span key={id} className="text-[10px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 font-medium">
                                     {modGroupMap.get(id) ?? id}
                                   </span>
                                 ))}
                                 {item.taxIds.length > 0 && item.taxIds.map((id) => (
-                                  <span key={id} className="text-[9px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 font-medium leading-none">
+                                  <span key={id} className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 font-medium">
                                     {taxMap.get(id) ?? id}
                                   </span>
                                 ))}

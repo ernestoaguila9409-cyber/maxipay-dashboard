@@ -152,7 +152,7 @@
         android:id="@+id/txtItemCount"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="Select a category"
+        android:text="Select a category or search for an item"
         android:textColor="#94A3B8"
         android:textSize="12sp"
         android:paddingStart="20dp"

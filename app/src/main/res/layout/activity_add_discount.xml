@@ -22,7 +22,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Choose type, name, value, and scope."
+            android:text="Choose type, name, value, scope, and schedule."
             android:textSize="14sp"
             android:textColor="@android:color/darker_gray"
             android:paddingBottom="24dp" />
@@ -98,11 +98,11 @@
             android:background="@android:color/white"
             android:padding="16dp" />
 
-        <!-- Applies To: Order or Item -->
+        <!-- Apply Scope -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Applies To"
+            android:text="Apply Scope"
             android:textSize="14sp"
             android:textStyle="bold"
             android:paddingTop="20dp"
@@ -112,25 +112,188 @@
             android:id="@+id/radioDiscountApplyTo"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
+            android:orientation="vertical"
             android:background="@android:color/white"
             android:padding="16dp">
 
             <RadioButton
                 android:id="@+id/radioApplyOrder"
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Order"
+                android:text="Apply to entire order"
                 android:checked="true" />
 
             <RadioButton
                 android:id="@+id/radioApplyItem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Apply to specific items" />
+
+            <RadioButton
+                android:id="@+id/radioApplyManual"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Show as option in checkout" />
+        </RadioGroup>
+
+        <!-- Item Selector (only visible when item scope) -->
+        <LinearLayout
+            android:id="@+id/itemSelectorContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:paddingTop="12dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Select Items"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:paddingBottom="8dp" />
+
+            <TextView
+                android:id="@+id/txtSelectedItems"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="No items selected"
+                android:textSize="13sp"
+                android:textColor="@android:color/darker_gray"
+                android:background="@android:color/white"
+                android:padding="16dp" />
+
+            <Button
+                android:id="@+id/btnSelectItems"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Choose Items"
+                android:layout_marginTop="8dp" />
+        </LinearLayout>
+
+        <!-- Schedule Section -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Schedule (optional)"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:paddingTop="20dp"
+            android:paddingBottom="8dp" />
+
+        <LinearLayout
+            android:id="@+id/daysContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="@android:color/white"
+            android:padding="12dp"
+            android:gravity="center" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingTop="12dp"
+            android:gravity="center_vertical">
+
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Item" />
-        </RadioGroup>
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Start Time"
+                    android:textSize="12sp"
+                    android:textColor="@android:color/darker_gray" />
+
+                <TextView
+                    android:id="@+id/txtStartTime"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="--:--"
+                    android:textSize="16sp"
+                    android:background="@android:color/white"
+                    android:padding="12dp"
+                    android:gravity="center"
+                    android:layout_marginTop="4dp" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=" to "
+                android:textSize="14sp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="End Time"
+                    android:textSize="12sp"
+                    android:textColor="@android:color/darker_gray" />
+
+                <TextView
+                    android:id="@+id/txtEndTime"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="--:--"
+                    android:textSize="16sp"
+                    android:background="@android:color/white"
+                    android:padding="12dp"
+                    android:gravity="center"
+                    android:layout_marginTop="4dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Auto Apply toggle -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@android:color/white"
+            android:padding="16dp"
+            android:layout_marginTop="20dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Auto Apply"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Automatically apply when conditions match"
+                    android:textSize="12sp"
+                    android:textColor="@android:color/darker_gray" />
+            </LinearLayout>
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switchAutoApply"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true" />
+        </LinearLayout>
 
         <!-- Active toggle -->
         <LinearLayout
@@ -140,7 +303,7 @@
             android:gravity="center_vertical"
             android:background="@android:color/white"
             android:padding="16dp"
-            android:layout_marginTop="20dp">
+            android:layout_marginTop="12dp">
 
             <TextView
                 android:layout_width="0dp"

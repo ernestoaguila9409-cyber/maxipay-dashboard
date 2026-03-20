@@ -5,13 +5,14 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.textfield.TextInputLayout
 import com.google.firebase.firestore.FirebaseFirestore
 
 class EmployeesActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
-    private lateinit var btnAdd: ImageButton
+    private lateinit var btnAdd: FloatingActionButton
     private lateinit var container: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,16 +47,23 @@ class EmployeesActivity : AppCompatActivity() {
                     val role = doc.getString("role") ?: ""
                     val pin = doc.getString("pin") ?: ""
 
-                    val textView = TextView(this)
-                    textView.text = "$name - $role"
-                    textView.textSize = 18f
-                    textView.setPadding(0, 30, 0, 30)
+                    val row = LayoutInflater.from(this).inflate(R.layout.item_employee, container, false)
 
-                    textView.setOnClickListener {
+                    val txtName = row.findViewById<TextView>(R.id.txtEmployeeName)
+                    val txtRole = row.findViewById<TextView>(R.id.txtEmployeeRole)
+                    val btnEdit = row.findViewById<ImageButton>(R.id.btnEdit)
+
+                    txtName.text = name
+                    txtRole.text = role
+
+                    row.setOnClickListener {
+                        showEditEmployeeDialog(employeeId, name, pin, role)
+                    }
+                    btnEdit.setOnClickListener {
                         showEditEmployeeDialog(employeeId, name, pin, role)
                     }
 
-                    container.addView(textView)
+                    container.addView(row)
                 }
             }
     }

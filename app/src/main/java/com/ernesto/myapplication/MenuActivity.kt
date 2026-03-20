@@ -17,7 +17,9 @@ import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import com.ernesto.myapplication.engine.AppliedDiscount
 import com.ernesto.myapplication.engine.CaptureResult
+import com.ernesto.myapplication.engine.DiscountEngine
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.ernesto.myapplication.engine.OrderEngine
 import com.ernesto.myapplication.engine.PaymentService
@@ -41,6 +43,7 @@ class MenuActivity : AppCompatActivity() {
     // key = lineKey (doc id in Orders/{orderId}/items)
     private val cartMap = mutableMapOf<String, CartItem>()
     private lateinit var orderEngine: OrderEngine
+    private lateinit var discountEngine: DiscountEngine
     private lateinit var categoryContainer: LinearLayout
     private lateinit var itemContainer: LinearLayout
     private lateinit var cartContainer: LinearLayout
@@ -51,6 +54,8 @@ class MenuActivity : AppCompatActivity() {
 
     private var totalAmount = 0.0
     private var allTaxes = mutableListOf<TaxItem>()
+    private var appliedDiscounts = listOf<AppliedDiscount>()
+    private var discountTotalCents = 0L
     private var employeeName: String = ""
     private var orderType: String = ""
     private var currentOrderId: String? = null
@@ -107,6 +112,7 @@ class MenuActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_menu)
         orderEngine = OrderEngine(db)
+        discountEngine = DiscountEngine(db)
         paymentService = PaymentService(this)
         employeeName = intent.getStringExtra("employeeName") ?: ""
         orderType = intent.getStringExtra("orderType") ?: ""
@@ -152,6 +158,7 @@ class MenuActivity : AppCompatActivity() {
                 loadActiveSchedules { loadCategories() }
             }
         loadAllTaxes()
+        discountEngine.loadDiscounts { refreshCart() }
         updateCustomerDisplay()
 
         // ✅ Load existing order items into cart if ORDER_ID was provided
@@ -199,6 +206,7 @@ class MenuActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         loadAllTaxes()
+        discountEngine.loadDiscounts { refreshCart() }
     }
 
     private fun loadAllTaxes() {
@@ -1043,6 +1051,10 @@ class MenuActivity : AppCompatActivity() {
         cartContainer.removeAllViews()
         totalAmount = 0.0
 
+        // Pre-compute discounts so buildCartItemView can reference them
+        appliedDiscounts = discountEngine.computeAutoDiscounts(cartMap)
+        discountTotalCents = appliedDiscounts.sumOf { it.amountInCents }
+
         val entries = cartMap.entries.toList()
 
         if (guestCount > 0) {
@@ -1139,19 +1151,70 @@ class MenuActivity : AppCompatActivity() {
         }
 
         val subtotal = totalAmount
+        val subtotalCents = (subtotal * 100).toLong()
         cartTaxSummary.removeAllViews()
 
         val subtotalLabel = TextView(this)
-        subtotalLabel.text = "Subtotal: ${MoneyUtils.centsToDisplay((subtotal * 100).toLong())}"
+        subtotalLabel.text = "Subtotal: ${MoneyUtils.centsToDisplay(subtotalCents)}"
         subtotalLabel.textSize = 14f
         subtotalLabel.setTypeface(null, android.graphics.Typeface.BOLD)
         cartTaxSummary.addView(subtotalLabel)
 
+        if (discountTotalCents > 0L) {
+            val discountSummary = TextView(this)
+            discountSummary.text = "Discount: -${MoneyUtils.centsToDisplay(discountTotalCents)}"
+            discountSummary.textSize = 14f
+            discountSummary.setTypeface(null, android.graphics.Typeface.BOLD)
+            discountSummary.setTextColor(Color.parseColor("#2E7D32"))
+            cartTaxSummary.addView(discountSummary)
+
+            for (ad in appliedDiscounts) {
+                val detailLine = TextView(this)
+                val valueStr = if (ad.type == "PERCENTAGE") {
+                    String.format(Locale.US, "%.1f%%", ad.value)
+                } else {
+                    MoneyUtils.centsToDisplay((ad.value * 100).toLong())
+                }
+                val scopeStr = when (ad.applyScope) {
+                    "item" -> "item"
+                    "manual" -> "checkout"
+                    else -> "order"
+                }
+                detailLine.text = "  ${ad.discountName} ($valueStr · $scopeStr)"
+                detailLine.textSize = 12f
+                detailLine.setTextColor(Color.parseColor("#388E3C"))
+                cartTaxSummary.addView(detailLine)
+            }
+
+            totalAmount -= discountTotalCents / 100.0
+        }
+
+        // Taxes are computed on discounted amount
+        val discountedSubtotal = subtotal - (discountTotalCents / 100.0)
+
         for (tax in allTaxes) {
             var taxableBase = 0.0
-            for ((_, item) in cartMap.entries) {
+            for ((lineKey, item) in cartMap.entries) {
                 val modTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
-                val lineTotal = (item.basePrice + modTotal) * item.quantity
+                var lineTotal = (item.basePrice + modTotal) * item.quantity
+
+                // Subtract item-level discounts from this line's taxable base
+                val lineDiscounts = appliedDiscounts.filter { it.lineKey == lineKey }
+                if (lineDiscounts.isNotEmpty()) {
+                    val lineDiscountAmount = lineDiscounts.sumOf { it.amountInCents } / 100.0
+                    lineTotal = (lineTotal - lineDiscountAmount).coerceAtLeast(0.0)
+                }
+
+                // Apply proportional order-level discount
+                val orderDiscount = appliedDiscounts.find {
+                    (it.applyScope == "order" || it.applyScope == "manual") && it.lineKey == null
+                }
+                if (orderDiscount != null && subtotalCents > 0) {
+                    val proportion = lineTotal / (subtotal.coerceAtLeast(0.01))
+                    val orderDiscountForLine = (orderDiscount.amountInCents / 100.0) * proportion
+                    lineTotal = (lineTotal - orderDiscountForLine).coerceAtLeast(0.0)
+                }
+
                 if (item.taxMode == "FORCE_APPLY") {
                     if (item.taxIds.contains(tax.id)) taxableBase += lineTotal
                 } else if (tax.enabled) {
@@ -1177,14 +1240,74 @@ class MenuActivity : AppCompatActivity() {
     private fun syncOrderTotal() {
         val oid = currentOrderId ?: return
         val totalInCents = Math.round(totalAmount * 100)
-        db.collection("Orders").document(oid)
-            .update(
+
+        val discountedSubtotal = (cartMap.entries.sumOf { (_, item) ->
+            val modTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+            (item.basePrice + modTotal) * item.quantity
+        }) - (discountTotalCents / 100.0)
+
+        val taxBreakdownList = mutableListOf<Map<String, Any>>()
+        for (tax in allTaxes) {
+            var taxableBase = 0.0
+            for ((lineKey, item) in cartMap.entries) {
+                val modTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+                var lineTotal = (item.basePrice + modTotal) * item.quantity
+                val lineDiscounts = appliedDiscounts.filter { it.lineKey == lineKey }
+                if (lineDiscounts.isNotEmpty()) {
+                    lineTotal = (lineTotal - lineDiscounts.sumOf { it.amountInCents } / 100.0).coerceAtLeast(0.0)
+                }
+                val subtotal = cartMap.entries.sumOf { (_, i) ->
+                    val mt = i.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+                    (i.basePrice + mt) * i.quantity
+                }
+                val orderDiscount = appliedDiscounts.find {
+                    (it.applyScope == "order" || it.applyScope == "manual") && it.lineKey == null
+                }
+                if (orderDiscount != null && subtotal > 0) {
+                    val proportion = lineTotal / subtotal.coerceAtLeast(0.01)
+                    lineTotal = (lineTotal - (orderDiscount.amountInCents / 100.0) * proportion).coerceAtLeast(0.0)
+                }
+                if (item.taxMode == "FORCE_APPLY") {
+                    if (item.taxIds.contains(tax.id)) taxableBase += lineTotal
+                } else if (tax.enabled) {
+                    taxableBase += lineTotal
+                }
+            }
+            if (taxableBase <= 0.0) continue
+            val taxAmount = if (tax.type == "PERCENTAGE") taxableBase * tax.amount / 100.0 else tax.amount
+            taxBreakdownList.add(mapOf(
+                "name" to tax.name,
+                "rate" to tax.amount,
+                "taxType" to tax.type,
+                "amountInCents" to Math.round(taxAmount * 100)
+            ))
+        }
+
+        val updates = mutableMapOf<String, Any>(
+            "totalInCents" to totalInCents,
+            "remainingInCents" to totalInCents,
+            "updatedAt" to Date(),
+            "discountInCents" to discountTotalCents,
+            "taxBreakdown" to taxBreakdownList
+        )
+
+        if (appliedDiscounts.isNotEmpty()) {
+            updates["appliedDiscounts"] = appliedDiscounts.map { ad ->
                 mapOf(
-                    "totalInCents" to totalInCents,
-                    "remainingInCents" to totalInCents,
-                    "updatedAt" to Date()
+                    "discountId" to ad.discountId,
+                    "discountName" to ad.discountName,
+                    "type" to ad.type,
+                    "value" to ad.value,
+                    "applyScope" to ad.applyScope,
+                    "amountInCents" to ad.amountInCents,
+                    "lineKey" to (ad.lineKey ?: "")
                 )
-            )
+            }
+        } else {
+            updates["appliedDiscounts"] = emptyList<Map<String, Any>>()
+        }
+
+        db.collection("Orders").document(oid).update(updates)
     }
 
     private fun buildCartItemView(lineKey: String, item: CartItem): View {
@@ -1230,8 +1353,39 @@ class MenuActivity : AppCompatActivity() {
         val unitPrice = item.basePrice + modifiersTotal
         val lineTotal = unitPrice * item.quantity
 
+        // Show item-level discounts
+        val lineDiscounts = appliedDiscounts.filter { it.lineKey == lineKey }
+        if (lineDiscounts.isNotEmpty()) {
+            for (ld in lineDiscounts) {
+                val discountRow = LinearLayout(this)
+                discountRow.orientation = LinearLayout.HORIZONTAL
+                val discountLabel = TextView(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    text = "   🏷 ${ld.discountName}"
+                    setTextColor(Color.parseColor("#2E7D32"))
+                    textSize = 12f
+                }
+                val discountValue = TextView(this).apply {
+                    text = "-${MoneyUtils.centsToDisplay(ld.amountInCents)}"
+                    setTextColor(Color.parseColor("#2E7D32"))
+                    textSize = 12f
+                }
+                discountRow.addView(discountLabel)
+                discountRow.addView(discountValue)
+                itemLayout.addView(discountRow)
+            }
+        }
+
+        val lineDiscountCents = lineDiscounts.sumOf { it.amountInCents }
+        val effectiveTotal = (lineTotal * 100).toLong() - lineDiscountCents
+
         val subtotalText = TextView(this)
-        subtotalText.text = "Line Total: ${MoneyUtils.centsToDisplay((lineTotal * 100).toLong())}"
+        if (lineDiscountCents > 0) {
+            subtotalText.text = "Line Total: ${MoneyUtils.centsToDisplay(effectiveTotal)} (was ${MoneyUtils.centsToDisplay((lineTotal * 100).toLong())})"
+            subtotalText.setTextColor(Color.parseColor("#2E7D32"))
+        } else {
+            subtotalText.text = "Line Total: ${MoneyUtils.centsToDisplay((lineTotal * 100).toLong())}"
+        }
         subtotalText.setTypeface(null, Typeface.BOLD)
         subtotalText.textSize = 13f
         itemLayout.addView(subtotalText)
@@ -1369,6 +1523,8 @@ class MenuActivity : AppCompatActivity() {
     private fun clearCart() {
         cartMap.clear()
         totalAmount = 0.0
+        discountTotalCents = 0L
+        appliedDiscounts = emptyList()
         isCreatingOrder = false
         customerId = null
         customerName = null

@@ -18,6 +18,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.ernesto.myapplication.engine.CardBrandSale
 import com.ernesto.myapplication.engine.CategorySalesRow
+import com.ernesto.myapplication.engine.DiscountBreakdown
 import com.ernesto.myapplication.engine.EmployeeReportData
 import com.ernesto.myapplication.engine.HourlySale
 import com.ernesto.myapplication.engine.ItemSalesRow
@@ -66,6 +67,9 @@ class ReportsActivity : AppCompatActivity() {
     private lateinit var rowTaxCollected: LinearLayout
     private lateinit var arrowTax: TextView
     private lateinit var contentTaxBreakdown: LinearLayout
+    private lateinit var rowDiscounts: LinearLayout
+    private lateinit var arrowDiscount: TextView
+    private lateinit var contentDiscountBreakdown: LinearLayout
 
     private lateinit var progressOrderType: ProgressBar
     private lateinit var cardOrderType: MaterialCardView
@@ -146,6 +150,9 @@ class ReportsActivity : AppCompatActivity() {
         rowTaxCollected = findViewById(R.id.rowTaxCollected)
         arrowTax = findViewById(R.id.arrowTax)
         contentTaxBreakdown = findViewById(R.id.contentTaxBreakdown)
+        rowDiscounts = findViewById(R.id.rowDiscounts)
+        arrowDiscount = findViewById(R.id.arrowDiscount)
+        contentDiscountBreakdown = findViewById(R.id.contentDiscountBreakdown)
 
         progressOrderType = findViewById(R.id.progressOrderType)
         cardOrderType = findViewById(R.id.cardSalesByOrderType)
@@ -336,6 +343,7 @@ class ReportsActivity : AppCompatActivity() {
                     valDebit.text = currencyFmt.format(summary.debitPayments)
 
                     bindTaxBreakdown(summary.taxesByOrderType, summary.taxesByTaxName)
+                    bindDiscountBreakdown(summary.discountBreakdown)
                 }
             },
             onFailure = { e ->
@@ -409,6 +417,87 @@ class ReportsActivity : AppCompatActivity() {
         "TO_GO" -> "To-Go Tax"
         "BAR", "BAR_TAB" -> "Bar Tax"
         else -> "$raw Tax"
+    }
+
+    private fun orderTypeLabelSimple(raw: String): String = when (raw) {
+        "DINE_IN" -> "Dine-In"
+        "TO_GO" -> "To-Go"
+        "BAR" -> "Bar"
+        "BAR_TAB" -> "Bar Tab"
+        else -> raw.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
+    }
+
+    private fun bindDiscountBreakdown(breakdown: DiscountBreakdown) {
+        contentDiscountBreakdown.removeAllViews()
+        val hasData = breakdown.byOrderType.isNotEmpty() || breakdown.byName.isNotEmpty()
+        arrowDiscount.visibility = if (hasData) View.VISIBLE else View.GONE
+        contentDiscountBreakdown.visibility = View.GONE
+        arrowDiscount.text = "▶"
+
+        if (!hasData) {
+            rowDiscounts.setOnClickListener(null)
+            rowDiscounts.isClickable = false
+            return
+        }
+
+        rowDiscounts.setOnClickListener {
+            val expanding = contentDiscountBreakdown.visibility == View.GONE
+            contentDiscountBreakdown.visibility = if (expanding) View.VISIBLE else View.GONE
+            arrowDiscount.text = if (expanding) "▼" else "▶"
+        }
+
+        if (breakdown.byOrderType.isNotEmpty()) {
+            contentDiscountBreakdown.addView(makeTaxSectionCard("Discounts by Order Type") { container ->
+                for (item in breakdown.byOrderType) {
+                    container.addView(
+                        makeTaxBreakdownRow(
+                            "${orderTypeLabelSimple(item.orderType)} (${item.orderCount} orders)",
+                            "−${currencyFmt.format(item.discountCents / 100.0)}"
+                        )
+                    )
+                }
+                container.addView(makeDivider())
+                val total = breakdown.byOrderType.sumOf { it.discountCents }
+                container.addView(makeTotalRow("Total", "−${currencyFmt.format(total / 100.0)}", "#E65100"))
+            })
+        }
+
+        if (breakdown.byName.isNotEmpty()) {
+            contentDiscountBreakdown.addView(makeTaxSectionCard("Most Used Discounts") { container ->
+                for (item in breakdown.byName) {
+                    container.addView(
+                        makeTaxBreakdownRow(
+                            "${item.discountName} (${item.timesUsed}x)",
+                            "−${currencyFmt.format(item.discountCents / 100.0)}"
+                        )
+                    )
+                }
+            })
+        }
+
+        if (breakdown.byPaymentMethod.totalCents > 0L) {
+            val pm = breakdown.byPaymentMethod
+            contentDiscountBreakdown.addView(makeTaxSectionCard("Discounts by Payment Method") { container ->
+                if (pm.cashDiscountCents > 0L) {
+                    container.addView(
+                        makeTaxBreakdownRow(
+                            "Cash (${pm.cashOrderCount} orders)",
+                            "−${currencyFmt.format(pm.cashDiscountCents / 100.0)}"
+                        )
+                    )
+                }
+                if (pm.cardDiscountCents > 0L) {
+                    container.addView(
+                        makeTaxBreakdownRow(
+                            "Card (${pm.cardOrderCount} orders)",
+                            "−${currencyFmt.format(pm.cardDiscountCents / 100.0)}"
+                        )
+                    )
+                }
+                container.addView(makeDivider())
+                container.addView(makeTotalRow("Total", "−${currencyFmt.format(pm.totalCents / 100.0)}", "#E65100"))
+            })
+        }
     }
 
     private fun makeTaxSectionCard(
@@ -1026,6 +1115,78 @@ class ReportsActivity : AppCompatActivity() {
             }
             container.addView(makeDivider())
             container.addView(makeTotalRow("Total", total.toString(), "#C62828"))
+        }
+
+        addSubSection(contentEmployee, "Discounts") { container ->
+            val merged = DiscountBreakdown(
+                byOrderType = data.flatMap { it.discountBreakdown.byOrderType }
+                    .groupBy { it.orderType }
+                    .map { (ot, items) ->
+                        com.ernesto.myapplication.engine.DiscountByOrderType(ot, items.sumOf { it.discountCents }, items.sumOf { it.orderCount })
+                    }.sortedByDescending { it.discountCents },
+                byName = data.flatMap { it.discountBreakdown.byName }
+                    .groupBy { it.discountName }
+                    .map { (name, items) ->
+                        com.ernesto.myapplication.engine.DiscountByName(name, items.sumOf { it.discountCents }, items.sumOf { it.timesUsed })
+                    }.sortedByDescending { it.timesUsed },
+                byPaymentMethod = com.ernesto.myapplication.engine.DiscountByPaymentMethod(
+                    cashDiscountCents = data.sumOf { it.discountBreakdown.byPaymentMethod.cashDiscountCents },
+                    cashOrderCount = data.sumOf { it.discountBreakdown.byPaymentMethod.cashOrderCount },
+                    cardDiscountCents = data.sumOf { it.discountBreakdown.byPaymentMethod.cardDiscountCents },
+                    cardOrderCount = data.sumOf { it.discountBreakdown.byPaymentMethod.cardOrderCount }
+                )
+            )
+            val totalDiscCents = merged.byOrderType.sumOf { it.discountCents }
+            if (totalDiscCents == 0L) {
+                container.addView(makeLabel("No discounts applied", "#757575"))
+                return@addSubSection
+            }
+
+            if (merged.byOrderType.isNotEmpty()) {
+                container.addView(makeEmployeeHeader("By Order Type"))
+                for (item in merged.byOrderType) {
+                    container.addView(makeRightAlignedRow(
+                        "${orderTypeLabelSimple(item.orderType)} (${item.orderCount} orders)",
+                        "−${currencyFmt.format(item.discountCents / 100.0)}",
+                        "#E65100"
+                    ))
+                }
+            }
+
+            if (merged.byName.isNotEmpty()) {
+                container.addView(makeSpacing(4))
+                container.addView(makeEmployeeHeader("Most Used"))
+                for (item in merged.byName) {
+                    container.addView(makeRightAlignedRow(
+                        "${item.discountName} (${item.timesUsed}x)",
+                        "−${currencyFmt.format(item.discountCents / 100.0)}",
+                        "#E65100"
+                    ))
+                }
+            }
+
+            if (merged.byPaymentMethod.totalCents > 0L) {
+                val pm = merged.byPaymentMethod
+                container.addView(makeSpacing(4))
+                container.addView(makeEmployeeHeader("By Payment Method"))
+                if (pm.cashDiscountCents > 0L) {
+                    container.addView(makeRightAlignedRow(
+                        "Cash (${pm.cashOrderCount} orders)",
+                        "−${currencyFmt.format(pm.cashDiscountCents / 100.0)}",
+                        "#E65100"
+                    ))
+                }
+                if (pm.cardDiscountCents > 0L) {
+                    container.addView(makeRightAlignedRow(
+                        "Card (${pm.cardOrderCount} orders)",
+                        "−${currencyFmt.format(pm.cardDiscountCents / 100.0)}",
+                        "#E65100"
+                    ))
+                }
+            }
+
+            container.addView(makeDivider())
+            container.addView(makeTotalRow("Total Discounts", "−${currencyFmt.format(totalDiscCents / 100.0)}", "#E65100"))
         }
     }
 

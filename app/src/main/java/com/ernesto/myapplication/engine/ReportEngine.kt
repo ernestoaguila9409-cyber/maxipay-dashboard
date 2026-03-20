@@ -74,7 +74,8 @@ data class EmployeeReportData(
     val voidsCount: Int = 0,
     val paymentsByMethod: PaymentMethodBreakdown = PaymentMethodBreakdown(),
     val tipsByMethod: PaymentMethodBreakdown = PaymentMethodBreakdown(),
-    val refundsByMethod: PaymentMethodBreakdown = PaymentMethodBreakdown()
+    val refundsByMethod: PaymentMethodBreakdown = PaymentMethodBreakdown(),
+    val discountBreakdown: DiscountBreakdown = DiscountBreakdown()
 ) {
     fun toMetrics() = EmployeeMetrics(
         employeeName, salesCents, orderCount,
@@ -109,6 +110,37 @@ data class TaxByTaxName(
     val taxCents: Long
 )
 
+/** Discount breakdown by order type. */
+data class DiscountByOrderType(
+    val orderType: String,
+    val discountCents: Long,
+    val orderCount: Int
+)
+
+/** Discount usage by name (which discounts are used most). */
+data class DiscountByName(
+    val discountName: String,
+    val discountCents: Long,
+    val timesUsed: Int
+)
+
+/** Discount breakdown by payment method (cash vs card). */
+data class DiscountByPaymentMethod(
+    val cashDiscountCents: Long = 0L,
+    val cashOrderCount: Int = 0,
+    val cardDiscountCents: Long = 0L,
+    val cardOrderCount: Int = 0
+) {
+    val totalCents: Long get() = cashDiscountCents + cardDiscountCents
+}
+
+/** Full discount breakdown for reports. */
+data class DiscountBreakdown(
+    val byOrderType: List<DiscountByOrderType> = emptyList(),
+    val byName: List<DiscountByName> = emptyList(),
+    val byPaymentMethod: DiscountByPaymentMethod = DiscountByPaymentMethod()
+)
+
 data class DailySalesSummary(
     val grossSales: Double,
     val taxCollected: Double,
@@ -124,7 +156,8 @@ data class DailySalesSummary(
     val creditPayments: Double,
     val debitPayments: Double,
     val taxesByOrderType: List<TaxByOrderType> = emptyList(),
-    val taxesByTaxName: List<TaxByTaxName> = emptyList()
+    val taxesByTaxName: List<TaxByTaxName> = emptyList(),
+    val discountBreakdown: DiscountBreakdown = DiscountBreakdown()
 )
 
 class ReportEngine(private val db: FirebaseFirestore) {
@@ -259,6 +292,10 @@ class ReportEngine(private val db: FirebaseFirestore) {
         var itemsSold = 0
         val taxByOrderTypeAgg = mutableMapOf<String, Long>()
         val taxByNameAgg = mutableMapOf<String, Long>()
+        val discountByOrderTypeAgg = mutableMapOf<String, Pair<Long, Int>>()
+        val discountByNameAgg = mutableMapOf<String, Pair<Long, Int>>()
+        data class OrderDiscountInfo(val discountCents: Long, val orderType: String)
+        val orderDiscountInfoMap = mutableMapOf<String, OrderDiscountInfo>()
         var remaining = 2
         var firstError: Exception? = null
 
@@ -273,12 +310,33 @@ class ReportEngine(private val db: FirebaseFirestore) {
             var debitCents = 0L
             var refundCents = 0L
 
+            var discCashCents = 0L
+            var discCashCount = 0
+            var discCardCents = 0L
+            var discCardCount = 0
+
             for (rec in saleRecords) {
                 if (employeeName != null && rec.orderId != null && rec.orderId !in validOrderIds) continue
                 if (rec.gross > 0L) { grossCents += rec.gross; saleCount++ }
                 cashCents += rec.cash
                 creditCents += rec.credit
                 debitCents += rec.debit
+
+                val discInfo = rec.orderId?.let { orderDiscountInfoMap[it] }
+                if (discInfo != null && discInfo.discountCents > 0L) {
+                    val hasCash = rec.cash > 0L
+                    val hasCard = (rec.credit + rec.debit) > 0L
+                    if (hasCash && !hasCard) {
+                        discCashCents += discInfo.discountCents; discCashCount++
+                    } else if (hasCard && !hasCash) {
+                        discCardCents += discInfo.discountCents; discCardCount++
+                    } else if (hasCash && hasCard) {
+                        val total = rec.cash + rec.credit + rec.debit
+                        discCashCents += (discInfo.discountCents * rec.cash) / total
+                        discCardCents += (discInfo.discountCents * (rec.credit + rec.debit)) / total
+                        discCashCount++; discCardCount++
+                    }
+                }
             }
             for ((orderId, amount) in refundRecords) {
                 if (employeeName != null && orderId != null && orderId !in validOrderIds) continue
@@ -299,6 +357,19 @@ class ReportEngine(private val db: FirebaseFirestore) {
                 TaxByTaxName(taxName = name, taxCents = cents)
             }.sortedByDescending { it.taxCents }
 
+            val discByOT = discountByOrderTypeAgg.map { (ot, pair) ->
+                DiscountByOrderType(orderType = ot, discountCents = pair.first, orderCount = pair.second)
+            }.sortedByDescending { it.discountCents }
+
+            val discByName = discountByNameAgg.map { (name, pair) ->
+                DiscountByName(discountName = name, discountCents = pair.first, timesUsed = pair.second)
+            }.sortedByDescending { it.timesUsed }
+
+            val discByPM = DiscountByPaymentMethod(
+                cashDiscountCents = discCashCents, cashOrderCount = discCashCount,
+                cardDiscountCents = discCardCents, cardOrderCount = discCardCount
+            )
+
             onSuccess(
                 DailySalesSummary(
                     grossSales = gross,
@@ -315,7 +386,12 @@ class ReportEngine(private val db: FirebaseFirestore) {
                     creditPayments = creditCents / 100.0,
                     debitPayments = debitCents / 100.0,
                     taxesByOrderType = taxesByOrderType,
-                    taxesByTaxName = taxesByTaxName
+                    taxesByTaxName = taxesByTaxName,
+                    discountBreakdown = DiscountBreakdown(
+                        byOrderType = discByOT,
+                        byName = discByName,
+                        byPaymentMethod = discByPM
+                    )
                 )
             )
         }
@@ -368,7 +444,31 @@ class ReportEngine(private val db: FirebaseFirestore) {
                             taxByNameAgg[taxName] = (taxByNameAgg[taxName] ?: 0L) + cents
                         }
                         tipCents += doc.getLong("tipAmountInCents") ?: 0L
-                        discountCents += doc.getLong("discountInCents") ?: 0L
+                        val orderDiscCents = doc.getLong("discountInCents") ?: 0L
+                        discountCents += orderDiscCents
+
+                        if (orderDiscCents > 0L) {
+                            val (curCents, curCount) = discountByOrderTypeAgg[orderType] ?: (0L to 0)
+                            discountByOrderTypeAgg[orderType] = (curCents + orderDiscCents) to (curCount + 1)
+
+                            @Suppress("UNCHECKED_CAST")
+                            val appliedDiscounts = doc.get("appliedDiscounts") as? List<Map<String, Any>> ?: emptyList()
+                            if (appliedDiscounts.isNotEmpty()) {
+                                for (ad in appliedDiscounts) {
+                                    val dName = (ad["discountName"] as? String)?.takeIf { it.isNotBlank() } ?: "Unknown Discount"
+                                    val dCents = (ad["amountInCents"] as? Number)?.toLong() ?: 0L
+                                    if (dCents > 0L) {
+                                        val (nc, nt) = discountByNameAgg[dName] ?: (0L to 0)
+                                        discountByNameAgg[dName] = (nc + dCents) to (nt + 1)
+                                    }
+                                }
+                            } else {
+                                val (nc, nt) = discountByNameAgg["Discount"] ?: (0L to 0)
+                                discountByNameAgg["Discount"] = (nc + orderDiscCents) to (nt + 1)
+                            }
+
+                            orderDiscountInfoMap[doc.id] = OrderDiscountInfo(orderDiscCents, orderType)
+                        }
                     }
 
                     if (status == "CLOSED" || status == "VOIDED") {
@@ -615,7 +715,7 @@ class ReportEngine(private val db: FirebaseFirestore) {
     ) {
         val (start, end) = dateRange(startDate, endDate)
 
-        data class OrderInfo(val employeeName: String, val tipAmountInCents: Long)
+        data class OrderInfo(val employeeName: String, val tipAmountInCents: Long, val discountCents: Long = 0L)
 
         class Accum(val name: String) {
             var salesCents = 0L
@@ -633,6 +733,12 @@ class ReportEngine(private val db: FirebaseFirestore) {
             var tipCardCents = 0L
             var refundCashCents = 0L
             var refundCardCents = 0L
+            val discByOrderType = mutableMapOf<String, Pair<Long, Int>>()
+            val discByName = mutableMapOf<String, Pair<Long, Int>>()
+            var discCashCents = 0L
+            var discCashCount = 0
+            var discCardCents = 0L
+            var discCardCount = 0
 
             fun toReportData() = EmployeeReportData(
                 employeeName = name,
@@ -645,7 +751,12 @@ class ReportEngine(private val db: FirebaseFirestore) {
                 voidsCount = voidsCount,
                 paymentsByMethod = PaymentMethodBreakdown(payCashCents, payCashTxCount, payCardCents, payCardTxCount),
                 tipsByMethod = PaymentMethodBreakdown(tipCashCents, 0, tipCardCents, 0),
-                refundsByMethod = PaymentMethodBreakdown(refundCashCents, 0, refundCardCents, 0)
+                refundsByMethod = PaymentMethodBreakdown(refundCashCents, 0, refundCardCents, 0),
+                discountBreakdown = DiscountBreakdown(
+                    byOrderType = discByOrderType.map { (ot, p) -> DiscountByOrderType(ot, p.first, p.second) }.sortedByDescending { it.discountCents },
+                    byName = discByName.map { (n, p) -> DiscountByName(n, p.first, p.second) }.sortedByDescending { it.timesUsed },
+                    byPaymentMethod = DiscountByPaymentMethod(discCashCents, discCashCount, discCardCents, discCardCount)
+                )
             )
         }
 
@@ -675,11 +786,34 @@ class ReportEngine(private val db: FirebaseFirestore) {
                     if (status == "CLOSED") {
                         val emp = doc.getString("employeeName")?.takeIf { it.isNotBlank() } ?: continue
                         val tipCents = doc.getLong("tipAmountInCents") ?: 0L
-                        orderInfo[doc.id] = OrderInfo(emp, tipCents)
+                        val orderDiscCents = doc.getLong("discountInCents") ?: 0L
+                        orderInfo[doc.id] = OrderInfo(emp, tipCents, orderDiscCents)
                         val a = accum(emp)
                         a.salesCents += doc.getLong("totalPaidInCents") ?: 0L
                         a.orderCount++
                         if (tipCents > 0L) { a.tipsCents += tipCents; a.tipsCount++ }
+
+                        if (orderDiscCents > 0L) {
+                            val orderType = doc.getString("orderType") ?: "OTHER"
+                            val (curC, curN) = a.discByOrderType[orderType] ?: (0L to 0)
+                            a.discByOrderType[orderType] = (curC + orderDiscCents) to (curN + 1)
+
+                            @Suppress("UNCHECKED_CAST")
+                            val appliedDiscs = doc.get("appliedDiscounts") as? List<Map<String, Any>> ?: emptyList()
+                            if (appliedDiscs.isNotEmpty()) {
+                                for (ad in appliedDiscs) {
+                                    val dName = (ad["discountName"] as? String)?.takeIf { it.isNotBlank() } ?: "Unknown Discount"
+                                    val dCents = (ad["amountInCents"] as? Number)?.toLong() ?: 0L
+                                    if (dCents > 0L) {
+                                        val (nc, nt) = a.discByName[dName] ?: (0L to 0)
+                                        a.discByName[dName] = (nc + dCents) to (nt + 1)
+                                    }
+                                }
+                            } else {
+                                val (nc, nt) = a.discByName["Discount"] ?: (0L to 0)
+                                a.discByName["Discount"] = (nc + orderDiscCents) to (nt + 1)
+                            }
+                        }
                     }
 
                     if (status == "VOIDED") {
@@ -711,6 +845,20 @@ class ReportEngine(private val db: FirebaseFirestore) {
                                 val total = cashCents + cardCents
                                 a.tipCashCents += (info.tipAmountInCents * cashCents) / total
                                 a.tipCardCents += (info.tipAmountInCents * cardCents) / total
+                            }
+                            if (info.discountCents > 0L && (cashCents + cardCents) > 0L) {
+                                val hasCash = cashCents > 0L
+                                val hasCard = cardCents > 0L
+                                if (hasCash && !hasCard) {
+                                    a.discCashCents += info.discountCents; a.discCashCount++
+                                } else if (hasCard && !hasCash) {
+                                    a.discCardCents += info.discountCents; a.discCardCount++
+                                } else {
+                                    val total = cashCents + cardCents
+                                    a.discCashCents += (info.discountCents * cashCents) / total
+                                    a.discCardCents += (info.discountCents * cardCents) / total
+                                    a.discCashCount++; a.discCardCount++
+                                }
                             }
                         }
                         "REFUND" -> {

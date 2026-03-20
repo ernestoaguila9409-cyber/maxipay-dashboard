@@ -1,6 +1,7 @@
 package com.ernesto.myapplication
 
 import android.app.DatePickerDialog
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.widget.EditText
@@ -427,58 +428,83 @@ class TransactionActivity : AppCompatActivity() {
         }
 
         if (fullyRefunded) {
+            val options = mutableListOf("See Order", "Email Receipt", "Cancel")
             AlertDialog.Builder(this)
                 .setTitle("Transaction Options")
-                .setMessage("This transaction has already been fully refunded.")
-                .setPositiveButton("Email Receipt") { _, _ -> showEmailReceiptForTransaction(transaction.referenceId) }
-                .setNegativeButton("Cancel", null)
+                .setItems(options.toTypedArray()) { _, which ->
+                    when (options[which]) {
+                        "See Order" -> navigateToOrder(transaction.orderId)
+                        "Email Receipt" -> showEmailReceiptForTransaction(transaction.referenceId)
+                    }
+                }
                 .show()
             return
         }
 
         if (transaction.settled) {
+            val options = mutableListOf("See Order", "Refund", "Email Receipt", "Cancel")
             AlertDialog.Builder(this)
                 .setTitle("Transaction Options")
-                .setMessage("Batch already closed. Refund only.")
-                .setPositiveButton("Refund") { _, _ ->
-                    if (allCash) processCashRefund(transaction, remainingCents) else processRefund(transaction, remainingCents)
+                .setItems(options.toTypedArray()) { _, which ->
+                    when (options[which]) {
+                        "See Order" -> navigateToOrder(transaction.orderId)
+                        "Refund" -> if (allCash) processCashRefund(transaction, remainingCents) else processRefund(transaction, remainingCents)
+                        "Email Receipt" -> showEmailReceiptForTransaction(transaction.referenceId)
+                    }
                 }
-                .setNeutralButton("Email Receipt") { _, _ -> showEmailReceiptForTransaction(transaction.referenceId) }
-                .setNegativeButton("Cancel", null)
                 .show()
             return
         }
         if (debitOnly) {
+            val options = mutableListOf("See Order", "Refund", "Email Receipt", "Cancel")
             AlertDialog.Builder(this)
                 .setTitle("Transaction Options")
-                .setMessage("Debit sale can only be refunded.")
-                .setPositiveButton("Refund") { _, _ -> processRefund(transaction, remainingCents) }
-                .setNeutralButton("Email Receipt") { _, _ -> showEmailReceiptForTransaction(transaction.referenceId) }
-                .setNegativeButton("Cancel", null)
+                .setItems(options.toTypedArray()) { _, which ->
+                    when (options[which]) {
+                        "See Order" -> navigateToOrder(transaction.orderId)
+                        "Refund" -> processRefund(transaction, remainingCents)
+                        "Email Receipt" -> showEmailReceiptForTransaction(transaction.referenceId)
+                    }
+                }
                 .show()
             return
         }
         if (allCash) {
+            val options = mutableListOf("See Order", "Refund", "Email Receipt", "Cancel")
             AlertDialog.Builder(this)
                 .setTitle("Cash Transaction")
-                .setMessage("Select an option for this cash payment.")
-                .setPositiveButton("Refund") { _, _ -> processCashRefund(transaction, remainingCents) }
-                .setNeutralButton("Email Receipt") { _, _ -> showEmailReceiptForTransaction(transaction.referenceId) }
-                .setNegativeButton("Cancel", null)
+                .setItems(options.toTypedArray()) { _, which ->
+                    when (options[which]) {
+                        "See Order" -> navigateToOrder(transaction.orderId)
+                        "Refund" -> processCashRefund(transaction, remainingCents)
+                        "Email Receipt" -> showEmailReceiptForTransaction(transaction.referenceId)
+                    }
+                }
                 .show()
             return
         }
-        val options = arrayOf("Refund", "Void", "Email Receipt", "Cancel")
+        val options = arrayOf("See Order", "Refund", "Void", "Email Receipt", "Cancel")
         AlertDialog.Builder(this)
             .setTitle("Transaction Options")
             .setItems(options) { _, which ->
-                when (which) {
-                    0 -> processRefund(transaction, remainingCents)
-                    1 -> processVoid(transaction)
-                    2 -> showEmailReceiptForTransaction(transaction.referenceId)
+                when (options[which]) {
+                    "See Order" -> navigateToOrder(transaction.orderId)
+                    "Refund" -> processRefund(transaction, remainingCents)
+                    "Void" -> processVoid(transaction)
+                    "Email Receipt" -> showEmailReceiptForTransaction(transaction.referenceId)
                 }
             }
             .show()
+    }
+
+    private fun navigateToOrder(orderId: String) {
+        if (orderId.isBlank()) {
+            Toast.makeText(this, "No order linked to this transaction", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = Intent(this, OrderDetailActivity::class.java)
+        intent.putExtra("orderId", orderId)
+        startActivity(intent)
     }
 
     private fun processVoid(transaction: Transaction) {

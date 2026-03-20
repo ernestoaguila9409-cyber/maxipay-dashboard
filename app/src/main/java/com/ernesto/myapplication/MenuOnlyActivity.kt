@@ -34,6 +34,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     private var stockCountingEnabled: Boolean = true
     private var currentAdapter: ItemAdapter? = null
     private var activeScheduleIds: Set<String> = emptySet()
+    private var categoryAvailabilityMap: Map<String, List<String>> = emptyMap()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,7 +64,16 @@ class MenuOnlyActivity : AppCompatActivity() {
         editSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                currentAdapter?.filter(s?.toString() ?: "")
+                val query = s?.toString()?.trim() ?: ""
+                if (query.isNotEmpty()) {
+                    loadAllItemsForSearch(query)
+                } else {
+                    if (selectedCategoryId != null) {
+                        loadItems(selectedCategoryId!!)
+                    } else {
+                        showEmptyState()
+                    }
+                }
             }
             override fun afterTextChanged(s: Editable?) {}
         })
@@ -164,6 +174,8 @@ class MenuOnlyActivity : AppCompatActivity() {
 
                 categoryList.sortBy { it.name.lowercase() }
 
+                categoryAvailabilityMap = categoryList.associate { it.id to it.availableOrderTypes }
+
                 categoryRecycler.adapter =
                     CategoryAdapter(
                         categories = categoryList,
@@ -185,6 +197,8 @@ class MenuOnlyActivity : AppCompatActivity() {
 
                 if (selectedCategoryId != null) {
                     loadItems(selectedCategoryId!!)
+                } else if (editSearch.text.toString().trim().isEmpty()) {
+                    showEmptyState()
                 }
             }
     }
@@ -192,6 +206,70 @@ class MenuOnlyActivity : AppCompatActivity() {
     // =========================================================
     // LOAD ITEMS
     // =========================================================
+
+    private fun loadAllItemsForSearch(query: String) {
+        db.collection("MenuItems")
+            .get()
+            .addOnSuccessListener { documents ->
+                val itemList = mutableListOf<ItemModel>()
+                val q = query.lowercase()
+
+                for (doc in documents) {
+                    val name = doc.getString("name") ?: continue
+                    if (!name.lowercase().contains(q)) continue
+
+                    @Suppress("UNCHECKED_CAST")
+                    val pricesRaw = doc.get("prices") as? Map<String, Any>
+                    val pricesMap = pricesRaw?.mapValues {
+                        (it.value as? Number)?.toDouble() ?: 0.0
+                    } ?: emptyMap()
+                    val legacyPrice = doc.getDouble("price")
+                    val effectivePrices = if (pricesMap.isNotEmpty()) pricesMap
+                        else mapOf("default" to (legacyPrice ?: 0.0))
+                    val displayPrice = effectivePrices.values.firstOrNull() ?: 0.0
+
+                    val stock = doc.getLong("stock") ?: 0L
+                    @Suppress("UNCHECKED_CAST")
+                    val availableOrderTypes = doc.get("availableOrderTypes") as? List<String>
+                    val isScheduled = doc.getBoolean("isScheduled") ?: false
+                    @Suppress("UNCHECKED_CAST")
+                    val scheduleIds = (doc.get("scheduleIds") as? List<String>) ?: emptyList()
+
+                    itemList.add(
+                        ItemModel(
+                            id = doc.id,
+                            name = name,
+                            price = displayPrice,
+                            prices = effectivePrices,
+                            stock = stock,
+                            categoryId = doc.getString("categoryId") ?: "",
+                            availableOrderTypes = availableOrderTypes,
+                            isScheduled = isScheduled,
+                            scheduleIds = scheduleIds
+                        )
+                    )
+                }
+
+                itemList.sortBy { it.name.lowercase() }
+                txtItemCount.text = "${itemList.size} item${if (itemList.size != 1) "s" else ""}"
+
+                val adapter = ItemAdapter(
+                    context = this,
+                    itemList = itemList,
+                    categoryAvailabilityMap = categoryAvailabilityMap,
+                    stockCountingEnabled = stockCountingEnabled,
+                    refresh = { loadAllItemsForSearch(query) }
+                )
+                currentAdapter = adapter
+                itemRecycler.adapter = adapter
+            }
+    }
+
+    private fun showEmptyState() {
+        txtItemCount.text = "Select a category or search for an item"
+        currentAdapter = null
+        itemRecycler.adapter = null
+    }
 
     private fun loadItems(categoryId: String) {
         db.collection("MenuItems")
@@ -228,6 +306,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                             price = displayPrice,
                             prices = effectivePrices,
                             stock = stock,
+                            categoryId = doc.getString("categoryId") ?: "",
                             availableOrderTypes = availableOrderTypes,
                             isScheduled = isScheduled,
                             scheduleIds = scheduleIds
@@ -243,7 +322,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                 val adapter = ItemAdapter(
                     context = this,
                     itemList = itemList,
-                    categoryAvailability = selectedCategoryAvailability,
+                    categoryAvailabilityMap = categoryAvailabilityMap,
                     stockCountingEnabled = stockCountingEnabled,
                     refresh = { loadItems(categoryId) }
                 )

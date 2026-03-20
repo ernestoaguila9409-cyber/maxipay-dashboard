@@ -20,6 +20,13 @@ const ORDER_TYPE_LABELS = {
   BAR_TAB: "BAR",
 };
 
+const ORDER_TYPE_COLORS = {
+  DINE_IN: "#2E7D32",
+  TO_GO: "#E65100",
+  BAR_TAB: "#00897B",
+  BAR: "#00897B",
+};
+
 // ---------------------------------------------------------------------------
 // Shared HTML helpers
 // ---------------------------------------------------------------------------
@@ -52,6 +59,7 @@ function orderMetaSection(order) {
   const orderType = order.orderType ?? "";
   const employeeName = order.employeeName ?? "";
   const typeLabel = ORDER_TYPE_LABELS[orderType] || orderType || "";
+  const typeColor = ORDER_TYPE_COLORS[orderType] || "#757575";
 
   const ts = parseTimestamp(order.createdAt);
   let dateStr = "";
@@ -63,7 +71,10 @@ function orderMetaSection(order) {
 
   const rows = [];
   if (orderNumber) rows.push(row("Order #:", escapeHtml(String(orderNumber))));
-  if (typeLabel) rows.push(row("Order Type:", escapeHtml(typeLabel)));
+  if (typeLabel) {
+    const badge = `<span style="background:${typeColor};color:#fff;padding:3px 10px;border-radius:4px;font-size:12px;font-weight:bold;display:inline-block;">${escapeHtml(typeLabel)}</span>`;
+    rows.push(row("Order Type:", badge));
+  }
   if (dateStr) rows.push(row("Date:", escapeHtml(dateStr)));
   if (timeStr) rows.push(row("Time:", escapeHtml(timeStr)));
   if (employeeName) rows.push(row("Cashier:", escapeHtml(employeeName)));
@@ -84,8 +95,9 @@ function row(label, value) {
   </tr>`;
 }
 
-function itemsTableHtml(items, strikethrough) {
+function itemsTableHtml(items, strikethrough, appliedDiscounts) {
   const strike = strikethrough ? "text-decoration:line-through;color:#999;" : "";
+  const discounts = Array.isArray(appliedDiscounts) ? appliedDiscounts : [];
 
   let rows = "";
   items.forEach((item) => {
@@ -111,6 +123,26 @@ function itemsTableHtml(items, strikethrough) {
         }
       });
     }
+
+    const itemDiscounts = discounts.filter((d) => d.lineKey && d.lineKey === item.lineKey);
+    itemDiscounts.forEach((d) => {
+      const name = d.discountName || "Discount";
+      const type = (d.type || "").toLowerCase();
+      const val = d.value;
+      const cents = d.amountInCents ?? 0;
+      let label = name;
+      if (val != null && type === "percentage") {
+        const pctStr = val % 1 === 0 ? val.toFixed(0) : val.toFixed(1);
+        label = `${name} ${pctStr}% off`;
+      } else if (val != null && type === "fixed") {
+        label = `${name} $${val.toFixed(2)} off`;
+      }
+      const discDollars = (cents / 100).toFixed(2);
+      rows += `<tr>
+        <td colspan="2" style="padding:2px 0 2px 20px;color:#2E7D32;font-size:13px;font-weight:bold;font-style:italic;">${escapeHtml(label)}</td>
+        <td style="padding:2px 0;text-align:right;color:#2E7D32;font-size:13px;font-weight:bold;">-$${discDollars}</td>
+      </tr>`;
+    });
   });
 
   return `
@@ -127,14 +159,67 @@ function itemsTableHtml(items, strikethrough) {
     <hr style="border:none;border-top:1px solid #ddd;margin:16px 0;">`;
 }
 
-function totalsHtml({ subtotal, tax, tip, total, totalStrike, refundAmount, isFullRefund }) {
+function totalsHtml({ subtotal, tax, taxBreakdown, tip, total, totalStrike, refundAmount, isFullRefund, discountInCents, appliedDiscounts }) {
   const totalColor = totalStrike ? "color:#999;text-decoration:line-through;" : "color:#222;";
   const totalSize = totalStrike ? "font-size:16px;" : "font-size:20px;";
 
   let body = `
     <table style="width:100%;font-size:14px;color:#333;" cellpadding="0" cellspacing="0">
-      <tr><td style="padding:4px 0;">Subtotal</td><td style="padding:4px 0;text-align:right;">$${subtotal.toFixed(2)}</td></tr>
-      <tr><td style="padding:4px 0;">Tax</td><td style="padding:4px 0;text-align:right;">$${tax.toFixed(2)}</td></tr>`;
+      <tr><td style="padding:4px 0;">Subtotal</td><td style="padding:4px 0;text-align:right;">$${subtotal.toFixed(2)}</td></tr>`;
+
+  // Discount — separate item-level (shown per item) from order/manual-level
+  const allDiscounts = Array.isArray(appliedDiscounts) ? appliedDiscounts : [];
+  const orderDiscounts = allDiscounts.filter((d) => !d.lineKey || d.lineKey === "");
+  const itemDiscountCents = allDiscounts.filter((d) => d.lineKey && d.lineKey !== "").reduce((sum, d) => sum + (d.amountInCents ?? 0), 0);
+  const totalDiscountCents = discountInCents ?? 0;
+
+  if (orderDiscounts.length > 0) {
+    const orderDiscCents = orderDiscounts.reduce((sum, d) => sum + (d.amountInCents ?? 0), 0);
+    if (orderDiscCents > 0) {
+      const orderDiscDollars = orderDiscCents / 100;
+      const names = orderDiscounts.map((d) => {
+        const name = d.discountName || "Discount";
+        const type = (d.type || "").toLowerCase();
+        const val = d.value;
+        if (val != null && type === "percentage") {
+          const pctStr = val % 1 === 0 ? val.toFixed(0) : val.toFixed(1);
+          return `${name} ${pctStr}% off`;
+        } else if (val != null && type === "fixed") {
+          return `${name} $${val.toFixed(2)} off`;
+        }
+        return name;
+      }).join(", ");
+      body += `<tr>
+        <td style="padding:4px 0;color:#2E7D32;font-weight:bold;">${escapeHtml(names)}</td>
+        <td style="padding:4px 0;text-align:right;color:#2E7D32;font-weight:bold;">-$${orderDiscDollars.toFixed(2)}</td>
+      </tr>`;
+    }
+  } else if (totalDiscountCents > 0 && itemDiscountCents === 0) {
+    const discountDollars = totalDiscountCents / 100;
+    body += `<tr>
+      <td style="padding:4px 0;color:#2E7D32;font-weight:bold;">Discount</td>
+      <td style="padding:4px 0;text-align:right;color:#2E7D32;font-weight:bold;">-$${discountDollars.toFixed(2)}</td>
+    </tr>`;
+  }
+
+  // Tax breakdown
+  if (Array.isArray(taxBreakdown) && taxBreakdown.length > 0) {
+    taxBreakdown.forEach((entry) => {
+      const taxName = entry.name || "Tax";
+      const taxType = entry.taxType || "PERCENTAGE";
+      const rate = entry.rate;
+      const taxCents = entry.amountInCents ?? 0;
+      const taxDollars = taxCents / 100;
+      let label = taxName;
+      if (taxType === "PERCENTAGE" && rate != null) {
+        const rateStr = rate % 1 === 0 ? rate.toFixed(0) : rate.toFixed(1);
+        label = `${taxName} (${rateStr}%)`;
+      }
+      body += `<tr><td style="padding:4px 0;">${escapeHtml(label)}</td><td style="padding:4px 0;text-align:right;">$${taxDollars.toFixed(2)}</td></tr>`;
+    });
+  } else if (tax > 0) {
+    body += `<tr><td style="padding:4px 0;">Tax</td><td style="padding:4px 0;text-align:right;">$${tax.toFixed(2)}</td></tr>`;
+  }
 
   if (tip > 0) {
     body += `<tr><td style="padding:4px 0;">Tip</td><td style="padding:4px 0;text-align:right;">$${tip.toFixed(2)}</td></tr>`;
@@ -248,7 +333,7 @@ function parseItems(itemsSnap) {
       });
     }
 
-    items.push({ name, quantity, unitPriceInCents, lineTotalInCents, modifiers });
+    items.push({ lineKey: doc.id, name, quantity, unitPriceInCents, lineTotalInCents, modifiers });
   });
 
   return { items, subtotalInCents };
@@ -305,6 +390,8 @@ exports.sendReceiptEmail = onCall(async (request) => {
   const totalInCents = order.totalInCents ?? 0;
   const tipAmountInCents = order.tipAmountInCents ?? 0;
   const taxBreakdown = order.taxBreakdown ?? [];
+  const discountInCents = order.discountInCents ?? 0;
+  const appliedDiscounts = order.appliedDiscounts ?? [];
 
   const itemsSnap = await orderRef.collection("items").get();
   const { items, subtotalInCents } = parseItems(itemsSnap);
@@ -319,8 +406,8 @@ exports.sendReceiptEmail = onCall(async (request) => {
   const body =
     brandedHeader() +
     orderMetaSection(order) +
-    itemsTableHtml(items, false) +
-    totalsHtml({ subtotal, tax, tip, total }) +
+    itemsTableHtml(items, false, appliedDiscounts) +
+    totalsHtml({ subtotal, tax, taxBreakdown, tip, total, discountInCents, appliedDiscounts }) +
     paymentHtml(payments) +
     footerHtml();
 
@@ -372,6 +459,8 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
   const totalInCents = order.totalInCents ?? 0;
   const tipAmountInCents = order.tipAmountInCents ?? 0;
   const taxBreakdown = order.taxBreakdown ?? [];
+  const discountInCents = order.discountInCents ?? 0;
+  const appliedDiscounts = order.appliedDiscounts ?? [];
   const total = totalInCents / 100;
 
   const voidedBy = order.voidedBy ?? "";
@@ -399,8 +488,8 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
     statusBadge("VOIDED", "#D32F2F") +
     voidMeta +
     orderMetaSection(order) +
-    itemsTableHtml(items, true) +
-    totalsHtml({ subtotal, tax, tip, total, totalStrike: true }) +
+    itemsTableHtml(items, true, appliedDiscounts) +
+    totalsHtml({ subtotal, tax, taxBreakdown, tip, total, totalStrike: true, discountInCents, appliedDiscounts }) +
     footerHtml('<span style="color:#D32F2F;">This transaction has been voided.</span>');
 
   const html = wrapEmail(body);
@@ -453,6 +542,8 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
     const totalRefundedInCents = order.totalRefundedInCents ?? 0;
     const tipAmountInCents = order.tipAmountInCents ?? 0;
     const taxBreakdown = order.taxBreakdown ?? [];
+    const discountInCents = order.discountInCents ?? 0;
+    const appliedDiscounts = order.appliedDiscounts ?? [];
     const total = totalInCents / 100;
 
     const itemsSnap = await db.collection("Orders").doc(orderId).collection("items").get();
@@ -515,8 +606,8 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
       statusBadge("REFUND", "#F57C00") +
       refundMeta +
       orderMetaSection(order) +
-      itemsTableHtml(items, false) +
-      totalsHtml({ subtotal, tax, tip, total, totalStrike: false, refundAmount, isFullRefund }) +
+      itemsTableHtml(items, false, appliedDiscounts) +
+      totalsHtml({ subtotal, tax, taxBreakdown, tip, total, totalStrike: false, refundAmount, isFullRefund, discountInCents, appliedDiscounts }) +
       footerHtml(refundMsg);
 
     const html = wrapEmail(body);

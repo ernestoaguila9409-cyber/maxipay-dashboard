@@ -9,6 +9,8 @@ import {
   deleteDoc,
   onSnapshot,
   writeBatch,
+  arrayUnion,
+  arrayRemove,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
@@ -26,6 +28,7 @@ import {
   Search,
   ToggleLeft,
   ToggleRight,
+  CalendarClock,
 } from "lucide-react";
 
 // ── Types ──
@@ -34,6 +37,7 @@ interface Menu {
   id: string;
   name: string;
   isActive: boolean;
+  scheduleIds: string[];
 }
 
 interface Schedule {
@@ -71,6 +75,21 @@ const DAY_LABELS: Record<string, string> = {
   SAT: "Sat",
   SUN: "Sun",
 };
+
+function formatTimeForDisplay(t: string): string {
+  if (!t || t.length < 5) return t;
+  const [h, m] = t.split(":").map(Number);
+  if (h === 0) return `12:${String(m).padStart(2, "0")} AM`;
+  if (h === 12) return `12:${String(m).padStart(2, "0")} PM`;
+  return `${h > 12 ? h - 12 : h}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
+}
+
+function formatScheduleDisplay(sched: Schedule): string {
+  const daysStr = sched.days.length > 0
+    ? sched.days.map((d) => DAY_LABELS[d] ?? d).join(", ")
+    : "No days";
+  return `${sched.name} (${daysStr} ${formatTimeForDisplay(sched.startTime)} – ${formatTimeForDisplay(sched.endTime)})`;
+}
 
 type Screen = "main" | "scheduleDetail";
 
@@ -117,6 +136,15 @@ export default function MenusPage() {
   const [itemSearch, setItemSearch] = useState("");
   const [assignSaving, setAssignSaving] = useState<string | null>(null);
 
+  // ── Assign Schedule to Menu ──
+  const [assignScheduleModalOpen, setAssignScheduleModalOpen] = useState(false);
+  const [assignScheduleMenu, setAssignScheduleMenu] = useState<Menu | null>(null);
+  const [assignScheduleSelections, setAssignScheduleSelections] = useState<Record<string, boolean>>({});
+  const [assignScheduleSaving, setAssignScheduleSaving] = useState(false);
+
+  // ── Create Schedule: Assign to Menu ──
+  const [scheduleAssignToMenus, setScheduleAssignToMenus] = useState<Record<string, boolean>>({});
+
   // ── Preview mode ──
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewDay, setPreviewDay] = useState<string>(
@@ -144,6 +172,7 @@ export default function MenusPage() {
           id: d.id,
           name: data.name ?? "",
           isActive: data.isActive ?? true,
+          scheduleIds: Array.isArray(data.scheduleIds) ? data.scheduleIds : [],
         });
       });
       list.sort((a, b) => a.name.localeCompare(b.name));
@@ -222,29 +251,53 @@ export default function MenusPage() {
   const menuMap = useMemo(() => new Map(menus.map((m) => [m.id, m.name])), [menus]);
   const activeSchedule = schedules.find((s) => s.id === activeScheduleId) ?? null;
 
+  const catScheduleMap = useMemo(
+    () => new Map(categories.map((c) => [c.id, c.scheduleIds])),
+    [categories]
+  );
+
   const menuItemCounts = useMemo(() => {
     const map = new Map<string, number>();
+    const menuScheduleLookup = new Map<string, Set<string>>();
+    for (const menu of menus) {
+      for (const sid of menu.scheduleIds) {
+        if (!menuScheduleLookup.has(sid)) menuScheduleLookup.set(sid, new Set());
+        menuScheduleLookup.get(sid)!.add(menu.id);
+      }
+    }
     for (const item of items) {
-      if (item.menuId) {
-        map.set(item.menuId, (map.get(item.menuId) ?? 0) + 1);
+      const counted = new Set<string>();
+      if (item.menuId) counted.add(item.menuId);
+      const sIds = item.scheduleIds.length > 0
+        ? item.scheduleIds
+        : (catScheduleMap.get(item.categoryId) ?? []);
+      for (const sid of sIds) {
+        const menuIds = menuScheduleLookup.get(sid);
+        if (menuIds) for (const mid of menuIds) counted.add(mid);
+      }
+      for (const mid of counted) {
+        map.set(mid, (map.get(mid) ?? 0) + 1);
       }
     }
     return map;
-  }, [items]);
+  }, [items, menus, catScheduleMap]);
 
   const scheduleItemCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const item of items) {
-      if (item.isScheduled) {
-        for (const sid of item.scheduleIds) {
-          map.set(sid, (map.get(sid) ?? 0) + 1);
-        }
+      const sIds = item.scheduleIds.length > 0
+        ? item.scheduleIds
+        : (catScheduleMap.get(item.categoryId) ?? []);
+      for (const sid of sIds) {
+        map.set(sid, (map.get(sid) ?? 0) + 1);
       }
     }
     return map;
-  }, [items]);
+  }, [items, catScheduleMap]);
 
   // ── Preview logic (additive model) ──
+  // Menus with schedules: only active during their schedule times
+  // Menus without schedules: always active
   const previewItems = useMemo(() => {
     const activeSchedIds = new Set<string>();
     for (const sched of schedules) {
@@ -257,10 +310,16 @@ export default function MenusPage() {
       }
     }
 
+    const menuMapById = new Map(menus.map((m) => [m.id, m]));
     const seen = new Set<string>();
     const result: MenuItem[] = [];
     for (const item of items) {
       if (seen.has(item.id)) continue;
+      const menu = item.menuId ? menuMapById.get(item.menuId) : null;
+      const menuHasSchedules = menu && (menu.scheduleIds?.length ?? 0) > 0;
+      const menuIsActive = !menuHasSchedules || (menu!.scheduleIds.some((sid) => activeSchedIds.has(sid)));
+      if (!menuIsActive) continue;
+
       if (!item.isScheduled) {
         seen.add(item.id);
         result.push(item);
@@ -270,7 +329,7 @@ export default function MenusPage() {
       }
     }
     return result;
-  }, [schedules, items, previewDay, previewTime]);
+  }, [schedules, items, menus, previewDay, previewTime]);
 
   // ── Menu CRUD ──
   const openCreateMenu = () => {
@@ -301,6 +360,7 @@ export default function MenusPage() {
         await addDoc(collection(db, "menus"), {
           name,
           isActive: menuIsActive,
+          scheduleIds: [],
         });
       }
       setMenuModalOpen(false);
@@ -339,6 +399,7 @@ export default function MenusPage() {
     setScheduleStart("08:00");
     setScheduleEnd("16:00");
     setScheduleError("");
+    setScheduleAssignToMenus({});
     setScheduleModalOpen(true);
   };
 
@@ -379,7 +440,20 @@ export default function MenusPage() {
       if (scheduleEdit) {
         await updateDoc(doc(db, "menuSchedules", scheduleEdit.id), data);
       } else {
-        await addDoc(collection(db, "menuSchedules"), data);
+        const ref = await addDoc(collection(db, "menuSchedules"), data);
+        const newScheduleId = ref.id;
+        const menuIdsToAssign = Object.entries(scheduleAssignToMenus)
+          .filter(([, v]) => v)
+          .map(([k]) => k);
+        for (const menuId of menuIdsToAssign) {
+          const menu = menus.find((m) => m.id === menuId);
+          const currentIds = menu?.scheduleIds ?? [];
+          if (!currentIds.includes(newScheduleId)) {
+            await updateDoc(doc(db, "menus", menuId), {
+              scheduleIds: arrayUnion(newScheduleId),
+            });
+          }
+        }
       }
       setScheduleModalOpen(false);
     } catch (err) {
@@ -450,6 +524,36 @@ export default function MenusPage() {
     setActiveScheduleId(sched.id);
     setScreen("scheduleDetail");
     setItemSearch("");
+  };
+
+  // ── Assign Schedule to Menu ──
+  const openAssignSchedule = (menu: Menu) => {
+    setAssignScheduleMenu(menu);
+    const sel: Record<string, boolean> = {};
+    for (const s of schedules) {
+      sel[s.id] = menu.scheduleIds.includes(s.id);
+    }
+    setAssignScheduleSelections(sel);
+    setAssignScheduleModalOpen(true);
+  };
+
+  const handleSaveAssignSchedule = async () => {
+    if (!assignScheduleMenu) return;
+    const selectedIds = Object.entries(assignScheduleSelections)
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    setAssignScheduleSaving(true);
+    try {
+      await updateDoc(doc(db, "menus", assignScheduleMenu.id), {
+        scheduleIds: selectedIds,
+      });
+      setAssignScheduleModalOpen(false);
+      setAssignScheduleMenu(null);
+    } catch (err) {
+      console.error("Failed to assign schedules to menu:", err);
+    } finally {
+      setAssignScheduleSaving(false);
+    }
   };
 
   // ── Filtered items for schedule detail ──
@@ -526,47 +630,79 @@ export default function MenusPage() {
                   <div className="space-y-2">
                     {menus.map((menu) => {
                       const count = menuItemCounts.get(menu.id) ?? 0;
+                      const assignedSchedules = menu.scheduleIds
+                        .map((id) => schedules.find((s) => s.id === id))
+                        .filter((s): s is Schedule => s != null);
                       return (
                         <div
                           key={menu.id}
                           className="group bg-white rounded-xl border border-slate-200 p-4 hover:shadow-sm hover:border-slate-300 transition-all"
                         >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <h3 className="text-sm font-semibold text-slate-800 truncate">
-                                {menu.name}
-                              </h3>
-                              <span
-                                className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                                  menu.isActive
-                                    ? "bg-emerald-50 text-emerald-600"
-                                    : "bg-slate-100 text-slate-400"
-                                }`}
-                              >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                                <h3 className="text-sm font-semibold text-slate-800 truncate">
+                                  {menu.name}
+                                </h3>
                                 <span
-                                  className={`w-1.5 h-1.5 rounded-full ${
-                                    menu.isActive ? "bg-emerald-500" : "bg-slate-300"
+                                  className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                                    menu.isActive
+                                      ? "bg-emerald-50 text-emerald-600"
+                                      : "bg-slate-100 text-slate-400"
                                   }`}
-                                />
-                                {menu.isActive ? "Active" : "Inactive"}
-                              </span>
-                              <span className="text-xs text-slate-400">
-                                {count} item{count !== 1 ? "s" : ""}
-                              </span>
+                                >
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full ${
+                                      menu.isActive ? "bg-emerald-500" : "bg-slate-300"
+                                    }`}
+                                  />
+                                  {menu.isActive ? "Active" : "Inactive"}
+                                </span>
+                                <span className="text-xs text-slate-400">
+                                  {count} item{count !== 1 ? "s" : ""}
+                                </span>
+                              </div>
+                              <div className="mt-2">
+                                {assignedSchedules.length > 0 ? (
+                                  <div className="flex flex-col gap-1">
+                                    {assignedSchedules.map((s) => (
+                                      <p
+                                        key={s.id}
+                                        className="text-xs text-slate-600 font-medium"
+                                        title={formatScheduleDisplay(s)}
+                                      >
+                                        {formatScheduleDisplay(s)}
+                                      </p>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-slate-400 italic">No schedule assigned</p>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-1 shrink-0">
                               <button
-                                onClick={() => openEditMenu(menu)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                onClick={() => openAssignSchedule(menu)}
+                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+                                title="Assign Schedule"
                               >
-                                <Pencil size={13} />
+                                <CalendarClock size={13} />
+                                Assign Schedule
                               </button>
-                              <button
-                                onClick={() => setDeleteMenuTarget(menu)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                              >
-                                <Trash2 size={13} />
-                              </button>
+                              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={() => openEditMenu(menu)}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                >
+                                  <Pencil size={13} />
+                                </button>
+                                <button
+                                  onClick={() => setDeleteMenuTarget(menu)}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -936,6 +1072,94 @@ export default function MenusPage() {
       )}
 
       {/* ════════════════════════════════════════════
+          MODAL: ASSIGN SCHEDULE TO MENU
+          ════════════════════════════════════════════ */}
+      {assignScheduleModalOpen && assignScheduleMenu && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => !assignScheduleSaving && setAssignScheduleModalOpen(false)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="px-6 py-5 space-y-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-slate-800">
+                  Assign Schedule
+                </h3>
+                <button
+                  onClick={() => !assignScheduleSaving && setAssignScheduleModalOpen(false)}
+                  disabled={assignScheduleSaving}
+                  className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <p className="text-sm text-slate-500">
+                Select schedules for <strong className="text-slate-700">{assignScheduleMenu.name}</strong>. Menus with schedules are only active during their assigned time windows.
+              </p>
+              <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+                {schedules.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-slate-400">
+                    No schedules yet. Create a schedule first.
+                  </div>
+                ) : (
+                  schedules.map((sched) => (
+                    <label
+                      key={sched.id}
+                      className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={assignScheduleSelections[sched.id] ?? false}
+                        onChange={(e) =>
+                          setAssignScheduleSelections((prev) => ({
+                            ...prev,
+                            [sched.id]: e.target.checked,
+                          }))
+                        }
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-800 truncate">
+                          {sched.name}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {sched.days.map((d) => DAY_LABELS[d] ?? d).join(", ")} · {sched.startTime} – {sched.endTime}
+                        </p>
+                      </div>
+                    </label>
+                  ))
+                )}
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setAssignScheduleModalOpen(false)}
+                  disabled={assignScheduleSaving}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveAssignSchedule}
+                  disabled={assignScheduleSaving}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {assignScheduleSaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Saving…
+                    </>
+                  ) : (
+                    "Save"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════
           MODAL: DELETE MENU
           ════════════════════════════════════════════ */}
       {deleteMenuTarget && (
@@ -1067,6 +1291,38 @@ export default function MenusPage() {
                   />
                 </div>
               </div>
+
+              {!scheduleEdit && menus.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Assign to Menu (optional)
+                  </label>
+                  <p className="text-xs text-slate-500 mb-2">
+                    Link this schedule to menus so they are only active during this time window.
+                  </p>
+                  <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+                    {menus.map((menu) => (
+                      <label
+                        key={menu.id}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 cursor-pointer transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={scheduleAssignToMenus[menu.id] ?? false}
+                          onChange={(e) =>
+                            setScheduleAssignToMenus((prev) => ({
+                              ...prev,
+                              [menu.id]: e.target.checked,
+                            }))
+                          }
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-slate-700">{menu.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {scheduleError && (
                 <p className="text-sm text-red-600 font-medium">{scheduleError}</p>

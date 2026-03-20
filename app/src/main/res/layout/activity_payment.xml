@@ -56,6 +56,40 @@
                 android:layout_height="1dp"
                 android:background="#E0E0E0" />
 
+            <!-- ==================== Applied Discount Banner ==================== -->
+
+            <LinearLayout
+                android:id="@+id/appliedDiscountBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="#E8F5E9"
+                android:padding="12dp"
+                android:layout_marginTop="12dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/txtAppliedDiscount"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#2E7D32" />
+
+                <TextView
+                    android:id="@+id/btnRemoveDiscount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Remove"
+                    android:textSize="13sp"
+                    android:textColor="#C62828"
+                    android:padding="8dp"
+                    android:background="?attr/selectableItemBackground" />
+
+            </LinearLayout>
+
             <!-- ==================== Card Payments ==================== -->
 
             <TextView
@@ -168,6 +202,24 @@
                 app:iconTint="#424242"
                 app:cornerRadius="12dp"
                 app:strokeColor="#BDBDBD" />
+
+            <com.google.android.material.button.MaterialButton
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:id="@+id/btnDiscounts"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:text="Discounts"
+                android:textSize="16sp"
+                android:textAllCaps="false"
+                android:layout_marginTop="10dp"
+                app:icon="@drawable/ic_discount"
+                app:iconGravity="textStart"
+                app:iconPadding="12dp"
+                app:iconTint="#6A4FB3"
+                app:cornerRadius="12dp"
+                app:strokeColor="#6A4FB3"
+                android:textColor="#6A4FB3"
+                android:visibility="gone" />
 
             <!-- ==================== Divider ==================== -->
 

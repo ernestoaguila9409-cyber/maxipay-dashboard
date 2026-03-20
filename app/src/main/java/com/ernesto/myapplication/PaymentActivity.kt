@@ -20,6 +20,7 @@ import java.math.RoundingMode
 import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.Locale
+import com.ernesto.myapplication.engine.DiscountEngine
 import com.ernesto.myapplication.engine.PaymentEngine
 import android.util.Log
 import com.ernesto.myapplication.engine.MoneyUtils
@@ -58,6 +59,12 @@ class PaymentActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
     private lateinit var paymentEngine: PaymentEngine
+    private lateinit var discountEngine: DiscountEngine
+    private lateinit var btnDiscounts: MaterialButton
+    private lateinit var appliedDiscountBanner: LinearLayout
+    private lateinit var txtAppliedDiscount: TextView
+    private lateinit var btnRemoveDiscount: TextView
+    private var selectedManualDiscountId: String? = null
 
     private var lastCashTenderedCents: Long = 0L
     private var lastCashChangeCents: Long = 0L
@@ -77,6 +84,7 @@ class PaymentActivity : AppCompatActivity() {
         setContentView(R.layout.activity_payment)
 
         paymentEngine = PaymentEngine(db)
+        discountEngine = DiscountEngine(db)
 
         txtPaymentTotal = findViewById(R.id.txtPaymentTotal)
         txtOrderSummary = findViewById(R.id.txtOrderSummary)
@@ -96,9 +104,18 @@ class PaymentActivity : AppCompatActivity() {
         txtStatus = findViewById(R.id.txtStatus)
         fireworksView = findViewById(R.id.fireworksView)
 
+        btnDiscounts = findViewById(R.id.btnDiscounts)
+        appliedDiscountBanner = findViewById(R.id.appliedDiscountBanner)
+        txtAppliedDiscount = findViewById(R.id.txtAppliedDiscount)
+        btnRemoveDiscount = findViewById(R.id.btnRemoveDiscount)
+
         orderId = intent.getStringExtra("ORDER_ID")
         batchId = intent.getStringExtra("BATCH_ID")
         ensureBatchIdThenLoadBalance()
+        loadManualDiscounts()
+
+        btnDiscounts.setOnClickListener { showDiscountsDialog() }
+        btnRemoveDiscount.setOnClickListener { removeAppliedDiscount() }
 
         updateMixPaymentsVisibility()
 
@@ -162,7 +179,9 @@ class PaymentActivity : AppCompatActivity() {
 
         labelCashPayments.visibility = btnCash.visibility
 
-        val anyOther = btnMixMode.visibility == View.VISIBLE || btnSplitPayments.visibility == View.VISIBLE
+        val anyOther = btnMixMode.visibility == View.VISIBLE
+                || btnSplitPayments.visibility == View.VISIBLE
+                || btnDiscounts.visibility == View.VISIBLE
         labelOther.visibility = if (anyOther) View.VISIBLE else View.GONE
     }
 
@@ -680,6 +699,146 @@ class PaymentActivity : AppCompatActivity() {
         }
         startActivity(intent)
         finish()
+    }
+
+    private var availableManualDiscounts: List<DiscountItem> = emptyList()
+
+    private fun loadManualDiscounts() {
+        discountEngine.loadDiscounts {
+            availableManualDiscounts = discountEngine.getAvailableManualDiscounts()
+            btnDiscounts.visibility = if (availableManualDiscounts.isNotEmpty()) View.VISIBLE else View.GONE
+            updateOtherSectionVisibility()
+        }
+    }
+
+    private fun updateOtherSectionVisibility() {
+        val anyOther = btnMixMode.visibility == View.VISIBLE
+                || btnSplitPayments.visibility == View.VISIBLE
+                || btnDiscounts.visibility == View.VISIBLE
+        labelOther.visibility = if (anyOther) View.VISIBLE else View.GONE
+    }
+
+    private fun showDiscountsDialog() {
+        if (availableManualDiscounts.isEmpty()) {
+            Toast.makeText(this, "No discounts available", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val names = availableManualDiscounts.map { d ->
+            val valueStr = if (d.type == "PERCENTAGE") {
+                String.format(Locale.US, "%.1f%% off", d.value)
+            } else {
+                String.format(Locale.US, "$%.2f off", d.value)
+            }
+            "${d.name}  —  $valueStr"
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Select a Discount")
+            .setItems(names) { _, which ->
+                applyManualDiscount(availableManualDiscounts[which])
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun applyManualDiscount(discount: DiscountItem) {
+        val oid = orderId ?: return
+
+        if (selectedManualDiscountId == discount.id) {
+            Toast.makeText(this, "Discount already applied", Toast.LENGTH_SHORT).show()
+            return
+        }
+        selectedManualDiscountId = discount.id
+
+        db.collection("Orders").document(oid).get()
+            .addOnSuccessListener { doc ->
+                val currentTotal = doc.getLong("totalInCents") ?: 0L
+                val currentDiscount = doc.getLong("discountInCents") ?: 0L
+                val subtotalBeforeDiscount = currentTotal + currentDiscount
+
+                val discountCents = when (discount.type) {
+                    "PERCENTAGE" -> ((subtotalBeforeDiscount * discount.value) / 100.0).toLong()
+                    "FIXED" -> (discount.value * 100).toLong().coerceAtMost(subtotalBeforeDiscount)
+                    else -> 0L
+                }
+
+                val newTotal = (subtotalBeforeDiscount - discountCents).coerceAtLeast(0L)
+                val totalPaid = doc.getLong("totalPaidInCents") ?: 0L
+                val newRemaining = (newTotal - totalPaid).coerceAtLeast(0L)
+
+                val discountInfo = listOf(
+                    mapOf(
+                        "discountId" to discount.id,
+                        "discountName" to discount.name,
+                        "type" to discount.type,
+                        "value" to discount.value,
+                        "applyScope" to "manual",
+                        "amountInCents" to discountCents,
+                        "lineKey" to ""
+                    )
+                )
+
+                db.collection("Orders").document(oid).update(
+                    mapOf(
+                        "totalInCents" to newTotal,
+                        "remainingInCents" to newRemaining,
+                        "discountInCents" to discountCents,
+                        "appliedDiscounts" to discountInfo,
+                        "updatedAt" to Date()
+                    )
+                ).addOnSuccessListener {
+                    remainingBalance = MoneyUtils.centsToDouble(newRemaining)
+                    txtPaymentTotal.text = MoneyUtils.centsToDisplay(newRemaining)
+
+                    val valueStr = if (discount.type == "PERCENTAGE") {
+                        String.format(Locale.US, "%.1f%%", discount.value)
+                    } else {
+                        MoneyUtils.centsToDisplay((discount.value * 100).toLong())
+                    }
+                    txtAppliedDiscount.text = "${discount.name} ($valueStr): -${MoneyUtils.centsToDisplay(discountCents)}"
+                    appliedDiscountBanner.visibility = View.VISIBLE
+                    btnDiscounts.visibility = View.GONE
+                    updateOtherSectionVisibility()
+
+                    Toast.makeText(this, "${discount.name} applied", Toast.LENGTH_SHORT).show()
+                }.addOnFailureListener { e ->
+                    selectedManualDiscountId = null
+                    Toast.makeText(this, "Failed to apply discount: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+    }
+
+    private fun removeAppliedDiscount() {
+        val oid = orderId ?: return
+        val discountId = selectedManualDiscountId ?: return
+
+        db.collection("Orders").document(oid).get()
+            .addOnSuccessListener { doc ->
+                val currentTotal = doc.getLong("totalInCents") ?: 0L
+                val currentDiscount = doc.getLong("discountInCents") ?: 0L
+                val restoredTotal = currentTotal + currentDiscount
+                val totalPaid = doc.getLong("totalPaidInCents") ?: 0L
+                val newRemaining = (restoredTotal - totalPaid).coerceAtLeast(0L)
+
+                db.collection("Orders").document(oid).update(
+                    mapOf(
+                        "totalInCents" to restoredTotal,
+                        "remainingInCents" to newRemaining,
+                        "discountInCents" to 0L,
+                        "appliedDiscounts" to emptyList<Map<String, Any>>(),
+                        "updatedAt" to Date()
+                    )
+                ).addOnSuccessListener {
+                    selectedManualDiscountId = null
+                    remainingBalance = MoneyUtils.centsToDouble(newRemaining)
+                    txtPaymentTotal.text = MoneyUtils.centsToDisplay(newRemaining)
+                    appliedDiscountBanner.visibility = View.GONE
+                    btnDiscounts.visibility = if (availableManualDiscounts.isNotEmpty()) View.VISIBLE else View.GONE
+                    updateOtherSectionVisibility()
+                    Toast.makeText(this, "Discount removed", Toast.LENGTH_SHORT).show()
+                }
+            }
     }
 
     private fun roundMoney(value: Double): Double {

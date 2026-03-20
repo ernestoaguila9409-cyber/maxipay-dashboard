@@ -6,6 +6,7 @@ data class ItemModel(
     val price: Double,
     val prices: Map<String, Double> = emptyMap(),
     val stock: Long,
+    val categoryId: String = "",
     val availableOrderTypes: List<String>? = null,
     val modifierGroupIds: List<String> = emptyList(),
     val taxIds: List<String> = emptyList(),
