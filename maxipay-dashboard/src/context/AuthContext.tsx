@@ -20,6 +20,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log("[Auth] State changed →", user ? `UID: ${user.uid}, email: ${user.email}` : "signed out");
       setUser(user);
       setLoading(false);
     });

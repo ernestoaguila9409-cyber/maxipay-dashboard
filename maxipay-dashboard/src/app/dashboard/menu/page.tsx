@@ -35,7 +35,7 @@ import {
   List,
   Clock,
 } from "lucide-react";
-import * as XLSX from "xlsx";
+import type * as XLSXType from "xlsx";
 
 const ALL_ORDER_TYPES = ["DINE_IN", "TO_GO", "BAR_TAB"] as const;
 const ORDER_TYPE_LABELS: Record<string, string> = {
@@ -163,6 +163,7 @@ export default function MenuPage() {
   const [viewMode, setViewMode] = useState<"compact" | "card">("compact");
   const [menuTypeFilter, setMenuTypeFilter] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
+  const [subscriptionKey, setSubscriptionKey] = useState(0);
 
   const catSnap = useRef<Map<string, { name: string; availableOrderTypes: string[]; scheduleIds: string[] }>>(new Map());
   const itemSnap = useRef<
@@ -172,6 +173,9 @@ export default function MenuPage() {
 
   useEffect(() => {
     if (!user) return;
+    console.log("[Menu] useEffect fired — subscribing to Firestore. subscriptionKey:", subscriptionKey);
+    setLoading(true);
+    bothReady.current = { cats: false, items: false };
 
     function rebuild() {
       if (!bothReady.current.cats || !bothReady.current.items) return;
@@ -200,130 +204,174 @@ export default function MenuPage() {
       setLoading(false);
     }
 
-    const unsubCats = onSnapshot(collection(db, "Categories"), (snap) => {
-      catSnap.current.clear();
-      snap.forEach((d) => {
-        const data = d.data();
-        if (data.name) {
-          catSnap.current.set(d.id, {
-            name: data.name,
-            availableOrderTypes: Array.isArray(data.availableOrderTypes) ? data.availableOrderTypes : [],
-            scheduleIds: Array.isArray(data.scheduleIds) ? data.scheduleIds : [],
-          });
-        }
-      });
-      bothReady.current.cats = true;
-      rebuild();
-    });
+    console.log("[Menu] Subscribing to Firestore collections. User UID:", user.uid);
 
-    const unsubSchedules = onSnapshot(collection(db, "menuSchedules"), (snap) => {
-      const list: Schedule[] = [];
-      snap.forEach((d) => {
-        const data = d.data();
-        if (data.name) list.push({ id: d.id, name: data.name });
-      });
-      list.sort((a, b) => a.name.localeCompare(b.name));
-      setAllSchedules(list);
-    });
-
-    const unsubItems = onSnapshot(collection(db, "MenuItems"), (snap) => {
-      const list: typeof itemSnap.current = [];
-      snap.forEach((d) => {
-        const data = d.data();
-        const rawPrices = (typeof data.prices === "object" && data.prices !== null)
-          ? Object.fromEntries(
-              Object.entries(data.prices as Record<string, unknown>).map(
-                ([k, v]) => [k, typeof v === "number" ? v : 0]
-              )
-            )
-          : {};
-        const legacyPrice: number = data.price ?? 0;
-        const prices = Object.keys(rawPrices).length > 0 ? rawPrices : { default: legacyPrice };
-        const displayPrice = Object.values(prices)[0] ?? 0;
-        list.push({
-          id: d.id,
-          name: data.name || "Unnamed",
-          price: displayPrice,
-          prices,
-          stock: data.stock ?? 0,
-          categoryId: data.categoryId ?? "",
-          availableOrderTypes: Array.isArray(data.availableOrderTypes) ? data.availableOrderTypes : null,
-          modifierGroupIds: Array.isArray(data.modifierGroupIds) ? data.modifierGroupIds : [],
-          taxIds: Array.isArray(data.taxIds) ? data.taxIds : [],
-          menuId: data.menuId ?? "",
-          isScheduled: data.isScheduled ?? false,
-          scheduleIds: Array.isArray(data.scheduleIds) ? data.scheduleIds : [],
+    const unsubCats = onSnapshot(
+      collection(db, "Categories"),
+      (snap) => {
+        console.log("[Menu] Categories snapshot → docs:", snap.size);
+        catSnap.current.clear();
+        snap.forEach((d) => {
+          const data = d.data();
+          if (data.name) {
+            catSnap.current.set(d.id, {
+              name: data.name,
+              availableOrderTypes: Array.isArray(data.availableOrderTypes) ? data.availableOrderTypes : [],
+              scheduleIds: Array.isArray(data.scheduleIds) ? data.scheduleIds : [],
+            });
+          }
         });
-      });
-      itemSnap.current = list;
-      bothReady.current.items = true;
-      rebuild();
-    });
+        bothReady.current.cats = true;
+        rebuild();
+      },
+      (err) => {
+        console.error("[Menu] Categories onSnapshot error:", err.code, err.message);
+        setLoading(false);
+      }
+    );
 
-    const unsubSettings = onSnapshot(doc(db, "Settings", "inventory"), (snap) => {
-      const data = snap.data();
-      setStockCountingEnabled(data?.stockCountingEnabled ?? true);
-    });
+    const unsubSchedules = onSnapshot(
+      collection(db, "menuSchedules"),
+      (snap) => {
+        console.log("[Menu] menuSchedules snapshot → docs:", snap.size);
+        const list: Schedule[] = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          if (data.name) list.push({ id: d.id, name: data.name });
+        });
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        setAllSchedules(list);
+      },
+      (err) => console.error("[Menu] menuSchedules onSnapshot error:", err.code, err.message)
+    );
 
-    const unsubModGroups = onSnapshot(collection(db, "ModifierGroups"), (snap) => {
-      const list: ModifierGroup[] = [];
-      snap.forEach((d) => {
-        const data = d.data();
-        if (data.name) {
+    const unsubItems = onSnapshot(
+      collection(db, "MenuItems"),
+      (snap) => {
+        console.log("[Menu] MenuItems snapshot → docs:", snap.size);
+        const list: typeof itemSnap.current = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          const rawPrices = (typeof data.prices === "object" && data.prices !== null)
+            ? Object.fromEntries(
+                Object.entries(data.prices as Record<string, unknown>).map(
+                  ([k, v]) => [k, typeof v === "number" ? v : 0]
+                )
+              )
+            : {};
+          const legacyPrice: number = data.price ?? 0;
+          const prices = Object.keys(rawPrices).length > 0 ? rawPrices : { default: legacyPrice };
+          const displayPrice = Object.values(prices)[0] ?? 0;
           list.push({
             id: d.id,
-            name: data.name,
-            groupType: data.groupType ?? "ADD",
-            options: Array.isArray(data.options)
-              ? data.options.map((o: Record<string, unknown>) => ({
-                  id: String(o.id ?? ""),
-                  name: String(o.name ?? ""),
-                  price: typeof o.price === "number" ? o.price : 0,
-                }))
-              : [],
-          });
-        }
-      });
-      list.sort((a, b) => a.name.localeCompare(b.name));
-      setModifierGroups(list);
-    });
-
-    const unsubTaxes = onSnapshot(collection(db, "Taxes"), (snap) => {
-      const list: TaxEntry[] = [];
-      snap.forEach((d) => {
-        const data = d.data();
-        if (data.name) {
-          list.push({
-            id: d.id,
-            name: data.name,
-            amount: data.amount ?? 0,
-            type: data.type ?? "PERCENTAGE",
-            enabled: data.enabled ?? true,
-          });
-        }
-      });
-      list.sort((a, b) => a.name.localeCompare(b.name));
-      setTaxes(list);
-    });
-
-    const unsubMenuEntities = onSnapshot(collection(db, "menus"), (snap) => {
-      const list: MenuEntity[] = [];
-      snap.forEach((d) => {
-        const data = d.data();
-        if (data.name) {
-          list.push({
-            id: d.id,
-            name: data.name,
-            isActive: data.isActive ?? true,
+            name: data.name || "Unnamed",
+            price: displayPrice,
+            prices,
+            stock: data.stock ?? 0,
+            categoryId: data.categoryId ?? "",
+            availableOrderTypes: Array.isArray(data.availableOrderTypes) ? data.availableOrderTypes : null,
+            modifierGroupIds: Array.isArray(data.modifierGroupIds) ? data.modifierGroupIds : [],
+            taxIds: Array.isArray(data.taxIds) ? data.taxIds : [],
+            menuId: data.menuId ?? "",
+            isScheduled: data.isScheduled ?? false,
             scheduleIds: Array.isArray(data.scheduleIds) ? data.scheduleIds : [],
           });
-        }
-      });
-      list.sort((a, b) => a.name.localeCompare(b.name));
-      setMenuEntities(list);
-    });
+        });
+        itemSnap.current = list;
+        bothReady.current.items = true;
+        rebuild();
+      },
+      (err) => {
+        console.error("[Menu] MenuItems onSnapshot error:", err.code, err.message);
+        setLoading(false);
+      }
+    );
+
+    const unsubSettings = onSnapshot(
+      doc(db, "Settings", "inventory"),
+      (snap) => {
+        console.log("[Menu] Settings/inventory snapshot → exists:", snap.exists());
+        const data = snap.data();
+        setStockCountingEnabled(data?.stockCountingEnabled ?? true);
+      },
+      (err) => console.error("[Menu] Settings onSnapshot error:", err.code, err.message)
+    );
+
+    const unsubModGroups = onSnapshot(
+      collection(db, "ModifierGroups"),
+      (snap) => {
+        console.log("[Menu] ModifierGroups snapshot → docs:", snap.size);
+        const list: ModifierGroup[] = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          if (data.name) {
+            list.push({
+              id: d.id,
+              name: data.name,
+              groupType: data.groupType ?? "ADD",
+              options: Array.isArray(data.options)
+                ? data.options.map((o: Record<string, unknown>) => ({
+                    id: String(o.id ?? ""),
+                    name: String(o.name ?? ""),
+                    price: typeof o.price === "number" ? o.price : 0,
+                  }))
+                : [],
+            });
+          }
+        });
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        setModifierGroups(list);
+      },
+      (err) => console.error("[Menu] ModifierGroups onSnapshot error:", err.code, err.message)
+    );
+
+    const unsubTaxes = onSnapshot(
+      collection(db, "Taxes"),
+      (snap) => {
+        console.log("[Menu] Taxes snapshot → docs:", snap.size);
+        const list: TaxEntry[] = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          if (data.name) {
+            list.push({
+              id: d.id,
+              name: data.name,
+              amount: data.amount ?? 0,
+              type: data.type ?? "PERCENTAGE",
+              enabled: data.enabled ?? true,
+            });
+          }
+        });
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        setTaxes(list);
+      },
+      (err) => console.error("[Menu] Taxes onSnapshot error:", err.code, err.message)
+    );
+
+    const unsubMenuEntities = onSnapshot(
+      collection(db, "menus"),
+      (snap) => {
+        console.log("[Menu] menus snapshot → docs:", snap.size);
+        const list: MenuEntity[] = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          if (data.name) {
+            list.push({
+              id: d.id,
+              name: data.name,
+              isActive: data.isActive ?? true,
+              scheduleIds: Array.isArray(data.scheduleIds) ? data.scheduleIds : [],
+            });
+          }
+        });
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        setMenuEntities(list);
+      },
+      (err) => console.error("[Menu] menus onSnapshot error:", err.code, err.message)
+    );
 
     return () => {
+      console.log("[Menu] Cleaning up Firestore listeners");
       unsubCats();
       unsubSchedules();
       unsubItems();
@@ -333,7 +381,19 @@ export default function MenuPage() {
       unsubMenuEntities();
       bothReady.current = { cats: false, items: false };
     };
-  }, [user]);
+  }, [user, subscriptionKey]);
+
+  // Fallback: re-subscribe if tab becomes visible with no data loaded
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible" && items.length === 0 && !loading && user) {
+        console.log("[Menu] Tab visible with empty data — triggering re-subscribe");
+        setSubscriptionKey((k) => k + 1);
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [items.length, loading, user]);
 
   // ── Filter + group ──
 
@@ -690,7 +750,8 @@ export default function MenuPage() {
 
   // ── Download Menu as Excel ──
 
-  const handleDownloadMenu = () => {
+  const handleDownloadMenu = async () => {
+    const XLSX = await import("xlsx");
     const wb = XLSX.utils.book_new();
 
     // 1. Items

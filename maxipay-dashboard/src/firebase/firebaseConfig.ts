@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getAuth, type Auth } from "firebase/auth";
+import { getFirestore, type Firestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -11,13 +11,33 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-if (!firebaseConfig.apiKey) {
-  console.error(
-    "Firebase API key is missing. Check .env.local configuration."
+let auth = {} as Auth;
+let db = {} as Firestore;
+
+if (typeof window !== "undefined") {
+  const missingKeys = Object.entries(firebaseConfig)
+    .filter(([, v]) => !v)
+    .map(([k]) => k);
+
+  if (missingKeys.length > 0) {
+    console.error(
+      `[Firebase] Missing config keys: ${missingKeys.join(", ")}. ` +
+        "Ensure NEXT_PUBLIC_FIREBASE_* env vars are set at build time."
+    );
+  }
+
+  console.log(
+    "[Firebase] Client init →",
+    "projectId:", firebaseConfig.projectId ?? "MISSING",
+    "| authDomain:", firebaseConfig.authDomain ?? "MISSING",
+    "| apiKey:", firebaseConfig.apiKey ? "SET" : "MISSING"
   );
+
+  const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+  auth = getAuth(app);
+  db = getFirestore(app);
+
+  console.log("[Firebase] Initialized successfully");
 }
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+export { auth, db };
