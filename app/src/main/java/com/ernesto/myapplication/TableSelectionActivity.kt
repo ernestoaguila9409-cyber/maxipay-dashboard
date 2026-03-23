@@ -225,6 +225,14 @@ class TableSelectionActivity : AppCompatActivity() {
             }
         }
 
+        tableView.setOnLongClickListener {
+            val info = occupiedTableData[id]
+            if (info != null) {
+                showDeoccupyDialog(id, info)
+            }
+            true
+        }
+
         tableViews[id] = tableView
     }
 
@@ -304,6 +312,43 @@ class TableSelectionActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun showDeoccupyDialog(tableId: String, info: OccupiedTableInfo) {
+        val tableName = tableNames[tableId] ?: "Table"
+
+        AlertDialog.Builder(this)
+            .setTitle("Free Up $tableName?")
+            .setMessage("This will set the table to available and delete the open order associated with it.\n\nAre you sure?")
+            .setPositiveButton("Yes, Free Table") { _, _ ->
+                deleteOrderAndFreeTable(info.orderId)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun deleteOrderAndFreeTable(orderId: String) {
+        val orderRef = db.collection("Orders").document(orderId)
+
+        orderRef.collection("items").get()
+            .addOnSuccessListener { itemsSnap ->
+                val batch = db.batch()
+                for (item in itemsSnap.documents) {
+                    batch.delete(item.reference)
+                }
+                batch.delete(orderRef)
+
+                batch.commit()
+                    .addOnSuccessListener {
+                        Toast.makeText(this, "Table freed and order deleted", Toast.LENGTH_SHORT).show()
+                    }
+                    .addOnFailureListener { e ->
+                        Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(this, "Failed to load order items: ${e.message}", Toast.LENGTH_LONG).show()
+            }
     }
 
     private fun listenForOccupiedTables() {

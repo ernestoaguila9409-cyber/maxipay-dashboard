@@ -207,6 +207,16 @@
             android:parentActivityName=".ConfigurationActivity" />
 
         <activity
+            android:name=".ReceiptDisplayConfigActivity"
+            android:exported="false"
+            android:parentActivityName=".ConfigurationActivity" />
+
+        <activity
+            android:name=".ViewEditReceiptActivity"
+            android:exported="false"
+            android:parentActivityName=".ReceiptDisplayConfigActivity" />
+
+        <activity
             android:name=".AddDiscountActivity"
             android:exported="false"
             android:parentActivityName=".DiscountsActivity" />

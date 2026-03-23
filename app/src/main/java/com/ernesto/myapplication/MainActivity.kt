@@ -1,13 +1,15 @@
 package com.ernesto.myapplication
 
 import android.content.Intent
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
 import android.view.View
-import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import java.util.Locale
@@ -20,6 +22,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var txtTodayTotal: TextView
     private lateinit var txtTodayCount: TextView
     private lateinit var dashboardAdapter: DashboardAdapter
+    private lateinit var dashboardPager: ViewPager2
+    private lateinit var pageIndicator: LinearLayout
 
     private var openOrdersListener: ListenerRegistration? = null
     private var dashboardConfigListener: ListenerRegistration? = null
@@ -42,7 +46,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         val txtLoggedUser = findViewById<TextView>(R.id.txtLoggedUser)
-        txtLoggedUser.text = "Logged in as: $employeeName ($employeeRole)"
+        txtLoggedUser.text = "Logged in as: $employeeName"
+
+        val txtEmployeeRole = findViewById<TextView>(R.id.txtEmployeeRole)
+        txtEmployeeRole.text = employeeRole.ifBlank { "EMPLOYEE" }
 
         txtTodayTotal = findViewById(R.id.txtTodayTotal)
         txtTodayCount = findViewById(R.id.txtTodayCount)
@@ -55,7 +62,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, TodaySalesActivity::class.java))
         }
 
-        findViewById<ImageButton>(R.id.btnLogout).setOnClickListener {
+        findViewById<View>(R.id.btnLogout).setOnClickListener {
             val intent = Intent(this, LoginActivity::class.java)
             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             startActivity(intent)
@@ -64,29 +71,64 @@ class MainActivity : AppCompatActivity() {
         loadCurrentSales()
     }
 
+
     private fun setupDashboardGrid() {
-        val rv = findViewById<RecyclerView>(R.id.dashboardGrid)
-        rv.layoutManager = GridLayoutManager(this, 3)
+        dashboardPager = findViewById(R.id.dashboardPager)
+        pageIndicator = findViewById(R.id.pageIndicator)
 
         dashboardAdapter = DashboardAdapter(mutableListOf()) { module ->
             handleModuleClick(module)
         }
-        rv.adapter = dashboardAdapter
+        dashboardPager.adapter = dashboardAdapter
+
+        dashboardPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                updatePageIndicator(position)
+            }
+        })
 
         dashboardConfigListener = DashboardConfigManager.listenConfig(
             db,
             onUpdate = { modules ->
                 if (!isDestroyed) {
                     dashboardAdapter.setModules(modules)
+                    updatePageIndicator(dashboardPager.currentItem)
                     applyOrderTypeVisibility()
                 }
             },
             onCacheThenServer = { serverModules ->
                 if (!isDestroyed && serverModules.isNotEmpty()) {
                     dashboardAdapter.setModules(serverModules)
+                    updatePageIndicator(dashboardPager.currentItem)
                 }
             }
         )
+    }
+
+    private fun updatePageIndicator(selectedPage: Int) {
+        pageIndicator.removeAllViews()
+        val pageCount = dashboardAdapter.getPageCount()
+        if (pageCount <= 1) {
+            pageIndicator.visibility = View.GONE
+            return
+        }
+        pageIndicator.visibility = View.VISIBLE
+
+        val density = resources.displayMetrics.density
+        val dotSize = (8 * density).toInt()
+        val dotMargin = (4 * density).toInt()
+
+        for (i in 0 until pageCount) {
+            val dot = View(this)
+            val params = LinearLayout.LayoutParams(dotSize, dotSize)
+            params.setMargins(dotMargin, 0, dotMargin, 0)
+            dot.layoutParams = params
+            dot.background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(if (i == selectedPage) 0xFF6A4FB3.toInt() else 0xFFCCCCCC.toInt())
+            }
+            pageIndicator.addView(dot)
+        }
     }
 
     private fun handleModuleClick(module: DashboardModule) {
@@ -123,12 +165,7 @@ class MainActivity : AppCompatActivity() {
                 i.putExtra("employeeName", employeeName)
                 startActivity(i)
             }
-            "setup" -> {
-                val i = Intent(this, SideMenuActivity::class.java)
-                i.putExtra("employeeName", employeeName)
-                i.putExtra("employeeRole", employeeRole)
-                startActivity(i)
-            }
+            "setup" -> startActivity(Intent(this, ConfigurationActivity::class.java))
             "modifiers" -> startActivity(Intent(this, GlobalModifierActivity::class.java))
             "inventory" -> {
                 val i = Intent(this, MenuOnlyActivity::class.java)
@@ -151,14 +188,12 @@ class MainActivity : AppCompatActivity() {
         DashboardConfigManager.loadFromServer(db) { modules ->
             if (!isDestroyed && modules.isNotEmpty()) {
                 dashboardAdapter.setModules(modules)
+                updatePageIndicator(dashboardPager.currentItem)
             }
         }
     }
 
     private fun applyOrderTypeVisibility() {
-        // Order type visibility is now handled via the adapter; hidden modules
-        // still exist in config but we skip rendering disabled ones.
-        // For now we keep all visible — the config screen controls order.
     }
 
     private fun ensureOpenBatch() {
@@ -238,6 +273,8 @@ class MainActivity : AppCompatActivity() {
 
                             for (p in payments) {
                                 val map = p as? Map<*, *> ?: continue
+                                val status = (map["status"] as? String) ?: ""
+                                if (status.equals("VOIDED", ignoreCase = true)) continue
                                 val amountInCents = (map["amountInCents"] as? Number)?.toLong() ?: 0L
                                 totalCents += amountInCents
                             }
@@ -258,7 +295,6 @@ class MainActivity : AppCompatActivity() {
                             val amount = doc.getDouble("amount") ?: 0.0
                             if (amount > 0.0) {
                                 total -= amount
-                                count++
                             }
                         }
                     }
@@ -267,8 +303,8 @@ class MainActivity : AppCompatActivity() {
                     val finalCount = count
                     runOnUiThread {
                         if (!isDestroyed) {
-                            txtTodayTotal.text = String.format(Locale.US, "Current Sales: $%.2f", finalTotal)
-                            txtTodayCount.text = "Transactions: $finalCount"
+                            txtTodayTotal.text = String.format(Locale.US, "$%.2f", finalTotal)
+                            txtTodayCount.text = "$finalCount transactions"
                         }
                     }
                 }

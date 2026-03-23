@@ -1,5 +1,7 @@
 {
   "projects": {
     "default": "restaurantapp-180da"
-  }
+  },
+  "targets": {},
+  "etags": {}
 }

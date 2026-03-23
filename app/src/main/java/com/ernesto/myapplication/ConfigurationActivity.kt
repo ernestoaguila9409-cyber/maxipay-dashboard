@@ -35,6 +35,10 @@ class ConfigurationActivity : AppCompatActivity() {
         findViewById<android.view.View>(R.id.optionDiscounts).setOnClickListener {
             startActivity(Intent(this, DiscountsActivity::class.java))
         }
+
+        findViewById<android.view.View>(R.id.optionPrintReceiptDisplay).setOnClickListener {
+            startActivity(Intent(this, ReceiptDisplayConfigActivity::class.java))
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {

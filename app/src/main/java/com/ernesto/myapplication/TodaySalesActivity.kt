@@ -97,6 +97,8 @@ class TodaySalesActivity : AppCompatActivity() {
 
                             for (p in payments) {
                                 val map = p as? Map<*, *> ?: continue
+                                val status = (map["status"] as? String) ?: ""
+                                if (status.equals("VOIDED", ignoreCase = true)) continue
                                 val amountInCents = (map["amountInCents"] as? Number)?.toLong() ?: 0L
                                 totalCents += amountInCents
                             }
@@ -117,7 +119,6 @@ class TodaySalesActivity : AppCompatActivity() {
                             val amount = doc.getDouble("amount") ?: 0.0
                             if (amount > 0.0) {
                                 total -= amount
-                                count++
                             }
                         }
                     }

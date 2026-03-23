@@ -1,84 +1,147 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout
+<LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:fitsSystemWindows="true"
     android:background="#F5F5F5">
 
-    <!-- TOP TOOLBAR -->
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/topAppBar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:backgroundTint="#FFFFFF"
-        android:title="Restaurant POS"
-        android:titleTextColor="@android:color/black" />
-
-    <!-- CENTER CONTENT -->
+    <!-- ==================== LEFT PANEL ==================== -->
     <LinearLayout
-        android:layout_width="match_parent"
+        android:layout_width="250dp"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:gravity="center_horizontal"
-        android:padding="24dp"
-        android:layout_marginTop="70dp">
+        android:background="@drawable/bg_left_panel"
+        android:padding="16dp">
 
+        <!-- Logged-in user -->
         <TextView
             android:id="@+id/txtLoggedUser"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Logged in as:"
-            android:layout_marginBottom="8dp"/>
+            android:textColor="@android:color/white"
+            android:textSize="15sp"
+            android:textStyle="bold" />
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/dashboardGrid"
+        <TextView
+            android:id="@+id/txtEmployeeRole"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:clipChildren="false"
-            android:clipToPadding="false" />
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="EMPLOYEE"
+            android:textColor="#B0A3D4"
+            android:textSize="12sp"
+            android:textAllCaps="true"
+            android:letterSpacing="0.1" />
 
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="20dp"
+            android:background="#44FFFFFF" />
+
+        <!-- Sales section -->
         <LinearLayout
             android:id="@+id/todaySalesArea"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:gravity="center"
-            android:layout_marginTop="12dp"
             android:clickable="true"
             android:focusable="true"
             android:background="?attr/selectableItemBackground"
             android:padding="12dp">
 
             <TextView
-                android:id="@+id/txtTodayTotal"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Current Sales: $0.00"
-                android:textSize="16sp"/>
+                android:text="CURRENT SALES"
+                android:textColor="#B0A3D4"
+                android:textSize="11sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.15" />
+
+            <TextView
+                android:id="@+id/txtTodayTotal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="$0.00"
+                android:textColor="@android:color/white"
+                android:textSize="28sp"
+                android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/txtTodayCount"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Transactions: 0"
-                android:textSize="16sp"
-                android:layout_marginTop="8dp"/>
+                android:layout_marginTop="4dp"
+                android:text="0 transactions"
+                android:textColor="#B0A3D4"
+                android:textSize="13sp" />
         </LinearLayout>
+
+        <!-- Spacer pushes logout to bottom -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <!-- Logout button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnLogout"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginBottom="8dp"
+            android:text="Log Out"
+            android:textColor="@android:color/white"
+            android:textSize="14sp"
+            android:textAllCaps="false"
+            app:icon="@android:drawable/ic_lock_power_off"
+            app:iconTint="@android:color/white"
+            app:iconGravity="textStart"
+            app:iconPadding="8dp"
+            app:backgroundTint="#C62828"
+            app:cornerRadius="12dp"
+            app:rippleColor="#99FFFFFF" />
 
     </LinearLayout>
 
-    <!-- LOCK BUTTON BOTTOM RIGHT -->
-    <ImageButton
-        android:id="@+id/btnLogout"
-        android:layout_width="55dp"
-        android:layout_height="55dp"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="20dp"
-        android:background="@drawable/rounded_logout_button"
-        android:src="@android:drawable/ic_lock_power_off"
-        android:contentDescription="Logout"
-        app:tint="@android:color/white"
-        android:padding="12dp"/>
-</FrameLayout>
+    <!-- Vertical divider -->
+    <View
+        android:layout_width="1dp"
+        android:layout_height="match_parent"
+        android:background="#DDDDDD" />
+
+    <!-- ==================== RIGHT PANEL ==================== -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <!-- Dashboard pager fills available space -->
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/dashboardPager"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <!-- Page indicator dots -->
+        <LinearLayout
+            android:id="@+id/pageIndicator"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="#F5F5F5" />
+
+    </LinearLayout>
+
+</LinearLayout>

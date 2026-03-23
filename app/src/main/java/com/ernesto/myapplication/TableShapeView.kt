@@ -230,14 +230,16 @@ class TableShapeView(context: Context) : View(context) {
     private fun applyStateColors() {
         when {
             isOccupied && isWaitingForOrder -> {
-                tablePaint.color = 0x33FF8F00.toInt()
-                tableBorderPaint.color = 0xFFFF8F00.toInt()
-                boothCushionPaint.color = 0xFFFF8F00.toInt()
+                // Dark red: waiting time reached, no items in cart
+                tablePaint.color = 0x44B71C1C.toInt()
+                tableBorderPaint.color = 0xFFB71C1C.toInt()
+                boothCushionPaint.color = 0xFFB71C1C.toInt()
             }
             isOccupied -> {
-                tablePaint.color = 0x33D32F2F.toInt()
-                tableBorderPaint.color = 0xFFD32F2F.toInt()
-                boothCushionPaint.color = 0xFFD32F2F.toInt()
+                // Light red: occupied (has items or not yet past waiting threshold)
+                tablePaint.color = 0x44EF9A9A.toInt()
+                tableBorderPaint.color = 0xFFEF9A9A.toInt()
+                boothCushionPaint.color = 0xFFEF9A9A.toInt()
             }
             else -> {
                 tablePaint.color = Color.TRANSPARENT

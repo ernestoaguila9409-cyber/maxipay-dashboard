@@ -27,7 +27,7 @@ object ColorRegistry {
     fun getColor(colorKey: String): Int = COLORS[colorKey] ?: DEFAULT_COLOR
 
     fun getBackgroundDrawable(view: View, colorKey: String): GradientDrawable {
-        val radiusPx = 16 * view.resources.displayMetrics.density
+        val radiusPx = 8 * view.resources.displayMetrics.density
         return GradientDrawable().apply {
             setColor(getColor(colorKey))
             cornerRadius = radiusPx

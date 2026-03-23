@@ -8,11 +8,14 @@ import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
+import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import kotlin.math.abs
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Date
 import java.util.Locale
@@ -887,13 +890,15 @@ class MenuActivity : AppCompatActivity() {
             radioGroup.orientation = RadioGroup.VERTICAL
             groupContainer.addView(radioGroup)
 
+            val groupOptionNames = options.map { it.name }.toSet()
+
             for (opt in options) {
                 val radioButton = RadioButton(this)
                 radioButton.text = "${opt.name} +$${String.format(Locale.US, "%.2f", opt.price)}"
                 radioGroup.addView(radioButton)
 
                 radioButton.setOnClickListener {
-                    selectedModifiers.removeAll { it.name == opt.name && it.action == "ADD" }
+                    selectedModifiers.removeAll { it.action == "ADD" && it.name in groupOptionNames }
                     selectedModifiers.add(OrderModifier(opt.name, "ADD", opt.price))
                     selectedCountPerGroup[groupId] = 1
                 }
@@ -1390,22 +1395,108 @@ class MenuActivity : AppCompatActivity() {
         subtotalText.textSize = 13f
         itemLayout.addView(subtotalText)
 
-        itemLayout.setOnClickListener {
+        val onTap = {
             if (stockCountingEnabled) {
                 val currentStock = item.stock
                 val currentQty = item.quantity
 
                 if (currentStock > 0 && currentQty + 1 > currentStock) {
                     Toast.makeText(this, "Only $currentStock in stock", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
+                } else {
+                    item.quantity += 1
+                    cartMap[lineKey] = item
+                    refreshCart()
+
+                    val oid = currentOrderId
+                    if (oid != null) {
+                        orderEngine.upsertLineItem(
+                            orderId = oid,
+                            lineKey = lineKey,
+                            input = OrderEngine.LineItemInput(
+                                itemId = item.itemId,
+                                name = item.name,
+                                quantity = item.quantity,
+                                basePrice = item.basePrice,
+                                modifiers = item.modifiers,
+                                guestNumber = item.guestNumber,
+                                taxMode = item.taxMode,
+                                taxIds = item.taxIds
+                            ),
+                            onSuccess = {},
+                            onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
+                        )
+                    }
+                }
+            } else {
+                item.quantity += 1
+                cartMap[lineKey] = item
+                refreshCart()
+
+                val oid = currentOrderId
+                if (oid != null) {
+                    orderEngine.upsertLineItem(
+                        orderId = oid,
+                        lineKey = lineKey,
+                        input = OrderEngine.LineItemInput(
+                            itemId = item.itemId,
+                            name = item.name,
+                            quantity = item.quantity,
+                            basePrice = item.basePrice,
+                            modifiers = item.modifiers,
+                            guestNumber = item.guestNumber,
+                            taxMode = item.taxMode,
+                            taxIds = item.taxIds
+                        ),
+                        onSuccess = {},
+                        onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
+                    )
                 }
             }
+        }
 
-            item.quantity += 1
-            cartMap[lineKey] = item
-            refreshCart()
+        val onSwipeLeft = {
+            if (item.quantity > 1) {
+                decrementCartItem(lineKey, item, 1)
+            }
+        }
 
-            val oid = currentOrderId ?: return@setOnClickListener
+        val onTrash = {
+            removeCartItem(lineKey)
+        }
+
+        val onLongPress = {
+            if (item.quantity > 1) {
+                showRemoveQuantityDialog(lineKey, item, itemLayout)
+            } else {
+                removeCartItem(lineKey)
+            }
+        }
+
+        return wrapWithSwipeToDelete(itemLayout, onTap, onSwipeLeft, onTrash, onLongPress)
+    }
+
+    private fun removeCartItem(lineKey: String) {
+        cartMap.remove(lineKey)
+        refreshCart()
+
+        val oid = currentOrderId
+        if (oid != null) {
+            orderEngine.deleteLineItem(
+                orderId = oid,
+                lineKey = lineKey,
+                onSuccess = { if (cartMap.isEmpty()) deleteOrderIfEmpty() },
+                onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
+            )
+        }
+    }
+
+    private fun decrementCartItem(lineKey: String, item: CartItem, amount: Int) {
+        item.quantity -= amount
+        cartMap[lineKey] = item
+        refreshCart()
+
+        val oid = currentOrderId
+        if (oid != null) {
             orderEngine.upsertLineItem(
                 orderId = oid,
                 lineKey = lineKey,
@@ -1423,31 +1514,174 @@ class MenuActivity : AppCompatActivity() {
                 onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
             )
         }
+    }
 
-        itemLayout.setOnLongClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Remove Item")
-                .setMessage("Remove ${item.name} from cart?")
-                .setPositiveButton("Yes") { _, _ ->
-                    cartMap.remove(lineKey)
-                    refreshCart()
+    private fun showRemoveQuantityDialog(lineKey: String, item: CartItem, contentView: View) {
+        val currentQty = item.quantity
 
-                    val oid = currentOrderId ?: return@setPositiveButton
-                    orderEngine.deleteLineItem(
-                        orderId = oid,
-                        lineKey = lineKey,
-                        onSuccess = {
-                            if (cartMap.isEmpty()) deleteOrderIfEmpty()
-                        },
-                        onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
-                    )
-                }
-                .setNegativeButton("No", null)
-                .show()
-            true
+        val input = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setText("1")
+            hint = "1 – $currentQty"
+            setSelectAllOnFocus(true)
+            setPadding(48, 32, 48, 32)
         }
 
-        return itemLayout
+        AlertDialog.Builder(this)
+            .setTitle("Remove Quantity")
+            .setMessage("Current quantity: $currentQty\nHow many to remove?")
+            .setView(input)
+            .setPositiveButton("Remove") { _, _ ->
+                val removeQty = input.text.toString().toIntOrNull() ?: 1
+                val clamped = removeQty.coerceIn(1, currentQty)
+
+                if (clamped >= currentQty) {
+                    removeCartItem(lineKey)
+                } else {
+                    decrementCartItem(lineKey, item, clamped)
+                }
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                contentView.animate().translationX(0f).setDuration(150).start()
+            }
+            .setOnCancelListener {
+                contentView.animate().translationX(0f).setDuration(150).start()
+            }
+            .show()
+    }
+
+    @Suppress("ClickableViewAccessibility")
+    private fun wrapWithSwipeToDelete(
+        contentView: View,
+        onTap: () -> Unit,
+        onSwipeLeft: () -> Unit,
+        onTrash: () -> Unit,
+        onLongPress: () -> Unit
+    ): View {
+        val density = resources.displayMetrics.density
+        val deleteWidthPx = (72 * density).toInt()
+
+        val wrapper = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val deleteBtn = FrameLayout(this).apply {
+            setBackgroundColor(Color.parseColor("#E53935"))
+            layoutParams = FrameLayout.LayoutParams(
+                deleteWidthPx,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.END
+            )
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onTrash() }
+        }
+
+        val icon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_delete)
+            setColorFilter(Color.WHITE)
+            layoutParams = FrameLayout.LayoutParams(
+                (28 * density).toInt(),
+                (28 * density).toInt(),
+                Gravity.CENTER
+            )
+        }
+        deleteBtn.addView(icon)
+
+        contentView.setBackgroundColor(Color.WHITE)
+
+        wrapper.addView(deleteBtn)
+        wrapper.addView(contentView)
+
+        var downX = 0f
+        var downY = 0f
+        var prevX = 0f
+        var swiping = false
+        var longPressTriggered = false
+        val swipeMax = deleteWidthPx.toFloat()
+        val longPressTimeout = android.view.ViewConfiguration.getLongPressTimeout().toLong()
+
+        val longPressRunnable = Runnable {
+            longPressTriggered = true
+            contentView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            onLongPress()
+        }
+
+        contentView.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX
+                    downY = event.rawY
+                    prevX = event.rawX
+                    swiping = false
+                    longPressTriggered = false
+                    v.handler?.postDelayed(longPressRunnable, longPressTimeout)
+                    true
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - downX
+                    val dy = event.rawY - downY
+
+                    if (!swiping && abs(dx) > 12 * density && abs(dx) > abs(dy) * 1.5f) {
+                        swiping = true
+                        v.handler?.removeCallbacks(longPressRunnable)
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+
+                    if (abs(dy) > 12 * density && !swiping) {
+                        v.handler?.removeCallbacks(longPressRunnable)
+                    }
+
+                    if (swiping) {
+                        val delta = event.rawX - prevX
+                        val newTx = (v.translationX + delta).coerceIn(-swipeMax, 0f)
+                        v.translationX = newTx
+                        prevX = event.rawX
+                    }
+                    true
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    v.handler?.removeCallbacks(longPressRunnable)
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+
+                    if (longPressTriggered) {
+                        // already handled
+                    } else if (!swiping && abs(event.rawX - downX) < 12 * density
+                        && abs(event.rawY - downY) < 12 * density
+                    ) {
+                        onTap()
+                    } else if (swiping) {
+                        if (v.translationX < -swipeMax / 2) {
+                            onSwipeLeft()
+                            if (v.translationX != 0f) {
+                                v.animate().translationX(-swipeMax).setDuration(120).start()
+                            }
+                        } else {
+                            v.animate().translationX(0f).setDuration(150).start()
+                        }
+                    }
+                    swiping = false
+                    true
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    v.handler?.removeCallbacks(longPressRunnable)
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                    v.animate().translationX(0f).setDuration(150).start()
+                    swiping = false
+                    true
+                }
+
+                else -> true
+            }
+        }
+
+        return wrapper
     }
 
     // ----------------------------
