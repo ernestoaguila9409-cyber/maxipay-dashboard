@@ -1,6 +1,9 @@
 package com.ernesto.myapplication
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
@@ -9,6 +12,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.functions.FirebaseFunctions
@@ -17,6 +22,10 @@ import java.util.Date
 import java.util.Locale
 
 class ReceiptOptionsActivity : AppCompatActivity() {
+
+    companion object {
+        private const val REQUEST_BT_CONNECT = 1002
+    }
 
     private var orderId: String? = null
     private val db = FirebaseFirestore.getInstance()
@@ -81,12 +90,24 @@ class ReceiptOptionsActivity : AppCompatActivity() {
     }
 
     // ============================
-    // PRINT RECEIPT
+    // PRINT RECEIPT (ESC/POS)
     // ============================
 
-    private data class PrintSegment(val text: String, val fontSize: Int, val alignment: Int)
-
     private fun printReceipt(orderId: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BT_CONNECT
+                )
+                return
+            }
+        }
+        loadAndPrint(orderId)
+    }
+
+    private fun loadAndPrint(orderId: String) {
         Toast.makeText(this, "Preparing receipt…", Toast.LENGTH_SHORT).show()
 
         db.collection("Orders").document(orderId).get()
@@ -99,8 +120,26 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                 db.collection("Orders").document(orderId)
                     .collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
-                        val segments = buildReceiptSegments(orderDoc, itemsSnap.documents)
-                        sendToPrinter(segments)
+                        val saleId = orderDoc.getString("saleTransactionId")
+                        if (saleId != null) {
+                            db.collection("Transactions").document(saleId).get()
+                                .addOnSuccessListener { txDoc ->
+                                    @Suppress("UNCHECKED_CAST")
+                                    val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                                    val segments = buildReceiptSegments(orderDoc, itemsSnap.documents, payments)
+                                    EscPosPrinter.print(this, segments)
+                                    goToMainScreen()
+                                }
+                                .addOnFailureListener {
+                                    val segments = buildReceiptSegments(orderDoc, itemsSnap.documents, emptyList())
+                                    EscPosPrinter.print(this, segments)
+                                    goToMainScreen()
+                                }
+                        } else {
+                            val segments = buildReceiptSegments(orderDoc, itemsSnap.documents, emptyList())
+                            EscPosPrinter.print(this, segments)
+                            goToMainScreen()
+                        }
                     }
                     .addOnFailureListener { e ->
                         Log.e("PrintReceipt", "Failed to load items", e)
@@ -113,35 +152,54 @@ class ReceiptOptionsActivity : AppCompatActivity() {
             }
     }
 
+    @Suppress("UNCHECKED_CAST")
     private fun buildReceiptSegments(
         orderDoc: com.google.firebase.firestore.DocumentSnapshot,
-        items: List<com.google.firebase.firestore.DocumentSnapshot>
-    ): List<PrintSegment> {
+        items: List<com.google.firebase.firestore.DocumentSnapshot>,
+        payments: List<Map<String, Any>>
+    ): List<EscPosPrinter.Segment> {
         val rs = ReceiptSettings.load(this)
-        val segments = mutableListOf<PrintSegment>()
-        val c = ALIGN_CENTER
+        val segs = mutableListOf<EscPosPrinter.Segment>()
 
-        fun centered(text: String) { segments.add(PrintSegment(text, 0, c)) }
-        fun left(text: String) { segments.add(PrintSegment(text, 0, 0)) }
+        val bn = rs.boldBizName;      val fn = rs.fontSizeBizName
+        val ba = rs.boldAddress;      val fa = rs.fontSizeAddress
+        val bo = rs.boldOrderInfo;    val fo = rs.fontSizeOrderInfo
+        val bi = rs.boldItems;        val fi = rs.fontSizeItems
+        val bt = rs.boldTotals;       val ft = rs.fontSizeTotals
+        val bg = rs.boldGrandTotal;   val fg = rs.fontSizeGrandTotal
+        val bf = rs.boldFooter;       val ff = rs.fontSizeFooter
 
-        // ── Header ──
-        centered(rs.businessName)
-        for (line in rs.addressText.split("\n")) {
-            centered(line)
-        }
+        val lwi = ReceiptSettings.lineWidthForSize(fi)
+        val lwt = ReceiptSettings.lineWidthForSize(ft)
+        val lwg = ReceiptSettings.lineWidthForSize(fg)
 
-        centered("")
-        centered("RECEIPT")
-        centered("")
+        fun bizName(text: String) { segs += EscPosPrinter.Segment(text, bold = bn, fontSize = fn, centered = true) }
+        fun address(text: String) { segs += EscPosPrinter.Segment(text, bold = ba, fontSize = fa, centered = true) }
+        fun orderInfo(text: String) { segs += EscPosPrinter.Segment(text, bold = bo, fontSize = fo, centered = true) }
+        fun item(text: String) { segs += EscPosPrinter.Segment(text, bold = bi, fontSize = fi) }
+        fun total(text: String) { segs += EscPosPrinter.Segment(text, bold = bt, fontSize = ft) }
+        fun grand(text: String) { segs += EscPosPrinter.Segment(text, bold = bg, fontSize = fg) }
+        fun footer(text: String) { segs += EscPosPrinter.Segment(text, bold = bf, fontSize = ff, centered = true) }
 
-        // ── Order Info ──
+        // ── Business Name ──
+        bizName(rs.businessName)
+
+        // ── Address ──
+        for (line in rs.addressText.split("\n")) address(line)
+        segs += EscPosPrinter.Segment("")
+
+        // ── Order Info (includes RECEIPT label) ──
+        orderInfo("RECEIPT")
+        orderInfo("")
+
+        // ── Order Details ──
         val orderNumber = orderDoc.getLong("orderNumber") ?: 0L
         val orderType = orderDoc.getString("orderType") ?: ""
         val employeeName = orderDoc.getString("employeeName") ?: ""
         val customerName = orderDoc.getString("customerName") ?: ""
         val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
 
-        centered("Order #$orderNumber")
+        orderInfo("Order #$orderNumber")
         if (orderType.isNotBlank()) {
             val typeLabel = when (orderType) {
                 "DINE_IN" -> "Dine In"
@@ -149,15 +207,15 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                 "BAR_TAB" -> "Bar Tab"
                 else -> orderType
             }
-            centered("Type: $typeLabel")
+            orderInfo("Type: $typeLabel")
         }
-        if (rs.showServerName && employeeName.isNotBlank()) centered("Server: $employeeName")
-        if (customerName.isNotBlank()) centered("Customer: $customerName")
-        if (rs.showDateTime) centered("Date: $dateStr")
-        centered("")
+        if (rs.showServerName && employeeName.isNotBlank()) orderInfo("Server: $employeeName")
+        if (customerName.isNotBlank()) orderInfo("Customer: $customerName")
+        if (rs.showDateTime) orderInfo("Date: $dateStr")
+        segs += EscPosPrinter.Segment("")
 
         // ── Items ──
-        left("-".repeat(LINE_WIDTH))
+        item("-".repeat(lwi))
         for (doc in items) {
             val name = doc.getString("name")
                 ?: doc.getString("itemName")
@@ -166,24 +224,33 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                 ?: doc.getLong("quantity")
                 ?: 1L).toInt()
             val lineTotalCents = doc.getLong("lineTotalInCents") ?: 0L
+            val basePriceCents = doc.getLong("basePriceInCents") ?: lineTotalCents
             val itemLabel = if (qty > 1) "${qty}x $name" else name
-            left(formatLine(itemLabel, MoneyUtils.centsToDisplay(lineTotalCents), LINE_WIDTH))
+
+            if (basePriceCents > 0L) {
+                item(formatLine(itemLabel, MoneyUtils.centsToDisplay(lineTotalCents), lwi))
+            } else {
+                item(itemLabel)
+            }
 
             @Suppress("UNCHECKED_CAST")
             val mods = doc.get("modifiers") as? List<Map<String, Any>> ?: emptyList()
             for (mod in mods) {
                 val modName = mod["name"]?.toString() ?: continue
+                val modAction = mod["action"]?.toString() ?: "ADD"
                 val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
                 val modCents = kotlin.math.round(modPrice * 100).toLong()
-                val modLabel = "  + $modName"
-                if (modCents > 0) {
-                    left(formatLine(modLabel, MoneyUtils.centsToDisplay(modCents), LINE_WIDTH))
+                if (modAction == "REMOVE") {
+                    item("  NO $modName")
+                } else if (modCents > 0) {
+                    item(formatLine("  + $modName", MoneyUtils.centsToDisplay(modCents), lwi))
                 } else {
-                    left(modLabel)
+                    item("  + $modName")
                 }
             }
         }
-        left("-".repeat(LINE_WIDTH))
+        item("-".repeat(lwi))
+        segs += EscPosPrinter.Segment("")
 
         // ── Totals ──
         val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
@@ -198,108 +265,67 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         }
         val subtotalCents = totalInCents + discountInCents - taxTotalCents - tipAmountInCents
 
-        centered("")
-        left(formatLine("Subtotal", MoneyUtils.centsToDisplay(subtotalCents), LINE_WIDTH))
+        total(formatLine("Subtotal", MoneyUtils.centsToDisplay(subtotalCents), lwt))
         if (discountInCents > 0L) {
-            left(formatLine("Discount", "-${MoneyUtils.centsToDisplay(discountInCents)}", LINE_WIDTH))
+            total(formatLine("Discount", "-${MoneyUtils.centsToDisplay(discountInCents)}", lwt))
         }
         for (entry in taxBreakdown) {
             val name = entry["name"]?.toString() ?: "Tax"
             val amountCents = (entry["amountInCents"] as? Number)?.toLong() ?: 0L
-            left(formatLine(name, MoneyUtils.centsToDisplay(amountCents), LINE_WIDTH))
+            total(formatLine(name, MoneyUtils.centsToDisplay(amountCents), lwt))
         }
         if (tipAmountInCents > 0L) {
-            left(formatLine("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), LINE_WIDTH))
+            total(formatLine("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), lwt))
         }
-        left("=".repeat(LINE_WIDTH))
+        total("=".repeat(lwt))
 
         // ── Grand Total ──
-        centered("")
-        left(formatLine("TOTAL", MoneyUtils.centsToDisplay(totalInCents), LINE_WIDTH))
+        grand(formatLine("TOTAL", MoneyUtils.centsToDisplay(totalInCents), lwg))
+        segs += EscPosPrinter.Segment("")
 
-        // ── Footer ──
-        centered("")
-        centered("Thank you for dining with us!")
-
-        return segments
-    }
-
-    private fun sendToPrinter(segments: List<PrintSegment>) {
-        val omniApk = "/system_ext/app/omnidriver-service/omnidriver-service.apk"
-        val loader = dalvik.system.DexClassLoader(omniApk, cacheDir.absolutePath, null, classLoader)
-
-        val intent = android.content.Intent("sdksuite-omnidriver")
-        intent.setPackage("com.sdksuite.omnidriver")
-
-        bindService(intent, object : android.content.ServiceConnection {
-            override fun onServiceConnected(name: android.content.ComponentName?, service: android.os.IBinder?) {
-                try {
-                    val omniStub = loader.loadClass("com.sdksuite.omnidriver.aidl.IOmniDriver\$Stub")
-                    val omniProxy = omniStub.getMethod("asInterface", android.os.IBinder::class.java).invoke(null, service)
-
-                    val initBundle = android.os.Bundle()
-                    initBundle.putString("packageName", packageName)
-                    omniProxy.javaClass.getMethod("init", android.os.Bundle::class.java, android.os.IBinder::class.java)
-                        .invoke(omniProxy, initBundle, android.os.Binder())
-
-                    val printerBinder = omniProxy.javaClass.getMethod("getPrinter", android.os.Bundle::class.java)
-                        .invoke(omniProxy, android.os.Bundle()) as? android.os.IBinder
-
-                    if (printerBinder == null) {
-                        runOnUiThread { Toast.makeText(this@ReceiptOptionsActivity, "Printer not available", Toast.LENGTH_LONG).show() }
-                        return
-                    }
-
-                    val printerStub = loader.loadClass("com.sdksuite.omnidriver.aidl.printer.IPrinter\$Stub")
-                    val printerProxy = printerStub.getMethod("asInterface", android.os.IBinder::class.java)
-                        .invoke(null, printerBinder)!!
-
-                    printerProxy.javaClass.getMethod("openDevice", Int::class.javaPrimitiveType)
-                        .invoke(printerProxy, 0)
-
-                    val addText = printerProxy.javaClass.getMethod(
-                        "addText", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, String::class.java
-                    )
-
-                    // OmniDriver addText: addText(fontSize, alignment, text)
-                    for (seg in segments) {
-                        addText.invoke(printerProxy, seg.fontSize, seg.alignment, seg.text + "\n")
-                    }
-
-                    printerProxy.javaClass.getMethod("feedLine", Int::class.javaPrimitiveType)
-                        .invoke(printerProxy, 10)
-
-                    val listenerStubClass = loader.loadClass("com.sdksuite.omnidriver.aidl.printer.OnPrintListener\$Stub")
-                    val listenerInstance = object : android.os.Binder() {
-                        override fun onTransact(code: Int, data: android.os.Parcel, reply: android.os.Parcel?, flags: Int): Boolean {
-                            Log.d("PrintReceipt", "PrintListener onTransact code=$code")
-                            return try { super.onTransact(code, data, reply, flags) } catch (e: Exception) { reply?.writeNoException(); true }
+        // ── Payment Info ──
+        for (p in payments) {
+            val pType = p["paymentType"]?.toString() ?: ""
+            if (pType.equals("Cash", ignoreCase = true)) {
+                footer("Paid with Cash")
+            } else {
+                val brand = p["cardBrand"]?.toString() ?: ""
+                val last4 = p["last4"]?.toString() ?: ""
+                val authCode = p["authCode"]?.toString() ?: ""
+                if (brand.isNotBlank() || last4.isNotBlank()) {
+                    val cardLine = buildString {
+                        if (brand.isNotBlank()) append(brand)
+                        if (last4.isNotBlank()) {
+                            if (isNotEmpty()) append(" ")
+                            append("**** $last4")
                         }
                     }
-                    val listenerInterface = loader.loadClass("com.sdksuite.omnidriver.aidl.printer.OnPrintListener")
-                    val listenerProxy = listenerStubClass.getMethod("asInterface", android.os.IBinder::class.java)
-                        .invoke(null, listenerInstance)
-
-                    printerProxy.javaClass.getMethod("startPrint", listenerInterface)
-                        .invoke(printerProxy, listenerProxy)
-
-                    Log.d("PrintReceipt", "Receipt print started")
-                    runOnUiThread {
-                        Toast.makeText(this@ReceiptOptionsActivity, "Receipt printed!", Toast.LENGTH_SHORT).show()
-                        goToMainScreen()
-                    }
-                } catch (e: Exception) {
-                    Log.e("PrintReceipt", "Print error: ${e.message}", e)
-                    runOnUiThread {
-                        Toast.makeText(this@ReceiptOptionsActivity, "Print failed: ${e.cause?.message ?: e.message}", Toast.LENGTH_LONG).show()
-                    }
+                    footer(cardLine)
+                }
+                if (authCode.isNotBlank()) {
+                    footer("Auth: $authCode")
+                }
+                if (pType.isNotBlank()) {
+                    footer("Type: $pType")
                 }
             }
+            segs += EscPosPrinter.Segment("")
+        }
 
-            override fun onServiceDisconnected(name: android.content.ComponentName?) {
-                Log.d("PrintReceipt", "OmniDriver disconnected")
-            }
-        }, android.content.Context.BIND_AUTO_CREATE)
+        // ── Footer ──
+        footer("Thank you for dining with us!")
+
+        return segs
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_BT_CONNECT && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            val oid = orderId
+            if (!oid.isNullOrBlank()) loadAndPrint(oid)
+        }
     }
 
     // ============================
@@ -328,15 +354,16 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                     Toast.makeText(this, "Receipt sent to $email", Toast.LENGTH_SHORT).show()
                     goToMainScreen()
                 } else {
+                    val errorMsg = response?.get("error")?.toString() ?: "Unknown error"
                     Log.e("Receipt", "Cloud function returned failure: $response")
-                    Toast.makeText(this, "Failed to send receipt", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Failed to send receipt: $errorMsg", Toast.LENGTH_LONG).show()
                     btnSend.isEnabled = true
                     btnSend.text = "Send Receipt"
                 }
             }
             .addOnFailureListener { e ->
-                Log.e("Receipt", "Error sending email", e)
-                Toast.makeText(this, "Failed to send receipt. Please try again.", Toast.LENGTH_SHORT).show()
+                Log.e("Receipt", "Error calling sendReceiptEmail", e)
+                Toast.makeText(this, "Failed to send receipt: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                 btnSend.isEnabled = true
                 btnSend.text = "Send Receipt"
             }

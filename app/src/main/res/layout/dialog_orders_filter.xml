@@ -1,146 +1,284 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="20dp">
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Filter orders"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        android:paddingBottom="16dp"/>
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Status"
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:paddingBottom="8dp"/>
-
-    <RadioGroup
-        android:id="@+id/radioGroupStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical">
-
-        <RadioButton
-            android:id="@+id/radioAll"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="All"/>
-
-        <RadioButton
-            android:id="@+id/radioOpen"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Open"/>
-
-        <RadioButton
-            android:id="@+id/radioClosed"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Closed"/>
-
-        <RadioButton
-            android:id="@+id/radioVoided"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Voided"/>
-
-        <RadioButton
-            android:id="@+id/radioRefundedFully"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Refunded fully"/>
-
-        <RadioButton
-            android:id="@+id/radioPartiallyRefunded"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Partially refunded"/>
-    </RadioGroup>
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Employee"
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:paddingTop="20dp"
-        android:paddingBottom="8dp"/>
-
-    <Spinner
-        android:id="@+id/spinnerEmployee"
-        android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:background="@android:drawable/btn_dropdown"
-        android:padding="8dp"/>
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Date range"
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:paddingTop="20dp"
-        android:paddingBottom="8dp"/>
+    android:fadeScrollbars="false"
+    android:scrollbarStyle="outsideOverlay">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:orientation="vertical"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="24dp"
+        android:paddingBottom="16dp">
 
+        <!-- Title -->
         <TextView
-            android:id="@+id/txtDateFrom"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:padding="12dp"
-            android:background="@android:drawable/btn_dropdown"
-            android:text="From: Any"
-            android:textSize="14sp"/>
+            android:text="Filter Orders"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:gravity="center"/>
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text=" – "
-            android:paddingHorizontal="8dp"/>
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#E0E0E0"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="20dp"/>
 
+        <!-- STATUS -->
         <TextView
-            android:id="@+id/txtDateTo"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:padding="12dp"
-            android:background="@android:drawable/btn_dropdown"
-            android:text="To: Any"
-            android:textSize="14sp"/>
+            android:text="STATUS"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="#777777"
+            android:letterSpacing="0.1"
+            android:paddingBottom="8dp"/>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="0dp"
+            app:strokeColor="#E0E0E0"
+            app:strokeWidth="1dp"
+            app:cardBackgroundColor="@android:color/white">
+
+            <RadioGroup
+                android:id="@+id/radioGroupStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp">
+
+                <RadioButton
+                    android:id="@+id/radioAll"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="All"
+                    android:textSize="15sp"
+                    android:textColor="#333333"
+                    android:paddingStart="8dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
+                    android:paddingEnd="16dp"
+                    android:background="?attr/selectableItemBackground"/>
+
+                <RadioButton
+                    android:id="@+id/radioOpen"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Open"
+                    android:textSize="15sp"
+                    android:textColor="#333333"
+                    android:paddingStart="8dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
+                    android:paddingEnd="16dp"
+                    android:background="?attr/selectableItemBackground"/>
+
+                <RadioButton
+                    android:id="@+id/radioClosed"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Closed"
+                    android:textSize="15sp"
+                    android:textColor="#333333"
+                    android:paddingStart="8dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
+                    android:paddingEnd="16dp"
+                    android:background="?attr/selectableItemBackground"/>
+
+                <RadioButton
+                    android:id="@+id/radioVoided"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Voided"
+                    android:textSize="15sp"
+                    android:textColor="#333333"
+                    android:paddingStart="8dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
+                    android:paddingEnd="16dp"
+                    android:background="?attr/selectableItemBackground"/>
+
+                <RadioButton
+                    android:id="@+id/radioRefundedFully"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Refunded fully"
+                    android:textSize="15sp"
+                    android:textColor="#333333"
+                    android:paddingStart="8dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
+                    android:paddingEnd="16dp"
+                    android:background="?attr/selectableItemBackground"/>
+
+                <RadioButton
+                    android:id="@+id/radioPartiallyRefunded"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Partially refunded"
+                    android:textSize="15sp"
+                    android:textColor="#333333"
+                    android:paddingStart="8dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
+                    android:paddingEnd="16dp"
+                    android:background="?attr/selectableItemBackground"/>
+
+            </RadioGroup>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- EMPLOYEE -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="EMPLOYEE"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="#777777"
+            android:letterSpacing="0.1"
+            android:paddingTop="20dp"
+            android:paddingBottom="8dp"/>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="0dp"
+            app:strokeColor="#E0E0E0"
+            app:strokeWidth="1dp"
+            app:cardBackgroundColor="@android:color/white">
+
+            <Spinner
+                android:id="@+id/spinnerEmployee"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"/>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- DATE RANGE -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="DATE RANGE"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="#777777"
+            android:letterSpacing="0.1"
+            android:paddingTop="20dp"
+            android:paddingBottom="8dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp"
+                app:strokeColor="#E0E0E0"
+                app:strokeWidth="1dp"
+                app:cardBackgroundColor="@android:color/white">
+
+                <TextView
+                    android:id="@+id/txtDateFrom"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="14dp"
+                    android:text="From: Any"
+                    android:textSize="14sp"
+                    android:textColor="#333333"
+                    android:drawableEnd="@android:drawable/ic_menu_my_calendar"
+                    android:drawablePadding="8dp"
+                    android:background="?attr/selectableItemBackground"/>
+
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="–"
+                android:textSize="16sp"
+                android:textColor="#999999"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"/>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp"
+                app:strokeColor="#E0E0E0"
+                app:strokeWidth="1dp"
+                app:cardBackgroundColor="@android:color/white">
+
+                <TextView
+                    android:id="@+id/txtDateTo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="14dp"
+                    android:text="To: Any"
+                    android:textSize="14sp"
+                    android:textColor="#333333"
+                    android:drawableEnd="@android:drawable/ic_menu_my_calendar"
+                    android:drawablePadding="8dp"
+                    android:background="?attr/selectableItemBackground"/>
+
+            </com.google.android.material.card.MaterialCardView>
+
+        </LinearLayout>
+
+        <!-- ACTION BUTTONS -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="28dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnFilterClear"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:text="Clear Filters"
+                android:textSize="15sp"
+                app:cornerRadius="12dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnFilterApply"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:text="Apply"
+                android:textSize="15sp"
+                android:layout_marginStart="12dp"
+                app:cornerRadius="12dp"/>
+
+        </LinearLayout>
+
     </LinearLayout>
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="end"
-        android:paddingTop="24dp">
-
-        <Button
-            android:id="@+id/btnFilterClear"
-            style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Clear"/>
-
-        <Button
-            android:id="@+id/btnFilterApply"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Apply"
-            android:layout_marginStart="12dp"/>
-    </LinearLayout>
-</LinearLayout>
+</ScrollView>

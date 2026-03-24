@@ -102,10 +102,11 @@ function itemsTableHtml(items, strikethrough, appliedDiscounts) {
   let rows = "";
   items.forEach((item) => {
     const lineTotal = (item.lineTotalInCents / 100).toFixed(2);
+    const showItemPrice = (item.basePriceInCents ?? item.lineTotalInCents) > 0;
     rows += `<tr>
       <td style="padding:6px 0;${strike}">${escapeHtml(item.name)}</td>
       <td style="padding:6px 0;text-align:center;${strike}">${item.quantity}</td>
-      <td style="padding:6px 0;text-align:right;${strike}">$${lineTotal}</td>
+      <td style="padding:6px 0;text-align:right;${strike}">${showItemPrice ? `$${lineTotal}` : ""}</td>
     </tr>`;
 
     if (item.modifiers && item.modifiers.length > 0) {
@@ -333,7 +334,8 @@ function parseItems(itemsSnap) {
       });
     }
 
-    items.push({ lineKey: doc.id, name, quantity, unitPriceInCents, lineTotalInCents, modifiers });
+    const basePriceInCents = d.basePriceInCents ?? unitPriceInCents;
+    items.push({ lineKey: doc.id, name, quantity, unitPriceInCents, lineTotalInCents, basePriceInCents, modifiers });
   });
 
   return { items, subtotalInCents };

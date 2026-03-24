@@ -318,9 +318,11 @@ class PaymentActivity : AppCompatActivity() {
                         ?: doc.getLong("quantity")
                         ?: 1L).toInt()
                     val lineTotalCents = doc.getLong("lineTotalInCents") ?: 0L
+                    val basePriceCents = doc.getLong("basePriceInCents") ?: lineTotalCents
 
                     val itemLabel = if (qty > 1) "${qty}x $name" else name
-                    container.addView(makeSummaryRow(itemLabel, MoneyUtils.centsToDisplay(lineTotalCents), 13f, 0xDDFFFFFF.toInt()))
+                    val itemPriceStr = if (basePriceCents > 0L) MoneyUtils.centsToDisplay(lineTotalCents) else ""
+                    container.addView(makeSummaryRow(itemLabel, itemPriceStr, 13f, 0xDDFFFFFF.toInt()))
 
                     val mods = doc.get("modifiers") as? List<*> ?: emptyList<Any>()
                     for (m in mods) {
@@ -343,22 +345,23 @@ class PaymentActivity : AppCompatActivity() {
                     }
                 }
 
-                container.addView(makeDivider((8 * dp).toInt()))
+                val totalsContainer = findViewById<LinearLayout>(R.id.totalsSummaryContainer)
+                totalsContainer?.removeAllViews()
 
-                container.addView(makeSummaryRow("Subtotal", MoneyUtils.centsToDisplay(subtotalCents), 13f, 0xBBFFFFFF.toInt()))
+                totalsContainer?.addView(makeSummaryRow("Subtotal", MoneyUtils.centsToDisplay(subtotalCents), 13f, 0xBBFFFFFF.toInt()))
 
                 if (discountInCents > 0L) {
-                    container.addView(makeSummaryRow("Discount", "-${MoneyUtils.centsToDisplay(discountInCents)}", 13f, 0xFF81C784.toInt()))
+                    totalsContainer?.addView(makeSummaryRow("Discount", "-${MoneyUtils.centsToDisplay(discountInCents)}", 13f, 0xFF81C784.toInt()))
                 }
 
                 for (entry in taxBreakdown) {
                     val taxName = entry["name"]?.toString() ?: "Tax"
                     val taxCents = (entry["amountInCents"] as? Number)?.toLong() ?: 0L
-                    container.addView(makeSummaryRow(taxName, MoneyUtils.centsToDisplay(taxCents), 12f, 0xAAFFFFFF.toInt()))
+                    totalsContainer?.addView(makeSummaryRow(taxName, MoneyUtils.centsToDisplay(taxCents), 12f, 0xAAFFFFFF.toInt()))
                 }
 
                 if (tipAmountInCents > 0L) {
-                    container.addView(makeSummaryRow("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), 13f, 0xBBFFFFFF.toInt()))
+                    totalsContainer?.addView(makeSummaryRow("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), 13f, 0xBBFFFFFF.toInt()))
                 }
             }
     }

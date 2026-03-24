@@ -1,88 +1,112 @@
 <?xml version="1.0" encoding="utf-8"?>
-<com.google.android.material.card.MaterialCardView
+<LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    app:cardCornerRadius="18dp"
-    app:cardElevation="8dp"
-    app:strokeWidth="1dp"
-    app:strokeColor="#E0E0E0"
-    app:cardBackgroundColor="@android:color/white">
+    android:orientation="vertical"
+    android:background="@android:color/white"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp">
 
+    <!-- Row: Name+Qty on left, Amount on right -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="18dp">
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
-        <!-- Item name + qty -->
         <TextView
             android:id="@+id/txtItemNameQty"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
             android:textStyle="bold"
-            android:textSize="16sp" />
+            android:textSize="14sp"
+            android:textColor="#222222"
+            android:layout_marginEnd="8dp"/>
 
-        <!-- Base price (we will hide if 0) -->
-        <TextView
-            android:id="@+id/txtItemBase"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textSize="13sp"
-            android:layout_marginTop="4dp" />
-
-        <!-- Modifiers (we can hide if empty) -->
-        <TextView
-            android:id="@+id/txtItemModifiers"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="13sp"
-            android:layout_marginTop="10dp" />
-
-        <!-- Line total (at bottom, not beside name) -->
         <TextView
             android:id="@+id/txtItemLineTotal"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textStyle="bold"
             android:textSize="14sp"
-            android:layout_marginTop="12dp" />
-
-        <TextView
-            android:id="@+id/txtItemPayments"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textSize="13sp"
-            android:textColor="#555555"
-            android:layout_marginTop="4dp"
-            android:visibility="gone"/>
-
-        <!-- Refunded by + date (right-aligned, shown only for refunded items) -->
-        <LinearLayout
-            android:id="@+id/refundedByRow"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="end"
-            android:layout_marginTop="6dp"
-            android:visibility="gone">
-            <TextView
-                android:id="@+id/txtRefundedBy"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="12sp"
-                android:textColor="#1565C0"
-                android:textStyle="italic"/>
-            <TextView
-                android:id="@+id/txtRefundedDate"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:textColor="#1565C0"
-                android:layout_marginTop="2dp"/>
-        </LinearLayout>
-
+            android:textColor="#222222"/>
     </LinearLayout>
 
-</com.google.android.material.card.MaterialCardView>
+    <!-- Modifiers in smaller muted text -->
+    <TextView
+        android:id="@+id/txtItemModifiers"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="12sp"
+        android:textColor="#888888"
+        android:layout_marginTop="2dp"
+        android:visibility="gone"/>
+
+    <!-- Base price (kept for compatibility, hidden) -->
+    <TextView
+        android:id="@+id/txtItemBase"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="12sp"
+        android:textColor="#999999"
+        android:visibility="gone"/>
+
+    <!-- Payments info -->
+    <TextView
+        android:id="@+id/txtItemPayments"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="12sp"
+        android:textColor="#555555"
+        android:layout_marginTop="2dp"
+        android:visibility="gone"/>
+
+    <!-- REFUNDED badge -->
+    <TextView
+        android:id="@+id/txtRefundedBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="REFUNDED"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:textColor="#C62828"
+        android:layout_marginTop="4dp"
+        android:visibility="gone"/>
+
+    <!-- Refunded by + date -->
+    <LinearLayout
+        android:id="@+id/refundedByRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="2dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/txtRefundedBy"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="11sp"
+            android:textColor="#C62828"/>
+
+        <TextView
+            android:id="@+id/txtRefundedDate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="11sp"
+            android:textColor="#999999"
+            android:layout_marginTop="1dp"/>
+    </LinearLayout>
+
+    <!-- Bottom divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#EEEEEE"
+        android:layout_marginTop="10dp"/>
+
+</LinearLayout>

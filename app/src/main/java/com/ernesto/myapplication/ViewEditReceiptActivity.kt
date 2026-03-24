@@ -1,28 +1,65 @@
 package com.ernesto.myapplication
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
-import android.util.Log
 import android.widget.Button
 import android.widget.EditText
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 class ViewEditReceiptActivity : AppCompatActivity() {
 
+    companion object {
+        private const val REQUEST_BT_CONNECT = 1001
+    }
+
     private lateinit var settings: ReceiptSettings
 
+    // Input fields
     private lateinit var etBusinessName: EditText
     private lateinit var etAddress: EditText
     private lateinit var switchShowServer: SwitchCompat
     private lateinit var switchShowDateTime: SwitchCompat
 
+    // Bold toggles
+    private lateinit var switchBoldBizName: SwitchCompat
+    private lateinit var switchBoldAddress: SwitchCompat
+    private lateinit var switchBoldOrderInfo: SwitchCompat
+    private lateinit var switchBoldItems: SwitchCompat
+    private lateinit var switchBoldTotals: SwitchCompat
+    private lateinit var switchBoldGrandTotal: SwitchCompat
+    private lateinit var switchBoldFooter: SwitchCompat
+
+    // Font size
+    private lateinit var seekFontBizName: SeekBar
+    private lateinit var seekFontAddress: SeekBar
+    private lateinit var seekFontOrderInfo: SeekBar
+    private lateinit var seekFontItems: SeekBar
+    private lateinit var seekFontTotals: SeekBar
+    private lateinit var seekFontGrandTotal: SeekBar
+    private lateinit var seekFontFooter: SeekBar
+    private lateinit var tvFontBizNameVal: TextView
+    private lateinit var tvFontAddressVal: TextView
+    private lateinit var tvFontOrderInfoVal: TextView
+    private lateinit var tvFontItemsVal: TextView
+    private lateinit var tvFontTotalsVal: TextView
+    private lateinit var tvFontGrandTotalVal: TextView
+    private lateinit var tvFontFooterVal: TextView
+
+    // Preview
     private lateinit var tvBusinessName: TextView
     private lateinit var tvAddress: TextView
     private lateinit var tvReceiptTitle: TextView
@@ -33,6 +70,7 @@ class ViewEditReceiptActivity : AppCompatActivity() {
     private lateinit var tvTotals: TextView
     private lateinit var tvSep3: TextView
     private lateinit var tvGrandTotal: TextView
+    private lateinit var tvPaymentInfo: TextView
     private lateinit var tvFooter: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,11 +91,36 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         return true
     }
 
+    // ── View binding ─────────────────────────────────────────────
+
     private fun bindViews() {
         etBusinessName = findViewById(R.id.etBusinessName)
         etAddress = findViewById(R.id.etAddress)
         switchShowServer = findViewById(R.id.switchShowServer)
         switchShowDateTime = findViewById(R.id.switchShowDateTime)
+
+        switchBoldBizName = findViewById(R.id.switchBoldBizName)
+        switchBoldAddress = findViewById(R.id.switchBoldAddress)
+        switchBoldOrderInfo = findViewById(R.id.switchBoldOrderInfo)
+        switchBoldItems = findViewById(R.id.switchBoldItems)
+        switchBoldTotals = findViewById(R.id.switchBoldTotals)
+        switchBoldGrandTotal = findViewById(R.id.switchBoldGrandTotal)
+        switchBoldFooter = findViewById(R.id.switchBoldFooter)
+
+        seekFontBizName = findViewById(R.id.seekFontBizName)
+        seekFontAddress = findViewById(R.id.seekFontAddress)
+        seekFontOrderInfo = findViewById(R.id.seekFontOrderInfo)
+        seekFontItems = findViewById(R.id.seekFontItems)
+        seekFontTotals = findViewById(R.id.seekFontTotals)
+        seekFontGrandTotal = findViewById(R.id.seekFontGrandTotal)
+        seekFontFooter = findViewById(R.id.seekFontFooter)
+        tvFontBizNameVal = findViewById(R.id.tvFontBizNameVal)
+        tvFontAddressVal = findViewById(R.id.tvFontAddressVal)
+        tvFontOrderInfoVal = findViewById(R.id.tvFontOrderInfoVal)
+        tvFontItemsVal = findViewById(R.id.tvFontItemsVal)
+        tvFontTotalsVal = findViewById(R.id.tvFontTotalsVal)
+        tvFontGrandTotalVal = findViewById(R.id.tvFontGrandTotalVal)
+        tvFontFooterVal = findViewById(R.id.tvFontFooterVal)
 
         tvBusinessName = findViewById(R.id.tvBusinessName)
         tvAddress = findViewById(R.id.tvAddress)
@@ -69,6 +132,7 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         tvTotals = findViewById(R.id.tvTotals)
         tvSep3 = findViewById(R.id.tvSep3)
         tvGrandTotal = findViewById(R.id.tvGrandTotal)
+        tvPaymentInfo = findViewById(R.id.tvPaymentInfo)
         tvFooter = findViewById(R.id.tvFooter)
     }
 
@@ -77,37 +141,100 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         etAddress.setText(settings.addressText)
         switchShowServer.isChecked = settings.showServerName
         switchShowDateTime.isChecked = settings.showDateTime
+
+        switchBoldBizName.isChecked = settings.boldBizName
+        switchBoldAddress.isChecked = settings.boldAddress
+        switchBoldOrderInfo.isChecked = settings.boldOrderInfo
+        switchBoldItems.isChecked = settings.boldItems
+        switchBoldTotals.isChecked = settings.boldTotals
+        switchBoldGrandTotal.isChecked = settings.boldGrandTotal
+        switchBoldFooter.isChecked = settings.boldFooter
+
+        seekFontBizName.progress = settings.fontSizeBizName
+        seekFontAddress.progress = settings.fontSizeAddress
+        seekFontOrderInfo.progress = settings.fontSizeOrderInfo
+        seekFontItems.progress = settings.fontSizeItems
+        seekFontTotals.progress = settings.fontSizeTotals
+        seekFontGrandTotal.progress = settings.fontSizeGrandTotal
+        seekFontFooter.progress = settings.fontSizeFooter
+        tvFontBizNameVal.text = ReceiptSettings.FONT_SIZE_LABELS[settings.fontSizeBizName]
+        tvFontAddressVal.text = ReceiptSettings.FONT_SIZE_LABELS[settings.fontSizeAddress]
+        tvFontOrderInfoVal.text = ReceiptSettings.FONT_SIZE_LABELS[settings.fontSizeOrderInfo]
+        tvFontItemsVal.text = ReceiptSettings.FONT_SIZE_LABELS[settings.fontSizeItems]
+        tvFontTotalsVal.text = ReceiptSettings.FONT_SIZE_LABELS[settings.fontSizeTotals]
+        tvFontGrandTotalVal.text = ReceiptSettings.FONT_SIZE_LABELS[settings.fontSizeGrandTotal]
+        tvFontFooterVal.text = ReceiptSettings.FONT_SIZE_LABELS[settings.fontSizeFooter]
     }
 
+    // ── Listeners ────────────────────────────────────────────────
+
     private fun setupListeners() {
-        etBusinessName.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                settings = settings.copy(businessName = s?.toString() ?: "")
-                populatePreview()
-            }
+        etBusinessName.addTextChangedListener(simpleWatcher {
+            settings = settings.copy(businessName = it)
+            populatePreview()
+        })
+        etAddress.addTextChangedListener(simpleWatcher {
+            settings = settings.copy(addressText = it)
+            populatePreview()
         })
 
-        etAddress.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                settings = settings.copy(addressText = s?.toString() ?: "")
-                populatePreview()
+        switchShowServer.setOnCheckedChangeListener { _, c ->
+            settings = settings.copy(showServerName = c); populatePreview()
+        }
+        switchShowDateTime.setOnCheckedChangeListener { _, c ->
+            settings = settings.copy(showDateTime = c); populatePreview()
+        }
+
+        // Bold toggles
+        switchBoldBizName.setOnCheckedChangeListener { _, c ->
+            settings = settings.copy(boldBizName = c); populatePreview()
+        }
+        switchBoldAddress.setOnCheckedChangeListener { _, c ->
+            settings = settings.copy(boldAddress = c); populatePreview()
+        }
+        switchBoldOrderInfo.setOnCheckedChangeListener { _, c ->
+            settings = settings.copy(boldOrderInfo = c); populatePreview()
+        }
+        switchBoldItems.setOnCheckedChangeListener { _, c ->
+            settings = settings.copy(boldItems = c); populatePreview()
+        }
+        switchBoldTotals.setOnCheckedChangeListener { _, c ->
+            settings = settings.copy(boldTotals = c); populatePreview()
+        }
+        switchBoldGrandTotal.setOnCheckedChangeListener { _, c ->
+            settings = settings.copy(boldGrandTotal = c); populatePreview()
+        }
+        switchBoldFooter.setOnCheckedChangeListener { _, c ->
+            settings = settings.copy(boldFooter = c); populatePreview()
+        }
+
+        // Font size seekbars
+        fun fontListener(label: TextView, copy: (Int) -> ReceiptSettings) =
+            object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, p: Int, user: Boolean) {
+                    label.text = ReceiptSettings.FONT_SIZE_LABELS[p]
+                    if (user) { settings = copy(p); populatePreview() }
+                }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
             }
-        })
 
-        switchShowServer.setOnCheckedChangeListener { _, isChecked ->
-            settings = settings.copy(showServerName = isChecked)
-            populatePreview()
-        }
+        seekFontBizName.setOnSeekBarChangeListener(
+            fontListener(tvFontBizNameVal) { settings.copy(fontSizeBizName = it) })
+        seekFontAddress.setOnSeekBarChangeListener(
+            fontListener(tvFontAddressVal) { settings.copy(fontSizeAddress = it) })
+        seekFontOrderInfo.setOnSeekBarChangeListener(
+            fontListener(tvFontOrderInfoVal) { settings.copy(fontSizeOrderInfo = it) })
+        seekFontItems.setOnSeekBarChangeListener(
+            fontListener(tvFontItemsVal) { settings.copy(fontSizeItems = it) })
+        seekFontTotals.setOnSeekBarChangeListener(
+            fontListener(tvFontTotalsVal) { settings.copy(fontSizeTotals = it) })
+        seekFontGrandTotal.setOnSeekBarChangeListener(
+            fontListener(tvFontGrandTotalVal) { settings.copy(fontSizeGrandTotal = it) })
+        seekFontFooter.setOnSeekBarChangeListener(
+            fontListener(tvFontFooterVal) { settings.copy(fontSizeFooter = it) })
 
-        switchShowDateTime.setOnCheckedChangeListener { _, isChecked ->
-            settings = settings.copy(showDateTime = isChecked)
-            populatePreview()
-        }
-
+        // Buttons
         findViewById<Button>(R.id.btnSave).setOnClickListener {
             ReceiptSettings.save(this, settings)
             Toast.makeText(this, "Settings saved!", Toast.LENGTH_SHORT).show()
@@ -126,178 +253,120 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         }
     }
 
-    // ── Preview ────────────────────────────────────────────
+    private fun simpleWatcher(onChange: (String) -> Unit) = object : TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+        override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+        override fun afterTextChanged(s: Editable?) { onChange(s?.toString() ?: "") }
+    }
+
+    // ── Preview ──────────────────────────────────────────────────
+
+    private fun fontSizeToSp(fontSize: Int): Float = when (fontSize) {
+        1 -> 16f
+        2 -> 20f
+        else -> 12f
+    }
 
     private fun populatePreview() {
+        val bizNameSp = fontSizeToSp(settings.fontSizeBizName)
+        val addrSp = fontSizeToSp(settings.fontSizeAddress)
+        val orderSp = fontSizeToSp(settings.fontSizeOrderInfo)
+        val itemsSp = fontSizeToSp(settings.fontSizeItems)
+        val totalsSp = fontSizeToSp(settings.fontSizeTotals)
+        val grandTotalSp = fontSizeToSp(settings.fontSizeGrandTotal)
+        val footerSp = fontSizeToSp(settings.fontSizeFooter)
+
+        fun bold(on: Boolean) = if (on) Typeface.BOLD else Typeface.NORMAL
+
         tvBusinessName.text = settings.businessName
+        tvBusinessName.setTypeface(null, bold(settings.boldBizName))
+        tvBusinessName.textSize = bizNameSp + 4f
+
         tvAddress.text = settings.addressText
+        tvAddress.setTypeface(null, bold(settings.boldAddress))
+        tvAddress.textSize = addrSp
+
+        tvReceiptTitle.setTypeface(null, bold(settings.boldOrderInfo))
+        tvReceiptTitle.textSize = orderSp + 2f
 
         val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
-        val orderInfoLines = mutableListOf<String>()
-        orderInfoLines.add("Order #1042")
-        orderInfoLines.add("Type: Dine In")
+        val orderInfoLines = mutableListOf("Order #1042", "Type: Dine In")
         if (settings.showServerName) orderInfoLines.add("Server: Ernesto")
         if (settings.showDateTime) orderInfoLines.add("Date: $dateStr")
         tvOrderInfo.text = orderInfoLines.joinToString("\n")
+        tvOrderInfo.setTypeface(null, bold(settings.boldOrderInfo))
+        tvOrderInfo.textSize = orderSp
 
-        tvSep1.text = "-".repeat(LINE_WIDTH)
+        val lwi = ReceiptSettings.lineWidthForSize(settings.fontSizeItems)
+        tvSep1.text = "-".repeat(lwi)
+        tvSep1.setTypeface(null, bold(settings.boldItems))
 
         tvItems.text = buildString {
-            appendLine(formatLine("2x Burger", "$19.98", LINE_WIDTH))
-            appendLine(formatLine("  + Extra Cheese", "$1.50", LINE_WIDTH))
-            appendLine(formatLine("1x Caesar Salad", "$12.50", LINE_WIDTH))
-            appendLine(formatLine("1x Fries", "$5.99", LINE_WIDTH))
-            appendLine(formatLine("2x Iced Tea", "$7.98", LINE_WIDTH))
-            append(formatLine("1x Chocolate Cake", "$8.50", LINE_WIDTH))
+            appendLine(formatLine("2x Burger", "$19.98", lwi))
+            appendLine(formatLine("  + Extra Cheese", "$1.50", lwi))
+            appendLine(formatLine("1x Caesar Salad", "$12.50", lwi))
+            appendLine(formatLine("1x Fries", "$5.99", lwi))
+            appendLine(formatLine("2x Iced Tea", "$7.98", lwi))
+            append(formatLine("1x Chocolate Cake", "$8.50", lwi))
         }
+        tvItems.setTypeface(null, bold(settings.boldItems))
+        tvItems.textSize = itemsSp
 
-        tvSep2.text = "-".repeat(LINE_WIDTH)
+        val lwt = ReceiptSettings.lineWidthForSize(settings.fontSizeTotals)
+        tvSep2.text = "-".repeat(lwt)
+        tvSep2.setTypeface(null, bold(settings.boldTotals))
 
         tvTotals.text = buildString {
-            appendLine(formatLine("Subtotal", "$56.45", LINE_WIDTH))
-            appendLine(formatLine("Tax (8.25%)", "$4.66", LINE_WIDTH))
-            append(formatLine("Tip", "$8.47", LINE_WIDTH))
+            appendLine(formatLine("Subtotal", "$56.45", lwt))
+            appendLine(formatLine("Tax (8.25%)", "$4.66", lwt))
+            append(formatLine("Tip", "$8.47", lwt))
         }
+        tvTotals.setTypeface(null, bold(settings.boldTotals))
+        tvTotals.textSize = totalsSp
 
-        tvSep3.text = "=".repeat(LINE_WIDTH)
-        tvGrandTotal.text = formatLine("TOTAL", "$69.58", LINE_WIDTH)
+        val lwg = ReceiptSettings.lineWidthForSize(settings.fontSizeGrandTotal)
+        tvSep3.text = "=".repeat(lwg)
+        tvSep3.setTypeface(null, bold(settings.boldGrandTotal))
+
+        tvGrandTotal.text = formatLine("TOTAL", "$69.58", lwg)
+        tvGrandTotal.setTypeface(null, bold(settings.boldGrandTotal))
+        tvGrandTotal.textSize = grandTotalSp + 2f
+
+        tvPaymentInfo.text = "Visa **** 1234\nAuth: 123456\nType: Credit"
+        tvPaymentInfo.setTypeface(null, bold(settings.boldFooter))
+        tvPaymentInfo.textSize = footerSp
+
         tvFooter.text = "Thank you for dining with us!"
+        tvFooter.setTypeface(null, bold(settings.boldFooter))
+        tvFooter.textSize = footerSp
     }
 
-    // ── Test Print ──────────────────────────────────────────
-
-    private data class PrintSegment(val text: String, val fontSize: Int, val alignment: Int)
+    // ── ESC/POS Printing ─────────────────────────────────────────
 
     private fun printTestReceipt() {
-        Toast.makeText(this, "Printing test receipt…", Toast.LENGTH_SHORT).show()
-        val segments = buildTestSegments()
-        sendToPrinter(segments)
-    }
-
-    private fun buildTestSegments(): List<PrintSegment> {
-        val rs = settings
-        val segments = mutableListOf<PrintSegment>()
-        val c = ALIGN_CENTER
-
-        fun centered(text: String) { segments.add(PrintSegment(text, 0, c)) }
-        fun left(text: String) { segments.add(PrintSegment(text, 0, 0)) }
-
-        centered(rs.businessName)
-        for (line in rs.addressText.split("\n")) {
-            centered(line)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BT_CONNECT
+                )
+                return
+            }
         }
-
-        centered("")
-        centered("RECEIPT")
-        centered("")
-
-        val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
-        centered("Order #1042")
-        centered("Type: Dine In")
-        if (rs.showServerName) centered("Server: Ernesto")
-        if (rs.showDateTime) centered("Date: $dateStr")
-        centered("")
-
-        left("-".repeat(LINE_WIDTH))
-        left(formatLine("2x Burger", "$19.98", LINE_WIDTH))
-        left(formatLine("  + Extra Cheese", "$1.50", LINE_WIDTH))
-        left(formatLine("1x Caesar Salad", "$12.50", LINE_WIDTH))
-        left(formatLine("1x Fries", "$5.99", LINE_WIDTH))
-        left(formatLine("2x Iced Tea", "$7.98", LINE_WIDTH))
-        left(formatLine("1x Chocolate Cake", "$8.50", LINE_WIDTH))
-        left("-".repeat(LINE_WIDTH))
-
-        centered("")
-        left(formatLine("Subtotal", "$56.45", LINE_WIDTH))
-        left(formatLine("Tax (8.25%)", "$4.66", LINE_WIDTH))
-        left(formatLine("Tip", "$8.47", LINE_WIDTH))
-        left("=".repeat(LINE_WIDTH))
-
-        centered("")
-        left(formatLine("TOTAL", "$69.58", LINE_WIDTH))
-
-        centered("")
-        centered("Thank you for dining with us!")
-
-        return segments
+        EscPosPrinter.printTestReceipt(this, settings)
     }
 
-    // OmniDriver addText API: addText(fontSize, alignment, text)
-    // fontSize: 0=normal, 1=large, 2=x-large
-    // alignment: 0=left, 1=center, 2=right
-    private fun sendToPrinter(segments: List<PrintSegment>) {
-        val omniApk = "/system_ext/app/omnidriver-service/omnidriver-service.apk"
-        val loader = dalvik.system.DexClassLoader(omniApk, cacheDir.absolutePath, null, classLoader)
-
-        val intent = android.content.Intent("sdksuite-omnidriver")
-        intent.setPackage("com.sdksuite.omnidriver")
-
-        bindService(intent, object : android.content.ServiceConnection {
-            override fun onServiceConnected(name: android.content.ComponentName?, service: android.os.IBinder?) {
-                try {
-                    val omniStub = loader.loadClass("com.sdksuite.omnidriver.aidl.IOmniDriver\$Stub")
-                    val omniProxy = omniStub.getMethod("asInterface", android.os.IBinder::class.java).invoke(null, service)
-
-                    val initBundle = android.os.Bundle()
-                    initBundle.putString("packageName", packageName)
-                    omniProxy.javaClass.getMethod("init", android.os.Bundle::class.java, android.os.IBinder::class.java)
-                        .invoke(omniProxy, initBundle, android.os.Binder())
-
-                    val printerBinder = omniProxy.javaClass.getMethod("getPrinter", android.os.Bundle::class.java)
-                        .invoke(omniProxy, android.os.Bundle()) as? android.os.IBinder
-
-                    if (printerBinder == null) {
-                        runOnUiThread { Toast.makeText(this@ViewEditReceiptActivity, "Printer not available", Toast.LENGTH_LONG).show() }
-                        return
-                    }
-
-                    val printerStub = loader.loadClass("com.sdksuite.omnidriver.aidl.printer.IPrinter\$Stub")
-                    val printerProxy = printerStub.getMethod("asInterface", android.os.IBinder::class.java)
-                        .invoke(null, printerBinder)!!
-
-                    printerProxy.javaClass.getMethod("openDevice", Int::class.javaPrimitiveType)
-                        .invoke(printerProxy, 0)
-
-                    val addText = printerProxy.javaClass.getMethod(
-                        "addText", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, String::class.java
-                    )
-
-                    for (seg in segments) {
-                        addText.invoke(printerProxy, seg.fontSize, seg.alignment, seg.text + "\n")
-                    }
-
-                    printerProxy.javaClass.getMethod("feedLine", Int::class.javaPrimitiveType)
-                        .invoke(printerProxy, 10)
-
-                    val listenerStubClass = loader.loadClass("com.sdksuite.omnidriver.aidl.printer.OnPrintListener\$Stub")
-                    val listenerInstance = object : android.os.Binder() {
-                        override fun onTransact(code: Int, data: android.os.Parcel, reply: android.os.Parcel?, flags: Int): Boolean {
-                            Log.d("TestPrint", "PrintListener onTransact code=$code")
-                            return try { super.onTransact(code, data, reply, flags) } catch (e: Exception) { reply?.writeNoException(); true }
-                        }
-                    }
-                    val listenerInterface = loader.loadClass("com.sdksuite.omnidriver.aidl.printer.OnPrintListener")
-                    val listenerProxy = listenerStubClass.getMethod("asInterface", android.os.IBinder::class.java)
-                        .invoke(null, listenerInstance)
-
-                    printerProxy.javaClass.getMethod("startPrint", listenerInterface)
-                        .invoke(printerProxy, listenerProxy)
-
-                    Log.d("TestPrint", "Test receipt print started")
-                    runOnUiThread {
-                        Toast.makeText(this@ViewEditReceiptActivity, "Test receipt printed!", Toast.LENGTH_SHORT).show()
-                    }
-                } catch (e: Exception) {
-                    Log.e("TestPrint", "Print error: ${e.message}", e)
-                    runOnUiThread {
-                        Toast.makeText(this@ViewEditReceiptActivity, "Print failed: ${e.cause?.message ?: e.message}", Toast.LENGTH_LONG).show()
-                    }
-                }
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_BT_CONNECT) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                EscPosPrinter.printTestReceipt(this, settings)
+            } else {
+                Toast.makeText(this, "Bluetooth permission required", Toast.LENGTH_LONG).show()
             }
-
-            override fun onServiceDisconnected(name: android.content.ComponentName?) {
-                Log.d("TestPrint", "OmniDriver disconnected")
-            }
-        }, android.content.Context.BIND_AUTO_CREATE)
+        }
     }
 }

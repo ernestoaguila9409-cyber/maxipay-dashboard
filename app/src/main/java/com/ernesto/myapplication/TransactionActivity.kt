@@ -711,49 +711,15 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun processRefund(transaction: Transaction, remainingCents: Long) {
-
-        val maxAmount = remainingCents / 100.0
-
-        val input = EditText(this)
-        input.hint = "Enter refund amount (Max: $${String.format("%.2f", maxAmount)})"
-
-        AlertDialog.Builder(this)
-            .setTitle("Refund")
-            .setView(input)
-            .setPositiveButton("Refund") { _, _ ->
-                val entered = input.text.toString().toDoubleOrNull()
-
-                if (entered == null || entered <= 0 || entered > maxAmount) {
-                    Toast.makeText(this, "Invalid amount (max $${String.format("%.2f", maxAmount)})", Toast.LENGTH_SHORT).show()
-                } else {
-                    sendRefundRequest(transaction, entered)
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        RefundDialogHelper.showRefundOptionsDialog(this, remainingCents) { amountCents ->
+            sendRefundRequest(transaction, amountCents / 100.0)
+        }
     }
 
     private fun processCashRefund(transaction: Transaction, remainingCents: Long) {
-
-        val maxAmount = remainingCents / 100.0
-
-        val input = EditText(this)
-        input.hint = "Enter refund amount (Max: $${String.format("%.2f", maxAmount)})"
-
-        AlertDialog.Builder(this)
-            .setTitle("Cash Refund")
-            .setView(input)
-            .setPositiveButton("Refund") { _, _ ->
-                val entered = input.text.toString().toDoubleOrNull()
-
-                if (entered == null || entered <= 0 || entered > maxAmount) {
-                    Toast.makeText(this, "Invalid amount (max $${String.format("%.2f", maxAmount)})", Toast.LENGTH_SHORT).show()
-                } else {
-                    createLocalRefund(transaction, entered)
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        RefundDialogHelper.showRefundOptionsDialog(this, remainingCents) { amountCents ->
+            createLocalRefund(transaction, amountCents / 100.0)
+        }
     }
 
     private fun createLocalRefund(original: Transaction, amount: Double) {

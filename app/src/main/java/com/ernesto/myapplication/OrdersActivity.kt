@@ -13,6 +13,8 @@ import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -378,11 +380,11 @@ class OrdersActivity : AppCompatActivity() {
             }, cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH), cal.get(java.util.Calendar.DAY_OF_MONTH)).show()
         }
 
-        val dialog = AlertDialog.Builder(this)
+        val dialog = MaterialAlertDialogBuilder(this)
             .setView(view)
             .create()
 
-        view.findViewById<android.widget.Button>(R.id.btnFilterClear).setOnClickListener {
+        view.findViewById<MaterialButton>(R.id.btnFilterClear).setOnClickListener {
             val datesChanged = dateFromMillis != null || dateToMillis != null
             statusFilter = "ALL"
             orderTypeFilter = "ALL"
@@ -395,7 +397,7 @@ class OrdersActivity : AppCompatActivity() {
             dialog.dismiss()
             if (datesChanged) startListening() else applyAndRefresh()
         }
-        view.findViewById<android.widget.Button>(R.id.btnFilterApply).setOnClickListener {
+        view.findViewById<MaterialButton>(R.id.btnFilterApply).setOnClickListener {
             val checkedId = view.findViewById<android.widget.RadioGroup>(R.id.radioGroupStatus).checkedRadioButtonId
             statusFilter = when (checkedId) {
                 R.id.radioOpen -> "OPEN"

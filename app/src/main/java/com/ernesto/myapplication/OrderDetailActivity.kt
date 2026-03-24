@@ -48,6 +48,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var btnVoid: MaterialButton
     private lateinit var btnRefund: MaterialButton
     private lateinit var btnEmailReceipt: MaterialButton
+    private lateinit var btnPrintReceipt: MaterialButton
     private lateinit var txtAddCustomer: TextView
     private lateinit var txtOrderType: TextView
     private lateinit var orderSummaryContainer: LinearLayout
@@ -55,6 +56,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var txtOrderTotal: TextView
     private lateinit var taxBreakdownContainer: LinearLayout
     private lateinit var tipRow: LinearLayout
+    private lateinit var txtTipLabel: TextView
     private lateinit var txtTipAmount: TextView
     private lateinit var partialRefundContainer: LinearLayout
     private lateinit var txtPartialRefundAmount: TextView
@@ -107,6 +109,7 @@ class OrderDetailActivity : AppCompatActivity() {
         btnVoid = findViewById(R.id.btnVoid)
         btnRefund = findViewById(R.id.btnRefund)
         btnEmailReceipt = findViewById(R.id.btnEmailReceipt)
+        btnPrintReceipt = findViewById(R.id.btnPrintReceipt)
         txtAddCustomer = findViewById(R.id.txtAddCustomer)
         txtOrderType = findViewById(R.id.txtOrderType)
         orderSummaryContainer = findViewById(R.id.orderSummaryContainer)
@@ -114,6 +117,7 @@ class OrderDetailActivity : AppCompatActivity() {
         txtOrderTotal = findViewById(R.id.txtOrderTotal)
         taxBreakdownContainer = findViewById(R.id.taxBreakdownContainer)
         tipRow = findViewById(R.id.tipRow)
+        txtTipLabel = findViewById(R.id.txtTipLabel)
         txtTipAmount = findViewById(R.id.txtTipAmount)
         partialRefundContainer = findViewById(R.id.partialRefundContainer)
         txtPartialRefundAmount = findViewById(R.id.txtPartialRefundAmount)
@@ -131,7 +135,7 @@ class OrderDetailActivity : AppCompatActivity() {
                 parent: RecyclerView,
                 state: RecyclerView.State
             ) {
-                outRect.set(12, 12, 12, 12)
+                outRect.set(0, 1, 0, 1)
             }
         })
 
@@ -156,6 +160,7 @@ class OrderDetailActivity : AppCompatActivity() {
         btnVoid.visibility = View.GONE
         btnRefund.visibility = View.GONE
         btnEmailReceipt.visibility = View.GONE
+        btnPrintReceipt.visibility = View.GONE
 
         db.collection("Orders").document(orderId)
             .get()
@@ -231,6 +236,7 @@ class OrderDetailActivity : AppCompatActivity() {
                     btnVoid.visibility = View.GONE
                     btnRefund.visibility = View.GONE
                     btnEmailReceipt.visibility = View.VISIBLE
+                    btnPrintReceipt.visibility = View.VISIBLE
                     btnEmailReceipt.setOnClickListener { showEmailReceiptDialog() }
                     txtRefundHistory.visibility = View.GONE
                     return@addOnSuccessListener
@@ -272,6 +278,7 @@ class OrderDetailActivity : AppCompatActivity() {
                         btnVoid.visibility = View.GONE
                         btnRefund.visibility = View.GONE
                         btnEmailReceipt.visibility = View.VISIBLE
+                        btnPrintReceipt.visibility = View.VISIBLE
                         btnEmailReceipt.setOnClickListener { showEmailReceiptDialog() }
                         return@loadRefundHistory
                     }
@@ -284,6 +291,7 @@ class OrderDetailActivity : AppCompatActivity() {
                             btnRefund.visibility = View.GONE
                         }
                         btnEmailReceipt.visibility = View.VISIBLE
+                        btnPrintReceipt.visibility = View.VISIBLE
                         btnEmailReceipt.setOnClickListener { showEmailReceiptDialog() }
                         resolveBatchAndShowVoid(saleTransactionId)
                     }
@@ -450,7 +458,17 @@ class OrderDetailActivity : AppCompatActivity() {
         for (entry in taxBreakdown) {
             val name = entry["name"]?.toString() ?: "Tax"
             val amountCents = (entry["amountInCents"] as? Number)?.toLong() ?: 0L
+            val rate = (entry["rate"] as? Number)?.toDouble()
+            val taxType = entry["taxType"]?.toString() ?: ""
             taxTotalCents += amountCents
+
+            val label = if (taxType == "PERCENTAGE" && rate != null && rate > 0) {
+                val pctStr = if (rate % 1.0 == 0.0) rate.toInt().toString()
+                else String.format(java.util.Locale.US, "%.2f", rate)
+                "$name ($pctStr%)"
+            } else {
+                name
+            }
 
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -461,7 +479,7 @@ class OrderDetailActivity : AppCompatActivity() {
             }
             val labelView = TextView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                text = name
+                text = label
                 textSize = 14f
                 setTextColor(0xFF555555.toInt())
             }
@@ -484,6 +502,14 @@ class OrderDetailActivity : AppCompatActivity() {
 
         if (tipAmountInCents > 0L) {
             tipRow.visibility = View.VISIBLE
+            if (subtotalCents > 0L) {
+                val tipPct = tipAmountInCents.toDouble() / subtotalCents * 100.0
+                val pctStr = if (tipPct % 1.0 == 0.0) tipPct.toInt().toString()
+                else String.format(java.util.Locale.US, "%.1f", tipPct)
+                txtTipLabel.text = "Tip ($pctStr%)"
+            } else {
+                txtTipLabel.text = "Tip"
+            }
             txtTipAmount.text = MoneyUtils.centsToDisplay(tipAmountInCents)
         } else {
             tipRow.visibility = View.GONE
@@ -1051,13 +1077,20 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun confirmRefund() {
-
-        AlertDialog.Builder(this)
-            .setTitle("Refund Order")
-            .setMessage("Refund this order?")
-            .setPositiveButton("Refund") { _, _ -> executeRefundForAmount(null, finishAfter = true) }
-            .setNegativeButton("Cancel", null)
-            .show()
+        db.collection("Orders").document(orderId).get()
+            .addOnSuccessListener { orderDoc ->
+                if (!orderDoc.exists()) return@addOnSuccessListener
+                val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+                val totalRefundedInCents = orderDoc.getLong("totalRefundedInCents") ?: 0L
+                val remainingCents = (totalInCents - totalRefundedInCents).coerceAtLeast(0L)
+                if (remainingCents <= 0L) {
+                    Toast.makeText(this, "Order is already fully refunded.", Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+                RefundDialogHelper.showRefundOptionsDialog(this, remainingCents) { amountCents ->
+                    executeRefundForAmount(amountCents, finishAfter = true)
+                }
+            }
     }
 
     private fun onOrderItemClick(itemDoc: DocumentSnapshot) {
@@ -1091,11 +1124,13 @@ class OrderDetailActivity : AppCompatActivity() {
                                 return@addOnSuccessListener
                             }
                             val lineTotalInCents = itemDoc.getLong("lineTotalInCents") ?: 0L
+                            val lineTotalWithTaxInCents = itemDoc.getLong("lineTotalWithTaxInCents")
                             val itemName = itemDoc.getString("name") ?: itemDoc.getString("itemName") ?: ""
                             val alreadyRefundedByNameAndAmount = refundSnap.documents.any { ref ->
                                 ref.getString("refundedLineKey")?.isNotBlank() != true &&
-                                ref.getLong("amountInCents") == lineTotalInCents &&
-                                ref.getString("refundedItemName")?.trim() == itemName.trim()
+                                ref.getString("refundedItemName")?.trim() == itemName.trim() &&
+                                (ref.getLong("amountInCents") == lineTotalInCents ||
+                                 (lineTotalWithTaxInCents != null && ref.getLong("amountInCents") == lineTotalWithTaxInCents))
                             }
                             if (alreadyRefundedByNameAndAmount) {
                                 Toast.makeText(this, "This item has already been refunded.", Toast.LENGTH_SHORT).show()
@@ -1130,6 +1165,19 @@ class OrderDetailActivity : AppCompatActivity() {
         }
         val itemName = itemDoc.getString("name") ?: itemDoc.getString("itemName") ?: "Item"
 
+        val storedTotalWithTax = itemDoc.getLong("lineTotalWithTaxInCents")
+        val itemRefundBase: Long = if (storedTotalWithTax != null && storedTotalWithTax > 0L) {
+            storedTotalWithTax
+        } else {
+            val orderTotalInCents = orderDoc.getLong("totalInCents") ?: 0L
+            val subtotalInCents = itemDocs.sumOf { it.getLong("lineTotalInCents") ?: 0L }
+            if (subtotalInCents > 0L && orderTotalInCents > subtotalInCents) {
+                Math.round(orderTotalInCents.toDouble() * lineTotalInCents / subtotalInCents)
+            } else {
+                lineTotalInCents
+            }
+        }
+
         val otherUnrefundedItems = itemDocs.filter { doc ->
             if (doc.id == lineKey) return@filter false
             if (doc.id in refundedLineKeys) return@filter false
@@ -1148,21 +1196,22 @@ class OrderDetailActivity : AppCompatActivity() {
             return
         }
 
-        val refundAmount = if (otherUnrefundedItems.isEmpty() && remainingBalance > lineTotalInCents) {
+        val refundAmount = if (otherUnrefundedItems.isEmpty()) {
             remainingBalance
         } else {
-            minOf(lineTotalInCents, remainingBalance)
+            minOf(itemRefundBase, remainingBalance)
         }
 
         val amountStr = String.format(Locale.US, "%.2f", refundAmount / 100.0)
-        val message = if (refundAmount > lineTotalInCents) {
-            "Refund \"$itemName\" for \$$amountStr? (includes tax/fees)"
+        val includesTax = refundAmount > lineTotalInCents
+        val message = if (includesTax) {
+            "Refunding:\n$itemName\n\nAmount:\n\$$amountStr (includes tax)"
         } else {
-            "Refund \"$itemName\" for \$$amountStr?"
+            "Refunding:\n$itemName\n\nAmount:\n\$$amountStr"
         }
 
         AlertDialog.Builder(this)
-            .setTitle("Refund item")
+            .setTitle("Refund Item")
             .setMessage(message)
             .setPositiveButton("Refund") { _, _ ->
                 executeRefundForAmount(refundAmount, finishAfter = false, refundedItemName = itemName, refundedLineKey = lineKey)

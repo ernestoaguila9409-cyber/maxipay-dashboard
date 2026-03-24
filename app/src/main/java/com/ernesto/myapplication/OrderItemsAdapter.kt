@@ -1,12 +1,12 @@
 package com.ernesto.myapplication
 
 import android.graphics.Color
+import android.graphics.Paint
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.card.MaterialCardView
 import com.google.firebase.firestore.DocumentSnapshot
 import java.util.Locale
 import com.ernesto.myapplication.engine.MoneyUtils
@@ -66,7 +66,7 @@ class OrderItemsAdapter(
         val modifiers: TextView = view.findViewById(R.id.txtItemModifiers)
         val lineTotal: TextView = view.findViewById(R.id.txtItemLineTotal)
         val payments: TextView = view.findViewById(R.id.txtItemPayments)
-        val card: MaterialCardView = view as MaterialCardView
+        val refundedBadge: TextView = view.findViewById(R.id.txtRefundedBadge)
         val refundedByRow: View = view.findViewById(R.id.refundedByRow)
         val refundedBy: TextView = view.findViewById(R.id.txtRefundedBy)
         val refundedDate: TextView = view.findViewById(R.id.txtRefundedDate)
@@ -124,24 +124,39 @@ class OrderItemsAdapter(
         val refundedByEmployee = refundedLineKeyToEmployee[lineKey]
             ?: refundedNameAmountToEmployee[nameAmountKey]
             ?: wholeOrderRefundEmployee
-
-        holder.card.setCardBackgroundColor(
-            if (isRefunded) Color.parseColor("#BBDEFB") else Color.WHITE
-        )
         val refundedDateStr = refundedLineKeyToDate[lineKey]
             ?: refundedNameAmountToDate[nameAmountKey]
             ?: wholeOrderRefundDate
-        if (isRefunded && (!refundedByEmployee.isNullOrBlank() || !refundedDateStr.isNullOrBlank())) {
-            holder.refundedByRow.visibility = View.VISIBLE
-            holder.refundedBy.text = if (!refundedByEmployee.isNullOrBlank()) "Refunded by: $refundedByEmployee" else ""
-            holder.refundedBy.visibility = if (refundedByEmployee.isNullOrBlank()) View.GONE else View.VISIBLE
-            holder.refundedDate.text = refundedDateStr ?: ""
-            holder.refundedDate.visibility = if (refundedDateStr.isNullOrBlank()) View.GONE else View.VISIBLE
+
+        holder.nameQty.text = if (qty > 1) "${qty}x $name" else name
+        holder.lineTotal.text = MoneyUtils.centsToDisplay(lineInCents)
+
+        if (isRefunded) {
+            holder.itemView.setBackgroundColor(Color.parseColor("#FFF5F5"))
+            holder.nameQty.paintFlags = holder.nameQty.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+            holder.nameQty.setTextColor(Color.parseColor("#999999"))
+            holder.lineTotal.paintFlags = holder.lineTotal.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+            holder.lineTotal.setTextColor(Color.parseColor("#999999"))
+            holder.refundedBadge.visibility = View.VISIBLE
+
+            if (!refundedByEmployee.isNullOrBlank() || !refundedDateStr.isNullOrBlank()) {
+                holder.refundedByRow.visibility = View.VISIBLE
+                holder.refundedBy.text = if (!refundedByEmployee.isNullOrBlank()) "Refunded by $refundedByEmployee" else ""
+                holder.refundedBy.visibility = if (refundedByEmployee.isNullOrBlank()) View.GONE else View.VISIBLE
+                holder.refundedDate.text = refundedDateStr ?: ""
+                holder.refundedDate.visibility = if (refundedDateStr.isNullOrBlank()) View.GONE else View.VISIBLE
+            } else {
+                holder.refundedByRow.visibility = View.GONE
+            }
         } else {
+            holder.itemView.setBackgroundColor(Color.WHITE)
+            holder.nameQty.paintFlags = holder.nameQty.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
+            holder.nameQty.setTextColor(Color.parseColor("#222222"))
+            holder.lineTotal.paintFlags = holder.lineTotal.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
+            holder.lineTotal.setTextColor(Color.parseColor("#222222"))
+            holder.refundedBadge.visibility = View.GONE
             holder.refundedByRow.visibility = View.GONE
         }
-
-        holder.nameQty.text = "$name (Qty: $qty)"
 
         if (basePriceInCents > 0L) {
             holder.base.visibility = View.VISIBLE
@@ -157,9 +172,6 @@ class OrderItemsAdapter(
             holder.modifiers.visibility = View.VISIBLE
             holder.modifiers.text = modsText
         }
-
-        holder.lineTotal.text =
-            "Line Total: ${MoneyUtils.centsToDisplay(lineInCents)}"
 
         val paymentsArray = doc.get("payments") as? List<Map<String, Any>>
 
@@ -204,11 +216,11 @@ class OrderItemsAdapter(
                         ?: 0.0
 
                     if (action == "REMOVE") {
-                        "   NO $name"
+                        "NO $name"
                     } else if (price > 0) {
-                        "   • $name (+$${String.format(Locale.US, "%.2f", price)})"
+                        "• $name (+$${String.format(Locale.US, "%.2f", price)})"
                     } else {
-                        "   • $name"
+                        "• $name"
                     }
                 }
                 is List<*> -> {
@@ -216,9 +228,9 @@ class OrderItemsAdapter(
                     val name = item[0]?.toString() ?: return@mapNotNull null
                     val price = (item[1] as? Number)?.toDouble() ?: 0.0
                     if (price > 0)
-                        "   • $name (+$${String.format(Locale.US, "%.2f", price)})"
+                        "• $name (+$${String.format(Locale.US, "%.2f", price)})"
                     else
-                        "   • $name"
+                        "• $name"
                 }
                 else -> null
             }

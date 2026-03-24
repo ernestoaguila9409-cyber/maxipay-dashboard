@@ -254,6 +254,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
 
                             var newTotalInCents = discountedSubtotalInCents
                             val taxBreakdown = mutableListOf<Map<String, Any>>()
+                            val perItemTaxCents = mutableMapOf<String, Long>()
+                            lineInfos.forEach { perItemTaxCents[it.lineKey] = 0L }
 
                             for (taxDoc in taxesSnap.documents) {
                                 val taxId = taxDoc.id
@@ -263,15 +265,20 @@ class OrderEngine(private val db: FirebaseFirestore) {
                                 val taxEnabled = taxDoc.getBoolean("enabled") ?: true
 
                                 var taxableBaseCents = 0L
+                                val taxableItems = mutableListOf<Pair<String, Long>>()
                                 for (li in lineInfos) {
                                     val effectiveLineCents = if (subtotalInCents > 0) {
                                         (li.lineTotalInCents.toDouble() / subtotalInCents * discountedSubtotalInCents).toLong()
                                     } else 0L
 
-                                    if (li.taxMode == "FORCE_APPLY") {
-                                        if (li.taxIds.contains(taxId)) taxableBaseCents += effectiveLineCents
-                                    } else if (taxEnabled) {
+                                    val isTaxable = if (li.taxMode == "FORCE_APPLY") {
+                                        li.taxIds.contains(taxId)
+                                    } else {
+                                        taxEnabled
+                                    }
+                                    if (isTaxable) {
                                         taxableBaseCents += effectiveLineCents
+                                        taxableItems.add(li.lineKey to effectiveLineCents)
                                     }
                                 }
                                 if (taxableBaseCents <= 0L) continue
@@ -288,6 +295,20 @@ class OrderEngine(private val db: FirebaseFirestore) {
                                     "taxType" to type,
                                     "amountInCents" to taxCents
                                 ))
+
+                                if (taxCents > 0 && taxableBaseCents > 0 && taxableItems.isNotEmpty()) {
+                                    var distributed = 0L
+                                    for ((idx, pair) in taxableItems.withIndex()) {
+                                        val (itemKey, effectiveCents) = pair
+                                        val share = if (idx == taxableItems.size - 1) {
+                                            taxCents - distributed
+                                        } else {
+                                            Math.round(taxCents.toDouble() * effectiveCents / taxableBaseCents)
+                                        }
+                                        perItemTaxCents[itemKey] = (perItemTaxCents[itemKey] ?: 0L) + share
+                                        distributed += share
+                                    }
+                                }
                             }
 
                             db.runTransaction { trx ->
@@ -318,7 +339,27 @@ class OrderEngine(private val db: FirebaseFirestore) {
                                 }
                                 trx.update(orderRef, updates)
                             }
-                                .addOnSuccessListener { onSuccess() }
+                                .addOnSuccessListener {
+                                    val itemBatch = db.batch()
+                                    for (li in lineInfos) {
+                                        val taxAmount = perItemTaxCents[li.lineKey] ?: 0L
+                                        val effectiveLineCents = if (subtotalInCents > 0) {
+                                            Math.round(li.lineTotalInCents.toDouble() / subtotalInCents * discountedSubtotalInCents)
+                                        } else 0L
+                                        val ref = orderRef.collection("items").document(li.lineKey)
+                                        itemBatch.update(ref, mapOf(
+                                            "lineTaxInCents" to taxAmount,
+                                            "lineTotalWithTaxInCents" to effectiveLineCents + taxAmount
+                                        ))
+                                    }
+                                    if (lineInfos.isNotEmpty()) {
+                                        itemBatch.commit()
+                                            .addOnSuccessListener { onSuccess() }
+                                            .addOnFailureListener { onSuccess() }
+                                    } else {
+                                        onSuccess()
+                                    }
+                                }
                                 .addOnFailureListener { e -> onFailure(e) }
                         }.addOnFailureListener { e -> onFailure(e) }
                     }

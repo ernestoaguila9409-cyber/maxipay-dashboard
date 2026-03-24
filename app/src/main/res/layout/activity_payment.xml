@@ -58,12 +58,27 @@
                     android:orientation="vertical" />
             </ScrollView>
 
-            <!-- Divider above total -->
+            <!-- Divider above totals summary -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
                 android:layout_marginTop="8dp"
-                android:layout_marginBottom="12dp"
+                android:layout_marginBottom="4dp"
+                android:background="#44FFFFFF" />
+
+            <!-- Totals summary (subtotal, taxes, tip) pinned above Amount Due -->
+            <LinearLayout
+                android:id="@+id/totalsSummaryContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Divider above amount due -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginBottom="8dp"
                 android:background="#44FFFFFF" />
 
             <!-- Applied Discount Banner -->

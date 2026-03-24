@@ -6,7 +6,7 @@
     android:orientation="horizontal"
     android:background="#EEEEEE">
 
-    <!-- ═══════════ LEFT: Settings Panel ═══════════ -->
+    <!-- LEFT: Settings Panel -->
     <ScrollView
         android:layout_width="0dp"
         android:layout_height="match_parent"
@@ -137,6 +137,406 @@
                 android:layout_marginTop="4dp"
                 android:layout_marginBottom="16dp"/>
 
+            <!-- ═══ Bold Section ═══ -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Bold"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#333333"
+                android:paddingBottom="12dp"/>
+
+            <!-- Bold: Business Name -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Business Name"
+                    android:textSize="13sp"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchBoldBizName"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <!-- Bold: Address -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Address"
+                    android:textSize="13sp"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchBoldAddress"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <!-- Bold: Order Info -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Order Info"
+                    android:textSize="13sp"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchBoldOrderInfo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <!-- Bold: Items -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Items"
+                    android:textSize="13sp"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchBoldItems"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <!-- Bold: Totals -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Totals"
+                    android:textSize="13sp"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchBoldTotals"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <!-- Bold: Grand Total -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Grand Total"
+                    android:textSize="13sp"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchBoldGrandTotal"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <!-- Bold: Footer -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Footer"
+                    android:textSize="13sp"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchBoldFooter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <!-- Divider -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#CCCCCC"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="16dp"/>
+
+            <!-- ═══ Font Size Section ═══ -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Font Size"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#333333"
+                android:paddingBottom="12dp"/>
+
+            <!-- Font: Business Name -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:text="Biz Name"
+                    android:textSize="13sp"/>
+
+                <SeekBar
+                    android:id="@+id/seekFontBizName"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="2"
+                    android:progress="2"/>
+
+                <TextView
+                    android:id="@+id/tvFontBizNameVal"
+                    android:layout_width="56dp"
+                    android:layout_height="wrap_content"
+                    android:text="X-Large"
+                    android:textSize="11sp"
+                    android:gravity="center"/>
+            </LinearLayout>
+
+            <!-- Font: Address -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:text="Address"
+                    android:textSize="13sp"/>
+
+                <SeekBar
+                    android:id="@+id/seekFontAddress"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="2"
+                    android:progress="2"/>
+
+                <TextView
+                    android:id="@+id/tvFontAddressVal"
+                    android:layout_width="56dp"
+                    android:layout_height="wrap_content"
+                    android:text="X-Large"
+                    android:textSize="11sp"
+                    android:gravity="center"/>
+            </LinearLayout>
+
+            <!-- Font: Order Info -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:text="Order Info"
+                    android:textSize="13sp"/>
+
+                <SeekBar
+                    android:id="@+id/seekFontOrderInfo"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="2"
+                    android:progress="2"/>
+
+                <TextView
+                    android:id="@+id/tvFontOrderInfoVal"
+                    android:layout_width="56dp"
+                    android:layout_height="wrap_content"
+                    android:text="X-Large"
+                    android:textSize="11sp"
+                    android:gravity="center"/>
+            </LinearLayout>
+
+            <!-- Font: Items -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:text="Items"
+                    android:textSize="13sp"/>
+
+                <SeekBar
+                    android:id="@+id/seekFontItems"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="2"
+                    android:progress="0"/>
+
+                <TextView
+                    android:id="@+id/tvFontItemsVal"
+                    android:layout_width="56dp"
+                    android:layout_height="wrap_content"
+                    android:text="Normal"
+                    android:textSize="11sp"
+                    android:gravity="center"/>
+            </LinearLayout>
+
+            <!-- Font: Totals -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:text="Totals"
+                    android:textSize="13sp"/>
+
+                <SeekBar
+                    android:id="@+id/seekFontTotals"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="2"
+                    android:progress="0"/>
+
+                <TextView
+                    android:id="@+id/tvFontTotalsVal"
+                    android:layout_width="56dp"
+                    android:layout_height="wrap_content"
+                    android:text="Normal"
+                    android:textSize="11sp"
+                    android:gravity="center"/>
+            </LinearLayout>
+
+            <!-- Font: Grand Total -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:text="Grand Total"
+                    android:textSize="13sp"/>
+
+                <SeekBar
+                    android:id="@+id/seekFontGrandTotal"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="2"
+                    android:progress="1"/>
+
+                <TextView
+                    android:id="@+id/tvFontGrandTotalVal"
+                    android:layout_width="56dp"
+                    android:layout_height="wrap_content"
+                    android:text="Large"
+                    android:textSize="11sp"
+                    android:gravity="center"/>
+            </LinearLayout>
+
+            <!-- Font: Footer -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:text="Footer"
+                    android:textSize="13sp"/>
+
+                <SeekBar
+                    android:id="@+id/seekFontFooter"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="2"
+                    android:progress="0"/>
+
+                <TextView
+                    android:id="@+id/tvFontFooterVal"
+                    android:layout_width="56dp"
+                    android:layout_height="wrap_content"
+                    android:text="Normal"
+                    android:textSize="11sp"
+                    android:gravity="center"/>
+            </LinearLayout>
+
+            <!-- Divider -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#CCCCCC"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="16dp"/>
+
             <!-- Save Button -->
             <Button
                 android:id="@+id/btnSave"
@@ -147,13 +547,13 @@
                 android:textSize="15sp"
                 android:backgroundTint="#6A4FB3"/>
 
-            <!-- Test Receipt Button -->
+            <!-- Print Test Receipt Button -->
             <Button
                 android:id="@+id/btnTestReceipt"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Test Receipt"
+                android:text="Print Test Receipt"
                 android:textAllCaps="false"
                 android:textSize="15sp"
                 android:backgroundTint="#4CAF50"/>
@@ -173,7 +573,7 @@
         </LinearLayout>
     </ScrollView>
 
-    <!-- ═══════════ RIGHT: Receipt Preview ═══════════ -->
+    <!-- RIGHT: Receipt Preview -->
     <FrameLayout
         android:layout_width="0dp"
         android:layout_height="match_parent"
@@ -293,6 +693,15 @@
                     android:textSize="14sp"
                     android:textStyle="bold"
                     android:gravity="center"/>
+
+                <!-- Payment Info -->
+                <TextView
+                    android:id="@+id/tvPaymentInfo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="12sp"
+                    android:gravity="center"
+                    android:paddingTop="12dp"/>
 
                 <!-- Footer -->
                 <TextView
