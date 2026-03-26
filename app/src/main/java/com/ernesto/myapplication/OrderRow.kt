@@ -15,4 +15,13 @@ data class OrderRow(
     val preAuthAmountCents: Long = 0L
 ) {
     val netCents: Long get() = (totalCents - totalRefundedInCents).coerceAtLeast(0L)
+
+    /** Original order total in dollars; mirrors Firestore `totalInCents` (not reduced by refunds). */
+    val originalTotal: Double get() = totalCents / 100.0
+
+    /** Total refunded in dollars; mirrors `totalRefundedInCents` (defaults to 0 when absent in DB). */
+    val refundedAmount: Double get() = totalRefundedInCents / 100.0
+
+    /** Remaining after refunds: originalTotal − refundedAmount. */
+    val remainingTotal: Double get() = netCents / 100.0
 }

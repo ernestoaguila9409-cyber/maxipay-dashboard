@@ -23,6 +23,7 @@ import java.util.UUID
 import com.ernesto.myapplication.engine.AppliedDiscount
 import com.ernesto.myapplication.engine.CaptureResult
 import com.ernesto.myapplication.engine.DiscountEngine
+import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.ernesto.myapplication.engine.OrderEngine
 import com.ernesto.myapplication.engine.PaymentService
@@ -1164,29 +1165,87 @@ class MenuActivity : AppCompatActivity() {
 
         // Discount details + tax lines go in scrollable area
         if (discountTotalCents > 0L) {
-            val discountSummary = TextView(this)
-            discountSummary.text = "Discount: -${MoneyUtils.centsToDisplay(discountTotalCents)}"
-            discountSummary.textSize = 14f
-            discountSummary.setTypeface(null, android.graphics.Typeface.BOLD)
-            discountSummary.setTextColor(Color.parseColor("#2E7D32"))
-            cartTaxDetails.addView(discountSummary)
-
-            for (ad in appliedDiscounts) {
-                val detailLine = TextView(this)
-                val valueStr = if (ad.type == "PERCENTAGE") {
-                    String.format(Locale.US, "%.1f%%", ad.value)
-                } else {
-                    MoneyUtils.centsToDisplay((ad.value * 100).toLong())
+            val d = resources.displayMetrics.density
+            val taxPurple = Color.parseColor("#5D4E7B")
+            cartTaxDetails.addView(TextView(this).apply {
+                text = "Discounts"
+                textSize = 13f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(taxPurple)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = (8 * d).toInt() }
+            })
+            cartTaxDetails.addView(View(this).apply {
+                setBackgroundColor(Color.parseColor("#E0E0E0"))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    1
+                ).apply {
+                    topMargin = (4 * d).toInt()
+                    bottomMargin = (8 * d).toInt()
                 }
-                val scopeStr = when (ad.applyScope) {
-                    "item" -> "item"
-                    "manual" -> "checkout"
-                    else -> "order"
+            })
+            val withAmounts = appliedDiscounts.filter { it.amountInCents > 0L }
+            if (withAmounts.isNotEmpty()) {
+                for (ad in withAmounts) {
+                    val row = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply { topMargin = (4 * d).toInt() }
+                    }
+                    row.addView(TextView(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            0,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            1f
+                        )
+                        text = DiscountDisplay.formatCartSummaryLabel(ad.discountName, ad.type, ad.value)
+                        textSize = 13f
+                        setTextColor(taxPurple)
+                    })
+                    row.addView(TextView(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        )
+                        text = "-${MoneyUtils.centsToDisplay(ad.amountInCents)}"
+                        textSize = 13f
+                        setTextColor(taxPurple)
+                    })
+                    cartTaxDetails.addView(row)
                 }
-                detailLine.text = "  ${ad.discountName} ($valueStr · $scopeStr)"
-                detailLine.textSize = 12f
-                detailLine.setTextColor(Color.parseColor("#388E3C"))
-                cartTaxDetails.addView(detailLine)
+            } else {
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { topMargin = (4 * d).toInt() }
+                }
+                row.addView(TextView(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                    )
+                    text = "• Discount"
+                    textSize = 13f
+                    setTextColor(taxPurple)
+                })
+                row.addView(TextView(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
+                    text = "-${MoneyUtils.centsToDisplay(discountTotalCents)}"
+                    textSize = 13f
+                    setTextColor(taxPurple)
+                })
+                cartTaxDetails.addView(row)
             }
 
             totalAmount -= discountTotalCents / 100.0
@@ -1329,55 +1388,54 @@ class MenuActivity : AppCompatActivity() {
         val modifiersTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
 
         for (modifier in item.modifiers) {
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.HORIZONTAL
-
-            val nameView = TextView(this)
-            nameView.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-
-            if (modifier.action == "REMOVE") {
-                nameView.text = "   NO ${modifier.name}"
-                nameView.setTextColor(Color.parseColor("#D32F2F"))
-                nameView.setTypeface(null, Typeface.BOLD)
-                row.addView(nameView)
-            } else {
-                nameView.text = "   • ${modifier.name}"
-                nameView.setTextColor(Color.parseColor("#2E7D32"))
-
-                val priceView = TextView(this)
-                priceView.text = "+${MoneyUtils.centsToDisplay((modifier.price * 100).toLong())}"
-                priceView.setTextColor(Color.parseColor("#2E7D32"))
-
-                row.addView(nameView)
-                row.addView(priceView)
+            val line = TextView(this).apply {
+                textSize = 12f
+                setTextColor(Color.parseColor("#666666"))
+                if (modifier.action == "REMOVE") {
+                    text = "• No ${modifier.name}"
+                    setTextColor(Color.parseColor("#C62828"))
+                } else {
+                    text = "• ${modifier.name}"
+                }
             }
-
-            itemLayout.addView(row)
+            itemLayout.addView(line)
         }
 
         val unitPrice = item.basePrice + modifiersTotal
         val lineTotal = unitPrice * item.quantity
 
-        // Show item-level discounts
         val lineDiscounts = appliedDiscounts.filter { it.lineKey == lineKey }
-        if (lineDiscounts.isNotEmpty()) {
-            for (ld in lineDiscounts) {
-                val discountRow = LinearLayout(this)
-                discountRow.orientation = LinearLayout.HORIZONTAL
-                val discountLabel = TextView(this).apply {
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                    text = "   🏷 ${ld.discountName}"
-                    setTextColor(Color.parseColor("#2E7D32"))
+        for (ld in lineDiscounts) {
+            val discountLine = TextView(this).apply {
+                textSize = 12f
+                setTextColor(Color.parseColor("#666666"))
+                text = DiscountDisplay.formatBullet(ld.discountName, ld.type, ld.value)
+            }
+            itemLayout.addView(discountLine)
+        }
+
+        val orderDiscount = appliedDiscounts.find {
+            (it.applyScope == "order" || it.applyScope == "manual") && it.lineKey == null
+        }
+        if (orderDiscount != null && orderDiscount.amountInCents > 0L) {
+            val lineCents = (lineTotal * 100).toLong()
+            val subtotalAll = cartMap.entries.sumOf { (_, it) ->
+                val mod = it.modifiers.filter { m -> m.action == "ADD" }.sumOf { m -> m.price }
+                ((it.basePrice + mod) * it.quantity * 100).toLong()
+            }
+            val share = if (subtotalAll > 0L) {
+                (orderDiscount.amountInCents.toDouble() * lineCents / subtotalAll).toLong()
+            } else 0L
+            if (share > 0L) {
+                itemLayout.addView(TextView(this).apply {
                     textSize = 12f
-                }
-                val discountValue = TextView(this).apply {
-                    text = "-${MoneyUtils.centsToDisplay(ld.amountInCents)}"
-                    setTextColor(Color.parseColor("#2E7D32"))
-                    textSize = 12f
-                }
-                discountRow.addView(discountLabel)
-                discountRow.addView(discountValue)
-                itemLayout.addView(discountRow)
+                    setTextColor(Color.parseColor("#666666"))
+                    text = DiscountDisplay.formatBullet(
+                        orderDiscount.discountName,
+                        orderDiscount.type,
+                        orderDiscount.value
+                    )
+                })
             }
         }
 
@@ -1385,12 +1443,8 @@ class MenuActivity : AppCompatActivity() {
         val effectiveTotal = (lineTotal * 100).toLong() - lineDiscountCents
 
         val subtotalText = TextView(this)
-        if (lineDiscountCents > 0) {
-            subtotalText.text = "Line Total: ${MoneyUtils.centsToDisplay(effectiveTotal)} (was ${MoneyUtils.centsToDisplay((lineTotal * 100).toLong())})"
-            subtotalText.setTextColor(Color.parseColor("#2E7D32"))
-        } else {
-            subtotalText.text = "Line Total: ${MoneyUtils.centsToDisplay((lineTotal * 100).toLong())}"
-        }
+        subtotalText.text = "Line Total: ${MoneyUtils.centsToDisplay(effectiveTotal)}"
+        subtotalText.setTextColor(Color.parseColor("#1B5E20"))
         subtotalText.setTypeface(null, Typeface.BOLD)
         subtotalText.textSize = 13f
         itemLayout.addView(subtotalText)

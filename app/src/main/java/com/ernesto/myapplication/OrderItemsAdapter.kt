@@ -9,6 +9,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.DocumentSnapshot
 import java.util.Locale
+import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
 
 sealed class OrderListItem {
@@ -34,6 +35,14 @@ class OrderItemsAdapter(
     private var refundedNameAmountToDate: Map<String, String> = emptyMap()
     private var wholeOrderRefundEmployee: String? = null
     private var wholeOrderRefundDate: String? = null
+
+    /** Order-level applied discounts from Firestore (each map may contain lineKey). */
+    private var appliedDiscounts: List<Map<String, Any>> = emptyList()
+
+    fun setAppliedDiscounts(discounts: List<Map<String, Any>>) {
+        appliedDiscounts = discounts
+        notifyDataSetChanged()
+    }
 
     fun setRefundedKeys(
         lineKeys: Set<String>,
@@ -64,6 +73,7 @@ class OrderItemsAdapter(
         val nameQty: TextView = view.findViewById(R.id.txtItemNameQty)
         val base: TextView = view.findViewById(R.id.txtItemBase)
         val modifiers: TextView = view.findViewById(R.id.txtItemModifiers)
+        val discounts: TextView = view.findViewById(R.id.txtItemDiscounts)
         val lineTotal: TextView = view.findViewById(R.id.txtItemLineTotal)
         val payments: TextView = view.findViewById(R.id.txtItemPayments)
         val refundedBadge: TextView = view.findViewById(R.id.txtRefundedBadge)
@@ -111,9 +121,6 @@ class OrderItemsAdapter(
             ?: doc.getLong("quantity")
             ?: 1L).toInt()
 
-        val basePriceInCents =
-            doc.getLong("basePriceInCents") ?: 0L
-
         val lineInCents =
             doc.getLong("lineTotalInCents") ?: 0L
 
@@ -128,15 +135,18 @@ class OrderItemsAdapter(
             ?: refundedNameAmountToDate[nameAmountKey]
             ?: wholeOrderRefundDate
 
-        holder.nameQty.text = if (qty > 1) "${qty}x $name" else name
-        holder.lineTotal.text = MoneyUtils.centsToDisplay(lineInCents)
+        val lineTotalNormalColor = Color.parseColor("#1B5E20")
+        val lineTotalRefundedColor = Color.parseColor("#999999")
+
+        holder.nameQty.text = "$name (Qty: $qty)"
+        holder.lineTotal.text = "Line Total: ${MoneyUtils.centsToDisplay(lineInCents)}"
 
         if (isRefunded) {
             holder.itemView.setBackgroundColor(Color.parseColor("#FFF5F5"))
             holder.nameQty.paintFlags = holder.nameQty.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
             holder.nameQty.setTextColor(Color.parseColor("#999999"))
             holder.lineTotal.paintFlags = holder.lineTotal.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
-            holder.lineTotal.setTextColor(Color.parseColor("#999999"))
+            holder.lineTotal.setTextColor(lineTotalRefundedColor)
             holder.refundedBadge.visibility = View.VISIBLE
 
             if (!refundedByEmployee.isNullOrBlank() || !refundedDateStr.isNullOrBlank()) {
@@ -153,17 +163,12 @@ class OrderItemsAdapter(
             holder.nameQty.paintFlags = holder.nameQty.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
             holder.nameQty.setTextColor(Color.parseColor("#222222"))
             holder.lineTotal.paintFlags = holder.lineTotal.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
-            holder.lineTotal.setTextColor(Color.parseColor("#222222"))
+            holder.lineTotal.setTextColor(lineTotalNormalColor)
             holder.refundedBadge.visibility = View.GONE
             holder.refundedByRow.visibility = View.GONE
         }
 
-        if (basePriceInCents > 0L) {
-            holder.base.visibility = View.VISIBLE
-            holder.base.text = "Base: ${MoneyUtils.centsToDisplay(basePriceInCents)}"
-        } else {
-            holder.base.visibility = View.GONE
-        }
+        holder.base.visibility = View.GONE
 
         val modsText = buildModifiersText(doc)
         if (modsText.isNullOrBlank()) {
@@ -171,6 +176,14 @@ class OrderItemsAdapter(
         } else {
             holder.modifiers.visibility = View.VISIBLE
             holder.modifiers.text = modsText
+        }
+
+        val lineDiscountText = buildLineDiscountsText(lineKey)
+        if (lineDiscountText.isNullOrBlank()) {
+            holder.discounts.visibility = View.GONE
+        } else {
+            holder.discounts.visibility = View.VISIBLE
+            holder.discounts.text = lineDiscountText
         }
 
         val paymentsArray = doc.get("payments") as? List<Map<String, Any>>
@@ -200,6 +213,21 @@ class OrderItemsAdapter(
         }
     }
 
+    private fun buildLineDiscountsText(lineKey: String): String? {
+        val itemLevel = appliedDiscounts.filter { ad ->
+            val lk = ad["lineKey"]?.toString()?.trim().orEmpty()
+            lk == lineKey
+        }
+        val orderLevel = appliedDiscounts.filter { ad ->
+            val lk = ad["lineKey"]?.toString()?.trim().orEmpty()
+            val scope = ad["applyScope"]?.toString()?.trim()?.lowercase() ?: ""
+            lk.isEmpty() && (scope == "order" || scope == "manual")
+        }
+        val all = itemLevel + orderLevel
+        if (all.isEmpty()) return null
+        return all.joinToString("\n") { DiscountDisplay.formatBulletFromFirestoreMap(it) }
+    }
+
     private fun buildModifiersText(doc: DocumentSnapshot): String? {
         val raw = doc.get("modifiers") as? List<*> ?: return null
         if (raw.isEmpty()) return null
@@ -208,29 +236,20 @@ class OrderItemsAdapter(
             when (item) {
                 is Map<*, *> -> {
                     val action = item["action"]?.toString() ?: "ADD"
-                    val name = item["name"]?.toString()
+                    val modName = item["name"]?.toString()
                         ?: item["first"]?.toString()
                         ?: return@mapNotNull null
-                    val price = (item["price"] as? Number)?.toDouble()
-                        ?: (item["second"] as? Number)?.toDouble()
-                        ?: 0.0
 
                     if (action == "REMOVE") {
-                        "NO $name"
-                    } else if (price > 0) {
-                        "• $name (+$${String.format(Locale.US, "%.2f", price)})"
+                        "• No $modName"
                     } else {
-                        "• $name"
+                        "• $modName"
                     }
                 }
                 is List<*> -> {
-                    if (item.size < 2) return@mapNotNull null
-                    val name = item[0]?.toString() ?: return@mapNotNull null
-                    val price = (item[1] as? Number)?.toDouble() ?: 0.0
-                    if (price > 0)
-                        "• $name (+$${String.format(Locale.US, "%.2f", price)})"
-                    else
-                        "• $name"
+                    if (item.isEmpty()) return@mapNotNull null
+                    val modName = item[0]?.toString() ?: return@mapNotNull null
+                    "• $modName"
                 }
                 else -> null
             }

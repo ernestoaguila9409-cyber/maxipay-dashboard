@@ -10,49 +10,50 @@
     android:paddingTop="10dp"
     android:paddingBottom="10dp">
 
-    <!-- Row: Name+Qty on left, Amount on right -->
-    <LinearLayout
+    <!-- 1. Item name (Qty: n) — full width, bold -->
+    <TextView
+        android:id="@+id/txtItemNameQty"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:textStyle="bold"
+        android:textSize="14sp"
+        android:textColor="#222222"/>
 
-        <TextView
-            android:id="@+id/txtItemNameQty"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:textStyle="bold"
-            android:textSize="14sp"
-            android:textColor="#222222"
-            android:layout_marginEnd="8dp"/>
-
-        <TextView
-            android:id="@+id/txtItemLineTotal"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textStyle="bold"
-            android:textSize="14sp"
-            android:textColor="#222222"/>
-    </LinearLayout>
-
-    <!-- Modifiers in smaller muted text -->
+    <!-- 2. Modifiers (bullets), optional -->
     <TextView
         android:id="@+id/txtItemModifiers"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="12sp"
-        android:textColor="#888888"
+        android:textColor="#666666"
+        android:layout_marginTop="4dp"
+        android:visibility="gone"/>
+
+    <!-- 3. Line discount bullets, optional -->
+    <TextView
+        android:id="@+id/txtItemDiscounts"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="12sp"
+        android:textColor="#666666"
         android:layout_marginTop="2dp"
         android:visibility="gone"/>
 
-    <!-- Base price (kept for compatibility, hidden) -->
+    <!-- 4. Line total -->
+    <TextView
+        android:id="@+id/txtItemLineTotal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textStyle="bold"
+        android:textSize="13sp"
+        android:textColor="#1B5E20"
+        android:layout_marginTop="6dp"/>
+
+    <!-- Hidden: base (compat) -->
     <TextView
         android:id="@+id/txtItemBase"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:textSize="12sp"
-        android:textColor="#999999"
         android:visibility="gone"/>
 
     <!-- Payments info -->
@@ -102,7 +103,6 @@
             android:layout_marginTop="1dp"/>
     </LinearLayout>
 
-    <!-- Bottom divider -->
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"

@@ -184,7 +184,7 @@
             android:layout_marginTop="10dp"
             android:layout_marginBottom="10dp"/>
 
-        <!-- Total -->
+        <!-- Original total (order total before any refund; same as totalInCents) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -193,12 +193,56 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="Total"
+                android:text="Original Total"
+                android:textSize="14sp"
+                android:textColor="#555555"/>
+            <TextView
+                android:id="@+id/txtOriginalTotal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:textColor="#555555"/>
+        </LinearLayout>
+
+        <!-- Refunded amount (hidden when none) -->
+        <LinearLayout
+            android:id="@+id/refundedSummaryRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp"
+            android:visibility="gone">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="Refunded"
+                android:textSize="14sp"
+                android:textColor="#C62828"/>
+            <TextView
+                android:id="@+id/txtRefundedAmount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:textColor="#C62828"/>
+        </LinearLayout>
+
+        <!-- Remaining after refunds -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="Remaining"
                 android:textSize="20sp"
                 android:textStyle="bold"
                 android:textColor="#111111"/>
             <TextView
-                android:id="@+id/txtOrderTotal"
+                android:id="@+id/txtRemainingTotal"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:textSize="20sp"
@@ -303,32 +347,14 @@
                 android:layout_marginStart="4dp"/>
         </LinearLayout>
 
-        <LinearLayout
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnReceipt"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="4dp">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnEmailReceipt"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Email Receipt"
-                android:visibility="gone"
-                android:layout_marginEnd="4dp"/>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnPrintReceipt"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Print Receipt"
-                android:visibility="gone"
-                android:layout_marginStart="4dp"/>
-        </LinearLayout>
+            android:text="Receipt"
+            android:visibility="gone"
+            android:layout_marginTop="4dp"/>
     </LinearLayout>
 
 </LinearLayout>

@@ -198,7 +198,7 @@
                     android:layout_marginTop="12dp"
                     android:layout_marginBottom="12dp"/>
 
-                <!-- Total (larger, bolder) -->
+                <!-- Original total -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -207,12 +207,55 @@
                         android:layout_width="0dp"
                         android:layout_weight="1"
                         android:layout_height="wrap_content"
-                        android:text="Total"
+                        android:text="Original Total"
+                        android:textSize="15sp"
+                        android:textColor="#555555"/>
+                    <TextView
+                        android:id="@+id/txtOriginalTotal"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="15sp"
+                        android:textColor="#555555"/>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/refundedSummaryRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="6dp"
+                    android:visibility="gone">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:text="Refunded"
+                        android:textSize="15sp"
+                        android:textColor="#C62828"/>
+                    <TextView
+                        android:id="@+id/txtRefundedAmount"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="15sp"
+                        android:textColor="#C62828"/>
+                </LinearLayout>
+
+                <!-- Remaining: $X.XX -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="10dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:text="Remaining"
                         android:textSize="22sp"
                         android:textStyle="bold"
                         android:textColor="#111111"/>
                     <TextView
-                        android:id="@+id/txtOrderTotal"
+                        android:id="@+id/txtRemainingTotal"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:textSize="22sp"
@@ -306,20 +349,11 @@
                     android:text="Refund"/>
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnPrintReceipt"
+                    android:id="@+id/btnReceipt"
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Print Receipt"
-                    android:visibility="gone"
-                    android:layout_marginTop="4dp"/>
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnEmailReceipt"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Email Receipt"
+                    android:text="Receipt"
                     android:visibility="gone"
                     android:layout_marginTop="4dp"/>
 

@@ -23,6 +23,7 @@ import java.util.Locale
 import com.ernesto.myapplication.engine.DiscountEngine
 import com.ernesto.myapplication.engine.PaymentEngine
 import android.util.Log
+import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
 
 class PaymentActivity : AppCompatActivity() {
@@ -292,12 +293,13 @@ class PaymentActivity : AppCompatActivity() {
         val container = findViewById<LinearLayout>(R.id.orderItemsContainer) ?: return
         container.removeAllViews()
         val oid = orderSnap.id
-        val dp = resources.displayMetrics.density
 
         val totalInCents = orderSnap.getLong("totalInCents") ?: 0L
         val tipAmountInCents = orderSnap.getLong("tipAmountInCents") ?: 0L
         val discountInCents = orderSnap.getLong("discountInCents") ?: 0L
         val taxBreakdown = orderSnap.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
+        val orderAppliedDiscounts =
+            orderSnap.get("appliedDiscounts") as? List<Map<String, Any>> ?: emptyList()
 
         var taxTotalCents = 0L
         for (entry in taxBreakdown) {
@@ -310,7 +312,12 @@ class PaymentActivity : AppCompatActivity() {
             .addOnSuccessListener { itemsSnap ->
                 container.removeAllViews()
 
-                for (doc in itemsSnap.documents) {
+                val docs = itemsSnap.documents
+                for ((index, doc) in docs.withIndex()) {
+                    if (index > 0) {
+                        container.addView(makeSummarySpacer(8))
+                    }
+
                     val name = doc.getString("name")
                         ?: doc.getString("itemName")
                         ?: "Item"
@@ -318,11 +325,17 @@ class PaymentActivity : AppCompatActivity() {
                         ?: doc.getLong("quantity")
                         ?: 1L).toInt()
                     val lineTotalCents = doc.getLong("lineTotalInCents") ?: 0L
-                    val basePriceCents = doc.getLong("basePriceInCents") ?: lineTotalCents
+                    val lineKey = doc.id
 
-                    val itemLabel = if (qty > 1) "${qty}x $name" else name
-                    val itemPriceStr = if (basePriceCents > 0L) MoneyUtils.centsToDisplay(lineTotalCents) else ""
-                    container.addView(makeSummaryRow(itemLabel, itemPriceStr, 13f, 0xDDFFFFFF.toInt()))
+                    container.addView(
+                        makeSummaryRow(
+                            "$name (Qty: $qty)",
+                            "",
+                            13f,
+                            0xEEFFFFFF.toInt(),
+                            boldLeft = true
+                        )
+                    )
 
                     val mods = doc.get("modifiers") as? List<*> ?: emptyList<Any>()
                     for (m in mods) {
@@ -331,18 +344,38 @@ class PaymentActivity : AppCompatActivity() {
                         val modName = map["name"]?.toString()
                             ?: map["first"]?.toString()
                             ?: continue
-                        val modPrice = (map["price"] as? Number)?.toDouble()
-                            ?: (map["second"] as? Number)?.toDouble()
-                            ?: 0.0
-                        val modCents = kotlin.math.round(modPrice * 100).toLong()
-
-                        val label = if (action == "REMOVE") "  NO $modName"
-                        else if (modCents > 0) "  + $modName"
-                        else "  + $modName"
-
-                        val priceStr = if (action != "REMOVE" && modCents > 0) MoneyUtils.centsToDisplay(modCents) else ""
-                        container.addView(makeSummaryRow(label, priceStr, 11f, 0x99FFFFFF.toInt()))
+                        val label = if (action == "REMOVE") "• No $modName" else "• $modName"
+                        container.addView(makeSummaryRow(label, "", 11f, 0xBBFFFFFF.toInt()))
                     }
+
+                    val lineDiscounts = orderAppliedDiscounts.filter { ad ->
+                        (ad["lineKey"]?.toString()?.trim().orEmpty()) == lineKey
+                    }
+                    val orderDiscounts = orderAppliedDiscounts.filter { ad ->
+                        val lk = ad["lineKey"]?.toString()?.trim().orEmpty()
+                        val scope = ad["applyScope"]?.toString()?.trim()?.lowercase() ?: ""
+                        lk.isEmpty() && (scope == "order" || scope == "manual")
+                    }
+                    for (ad in lineDiscounts + orderDiscounts) {
+                        container.addView(
+                            makeSummaryRow(
+                                DiscountDisplay.formatBulletFromFirestoreMap(ad),
+                                "",
+                                11f,
+                                0xBBFFFFFF.toInt()
+                            )
+                        )
+                    }
+
+                    container.addView(
+                        makeSummaryRow(
+                            "Line Total: ${MoneyUtils.centsToDisplay(lineTotalCents)}",
+                            "",
+                            13f,
+                            0xFF81C784.toInt(),
+                            boldLeft = true
+                        )
+                    )
                 }
 
                 val totalsContainer = findViewById<LinearLayout>(R.id.totalsSummaryContainer)
@@ -350,14 +383,49 @@ class PaymentActivity : AppCompatActivity() {
 
                 totalsContainer?.addView(makeSummaryRow("Subtotal", MoneyUtils.centsToDisplay(subtotalCents), 13f, 0xBBFFFFFF.toInt()))
 
-                if (discountInCents > 0L) {
-                    totalsContainer?.addView(makeSummaryRow("Discount", "-${MoneyUtils.centsToDisplay(discountInCents)}", 13f, 0xFF81C784.toInt()))
+                val groupedDiscounts = DiscountDisplay.groupByName(orderAppliedDiscounts)
+                val hasDiscounts = discountInCents > 0L || groupedDiscounts.isNotEmpty()
+
+                if (hasDiscounts) {
+                    totalsContainer?.addView(makeTotalsSectionHeader("Discounts", withTopMargin = true))
+                    totalsContainer?.addView(makeTotalsSectionDivider())
+                    val discColor = 0xAAFFFFFF.toInt()
+                    if (groupedDiscounts.isNotEmpty()) {
+                        for (gd in groupedDiscounts) {
+                            totalsContainer?.addView(
+                                makeSummaryRow(
+                                    "• ${DiscountDisplay.formatReceiptLabel(gd.name, gd.type, gd.value)}",
+                                    "-${MoneyUtils.centsToDisplay(gd.totalCents)}",
+                                    12f,
+                                    discColor
+                                )
+                            )
+                        }
+                    } else if (discountInCents > 0L) {
+                        totalsContainer?.addView(
+                            makeSummaryRow(
+                                "• Discount",
+                                "-${MoneyUtils.centsToDisplay(discountInCents)}",
+                                12f,
+                                discColor
+                            )
+                        )
+                    }
                 }
 
+                if (taxBreakdown.isNotEmpty()) {
+                    totalsContainer?.addView(
+                        makeTotalsSectionHeader("Taxes", withTopMargin = hasDiscounts)
+                    )
+                    totalsContainer?.addView(makeTotalsSectionDivider())
+                }
                 for (entry in taxBreakdown) {
                     val taxName = entry["name"]?.toString() ?: "Tax"
                     val taxCents = (entry["amountInCents"] as? Number)?.toLong() ?: 0L
-                    totalsContainer?.addView(makeSummaryRow(taxName, MoneyUtils.centsToDisplay(taxCents), 12f, 0xAAFFFFFF.toInt()))
+                    val tRate = (entry["rate"] as? Number)?.toDouble()
+                    val tType = entry["taxType"]?.toString()
+                    val tLabel = DiscountDisplay.formatTaxLabel(taxName, tType, tRate)
+                    totalsContainer?.addView(makeSummaryRow(tLabel, MoneyUtils.centsToDisplay(taxCents), 12f, 0xAAFFFFFF.toInt()))
                 }
 
                 if (tipAmountInCents > 0L) {
@@ -366,7 +434,22 @@ class PaymentActivity : AppCompatActivity() {
             }
     }
 
-    private fun makeSummaryRow(left: String, right: String, size: Float, color: Int): LinearLayout {
+    private fun makeSummarySpacer(heightDp: Int): View {
+        return View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (heightDp * resources.displayMetrics.density).toInt()
+            )
+        }
+    }
+
+    private fun makeSummaryRow(
+        left: String,
+        right: String,
+        size: Float,
+        color: Int,
+        boldLeft: Boolean = false
+    ): LinearLayout {
         val dp = resources.displayMetrics.density
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -380,6 +463,7 @@ class PaymentActivity : AppCompatActivity() {
                 text = left
                 textSize = size
                 setTextColor(color)
+                if (boldLeft) setTypeface(typeface, android.graphics.Typeface.BOLD)
             })
             if (right.isNotBlank()) {
                 addView(TextView(this@PaymentActivity).apply {
@@ -392,6 +476,37 @@ class PaymentActivity : AppCompatActivity() {
                     setTextColor(color)
                 })
             }
+        }
+    }
+
+    private fun makeTotalsSectionHeader(title: String, withTopMargin: Boolean): TextView {
+        val dp = resources.displayMetrics.density
+        return TextView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = if (withTopMargin) (10 * dp).toInt() else 0
+                bottomMargin = (2 * dp).toInt()
+            }
+            text = title
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(0xBBFFFFFF.toInt())
+        }
+    }
+
+    private fun makeTotalsSectionDivider(): View {
+        val dp = resources.displayMetrics.density
+        return View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (1 * dp).toInt()
+            ).apply {
+                topMargin = (2 * dp).toInt()
+                bottomMargin = (6 * dp).toInt()
+            }
+            setBackgroundColor(0x44FFFFFF)
         }
     }
 

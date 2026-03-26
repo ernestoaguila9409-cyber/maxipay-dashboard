@@ -1,5 +1,6 @@
 package com.ernesto.myapplication
 
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -118,11 +119,6 @@ class ReportsActivity : AppCompatActivity() {
 
         findViewById<ImageButton>(R.id.btnBack).setOnClickListener { finish() }
 
-        setupCollapsibleCard(
-            header = findViewById(R.id.headerMenuPerformance),
-            content = findViewById(R.id.contentMenuPerformance),
-            arrow = findViewById(R.id.arrowMenuPerformance)
-        )
         progressMenuPerf = findViewById(R.id.progressMenuPerf)
         containerMenuPerf = findViewById(R.id.containerMenuPerf)
 
@@ -179,31 +175,12 @@ class ReportsActivity : AppCompatActivity() {
         cardHourlySales = findViewById(R.id.cardHourlySales)
         contentHourlySales = findViewById(R.id.contentHourlySales)
 
-        setupCollapsibleCard(
-            header = findViewById(R.id.headerDailySummary),
-            content = findViewById(R.id.contentDailySummary),
-            arrow = findViewById(R.id.arrowDailySummary)
-        )
-        setupCollapsibleCard(
-            header = findViewById(R.id.headerOrderType),
-            content = findViewById(R.id.contentOrderType),
-            arrow = findViewById(R.id.arrowOrderType)
-        )
-        setupCollapsibleCard(
-            header = findViewById(R.id.headerCardBrand),
-            content = contentCardBrand,
-            arrow = findViewById(R.id.arrowCardBrand)
-        )
-        setupCollapsibleCard(
-            header = findViewById(R.id.headerEmployee),
-            content = contentEmployee,
-            arrow = findViewById(R.id.arrowEmployee)
-        )
-        setupCollapsibleCard(
-            header = findViewById(R.id.headerHourlySales),
-            content = contentHourlySales,
-            arrow = findViewById(R.id.arrowHourlySales)
-        )
+        setupPreviewCard(findViewById(R.id.headerDailySummary), ReportPreviewActivity.TYPE_DAILY_SUMMARY)
+        setupPreviewCard(findViewById(R.id.headerOrderType), ReportPreviewActivity.TYPE_ORDER_TYPE)
+        setupPreviewCard(findViewById(R.id.headerHourlySales), ReportPreviewActivity.TYPE_HOURLY_SALES)
+        setupPreviewCard(findViewById(R.id.headerCardBrand), ReportPreviewActivity.TYPE_CARD_BRAND)
+        setupPreviewCard(findViewById(R.id.headerEmployee), ReportPreviewActivity.TYPE_EMPLOYEE)
+        setupPreviewCard(findViewById(R.id.headerMenuPerformance), ReportPreviewActivity.TYPE_MENU_PERFORMANCE)
 
         loadAllReports()
     }
@@ -311,6 +288,20 @@ class ReportsActivity : AppCompatActivity() {
             content.visibility = if (expanding) View.VISIBLE else View.GONE
             arrow.text = if (expanding) "▼" else "▶"
         }
+    }
+
+    private fun setupPreviewCard(header: View, reportType: String) {
+        header.setOnClickListener { openReportPreview(reportType) }
+    }
+
+    private fun openReportPreview(reportType: String) {
+        val intent = Intent(this, ReportPreviewActivity::class.java).apply {
+            putExtra(ReportPreviewActivity.EXTRA_REPORT_TYPE, reportType)
+            putExtra(ReportPreviewActivity.EXTRA_START_DATE, selectedStartDate.time)
+            putExtra(ReportPreviewActivity.EXTRA_END_DATE, selectedEndDate.time)
+            putExtra(ReportPreviewActivity.EXTRA_EMPLOYEE_FILTER, globalEmployeeFilter)
+        }
+        startActivity(intent)
     }
 
     // =========================================================

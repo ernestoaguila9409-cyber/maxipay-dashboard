@@ -278,6 +278,11 @@ class ViewEditReceiptActivity : AppCompatActivity() {
 
         fun bold(on: Boolean) = if (on) Typeface.BOLD else Typeface.NORMAL
 
+        fun monospaceStyle(isBold: Boolean) = Typeface.create(
+            Typeface.MONOSPACE,
+            if (isBold) Typeface.BOLD else Typeface.NORMAL
+        )
+
         tvBusinessName.text = settings.businessName
         tvBusinessName.setTypeface(null, bold(settings.boldBizName))
         tvBusinessName.textSize = bizNameSp + 4f
@@ -299,7 +304,7 @@ class ViewEditReceiptActivity : AppCompatActivity() {
 
         val lwi = ReceiptSettings.lineWidthForSize(settings.fontSizeItems)
         tvSep1.text = "-".repeat(lwi)
-        tvSep1.setTypeface(null, bold(settings.boldItems))
+        tvSep1.typeface = monospaceStyle(settings.boldItems)
 
         tvItems.text = buildString {
             appendLine(formatLine("2x Burger", "$19.98", lwi))
@@ -309,27 +314,27 @@ class ViewEditReceiptActivity : AppCompatActivity() {
             appendLine(formatLine("2x Iced Tea", "$7.98", lwi))
             append(formatLine("1x Chocolate Cake", "$8.50", lwi))
         }
-        tvItems.setTypeface(null, bold(settings.boldItems))
+        tvItems.typeface = monospaceStyle(settings.boldItems)
         tvItems.textSize = itemsSp
 
         val lwt = ReceiptSettings.lineWidthForSize(settings.fontSizeTotals)
         tvSep2.text = "-".repeat(lwt)
-        tvSep2.setTypeface(null, bold(settings.boldTotals))
+        tvSep2.typeface = monospaceStyle(settings.boldTotals)
 
         tvTotals.text = buildString {
             appendLine(formatLine("Subtotal", "$56.45", lwt))
             appendLine(formatLine("Tax (8.25%)", "$4.66", lwt))
             append(formatLine("Tip", "$8.47", lwt))
         }
-        tvTotals.setTypeface(null, bold(settings.boldTotals))
+        tvTotals.typeface = monospaceStyle(settings.boldTotals)
         tvTotals.textSize = totalsSp
 
         val lwg = ReceiptSettings.lineWidthForSize(settings.fontSizeGrandTotal)
         tvSep3.text = "=".repeat(lwg)
-        tvSep3.setTypeface(null, bold(settings.boldGrandTotal))
+        tvSep3.typeface = monospaceStyle(settings.boldGrandTotal)
 
         tvGrandTotal.text = formatLine("TOTAL", "$69.58", lwg)
-        tvGrandTotal.setTypeface(null, bold(settings.boldGrandTotal))
+        tvGrandTotal.typeface = monospaceStyle(settings.boldGrandTotal)
         tvGrandTotal.textSize = grandTotalSp + 2f
 
         tvPaymentInfo.text = "Visa **** 1234\nAuth: 123456\nType: Credit"

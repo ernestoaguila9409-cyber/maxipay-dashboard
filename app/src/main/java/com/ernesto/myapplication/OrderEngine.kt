@@ -255,7 +255,11 @@ class OrderEngine(private val db: FirebaseFirestore) {
                             var newTotalInCents = discountedSubtotalInCents
                             val taxBreakdown = mutableListOf<Map<String, Any>>()
                             val perItemTaxCents = mutableMapOf<String, Long>()
-                            lineInfos.forEach { perItemTaxCents[it.lineKey] = 0L }
+                            val perItemTaxBreakdown = mutableMapOf<String, MutableList<Map<String, Any>>>()
+                            lineInfos.forEach {
+                                perItemTaxCents[it.lineKey] = 0L
+                                perItemTaxBreakdown[it.lineKey] = mutableListOf()
+                            }
 
                             for (taxDoc in taxesSnap.documents) {
                                 val taxId = taxDoc.id
@@ -306,6 +310,11 @@ class OrderEngine(private val db: FirebaseFirestore) {
                                             Math.round(taxCents.toDouble() * effectiveCents / taxableBaseCents)
                                         }
                                         perItemTaxCents[itemKey] = (perItemTaxCents[itemKey] ?: 0L) + share
+                                        perItemTaxBreakdown.getOrPut(itemKey) { mutableListOf() }.add(mapOf(
+                                            "name" to name,
+                                            "rate" to amount,
+                                            "amountInCents" to share
+                                        ))
                                         distributed += share
                                     }
                                 }
@@ -347,9 +356,11 @@ class OrderEngine(private val db: FirebaseFirestore) {
                                             Math.round(li.lineTotalInCents.toDouble() / subtotalInCents * discountedSubtotalInCents)
                                         } else 0L
                                         val ref = orderRef.collection("items").document(li.lineKey)
+                                        val itemTaxBreakdown = perItemTaxBreakdown[li.lineKey] ?: emptyList<Map<String, Any>>()
                                         itemBatch.update(ref, mapOf(
                                             "lineTaxInCents" to taxAmount,
-                                            "lineTotalWithTaxInCents" to effectiveLineCents + taxAmount
+                                            "lineTotalWithTaxInCents" to effectiveLineCents + taxAmount,
+                                            "taxBreakdown" to itemTaxBreakdown
                                         ))
                                     }
                                     if (lineInfos.isNotEmpty()) {

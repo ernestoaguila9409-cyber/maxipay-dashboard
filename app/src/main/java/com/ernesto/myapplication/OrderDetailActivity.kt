@@ -28,8 +28,16 @@ import java.util.concurrent.TimeUnit
 import java.util.Locale
 import android.util.Log
 import android.widget.EditText
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.text.InputType
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.ernesto.myapplication.engine.OrderEngine
+import android.graphics.Typeface
 import com.google.firebase.functions.FirebaseFunctions
 
 class OrderDetailActivity : AppCompatActivity() {
@@ -47,13 +55,15 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var bottomActions: View
     private lateinit var btnVoid: MaterialButton
     private lateinit var btnRefund: MaterialButton
-    private lateinit var btnEmailReceipt: MaterialButton
-    private lateinit var btnPrintReceipt: MaterialButton
+    private lateinit var btnReceipt: MaterialButton
     private lateinit var txtAddCustomer: TextView
     private lateinit var txtOrderType: TextView
     private lateinit var orderSummaryContainer: LinearLayout
     private lateinit var txtSubtotal: TextView
-    private lateinit var txtOrderTotal: TextView
+    private lateinit var txtOriginalTotal: TextView
+    private lateinit var refundedSummaryRow: LinearLayout
+    private lateinit var txtRefundedAmount: TextView
+    private lateinit var txtRemainingTotal: TextView
     private lateinit var taxBreakdownContainer: LinearLayout
     private lateinit var tipRow: LinearLayout
     private lateinit var txtTipLabel: TextView
@@ -70,6 +80,14 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var orderId: String
     private var currentBatchId: String? = null
     private var orderType: String = ""
+    private var saleTransactionId: String? = null
+
+    private enum class ReceiptContentType { ORIGINAL, REFUND, VOID }
+    private var pendingPrintContentType: ReceiptContentType? = null
+
+    companion object {
+        private const val REQUEST_BT_CONNECT = 1001
+    }
 
     private val tableSelectLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -108,13 +126,15 @@ class OrderDetailActivity : AppCompatActivity() {
         bottomActions = findViewById(R.id.bottomActions)
         btnVoid = findViewById(R.id.btnVoid)
         btnRefund = findViewById(R.id.btnRefund)
-        btnEmailReceipt = findViewById(R.id.btnEmailReceipt)
-        btnPrintReceipt = findViewById(R.id.btnPrintReceipt)
+        btnReceipt = findViewById(R.id.btnReceipt)
         txtAddCustomer = findViewById(R.id.txtAddCustomer)
         txtOrderType = findViewById(R.id.txtOrderType)
         orderSummaryContainer = findViewById(R.id.orderSummaryContainer)
         txtSubtotal = findViewById(R.id.txtSubtotal)
-        txtOrderTotal = findViewById(R.id.txtOrderTotal)
+        txtOriginalTotal = findViewById(R.id.txtOriginalTotal)
+        refundedSummaryRow = findViewById(R.id.refundedSummaryRow)
+        txtRefundedAmount = findViewById(R.id.txtRefundedAmount)
+        txtRemainingTotal = findViewById(R.id.txtRemainingTotal)
         taxBreakdownContainer = findViewById(R.id.taxBreakdownContainer)
         tipRow = findViewById(R.id.tipRow)
         txtTipLabel = findViewById(R.id.txtTipLabel)
@@ -159,8 +179,7 @@ class OrderDetailActivity : AppCompatActivity() {
         bottomActions.visibility = View.GONE
         btnVoid.visibility = View.GONE
         btnRefund.visibility = View.GONE
-        btnEmailReceipt.visibility = View.GONE
-        btnPrintReceipt.visibility = View.GONE
+        btnReceipt.visibility = View.GONE
 
         db.collection("Orders").document(orderId)
             .get()
@@ -218,6 +237,7 @@ class OrderDetailActivity : AppCompatActivity() {
 
                 currentBatchId = doc.getString("batchId")
                 orderType = doc.getString("orderType") ?: ""
+                saleTransactionId = doc.getString("saleTransactionId") ?: doc.getString("transactionId")
 
                 displayOrderSummary(doc)
                 updateOrderTypeBadge(status)
@@ -235,14 +255,11 @@ class OrderDetailActivity : AppCompatActivity() {
                     bottomActions.visibility = View.VISIBLE
                     btnVoid.visibility = View.GONE
                     btnRefund.visibility = View.GONE
-                    btnEmailReceipt.visibility = View.VISIBLE
-                    btnPrintReceipt.visibility = View.VISIBLE
-                    btnEmailReceipt.setOnClickListener { showEmailReceiptDialog() }
+                    btnReceipt.visibility = View.VISIBLE
+                    btnReceipt.setOnClickListener { showOrderReceiptFlow() }
                     txtRefundHistory.visibility = View.GONE
                     return@addOnSuccessListener
                 }
-
-                val saleTransactionId = doc.getString("saleTransactionId") ?: doc.getString("transactionId")
                 val totalInCents = doc.getLong("totalInCents") ?: 0L
                 val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
                 val isFullyRefunded = totalRefundedInCents >= totalInCents && totalInCents > 0L
@@ -277,9 +294,8 @@ class OrderDetailActivity : AppCompatActivity() {
                         bottomActions.visibility = View.VISIBLE
                         btnVoid.visibility = View.GONE
                         btnRefund.visibility = View.GONE
-                        btnEmailReceipt.visibility = View.VISIBLE
-                        btnPrintReceipt.visibility = View.VISIBLE
-                        btnEmailReceipt.setOnClickListener { showEmailReceiptDialog() }
+                        btnReceipt.visibility = View.VISIBLE
+                        btnReceipt.setOnClickListener { showOrderReceiptFlow() }
                         return@loadRefundHistory
                     }
                     if (status == "CLOSED") {
@@ -290,9 +306,8 @@ class OrderDetailActivity : AppCompatActivity() {
                         } else {
                             btnRefund.visibility = View.GONE
                         }
-                        btnEmailReceipt.visibility = View.VISIBLE
-                        btnPrintReceipt.visibility = View.VISIBLE
-                        btnEmailReceipt.setOnClickListener { showEmailReceiptDialog() }
+                        btnReceipt.visibility = View.VISIBLE
+                        btnReceipt.setOnClickListener { showOrderReceiptFlow() }
                         resolveBatchAndShowVoid(saleTransactionId)
                     }
                 }
@@ -375,7 +390,15 @@ class OrderDetailActivity : AppCompatActivity() {
             return
         }
 
-        renderSummary(totalInCents, taxBreakdown, tipAmountInCents, discountInCents, appliedDiscounts)
+        val totalRefundedInCents = orderDoc.getLong("totalRefundedInCents") ?: 0L
+        renderSummary(
+            totalInCents,
+            taxBreakdown,
+            tipAmountInCents,
+            discountInCents,
+            appliedDiscounts,
+            totalRefundedInCents
+        )
     }
 
     private fun recomputeAndRefreshSummary() {
@@ -390,10 +413,18 @@ class OrderDetailActivity : AppCompatActivity() {
                             val taxBreakdown = doc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
                             val tipAmountInCents = doc.getLong("tipAmountInCents") ?: 0L
                             val discountInCents = doc.getLong("discountInCents") ?: 0L
+                            val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
                             @Suppress("UNCHECKED_CAST")
                             val appliedDiscounts = doc.get("appliedDiscounts") as? List<Map<String, Any>> ?: emptyList()
                             if (totalInCents > 0L) {
-                                renderSummary(totalInCents, taxBreakdown, tipAmountInCents, discountInCents, appliedDiscounts)
+                                renderSummary(
+                                    totalInCents,
+                                    taxBreakdown,
+                                    tipAmountInCents,
+                                    discountInCents,
+                                    appliedDiscounts,
+                                    totalRefundedInCents
+                                )
                             }
                         }
                     }
@@ -403,56 +434,49 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun renderSummary(totalInCents: Long, taxBreakdown: List<Map<String, Any>>, tipAmountInCents: Long = 0L, discountInCents: Long = 0L, appliedDiscounts: List<Map<String, Any>> = emptyList()) {
+    private fun renderSummary(
+        totalInCents: Long,
+        taxBreakdown: List<Map<String, Any>>,
+        tipAmountInCents: Long = 0L,
+        discountInCents: Long = 0L,
+        appliedDiscounts: List<Map<String, Any>> = emptyList(),
+        totalRefundedInCents: Long = 0L
+    ) {
         var taxTotalCents = 0L
         taxBreakdownContainer.removeAllViews()
 
-        if (discountInCents > 0L) {
-            val discountLabelText = if (appliedDiscounts.isNotEmpty()) {
-                appliedDiscounts.joinToString(", ") { ad ->
-                    val name = (ad["discountName"] as? String) ?: "Discount"
-                    val type = (ad["type"] as? String)?.lowercase() ?: ""
-                    val value = (ad["value"] as? Number)?.toDouble()
-                    when {
-                        type == "percentage" && value != null -> {
-                            val pct = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(java.util.Locale.US, "%.1f", value)
-                            "$name $pct% off"
-                        }
-                        type == "fixed" && value != null -> "$name $${String.format(java.util.Locale.US, "%.2f", value)} off"
-                        else -> name
-                    }
-                }
-            } else {
-                "Discount"
-            }
+        val summaryColor = 0xFF555555.toInt()
+        val dividerColor = 0xFFE0E0E0.toInt()
 
-            val discountRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = 4 }
-            }
-            val discountLabel = TextView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                text = discountLabelText
-                textSize = 14f
-                setTextColor(android.graphics.Color.parseColor("#2E7D32"))
-                setTypeface(null, android.graphics.Typeface.BOLD)
-            }
-            val discountAmount = TextView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
+        val grouped = DiscountDisplay.groupByName(appliedDiscounts)
+        val hasDiscounts = discountInCents > 0L || grouped.isNotEmpty()
+
+        if (hasDiscounts) {
+            addOrderSummarySectionHeader(taxBreakdownContainer, "Discounts", topMarginDp = 4, textColor = summaryColor)
+            addOrderSummaryDivider(taxBreakdownContainer, dividerColor)
+            if (grouped.isNotEmpty()) {
+                for (gd in grouped) {
+                    addOrderSummaryAmountRow(
+                        taxBreakdownContainer,
+                        "• ${DiscountDisplay.formatReceiptLabel(gd.name, gd.type, gd.value)}",
+                        "-${MoneyUtils.centsToDisplay(gd.totalCents)}",
+                        summaryColor
+                    )
+                }
+            } else if (discountInCents > 0L) {
+                addOrderSummaryAmountRow(
+                    taxBreakdownContainer,
+                    "• Discount",
+                    "-${MoneyUtils.centsToDisplay(discountInCents)}",
+                    summaryColor
                 )
-                text = "-${MoneyUtils.centsToDisplay(discountInCents)}"
-                textSize = 14f
-                setTextColor(android.graphics.Color.parseColor("#2E7D32"))
-                setTypeface(null, android.graphics.Typeface.BOLD)
             }
-            discountRow.addView(discountLabel)
-            discountRow.addView(discountAmount)
-            taxBreakdownContainer.addView(discountRow)
+        }
+
+        if (taxBreakdown.isNotEmpty()) {
+            val headerTop = if (hasDiscounts) 12 else 4
+            addOrderSummarySectionHeader(taxBreakdownContainer, "Taxes", topMarginDp = headerTop, textColor = summaryColor)
+            addOrderSummaryDivider(taxBreakdownContainer, dividerColor)
         }
 
         for (entry in taxBreakdown) {
@@ -470,31 +494,12 @@ class OrderDetailActivity : AppCompatActivity() {
                 name
             }
 
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = 4 }
-            }
-            val labelView = TextView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                text = label
-                textSize = 14f
-                setTextColor(0xFF555555.toInt())
-            }
-            val amountView = TextView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-                text = MoneyUtils.centsToDisplay(amountCents)
-                textSize = 14f
-                setTextColor(0xFF555555.toInt())
-            }
-            row.addView(labelView)
-            row.addView(amountView)
-            taxBreakdownContainer.addView(row)
+            addOrderSummaryAmountRow(
+                taxBreakdownContainer,
+                label,
+                MoneyUtils.centsToDisplay(amountCents),
+                summaryColor
+            )
         }
 
         val subtotalCents = totalInCents + discountInCents - taxTotalCents - tipAmountInCents
@@ -515,8 +520,82 @@ class OrderDetailActivity : AppCompatActivity() {
             tipRow.visibility = View.GONE
         }
 
-        txtOrderTotal.text = MoneyUtils.centsToDisplay(totalInCents)
+        val originalCents = totalInCents
+        val refundedCents = totalRefundedInCents
+        val remainingCents = (originalCents - refundedCents).coerceAtLeast(0L)
+        txtOriginalTotal.text = MoneyUtils.centsToDisplay(originalCents)
+        txtRefundedAmount.text = MoneyUtils.centsToDisplay(refundedCents)
+        refundedSummaryRow.visibility = if (refundedCents > 0L) View.VISIBLE else View.GONE
+        txtRemainingTotal.text = MoneyUtils.centsToDisplay(remainingCents)
         orderSummaryContainer.visibility = View.VISIBLE
+    }
+
+    private fun orderSummaryDip(dp: Int): Int =
+        (dp * resources.displayMetrics.density).toInt()
+
+    private fun addOrderSummarySectionHeader(
+        container: LinearLayout,
+        title: String,
+        topMarginDp: Int,
+        textColor: Int
+    ) {
+        container.addView(TextView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = orderSummaryDip(topMarginDp)
+                bottomMargin = orderSummaryDip(2)
+            }
+            text = title
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(textColor)
+        })
+    }
+
+    private fun addOrderSummaryDivider(container: LinearLayout, lineColor: Int) {
+        container.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                orderSummaryDip(1)
+            ).apply {
+                topMargin = orderSummaryDip(2)
+                bottomMargin = orderSummaryDip(6)
+            }
+            setBackgroundColor(lineColor)
+        })
+    }
+
+    private fun addOrderSummaryAmountRow(
+        container: LinearLayout,
+        leftLabel: String,
+        rightAmount: String,
+        textColor: Int
+    ) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = orderSummaryDip(4) }
+        }
+        row.addView(TextView(this@OrderDetailActivity).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            text = leftLabel
+            textSize = 14f
+            setTextColor(textColor)
+        })
+        row.addView(TextView(this@OrderDetailActivity).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            text = rightAmount
+            textSize = 14f
+            setTextColor(textColor)
+        })
+        container.addView(row)
     }
 
     private var refundHistoryLines: String = ""
@@ -758,6 +837,10 @@ class OrderDetailActivity : AppCompatActivity() {
             .addOnSuccessListener { orderDoc ->
                 @Suppress("UNCHECKED_CAST")
                 guestNames = (orderDoc.get("guestNames") as? List<String>) ?: emptyList()
+                @Suppress("UNCHECKED_CAST")
+                val orderAppliedDiscounts =
+                    (orderDoc.get("appliedDiscounts") as? List<Map<String, Any>>) ?: emptyList()
+                adapter.setAppliedDiscounts(orderAppliedDiscounts)
 
                 db.collection("Orders").document(orderId)
                     .collection("items")
@@ -1381,15 +1464,80 @@ class OrderDetailActivity : AppCompatActivity() {
             }
         })
     }
-    private fun showEmailReceiptDialog() {
-        val input = EditText(this).apply {
-            hint = "Enter email address"
-            inputType = android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-            setPadding(48, 32, 48, 32)
+    // ===============================
+    // RECEIPT FLOW
+    // ===============================
+
+    private fun showOrderReceiptFlow() {
+        db.collection("Orders").document(orderId).get()
+            .addOnSuccessListener { doc ->
+                if (!doc.exists()) return@addOnSuccessListener
+                val status = doc.getString("status") ?: ""
+                val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
+                val isVoided = status == "VOIDED"
+                val hasRefunds = totalRefundedInCents > 0L
+
+                if (!hasRefunds && !isVoided) {
+                    showReceiptDeliveryDialog(ReceiptContentType.ORIGINAL)
+                } else {
+                    showReceiptTypeDialog(isVoided, hasRefunds)
+                }
+            }
+    }
+
+    private fun showReceiptTypeDialog(isVoided: Boolean, hasRefunds: Boolean) {
+        val options = mutableListOf("\uD83D\uDCC4  Original Transaction")
+        if (isVoided) {
+            options.add("\uD83D\uDEAB  Void")
+        } else if (hasRefunds) {
+            options.add("\u21A9\uFE0F  Refund")
         }
+        options.add("Cancel")
 
         AlertDialog.Builder(this)
-            .setTitle("Email Receipt")
+            .setTitle("Select Receipt Type")
+            .setItems(options.toTypedArray()) { _, which ->
+                when {
+                    options[which].contains("Original") -> showReceiptDeliveryDialog(ReceiptContentType.ORIGINAL)
+                    options[which].contains("Void") -> showReceiptDeliveryDialog(ReceiptContentType.VOID)
+                    options[which].contains("Refund") -> showReceiptDeliveryDialog(ReceiptContentType.REFUND)
+                }
+            }
+            .show()
+    }
+
+    private fun showReceiptDeliveryDialog(contentType: ReceiptContentType) {
+        val options = arrayOf("\uD83D\uDDA8\uFE0F  Print Receipt", "\u2709\uFE0F  Email Receipt", "Cancel")
+        AlertDialog.Builder(this)
+            .setTitle("Send Receipt")
+            .setItems(options) { _, which ->
+                when {
+                    options[which].contains("Print") -> handlePrintReceipt(contentType)
+                    options[which].contains("Email") -> handleEmailReceipt(contentType)
+                }
+            }
+            .show()
+    }
+
+    // ── Email Receipt ────────────────────────────────────────────
+
+    private fun handleEmailReceipt(contentType: ReceiptContentType) {
+        val txId = saleTransactionId ?: ""
+        when (contentType) {
+            ReceiptContentType.ORIGINAL -> showTypedEmailDialog(orderId, "sendReceiptEmail", "")
+            ReceiptContentType.REFUND -> showTypedEmailDialog(orderId, "sendRefundReceiptEmail", txId)
+            ReceiptContentType.VOID -> showTypedEmailDialog(orderId, "sendVoidReceiptEmail", txId)
+        }
+    }
+
+    private fun showTypedEmailDialog(orderId: String, cloudFunction: String, transactionId: String) {
+        val input = EditText(this).apply {
+            hint = "Enter email address"
+            inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setPadding(48, 32, 48, 32)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("\u2709\uFE0F  Email Receipt")
             .setView(input)
             .setPositiveButton("Send") { _, _ ->
                 val email = input.text.toString().trim()
@@ -1397,17 +1545,21 @@ class OrderDetailActivity : AppCompatActivity() {
                     Toast.makeText(this, "Please enter an email", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                sendReceiptEmail(email, orderId)
+                sendTypedReceiptEmail(email, orderId, cloudFunction, transactionId)
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun sendReceiptEmail(email: String, orderId: String) {
-        val data = hashMapOf("email" to email, "orderId" to orderId)
+    private fun sendTypedReceiptEmail(email: String, orderId: String, cloudFunction: String, transactionId: String) {
+        val data = hashMapOf<String, Any>(
+            "email" to email,
+            "orderId" to orderId
+        )
+        if (transactionId.isNotBlank()) data["transactionId"] = transactionId
 
         FirebaseFunctions.getInstance()
-            .getHttpsCallable("sendReceiptEmail")
+            .getHttpsCallable(cloudFunction)
             .call(data)
             .addOnSuccessListener { result ->
                 val response = result.data as? Map<*, *>
@@ -1420,6 +1572,455 @@ class OrderDetailActivity : AppCompatActivity() {
             .addOnFailureListener {
                 Toast.makeText(this, "Failed to send receipt. Please try again.", Toast.LENGTH_SHORT).show()
             }
+    }
+
+    // ── Print Receipt ────────────────────────────────────────────
+
+    private fun handlePrintReceipt(contentType: ReceiptContentType) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                pendingPrintContentType = contentType
+                ActivityCompat.requestPermissions(
+                    this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BT_CONNECT
+                )
+                return
+            }
+        }
+        executePrint(contentType)
+    }
+
+    private fun executePrint(contentType: ReceiptContentType) {
+        Toast.makeText(this, "Preparing receipt\u2026", Toast.LENGTH_SHORT).show()
+        when (contentType) {
+            ReceiptContentType.ORIGINAL -> printOriginalReceipt()
+            ReceiptContentType.REFUND -> printRefundReceipt()
+            ReceiptContentType.VOID -> printVoidReceipt()
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun printOriginalReceipt() {
+        db.collection("Orders").document(orderId).get()
+            .addOnSuccessListener { orderDoc ->
+                if (!orderDoc.exists()) {
+                    Toast.makeText(this, "Order not found", Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+                db.collection("Orders").document(orderId).collection("items").get()
+                    .addOnSuccessListener { itemsSnap ->
+                        val txId = saleTransactionId ?: ""
+                        if (txId.isNotBlank()) {
+                            db.collection("Transactions").document(txId).get()
+                                .addOnSuccessListener { txDoc ->
+                                    val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                                    EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, payments))
+                                }
+                                .addOnFailureListener {
+                                    EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()))
+                                }
+                        } else {
+                            EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()))
+                        }
+                    }
+            }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun buildOriginalSegments(
+        orderDoc: com.google.firebase.firestore.DocumentSnapshot,
+        items: List<com.google.firebase.firestore.DocumentSnapshot>,
+        payments: List<Map<String, Any>>
+    ): List<EscPosPrinter.Segment> {
+        val rs = ReceiptSettings.load(this)
+        val segs = mutableListOf<EscPosPrinter.Segment>()
+        val lwi = ReceiptSettings.lineWidthForSize(rs.fontSizeItems)
+        val lwt = ReceiptSettings.lineWidthForSize(rs.fontSizeTotals)
+        val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
+
+        segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
+        for (line in rs.addressText.split("\n")) {
+            segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
+        }
+        segs += EscPosPrinter.Segment("")
+        segs += EscPosPrinter.Segment("RECEIPT", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        segs += EscPosPrinter.Segment("", fontSize = rs.fontSizeOrderInfo, centered = true)
+
+        val orderNumber = orderDoc.getLong("orderNumber") ?: 0L
+        val oType = orderDoc.getString("orderType") ?: ""
+        val empName = orderDoc.getString("employeeName") ?: ""
+        val custName = orderDoc.getString("customerName") ?: ""
+        val dateStr = java.text.SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
+
+        segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        if (oType.isNotBlank()) {
+            val label = when (oType) { "DINE_IN" -> "Dine In"; "TO_GO" -> "To Go"; "BAR_TAB" -> "Bar Tab"; else -> oType }
+            segs += EscPosPrinter.Segment("Type: $label", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        }
+        if (rs.showServerName && empName.isNotBlank()) segs += EscPosPrinter.Segment("Server: $empName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        if (custName.isNotBlank()) segs += EscPosPrinter.Segment("Customer: $custName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        if (rs.showDateTime) segs += EscPosPrinter.Segment("Date: $dateStr", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        segs += EscPosPrinter.Segment("")
+
+        @Suppress("UNCHECKED_CAST")
+        val appliedDiscounts = orderDoc.get("appliedDiscounts") as? List<Map<String, Any>> ?: emptyList()
+
+        segs += EscPosPrinter.Segment("-".repeat(lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+        for (doc in items) {
+            val name = doc.getString("name") ?: doc.getString("itemName") ?: "Item"
+            val qty = (doc.getLong("qty") ?: doc.getLong("quantity") ?: 1L).toInt()
+            val lineTotalCents = doc.getLong("lineTotalInCents") ?: 0L
+            val basePriceCents = doc.getLong("basePriceInCents") ?: lineTotalCents
+            val itemLabel = if (qty > 1) "${qty}x $name" else name
+            if (basePriceCents > 0L) {
+                segs += EscPosPrinter.Segment(formatLine(itemLabel, MoneyUtils.centsToDisplay(lineTotalCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+            } else {
+                segs += EscPosPrinter.Segment(itemLabel, bold = rs.boldItems, fontSize = rs.fontSizeItems)
+            }
+            val mods = doc.get("modifiers") as? List<Map<String, Any>> ?: emptyList()
+            for (mod in mods) {
+                val modName = mod["name"]?.toString() ?: continue
+                val modAction = mod["action"]?.toString() ?: "ADD"
+                val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
+                val modCents = kotlin.math.round(modPrice * 100).toLong()
+                when {
+                    modAction == "REMOVE" -> segs += EscPosPrinter.Segment("  NO $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                    modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                    else -> segs += EscPosPrinter.Segment("  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                }
+            }
+            val lineKey = doc.id
+            val itemDiscounts = appliedDiscounts.filter { ad ->
+                val lk = ad["lineKey"]?.toString()?.trim().orEmpty()
+                lk == lineKey
+            }
+            val orderDiscounts = appliedDiscounts.filter { ad ->
+                val lk = ad["lineKey"]?.toString()?.trim().orEmpty()
+                val scope = ad["applyScope"]?.toString()?.trim()?.lowercase() ?: ""
+                lk.isEmpty() && (scope == "order" || scope == "manual")
+            }
+            for (ad in itemDiscounts + orderDiscounts) {
+                segs += EscPosPrinter.Segment("  ${DiscountDisplay.formatBulletFromFirestoreMap(ad)}", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+            }
+        }
+        segs += EscPosPrinter.Segment("-".repeat(lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+        segs += EscPosPrinter.Segment("")
+
+        val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+        val tipAmountInCents = orderDoc.getLong("tipAmountInCents") ?: 0L
+        val discountInCents = orderDoc.getLong("discountInCents") ?: 0L
+        val taxBreakdown = orderDoc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
+        var taxTotalCents = 0L
+        for (entry in taxBreakdown) { taxTotalCents += (entry["amountInCents"] as? Number)?.toLong() ?: 0L }
+        val subtotalCents = totalInCents + discountInCents - taxTotalCents - tipAmountInCents
+
+        segs += EscPosPrinter.Segment(formatLine("Subtotal", MoneyUtils.centsToDisplay(subtotalCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+
+        val groupedDiscounts = DiscountDisplay.groupByName(appliedDiscounts)
+        if (groupedDiscounts.isNotEmpty()) {
+            for (gd in groupedDiscounts) {
+                val label = DiscountDisplay.formatReceiptLabel(gd.name, gd.type, gd.value)
+                segs += EscPosPrinter.Segment(formatLine(label, "-${MoneyUtils.centsToDisplay(gd.totalCents)}", lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+            }
+        } else if (discountInCents > 0L) {
+            segs += EscPosPrinter.Segment(formatLine("Discount", "-${MoneyUtils.centsToDisplay(discountInCents)}", lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+        }
+
+        for (entry in taxBreakdown) {
+            val tName = entry["name"]?.toString() ?: "Tax"
+            val aCents = (entry["amountInCents"] as? Number)?.toLong() ?: 0L
+            val tRate = (entry["rate"] as? Number)?.toDouble()
+            val tType = entry["taxType"]?.toString()
+            val tLabel = DiscountDisplay.formatTaxLabel(tName, tType, tRate)
+            segs += EscPosPrinter.Segment(formatLine(tLabel, MoneyUtils.centsToDisplay(aCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+        }
+        if (tipAmountInCents > 0L) {
+            segs += EscPosPrinter.Segment(formatLine("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+        }
+        segs += EscPosPrinter.Segment("=".repeat(lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+        segs += EscPosPrinter.Segment(formatLine("TOTAL", MoneyUtils.centsToDisplay(totalInCents), lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
+        segs += EscPosPrinter.Segment("")
+
+        for (p in payments) {
+            val pType = p["paymentType"]?.toString() ?: ""
+            if (pType.equals("Cash", ignoreCase = true)) {
+                segs += EscPosPrinter.Segment("Paid with Cash", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+            } else {
+                val brand = p["cardBrand"]?.toString() ?: ""
+                val l4 = p["last4"]?.toString() ?: ""
+                val auth = p["authCode"]?.toString() ?: ""
+                if (brand.isNotBlank() || l4.isNotBlank()) {
+                    segs += EscPosPrinter.Segment(buildString { if (brand.isNotBlank()) append(brand); if (l4.isNotBlank()) { if (isNotEmpty()) append(" "); append("**** $l4") } }, bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+                }
+                if (auth.isNotBlank()) segs += EscPosPrinter.Segment("Auth: $auth", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+                if (pType.isNotBlank()) segs += EscPosPrinter.Segment("Type: $pType", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+            }
+            segs += EscPosPrinter.Segment("")
+        }
+        segs += EscPosPrinter.Segment("Thank you for dining with us!", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+        return segs
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun printRefundReceipt() {
+        val txId = saleTransactionId ?: ""
+        db.collection("Orders").document(orderId).get()
+            .addOnSuccessListener { orderDoc ->
+                if (!orderDoc.exists()) return@addOnSuccessListener
+                db.collection("Orders").document(orderId).collection("items").get()
+                    .addOnSuccessListener { itemsSnap ->
+                        if (txId.isBlank()) {
+                            EscPosPrinter.print(this, buildSimpleRefundSegments(orderDoc))
+                            return@addOnSuccessListener
+                        }
+                        db.collection("Transactions")
+                            .whereEqualTo("type", "REFUND")
+                            .whereEqualTo("originalReferenceId", txId)
+                            .get()
+                            .addOnSuccessListener { refundSnap ->
+                                val segments = buildDetailedRefundSegments(orderDoc, itemsSnap.documents, refundSnap.documents)
+                                EscPosPrinter.print(this, segments)
+                            }
+                            .addOnFailureListener {
+                                EscPosPrinter.print(this, buildSimpleRefundSegments(orderDoc))
+                            }
+                    }
+            }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun buildDetailedRefundSegments(
+        orderDoc: com.google.firebase.firestore.DocumentSnapshot,
+        items: List<com.google.firebase.firestore.DocumentSnapshot>,
+        refundDocs: List<com.google.firebase.firestore.DocumentSnapshot>
+    ): List<EscPosPrinter.Segment> {
+        val rs = ReceiptSettings.load(this)
+        val segs = mutableListOf<EscPosPrinter.Segment>()
+        val lwi = ReceiptSettings.lineWidthForSize(rs.fontSizeItems)
+        val lwt = ReceiptSettings.lineWidthForSize(rs.fontSizeTotals)
+        val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
+
+        segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
+        for (line in rs.addressText.split("\n")) {
+            segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
+        }
+        segs += EscPosPrinter.Segment("")
+        segs += EscPosPrinter.Segment("REFUND RECEIPT", bold = true, fontSize = 2, centered = true)
+        segs += EscPosPrinter.Segment("")
+
+        val orderNumber = orderDoc.getLong("orderNumber") ?: 0L
+        if (orderNumber > 0L) {
+            segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        }
+        val dateStr = java.text.SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
+        if (rs.showDateTime) segs += EscPosPrinter.Segment("Date: $dateStr", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+
+        val refundedByName = refundDocs.firstOrNull()?.getString("refundedBy")?.trim()?.takeIf { it.isNotBlank() }
+        if (refundedByName != null) {
+            segs += EscPosPrinter.Segment("Refunded by: $refundedByName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        }
+        segs += EscPosPrinter.Segment("")
+
+        val itemById = items.associateBy { it.id }
+        val itemByName = items.groupBy { (it.getString("name") ?: it.getString("itemName") ?: "").trim() }
+
+        data class RefundedItem(val name: String, val qty: Int, val amountCents: Long, val baseCents: Long, val taxBreakdown: List<Map<String, Any>>)
+        val refundedItems = mutableListOf<RefundedItem>()
+        var totalRefundCents = 0L
+
+        for (refDoc in refundDocs) {
+            val refAmountCents = refDoc.getLong("amountInCents")
+                ?: ((refDoc.getDouble("amount") ?: 0.0) * 100).toLong()
+            totalRefundCents += refAmountCents
+            val lineKey = refDoc.getString("refundedLineKey")?.takeIf { it.isNotBlank() }
+            val itemName = refDoc.getString("refundedItemName")?.trim()?.takeIf { it.isNotBlank() }
+
+            val matchedItem = if (lineKey != null) {
+                itemById[lineKey]
+            } else if (itemName != null) {
+                itemByName[itemName]?.firstOrNull()
+            } else null
+
+            if (matchedItem != null) {
+                val name = matchedItem.getString("name") ?: matchedItem.getString("itemName") ?: "Item"
+                val qty = (matchedItem.getLong("qty") ?: matchedItem.getLong("quantity") ?: 1L).toInt()
+                val storedTaxBreakdown = matchedItem.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
+                val lineTotalInCents = matchedItem.getLong("lineTotalInCents") ?: refAmountCents
+                refundedItems.add(RefundedItem(name, qty, refAmountCents, lineTotalInCents, storedTaxBreakdown))
+            } else if (itemName != null) {
+                refundedItems.add(RefundedItem(itemName, 1, refAmountCents, refAmountCents, emptyList()))
+            } else {
+                for (item in items) {
+                    val name = item.getString("name") ?: item.getString("itemName") ?: "Item"
+                    val qty = (item.getLong("qty") ?: item.getLong("quantity") ?: 1L).toInt()
+                    val lineCents = item.getLong("lineTotalInCents") ?: 0L
+                    val storedTaxBreakdown = item.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
+                    refundedItems.add(RefundedItem(name, qty, lineCents, lineCents, storedTaxBreakdown))
+                }
+            }
+        }
+
+        segs += EscPosPrinter.Segment("Refunded Items:", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+        segs += EscPosPrinter.Segment("-".repeat(lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+        for (ri in refundedItems) {
+            val label = if (ri.qty > 1) "${ri.name} x${ri.qty}" else ri.name
+            segs += EscPosPrinter.Segment(
+                formatLine(label, MoneyUtils.centsToDisplay(ri.baseCents), lwi),
+                bold = rs.boldItems, fontSize = rs.fontSizeItems
+            )
+        }
+        segs += EscPosPrinter.Segment("")
+
+        val taxGroupMap = mutableMapOf<String, Triple<String, Double, Long>>()
+        for (ri in refundedItems) {
+            for (tax in ri.taxBreakdown) {
+                val taxName = tax["name"]?.toString() ?: continue
+                val taxRate = (tax["rate"] as? Number)?.toDouble() ?: 0.0
+                val taxAmount = (tax["amountInCents"] as? Number)?.toLong() ?: 0L
+                val existing = taxGroupMap[taxName]
+                if (existing != null) {
+                    taxGroupMap[taxName] = Triple(taxName, existing.second, existing.third + taxAmount)
+                } else {
+                    taxGroupMap[taxName] = Triple(taxName, taxRate, taxAmount)
+                }
+            }
+        }
+
+        if (taxGroupMap.isEmpty()) {
+            @Suppress("UNCHECKED_CAST")
+            val orderTaxBreakdown = orderDoc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
+            val orderSubtotalCents = items.sumOf { it.getLong("lineTotalInCents") ?: 0L }
+            val refundedBaseCents = refundedItems.sumOf { it.baseCents }
+            for (tax in orderTaxBreakdown) {
+                val taxName = tax["name"]?.toString() ?: continue
+                val taxRate = (tax["rate"] as? Number)?.toDouble() ?: 0.0
+                val orderTaxAmount = (tax["amountInCents"] as? Number)?.toLong() ?: 0L
+                val prorated = if (taxRate > 0) {
+                    Math.round(refundedBaseCents * taxRate / 100.0)
+                } else if (orderSubtotalCents > 0) {
+                    Math.round(orderTaxAmount.toDouble() * refundedBaseCents / orderSubtotalCents)
+                } else {
+                    orderTaxAmount
+                }
+                if (prorated > 0L) taxGroupMap[taxName] = Triple(taxName, taxRate, prorated)
+            }
+        }
+
+        if (taxGroupMap.isNotEmpty()) {
+            segs += EscPosPrinter.Segment("Taxes Refunded:", bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+            segs += EscPosPrinter.Segment("-".repeat(lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+            for ((_, group) in taxGroupMap) {
+                val (name, rate, totalAmount) = group
+                val pctStr = if (rate > 0) {
+                    val pct = rate
+                    if (pct % 1.0 == 0.0) "${pct.toInt()}%" else String.format(Locale.US, "%.2f%%", pct)
+                } else ""
+                val taxLabel = if (pctStr.isNotBlank()) "$name ($pctStr)" else name
+                segs += EscPosPrinter.Segment(
+                    formatLine(taxLabel, MoneyUtils.centsToDisplay(totalAmount), lwt),
+                    bold = rs.boldTotals, fontSize = rs.fontSizeTotals
+                )
+            }
+            segs += EscPosPrinter.Segment("")
+        }
+
+        segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
+        segs += EscPosPrinter.Segment(
+            formatLine("TOTAL REFUND", "-${MoneyUtils.centsToDisplay(totalRefundCents)}", lwg),
+            bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal
+        )
+        segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
+        segs += EscPosPrinter.Segment("")
+        segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+
+        return segs
+    }
+
+    private fun buildSimpleRefundSegments(orderDoc: com.google.firebase.firestore.DocumentSnapshot): List<EscPosPrinter.Segment> {
+        val rs = ReceiptSettings.load(this)
+        val segs = mutableListOf<EscPosPrinter.Segment>()
+        val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
+
+        segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
+        for (line in rs.addressText.split("\n")) {
+            segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
+        }
+        segs += EscPosPrinter.Segment("")
+        segs += EscPosPrinter.Segment("REFUND RECEIPT", bold = true, fontSize = 2, centered = true)
+        segs += EscPosPrinter.Segment("")
+
+        val orderNumber = orderDoc.getLong("orderNumber") ?: 0L
+        if (orderNumber > 0L) {
+            segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        }
+        val dateStr = java.text.SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
+        segs += EscPosPrinter.Segment("Date: $dateStr", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        segs += EscPosPrinter.Segment("")
+
+        val totalRefundedInCents = orderDoc.getLong("totalRefundedInCents") ?: 0L
+        segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
+        segs += EscPosPrinter.Segment(
+            formatLine("REFUND TOTAL", "-${MoneyUtils.centsToDisplay(totalRefundedInCents)}", lwg),
+            bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal
+        )
+        segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
+        segs += EscPosPrinter.Segment("")
+        segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+        return segs
+    }
+
+    private fun printVoidReceipt() {
+        db.collection("Orders").document(orderId).get()
+            .addOnSuccessListener { orderDoc ->
+                if (!orderDoc.exists()) return@addOnSuccessListener
+                val rs = ReceiptSettings.load(this)
+                val segs = mutableListOf<EscPosPrinter.Segment>()
+                val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
+
+                segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
+                for (line in rs.addressText.split("\n")) {
+                    segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
+                }
+                segs += EscPosPrinter.Segment("")
+                segs += EscPosPrinter.Segment("VOID RECEIPT", bold = true, fontSize = 2, centered = true)
+                segs += EscPosPrinter.Segment("")
+
+                val orderNumber = orderDoc.getLong("orderNumber") ?: 0L
+                if (orderNumber > 0L) {
+                    segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+                }
+                val dateStr = java.text.SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
+                segs += EscPosPrinter.Segment("Date: $dateStr", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+                segs += EscPosPrinter.Segment("")
+
+                val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+                segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
+                segs += EscPosPrinter.Segment(
+                    formatLine("VOID TOTAL", "-${MoneyUtils.centsToDisplay(totalInCents)}", lwg),
+                    bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal
+                )
+                segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
+                segs += EscPosPrinter.Segment("")
+                segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+
+                EscPosPrinter.print(this, segs)
+            }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_BT_CONNECT) {
+            val ct = pendingPrintContentType
+            pendingPrintContentType = null
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED && ct != null) {
+                executePrint(ct)
+            } else {
+                Toast.makeText(this, "Bluetooth permission required for printing", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun finalizeRefund(

@@ -14,6 +14,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.functions.FirebaseFunctions
@@ -266,13 +267,26 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         val subtotalCents = totalInCents + discountInCents - taxTotalCents - tipAmountInCents
 
         total(formatLine("Subtotal", MoneyUtils.centsToDisplay(subtotalCents), lwt))
-        if (discountInCents > 0L) {
+
+        @Suppress("UNCHECKED_CAST")
+        val appliedDiscounts = orderDoc.get("appliedDiscounts") as? List<Map<String, Any>> ?: emptyList()
+        val groupedDiscounts = DiscountDisplay.groupByName(appliedDiscounts)
+        if (groupedDiscounts.isNotEmpty()) {
+            for (gd in groupedDiscounts) {
+                val label = DiscountDisplay.formatReceiptLabel(gd.name, gd.type, gd.value)
+                total(formatLine(label, "-${MoneyUtils.centsToDisplay(gd.totalCents)}", lwt))
+            }
+        } else if (discountInCents > 0L) {
             total(formatLine("Discount", "-${MoneyUtils.centsToDisplay(discountInCents)}", lwt))
         }
+
         for (entry in taxBreakdown) {
             val name = entry["name"]?.toString() ?: "Tax"
             val amountCents = (entry["amountInCents"] as? Number)?.toLong() ?: 0L
-            total(formatLine(name, MoneyUtils.centsToDisplay(amountCents), lwt))
+            val tRate = (entry["rate"] as? Number)?.toDouble()
+            val tType = entry["taxType"]?.toString()
+            val tLabel = DiscountDisplay.formatTaxLabel(name, tType, tRate)
+            total(formatLine(tLabel, MoneyUtils.centsToDisplay(amountCents), lwt))
         }
         if (tipAmountInCents > 0L) {
             total(formatLine("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), lwt))

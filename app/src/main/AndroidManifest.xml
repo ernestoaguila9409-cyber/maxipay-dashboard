@@ -176,6 +176,10 @@
             android:exported="false"
             android:parentActivityName=".MainActivity" />
         <activity
+            android:name=".ReportPreviewActivity"
+            android:exported="false"
+            android:parentActivityName=".ReportsActivity" />
+        <activity
             android:name=".MenuPerformanceActivity"
             android:exported="false"
             android:parentActivityName=".ReportsActivity" />
