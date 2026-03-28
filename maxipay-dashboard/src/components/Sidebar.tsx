@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronDown,
   CalendarClock,
+  Store,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
@@ -49,6 +50,7 @@ const navItems: NavItem[] = [
     href: "/dashboard/settings",
     icon: Settings,
     children: [
+      { label: "Business Information", href: "/dashboard/settings/business", icon: Store },
       { label: "Taxes", href: "/dashboard/taxes", icon: Receipt },
       { label: "Discounts", href: "/dashboard/discounts", icon: Tags },
       { label: "Customize Dashboard", href: "/dashboard/settings/customize-dashboard", icon: LayoutGrid },
