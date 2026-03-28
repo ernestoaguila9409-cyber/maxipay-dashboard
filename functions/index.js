@@ -1,14 +1,18 @@
-require("dotenv").config();
-
 const admin = require("firebase-admin");
 admin.initializeApp();
 
 const { onCall } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions");
 const sgMail = require("@sendgrid/mail");
+const { Vonage } = require("@vonage/server-sdk");
 const logger = require("firebase-functions/logger");
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
+const vonage = new Vonage({
+  apiKey: process.env.VONAGE_API_KEY,
+  apiSecret: process.env.VONAGE_API_SECRET,
+});
 
 setGlobalOptions({ maxInstances: 10 });
 
@@ -809,6 +813,187 @@ exports.verifyPin = onCall(async (request) => {
   const role = employee.data().role ?? "";
 
   return { success: true, name, role };
+});
+
+// ---------------------------------------------------------------------------
+// 5. SMS Receipt via Vonage
+// ---------------------------------------------------------------------------
+
+exports.sendReceiptSms = onCall(async (request) => {
+  logger.info("sendReceiptSms invoked", {
+    dataKeys: Object.keys(request.data || {}),
+    hasAuth: !!request.auth,
+  });
+
+  const { phone, orderId } = request.data || {};
+  logger.info("sendReceiptSms params", { phone: phone ?? "MISSING", orderId: orderId ?? "MISSING" });
+
+  if (!phone || !orderId) {
+    logger.warn("sendReceiptSms early exit: missing phone or orderId");
+    return { success: false, error: "Phone and orderId are required." };
+  }
+
+  const fromNumber = process.env.VONAGE_FROM_NUMBER;
+  const hasApiKey = !!process.env.VONAGE_API_KEY;
+  const hasApiSecret = !!process.env.VONAGE_API_SECRET;
+  logger.info("sendReceiptSms env check", {
+    hasFromNumber: !!fromNumber,
+    fromNumberLength: (fromNumber || "").length,
+    hasApiKey,
+    hasApiSecret,
+  });
+
+  if (!fromNumber || !hasApiKey) {
+    logger.error("Vonage SMS env variables are not configured", {
+      hasFromNumber: !!fromNumber,
+      hasApiKey,
+      hasApiSecret,
+    });
+    return { success: false, error: "SMS service is not configured." };
+  }
+
+  const cleaned = phone.replace(/[\s\-()]/g, "");
+  logger.info("sendReceiptSms phone cleaned", { original: phone, cleaned });
+
+  if (!/^\+1\d{10}$/.test(cleaned)) {
+    logger.warn("sendReceiptSms invalid phone format", { cleaned });
+    return { success: false, error: "Invalid phone number. Must be E.164 format (+1XXXXXXXXXX)." };
+  }
+
+  const db = admin.firestore();
+
+  try {
+    // Step 1: Firestore read
+    logger.info("sendReceiptSms step 1: fetching order from Firestore", { orderId });
+    const orderDoc = await db.collection("Orders").doc(orderId).get();
+
+    if (!orderDoc.exists) {
+      logger.warn("sendReceiptSms order not found in Firestore", { orderId });
+      return { success: false, error: "Order not found." };
+    }
+    logger.info("sendReceiptSms step 1 complete: order found", { orderId });
+
+    // Step 2: Extract and validate order fields
+    const order = orderDoc.data();
+    const orderNumber = order.orderNumber ?? orderId;
+    const totalInCents = order.totalInCents ?? 0;
+    const businessName = order.businessName ?? "MaxiPay";
+
+    logger.info("sendReceiptSms step 2: order data extracted", {
+      orderId,
+      orderNumber,
+      totalInCents,
+      totalInCentsType: typeof order.totalInCents,
+      businessName,
+      businessNameSource: order.businessName ? "firestore" : "default",
+      orderFieldKeys: Object.keys(order),
+    });
+
+    // Step 3: Format message
+    const total = (totalInCents / 100).toFixed(2);
+    logger.info("sendReceiptSms step 3: formatting message", { total, totalInCents });
+
+    const message = [
+      businessName,
+      `Order #${orderNumber}`,
+      `Total: $${total}`,
+      "",
+      "Thank you for your purchase!",
+      "",
+      "Reply STOP to opt out.",
+    ].join("\n");
+
+    logger.info("sendReceiptSms step 3 complete: message formatted", {
+      messageLength: message.length,
+      messagePreview: message.substring(0, 80),
+    });
+
+    // Step 4: Send via Vonage
+    logger.info("sendReceiptSms step 4: calling vonage.sms.send", {
+      to: cleaned,
+      from: fromNumber,
+      textLength: message.length,
+    });
+
+    let resp;
+    try {
+      resp = await vonage.sms.send({
+        to: cleaned,
+        from: fromNumber,
+        text: message,
+      });
+      logger.info("sendReceiptSms step 4 complete: Vonage responded", {
+        respType: typeof resp,
+        respKeys: resp ? Object.keys(resp) : "null",
+        messageCount: resp?.messages?.length ?? 0,
+        rawResp: JSON.stringify(resp).substring(0, 500),
+      });
+    } catch (vonageErr) {
+      logger.error("sendReceiptSms step 4 FAILED: Vonage SDK threw", {
+        name: vonageErr.name,
+        message: vonageErr.message,
+        code: vonageErr.code,
+        statusCode: vonageErr.statusCode,
+        stack: vonageErr.stack,
+        body: vonageErr.body ? JSON.stringify(vonageErr.body).substring(0, 500) : undefined,
+        response: vonageErr.response ? JSON.stringify(vonageErr.response).substring(0, 500) : undefined,
+      });
+      return { success: false, error: vonageErr.message || "Vonage API call failed." };
+    }
+
+    // Step 5: Check Vonage response status
+    const msg = resp.messages?.[0];
+    logger.info("sendReceiptSms step 5: checking response status", {
+      hasMessages: !!resp.messages,
+      firstMsgStatus: msg?.status,
+      firstMsgErrorText: msg?.["error-text"],
+    });
+
+    if (msg && msg.status !== "0") {
+      logger.error("Vonage SMS rejected", {
+        status: msg.status,
+        errorText: msg["error-text"],
+        to: cleaned,
+        orderId,
+        fullMsg: JSON.stringify(msg).substring(0, 500),
+      });
+      return { success: false, error: msg["error-text"] || "SMS rejected by carrier." };
+    }
+
+    logger.info("SMS receipt sent successfully", {
+      to: cleaned,
+      orderId,
+      messageId: msg?.["message-id"],
+    });
+
+    // Step 6: Update order document with SMS status
+    logger.info("sendReceiptSms step 6: updating order with SMS status", { orderId });
+    await db.collection("Orders").doc(orderId).update({
+      smsStatus: "sent",
+      smsPhone: cleaned,
+      smsSentAt: admin.firestore.FieldValue.serverTimestamp(),
+    }).catch((e) => logger.warn("Failed to save SMS status to order", {
+      orderId,
+      error: e.message,
+      stack: e.stack,
+    }));
+
+    logger.info("sendReceiptSms completed successfully", { orderId });
+    return { success: true, messageId: msg?.["message-id"] };
+  } catch (error) {
+    logger.error("sendReceiptSms UNHANDLED error", {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      stack: error.stack,
+      orderId,
+      phone: cleaned,
+      errorJson: (() => {
+        try { return JSON.stringify(error, Object.getOwnPropertyNames(error)).substring(0, 1000); } catch (_) { return "unserializable"; }
+      })(),
+    });
+    return { success: false, error: error.message || "Failed to send SMS." };
+  }
 });
 
 // ---------------------------------------------------------------------------

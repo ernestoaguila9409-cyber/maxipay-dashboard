@@ -13,3 +13,8 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Never commit secret keys
+functions/.env
+functions/.env.*
+!functions/.env.example
