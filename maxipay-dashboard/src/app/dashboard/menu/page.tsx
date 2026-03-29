@@ -174,7 +174,21 @@ export default function MenuPage() {
 
   const catSnap = useRef<Map<string, { name: string; availableOrderTypes: string[]; scheduleIds: string[] }>>(new Map());
   const itemSnap = useRef<
-    { id: string; name: string; price: number; prices: Record<string, number>; stock: number; categoryId: string; availableOrderTypes: string[] | null; modifierGroupIds: string[]; taxIds: string[]; menuId: string; isScheduled: boolean; scheduleIds: string[] }[]
+    {
+      id: string;
+      name: string;
+      price: number;
+      prices: Record<string, number>;
+      stock: number;
+      categoryId: string;
+      availableOrderTypes: string[] | null;
+      modifierGroupIds: string[];
+      taxIds: string[];
+      menuId: string;
+      isScheduled: boolean;
+      scheduleIds: string[];
+      externalMappings: ExternalMappings;
+    }[]
   >([]);
   const bothReady = useRef({ cats: false, items: false });
 
