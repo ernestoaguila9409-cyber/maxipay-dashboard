@@ -35,6 +35,8 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
+import com.ernesto.myapplication.engine.PaymentService
+import com.google.firebase.Timestamp
 import java.text.SimpleDateFormat
 
 class TransactionActivity : AppCompatActivity() {
@@ -45,6 +47,7 @@ class TransactionActivity : AppCompatActivity() {
     private val transactionList = mutableListOf<SaleWithRefunds>()
     private val allSalesWithRefunds = mutableListOf<SaleWithRefunds>()
     private val db = FirebaseFirestore.getInstance()
+    private lateinit var paymentService: PaymentService
     private var currentEmployeeName: String = ""
 
     companion object {
@@ -85,6 +88,7 @@ class TransactionActivity : AppCompatActivity() {
         }
 
         recyclerView.adapter = adapter
+        paymentService = PaymentService(this)
         currentEmployeeName = intent.getStringExtra("employeeName") ?: ""
         btnFilter.setOnClickListener { showFilterDialog() }
         loadTransactions()
@@ -209,12 +213,15 @@ class TransactionActivity : AppCompatActivity() {
                         last4 = last4,
                         entryType = entryType,
                         voided = doc.getBoolean("voided") ?: false,
+                        voidedBy = doc.getString("voidedBy") ?: "",
                         settled = doc.getBoolean("settled") ?: false,
                         batchId = doc.getString("batchId") ?: "",
                         type = type,
                         originalReferenceId = doc.getString("originalReferenceId") ?: "",
                         isMixed = isMixed,
-                        payments = payments
+                        payments = payments,
+                        tipAmountInCents = doc.getLong("tipAmountInCents") ?: 0L,
+                        tipAdjusted = doc.getBoolean("tipAdjusted") ?: false
                     )
 
                     allTransactions.add(transaction)
@@ -419,9 +426,13 @@ class TransactionActivity : AppCompatActivity() {
             return
         }
         if (transaction.voided) {
+            val msg = if (transaction.voidedBy.isNotBlank())
+                "This transaction has been voided by ${transaction.voidedBy}."
+            else
+                "This transaction has been voided."
             AlertDialog.Builder(this)
                 .setTitle("Voided Transaction")
-                .setMessage("This transaction has been voided.")
+                .setMessage(msg)
                 .setPositiveButton("\uD83E\uDDFE  Receipt") { _, _ -> showReceiptFlow(transaction) }
                 .setNegativeButton("Cancel", null)
                 .show()
@@ -501,7 +512,8 @@ class TransactionActivity : AppCompatActivity() {
                 .show()
             return
         }
-        val options = arrayOf("See Order", "Refund", "Void", "\uD83E\uDDFE  Receipt", "Cancel")
+        val tipLabel = if (transaction.tipAmountInCents > 0L) "Adjust Tip" else "Add Tip"
+        val options = arrayOf("See Order", "Refund", "Void", tipLabel, "\uD83E\uDDFE  Receipt", "Cancel")
         AlertDialog.Builder(this)
             .setTitle("Transaction Options")
             .setItems(options) { _, which ->
@@ -509,6 +521,7 @@ class TransactionActivity : AppCompatActivity() {
                     "See Order" -> navigateToOrder(transaction.orderId)
                     "Refund" -> processRefund(transaction, remainingCents)
                     "Void" -> processVoid(transaction)
+                    tipLabel -> showTipAdjustDialog(transaction)
                     "\uD83E\uDDFE  Receipt" -> showReceiptFlow(transaction)
                 }
             }
@@ -677,18 +690,19 @@ class TransactionActivity : AppCompatActivity() {
                 }
                 db.collection("Orders").document(orderId).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
+                        val rs = ReceiptSettings.load(this)
                         val txId = orderDoc.getString("saleTransactionId") ?: saleTransactionId
                         if (txId.isNotBlank()) {
                             db.collection("Transactions").document(txId).get()
                                 .addOnSuccessListener { txDoc ->
                                     val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
-                                    EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, payments))
+                                    EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, payments), rs)
                                 }
                                 .addOnFailureListener {
-                                    EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()))
+                                    EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()), rs)
                                 }
                         } else {
-                            EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()))
+                            EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()), rs)
                         }
                     }
                     .addOnFailureListener {
@@ -822,8 +836,12 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun printRefundVoidReceipt(transaction: Transaction, label: String) {
-        if (label == "REFUND" && transaction.orderId.isNotBlank()) {
-            printDetailedRefundReceipt(transaction)
+        if (transaction.orderId.isNotBlank()) {
+            if (label == "REFUND") {
+                printDetailedRefundReceipt(transaction)
+            } else {
+                printDetailedVoidReceipt(transaction)
+            }
         } else {
             printSimpleReceipt(transaction, label)
         }
@@ -848,7 +866,7 @@ class TransactionActivity : AppCompatActivity() {
                                 val segments = buildDetailedRefundSegments(
                                     transaction, orderDoc, itemsSnap.documents, refundSnap.documents
                                 )
-                                EscPosPrinter.print(this, segments)
+                                EscPosPrinter.print(this, segments, ReceiptSettings.load(this))
                             }
                             .addOnFailureListener { printSimpleReceipt(transaction, "REFUND") }
                     }
@@ -1032,6 +1050,155 @@ class TransactionActivity : AppCompatActivity() {
         return segs
     }
 
+    @Suppress("UNCHECKED_CAST")
+    private fun printDetailedVoidReceipt(transaction: Transaction) {
+        val orderId = transaction.orderId
+        db.collection("Orders").document(orderId).get()
+            .addOnSuccessListener { orderDoc ->
+                if (!orderDoc.exists()) {
+                    printSimpleReceipt(transaction, "VOID")
+                    return@addOnSuccessListener
+                }
+                db.collection("Orders").document(orderId).collection("items").get()
+                    .addOnSuccessListener { itemsSnap ->
+                        val segments = buildDetailedVoidSegments(
+                            transaction, orderDoc, itemsSnap.documents
+                        )
+                        EscPosPrinter.print(this, segments, ReceiptSettings.load(this))
+                    }
+                    .addOnFailureListener { printSimpleReceipt(transaction, "VOID") }
+            }
+            .addOnFailureListener { printSimpleReceipt(transaction, "VOID") }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun buildDetailedVoidSegments(
+        transaction: Transaction,
+        orderDoc: com.google.firebase.firestore.DocumentSnapshot,
+        items: List<com.google.firebase.firestore.DocumentSnapshot>
+    ): List<EscPosPrinter.Segment> {
+        val rs = ReceiptSettings.load(this)
+        val segs = mutableListOf<EscPosPrinter.Segment>()
+        val lwi = ReceiptSettings.lineWidthForSize(rs.fontSizeItems)
+        val lwt = ReceiptSettings.lineWidthForSize(rs.fontSizeTotals)
+        val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
+
+        segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
+        for (line in rs.addressText.split("\n")) {
+            segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
+        }
+        segs += EscPosPrinter.Segment("")
+        segs += EscPosPrinter.Segment("VOID RECEIPT", bold = true, fontSize = 2, centered = true)
+        segs += EscPosPrinter.Segment("")
+
+        val orderNumber = orderDoc.getLong("orderNumber") ?: transaction.orderNumber
+        val orderType = orderDoc.getString("orderType") ?: ""
+        val empName = orderDoc.getString("employeeName") ?: ""
+        val custName = orderDoc.getString("customerName") ?: ""
+        val voidedBy = orderDoc.getString("voidedBy")?.trim()?.takeIf { it.isNotBlank() }
+        val dateStr = if (transaction.date > 0L)
+            SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date(transaction.date))
+        else
+            SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
+
+        if (orderNumber > 0L) {
+            segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        }
+        if (orderType.isNotBlank()) {
+            val label = when (orderType) { "DINE_IN" -> "Dine In"; "TO_GO" -> "To Go"; "BAR_TAB" -> "Bar Tab"; else -> orderType }
+            segs += EscPosPrinter.Segment("Type: $label", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        }
+        if (rs.showServerName && empName.isNotBlank()) segs += EscPosPrinter.Segment("Server: $empName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        if (custName.isNotBlank()) segs += EscPosPrinter.Segment("Customer: $custName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        if (rs.showDateTime) segs += EscPosPrinter.Segment("Date: $dateStr", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        if (voidedBy != null) segs += EscPosPrinter.Segment("Voided by: $voidedBy", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        segs += EscPosPrinter.Segment("")
+
+        segs += EscPosPrinter.Segment("-".repeat(lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+        for (doc in items) {
+            val name = doc.getString("name") ?: doc.getString("itemName") ?: "Item"
+            val qty = (doc.getLong("qty") ?: doc.getLong("quantity") ?: 1L).toInt()
+            val lineTotalCents = doc.getLong("lineTotalInCents") ?: 0L
+            val basePriceCents = doc.getLong("basePriceInCents") ?: lineTotalCents
+            val itemLabel = if (qty > 1) "${qty}x $name" else name
+            if (basePriceCents > 0L) {
+                segs += EscPosPrinter.Segment(formatLine(itemLabel, MoneyUtils.centsToDisplay(lineTotalCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+            } else {
+                segs += EscPosPrinter.Segment(itemLabel, bold = rs.boldItems, fontSize = rs.fontSizeItems)
+            }
+            val mods = doc.get("modifiers") as? List<Map<String, Any>> ?: emptyList()
+            for (mod in mods) {
+                val modName = mod["name"]?.toString() ?: continue
+                val modAction = mod["action"]?.toString() ?: "ADD"
+                val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
+                val modCents = kotlin.math.round(modPrice * 100).toLong()
+                when {
+                    modAction == "REMOVE" -> segs += EscPosPrinter.Segment("  NO $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                    modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                    else -> segs += EscPosPrinter.Segment("  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                }
+            }
+        }
+        segs += EscPosPrinter.Segment("-".repeat(lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+        segs += EscPosPrinter.Segment("")
+
+        val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+        val tipAmountInCents = orderDoc.getLong("tipAmountInCents") ?: 0L
+        val discountInCents = orderDoc.getLong("discountInCents") ?: 0L
+        val taxBreakdown = orderDoc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
+        var taxTotalCents = 0L
+        for (entry in taxBreakdown) { taxTotalCents += (entry["amountInCents"] as? Number)?.toLong() ?: 0L }
+        val subtotalCents = totalInCents + discountInCents - taxTotalCents - tipAmountInCents
+
+        segs += EscPosPrinter.Segment(formatLine("Subtotal", MoneyUtils.centsToDisplay(subtotalCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+
+        val appliedDiscounts = orderDoc.get("appliedDiscounts") as? List<Map<String, Any>> ?: emptyList()
+        val groupedDiscounts = DiscountDisplay.groupByName(appliedDiscounts)
+        if (groupedDiscounts.isNotEmpty()) {
+            for (gd in groupedDiscounts) {
+                val discLabel = DiscountDisplay.formatReceiptLabel(gd.name, gd.type, gd.value)
+                segs += EscPosPrinter.Segment(formatLine(discLabel, "-${MoneyUtils.centsToDisplay(gd.totalCents)}", lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+            }
+        } else if (discountInCents > 0L) {
+            segs += EscPosPrinter.Segment(formatLine("Discount", "-${MoneyUtils.centsToDisplay(discountInCents)}", lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+        }
+
+        for (entry in taxBreakdown) {
+            val tName = entry["name"]?.toString() ?: "Tax"
+            val aCents = (entry["amountInCents"] as? Number)?.toLong() ?: 0L
+            val tRate = (entry["rate"] as? Number)?.toDouble()
+            val tType = entry["taxType"]?.toString()
+            val tLabel = DiscountDisplay.formatTaxLabel(tName, tType, tRate)
+            segs += EscPosPrinter.Segment(formatLine(tLabel, MoneyUtils.centsToDisplay(aCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+        }
+        if (tipAmountInCents > 0L) {
+            segs += EscPosPrinter.Segment(formatLine("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+        }
+        segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
+        segs += EscPosPrinter.Segment(
+            formatLine("VOID TOTAL", "-${MoneyUtils.centsToDisplay(totalInCents)}", lwg),
+            bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal
+        )
+        segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
+        segs += EscPosPrinter.Segment("")
+
+        for (p in transaction.payments) {
+            val pType = p.paymentType
+            if (pType.equals("Cash", ignoreCase = true)) {
+                segs += EscPosPrinter.Segment("Paid with Cash", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+            } else {
+                if (p.cardBrand.isNotBlank() || p.last4.isNotBlank()) {
+                    segs += EscPosPrinter.Segment(buildString { if (p.cardBrand.isNotBlank()) append(p.cardBrand); if (p.last4.isNotBlank()) { if (isNotEmpty()) append(" "); append("**** ${p.last4}") } }, bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+                }
+                if (p.authCode.isNotBlank()) segs += EscPosPrinter.Segment("Auth: ${p.authCode}", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+                if (pType.isNotBlank()) segs += EscPosPrinter.Segment("Type: $pType", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+            }
+            segs += EscPosPrinter.Segment("")
+        }
+        segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+        return segs
+    }
+
     private fun printSimpleReceipt(transaction: Transaction, label: String) {
         val rs = ReceiptSettings.load(this)
         val segs = mutableListOf<EscPosPrinter.Segment>()
@@ -1095,11 +1262,149 @@ class TransactionActivity : AppCompatActivity() {
         segs += EscPosPrinter.Segment("")
         segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
 
-        EscPosPrinter.print(this, segs)
+        EscPosPrinter.print(this, segs, rs)
+    }
+
+    // ===============================
+    // TIP ADJUST
+    // ===============================
+
+    private fun showTipAdjustDialog(transaction: Transaction) {
+        if (transaction.settled) {
+            Toast.makeText(this, "Batch already closed. Cannot adjust tip.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val refId = transaction.payments.firstOrNull()?.referenceId?.takeIf { it.isNotBlank() }
+            ?: transaction.gatewayReferenceId.takeIf { it.isNotBlank() }
+        if (refId.isNullOrBlank()) {
+            Toast.makeText(this, "Cannot adjust tip: missing reference ID", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val existingTipCents = transaction.tipAmountInCents
+        val title = if (existingTipCents > 0L) "Adjust Tip" else "Add Tip"
+
+        val input = EditText(this).apply {
+            hint = "Tip amount (e.g. 5.00)"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setPadding(48, 32, 48, 32)
+            if (existingTipCents > 0L) {
+                setText(String.format(Locale.US, "%.2f", existingTipCents / 100.0))
+                selectAll()
+            }
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(if (existingTipCents > 0L) "Current tip: ${MoneyUtils.centsToDisplay(existingTipCents)}" else null)
+            .setView(input)
+            .setPositiveButton("Confirm") { _, _ ->
+                val tipStr = input.text.toString().trim()
+                val tipDollars = tipStr.toDoubleOrNull()
+                if (tipDollars == null || tipDollars < 0) {
+                    Toast.makeText(this, "Please enter a valid tip amount", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                executeTipAdjust(transaction, refId, tipDollars)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun executeTipAdjust(transaction: Transaction, refId: String, newTipDollars: Double) {
+        val newTipCents = MoneyUtils.dollarsToCents(newTipDollars)
+        val existingTipCents = transaction.tipAmountInCents
+        val baseAmountCents = transaction.amountInCents - existingTipCents
+        val baseAmountDollars = baseAmountCents / 100.0
+
+        Toast.makeText(this, "Processing tip adjustment\u2026", Toast.LENGTH_SHORT).show()
+
+        paymentService.tipAdjust(
+            originalAmount = baseAmountDollars,
+            tipAmount = newTipDollars,
+            referenceId = refId,
+            onSuccess = { _ ->
+                runOnUiThread {
+                    finalizeTipAdjustInFirestore(transaction, newTipCents, existingTipCents, baseAmountCents)
+                }
+            },
+            onFailure = { errorMsg ->
+                runOnUiThread {
+                    AlertDialog.Builder(this)
+                        .setTitle("Tip Adjust Failed")
+                        .setMessage(errorMsg)
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+        )
+    }
+
+    private fun finalizeTipAdjustInFirestore(
+        transaction: Transaction,
+        newTipCents: Long,
+        oldTipCents: Long,
+        baseAmountCents: Long
+    ) {
+        val txDocId = transaction.referenceId
+        val batchId = transaction.batchId
+        val orderId = transaction.orderId
+        val deltaTipCents = newTipCents - oldTipCents
+
+        val txRef = db.collection("Transactions").document(txDocId)
+        val batchRef = if (batchId.isNotBlank()) db.collection("Batches").document(batchId) else null
+        val orderRef = if (orderId.isNotBlank()) db.collection("Orders").document(orderId) else null
+
+        db.runTransaction { firestoreTx ->
+            val txSnap = firestoreTx.get(txRef)
+
+            if (batchRef != null) {
+                val batchSnap = firestoreTx.get(batchRef)
+                val batchClosed = batchSnap.getBoolean("closed") ?: true
+                if (batchClosed) throw Exception("Batch is already closed")
+
+                val currentBatchTips = batchSnap.getLong("totalTipsInCents") ?: 0L
+                firestoreTx.update(batchRef, mapOf(
+                    "totalTipsInCents" to currentBatchTips + deltaTipCents,
+                    "netTotalInCents" to FieldValue.increment(deltaTipCents)
+                ))
+            }
+
+            val newTotalPaidCents = baseAmountCents + newTipCents
+            firestoreTx.update(txRef, mapOf(
+                "tipAmountInCents" to newTipCents,
+                "totalPaidInCents" to newTotalPaidCents,
+                "tipAdjusted" to true,
+                "tipAdjustedAt" to Timestamp.now()
+            ))
+
+            if (orderRef != null) {
+                val orderSnap = firestoreTx.get(orderRef)
+                val orderTotalCents = orderSnap.getLong("totalInCents") ?: 0L
+                val orderTipCents = orderSnap.getLong("tipAmountInCents") ?: 0L
+                val newOrderTotalCents = orderTotalCents - orderTipCents + newTipCents
+
+                firestoreTx.update(orderRef, mapOf(
+                    "tipAmountInCents" to newTipCents,
+                    "totalInCents" to newOrderTotalCents
+                ))
+            }
+
+            null
+        }.addOnSuccessListener {
+            Toast.makeText(this, "Tip adjusted successfully", Toast.LENGTH_SHORT).show()
+        }.addOnFailureListener { e ->
+            Log.e("TIP_ADJUST", "Firestore transaction failed", e)
+            AlertDialog.Builder(this)
+                .setTitle("Error")
+                .setMessage("Tip was approved by processor but failed to save: ${e.message}\nPlease try again or contact support.")
+                .setPositiveButton("OK", null)
+                .show()
+        }
     }
 
     private fun processVoid(transaction: Transaction) {
-        // VOID allowed only when batch is still open (settled == false means batch not closed)
         if (transaction.settled) {
             Toast.makeText(this, "Batch already closed. Cannot void. Use Refund instead.", Toast.LENGTH_LONG).show()
             return
@@ -1268,7 +1573,11 @@ class TransactionActivity : AppCompatActivity() {
                 val orderId = document.getString("orderId") ?: ""
                 val batchId = document.getString("batchId") ?: ""
 
-                txRef.update("voided", true, "payments", updatedPayments)
+                txRef.update(mapOf(
+                    "voided" to true,
+                    "voidedBy" to currentEmployeeName,
+                    "payments" to updatedPayments
+                ))
                     .addOnSuccessListener {
                         if (batchId.isNotBlank()) {
                             db.collection("Batches").document(batchId).update(

@@ -60,6 +60,16 @@
                 android:visibility="gone" />
         </LinearLayout>
 
+        <!-- Voided by (shown only for voided transactions) -->
+        <TextView
+            android:id="@+id/txtVoidedBy"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textSize="12sp"
+            android:textColor="#C62828"
+            android:visibility="gone" />
+
         <!-- Row 2: Payment method name (left) + Amount (right) -->
         <LinearLayout
             android:layout_width="match_parent"

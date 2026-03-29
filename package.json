@@ -5,5 +5,8 @@
     "build": "cd maxipay-dashboard && npm run build",
     "dev": "cd maxipay-dashboard && npm run dev",
     "lint": "cd maxipay-dashboard && npm run lint"
+  },
+  "dependencies": {
+    "@google-cloud/storage": "^7.19.0"
   }
 }

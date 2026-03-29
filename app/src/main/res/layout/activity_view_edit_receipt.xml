@@ -129,6 +129,48 @@
                     android:layout_height="wrap_content"/>
             </LinearLayout>
 
+            <!-- Show Logo toggle -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="12dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Show Logo"
+                    android:textSize="14sp"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchShowLogo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <!-- Show Email toggle -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="12dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Show Email"
+                    android:textSize="14sp"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchShowEmail"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
             <!-- Divider -->
             <View
                 android:layout_width="match_parent"
@@ -598,6 +640,18 @@
                 android:paddingTop="24dp"
                 android:paddingBottom="32dp">
 
+                <!-- Logo -->
+                <ImageView
+                    android:id="@+id/ivLogo"
+                    android:layout_width="120dp"
+                    android:layout_height="120dp"
+                    android:layout_gravity="center_horizontal"
+                    android:scaleType="fitCenter"
+                    android:adjustViewBounds="true"
+                    android:visibility="gone"
+                    android:paddingBottom="8dp"
+                    android:contentDescription="Business logo" />
+
                 <!-- Business Name -->
                 <TextView
                     android:id="@+id/tvBusinessName"
@@ -616,6 +670,17 @@
                     android:textSize="13sp"
                     android:gravity="center"
                     android:paddingTop="4dp"/>
+
+                <!-- Email -->
+                <TextView
+                    android:id="@+id/tvEmail"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:gravity="center"
+                    android:textColor="#888888"
+                    android:visibility="gone"
+                    android:paddingTop="2dp"/>
 
                 <!-- RECEIPT title -->
                 <TextView

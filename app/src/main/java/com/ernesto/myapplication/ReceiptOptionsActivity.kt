@@ -201,18 +201,21 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                                 .addOnSuccessListener { txDoc ->
                                     @Suppress("UNCHECKED_CAST")
                                     val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                                    val rs = ReceiptSettings.load(this)
                                     val segments = buildReceiptSegments(orderDoc, itemsSnap.documents, payments)
-                                    EscPosPrinter.print(this, segments)
+                                    EscPosPrinter.print(this, segments, rs)
                                     goToMainScreen()
                                 }
                                 .addOnFailureListener {
+                                    val rs = ReceiptSettings.load(this)
                                     val segments = buildReceiptSegments(orderDoc, itemsSnap.documents, emptyList())
-                                    EscPosPrinter.print(this, segments)
+                                    EscPosPrinter.print(this, segments, rs)
                                     goToMainScreen()
                                 }
                         } else {
+                            val rs = ReceiptSettings.load(this)
                             val segments = buildReceiptSegments(orderDoc, itemsSnap.documents, emptyList())
-                            EscPosPrinter.print(this, segments)
+                            EscPosPrinter.print(this, segments, rs)
                             goToMainScreen()
                         }
                     }
@@ -261,6 +264,9 @@ class ReceiptOptionsActivity : AppCompatActivity() {
 
         // ── Address ──
         for (line in rs.addressText.split("\n")) address(line)
+        if (rs.showEmail && rs.email.isNotBlank()) {
+            segs += EscPosPrinter.Segment(rs.email, bold = ba, fontSize = 0, centered = true)
+        }
         segs += EscPosPrinter.Segment("")
 
         // ── Order Info (includes RECEIPT label) ──

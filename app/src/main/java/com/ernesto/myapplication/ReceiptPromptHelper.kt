@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.functions.FirebaseFunctions
@@ -99,13 +100,51 @@ object ReceiptPromptHelper {
                                 .whereEqualTo("originalReferenceId", transactionId)
                                 .get()
                                 .addOnSuccessListener { refundSnap ->
-                                    val segs = buildDetailedRefundSegments(activity, orderDoc, itemsSnap.documents, refundSnap.documents)
-                                    EscPosPrinter.print(activity, segs)
-                                    onDismiss?.invoke()
+                                    val rs = ReceiptSettings.load(activity)
+                                    db.collection("Transactions").document(transactionId).get()
+                                        .addOnSuccessListener { txDoc ->
+                                            @Suppress("UNCHECKED_CAST")
+                                            val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                                            val segs = buildDetailedRefundSegments(activity, orderDoc, itemsSnap.documents, refundSnap.documents, payments)
+                                            EscPosPrinter.print(activity, segs, rs)
+                                            onDismiss?.invoke()
+                                        }
+                                        .addOnFailureListener {
+                                            val segs = buildDetailedRefundSegments(activity, orderDoc, itemsSnap.documents, refundSnap.documents, emptyList())
+                                            EscPosPrinter.print(activity, segs, rs)
+                                            onDismiss?.invoke()
+                                        }
                                 }
                                 .addOnFailureListener {
                                     printSimpleLabelReceipt(activity, type.label, orderId, onDismiss)
                                 }
+                        }
+                        .addOnFailureListener { printSimpleLabelReceipt(activity, type.label, orderId, onDismiss) }
+                }
+                .addOnFailureListener { printSimpleLabelReceipt(activity, type.label, orderId, onDismiss) }
+        } else if (type == ReceiptType.VOID && orderId.isNotBlank()) {
+            db.collection("Orders").document(orderId).get()
+                .addOnSuccessListener { orderDoc ->
+                    if (!orderDoc.exists()) { printSimpleLabelReceipt(activity, type.label, orderId, onDismiss); return@addOnSuccessListener }
+                    db.collection("Orders").document(orderId).collection("items").get()
+                        .addOnSuccessListener { itemsSnap ->
+                            val rsVoid = ReceiptSettings.load(activity)
+                            val fetchPayments: (List<Map<String, Any>>) -> Unit = { payments ->
+                                val segs = buildDetailedVoidSegments(activity, orderDoc, itemsSnap.documents, payments)
+                                EscPosPrinter.print(activity, segs, rsVoid)
+                                onDismiss?.invoke()
+                            }
+                            if (transactionId.isNotBlank()) {
+                                db.collection("Transactions").document(transactionId).get()
+                                    .addOnSuccessListener { txDoc ->
+                                        @Suppress("UNCHECKED_CAST")
+                                        val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                                        fetchPayments(payments)
+                                    }
+                                    .addOnFailureListener { fetchPayments(emptyList()) }
+                            } else {
+                                fetchPayments(emptyList())
+                            }
                         }
                         .addOnFailureListener { printSimpleLabelReceipt(activity, type.label, orderId, onDismiss) }
                 }
@@ -120,7 +159,8 @@ object ReceiptPromptHelper {
         activity: Activity,
         orderDoc: com.google.firebase.firestore.DocumentSnapshot,
         items: List<com.google.firebase.firestore.DocumentSnapshot>,
-        refundDocs: List<com.google.firebase.firestore.DocumentSnapshot>
+        refundDocs: List<com.google.firebase.firestore.DocumentSnapshot>,
+        payments: List<Map<String, Any>> = emptyList()
     ): List<EscPosPrinter.Segment> {
         val rs = ReceiptSettings.load(activity)
         val segs = mutableListOf<EscPosPrinter.Segment>()
@@ -256,6 +296,152 @@ object ReceiptPromptHelper {
         )
         segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
         segs += EscPosPrinter.Segment("")
+
+        for (p in payments) {
+            val pType = p["paymentType"]?.toString() ?: ""
+            if (pType.equals("Cash", ignoreCase = true)) {
+                segs += EscPosPrinter.Segment("Cash", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+            } else {
+                val brand = p["cardBrand"]?.toString() ?: ""
+                val l4 = p["last4"]?.toString() ?: ""
+                val auth = p["authCode"]?.toString() ?: ""
+                if (brand.isNotBlank() || l4.isNotBlank()) {
+                    segs += EscPosPrinter.Segment(buildString { if (brand.isNotBlank()) append(brand); if (l4.isNotBlank()) { if (isNotEmpty()) append(" "); append("**** $l4") } }, bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+                }
+                if (auth.isNotBlank()) segs += EscPosPrinter.Segment("Auth: $auth", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+                if (pType.isNotBlank()) segs += EscPosPrinter.Segment("Type: $pType", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+            }
+            segs += EscPosPrinter.Segment("")
+        }
+        segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+        return segs
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun buildDetailedVoidSegments(
+        activity: Activity,
+        orderDoc: com.google.firebase.firestore.DocumentSnapshot,
+        items: List<com.google.firebase.firestore.DocumentSnapshot>,
+        payments: List<Map<String, Any>>
+    ): List<EscPosPrinter.Segment> {
+        val rs = ReceiptSettings.load(activity)
+        val segs = mutableListOf<EscPosPrinter.Segment>()
+        val lwi = ReceiptSettings.lineWidthForSize(rs.fontSizeItems)
+        val lwt = ReceiptSettings.lineWidthForSize(rs.fontSizeTotals)
+        val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
+
+        segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
+        for (line in rs.addressText.split("\n")) {
+            segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
+        }
+        segs += EscPosPrinter.Segment("")
+        segs += EscPosPrinter.Segment("VOID RECEIPT", bold = true, fontSize = 2, centered = true)
+        segs += EscPosPrinter.Segment("")
+
+        val orderNumber = orderDoc.getLong("orderNumber") ?: 0L
+        val orderType = orderDoc.getString("orderType") ?: ""
+        val empName = orderDoc.getString("employeeName") ?: ""
+        val custName = orderDoc.getString("customerName") ?: ""
+        val voidedBy = orderDoc.getString("voidedBy")?.trim()?.takeIf { it.isNotBlank() }
+        val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
+
+        if (orderNumber > 0L) {
+            segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        }
+        if (orderType.isNotBlank()) {
+            val label = when (orderType) { "DINE_IN" -> "Dine In"; "TO_GO" -> "To Go"; "BAR_TAB" -> "Bar Tab"; else -> orderType }
+            segs += EscPosPrinter.Segment("Type: $label", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        }
+        if (rs.showServerName && empName.isNotBlank()) segs += EscPosPrinter.Segment("Server: $empName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        if (custName.isNotBlank()) segs += EscPosPrinter.Segment("Customer: $custName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        if (rs.showDateTime) segs += EscPosPrinter.Segment("Date: $dateStr", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        if (voidedBy != null) segs += EscPosPrinter.Segment("Voided by: $voidedBy", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        segs += EscPosPrinter.Segment("")
+
+        segs += EscPosPrinter.Segment("-".repeat(lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+        for (doc in items) {
+            val name = doc.getString("name") ?: doc.getString("itemName") ?: "Item"
+            val qty = (doc.getLong("qty") ?: doc.getLong("quantity") ?: 1L).toInt()
+            val lineTotalCents = doc.getLong("lineTotalInCents") ?: 0L
+            val basePriceCents = doc.getLong("basePriceInCents") ?: lineTotalCents
+            val itemLabel = if (qty > 1) "${qty}x $name" else name
+            if (basePriceCents > 0L) {
+                segs += EscPosPrinter.Segment(formatLine(itemLabel, MoneyUtils.centsToDisplay(lineTotalCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+            } else {
+                segs += EscPosPrinter.Segment(itemLabel, bold = rs.boldItems, fontSize = rs.fontSizeItems)
+            }
+            val mods = doc.get("modifiers") as? List<Map<String, Any>> ?: emptyList()
+            for (mod in mods) {
+                val modName = mod["name"]?.toString() ?: continue
+                val modAction = mod["action"]?.toString() ?: "ADD"
+                val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
+                val modCents = kotlin.math.round(modPrice * 100).toLong()
+                when {
+                    modAction == "REMOVE" -> segs += EscPosPrinter.Segment("  NO $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                    modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                    else -> segs += EscPosPrinter.Segment("  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                }
+            }
+        }
+        segs += EscPosPrinter.Segment("-".repeat(lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+        segs += EscPosPrinter.Segment("")
+
+        val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+        val tipAmountInCents = orderDoc.getLong("tipAmountInCents") ?: 0L
+        val discountInCents = orderDoc.getLong("discountInCents") ?: 0L
+        val taxBreakdown = orderDoc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
+        var taxTotalCents = 0L
+        for (entry in taxBreakdown) { taxTotalCents += (entry["amountInCents"] as? Number)?.toLong() ?: 0L }
+        val subtotalCents = totalInCents + discountInCents - taxTotalCents - tipAmountInCents
+
+        segs += EscPosPrinter.Segment(formatLine("Subtotal", MoneyUtils.centsToDisplay(subtotalCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+
+        val appliedDiscounts = orderDoc.get("appliedDiscounts") as? List<Map<String, Any>> ?: emptyList()
+        val groupedDiscounts = DiscountDisplay.groupByName(appliedDiscounts)
+        if (groupedDiscounts.isNotEmpty()) {
+            for (gd in groupedDiscounts) {
+                val discLabel = DiscountDisplay.formatReceiptLabel(gd.name, gd.type, gd.value)
+                segs += EscPosPrinter.Segment(formatLine(discLabel, "-${MoneyUtils.centsToDisplay(gd.totalCents)}", lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+            }
+        } else if (discountInCents > 0L) {
+            segs += EscPosPrinter.Segment(formatLine("Discount", "-${MoneyUtils.centsToDisplay(discountInCents)}", lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+        }
+
+        for (entry in taxBreakdown) {
+            val tName = entry["name"]?.toString() ?: "Tax"
+            val aCents = (entry["amountInCents"] as? Number)?.toLong() ?: 0L
+            val tRate = (entry["rate"] as? Number)?.toDouble()
+            val tType = entry["taxType"]?.toString()
+            val tLabel = DiscountDisplay.formatTaxLabel(tName, tType, tRate)
+            segs += EscPosPrinter.Segment(formatLine(tLabel, MoneyUtils.centsToDisplay(aCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+        }
+        if (tipAmountInCents > 0L) {
+            segs += EscPosPrinter.Segment(formatLine("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+        }
+        segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
+        segs += EscPosPrinter.Segment(
+            formatLine("VOID TOTAL", "-${MoneyUtils.centsToDisplay(totalInCents)}", lwg),
+            bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal
+        )
+        segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
+        segs += EscPosPrinter.Segment("")
+
+        for (p in payments) {
+            val pType = p["paymentType"]?.toString() ?: ""
+            if (pType.equals("Cash", ignoreCase = true)) {
+                segs += EscPosPrinter.Segment("Paid with Cash", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+            } else {
+                val brand = p["cardBrand"]?.toString() ?: ""
+                val l4 = p["last4"]?.toString() ?: ""
+                val auth = p["authCode"]?.toString() ?: ""
+                if (brand.isNotBlank() || l4.isNotBlank()) {
+                    segs += EscPosPrinter.Segment(buildString { if (brand.isNotBlank()) append(brand); if (l4.isNotBlank()) { if (isNotEmpty()) append(" "); append("**** $l4") } }, bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+                }
+                if (auth.isNotBlank()) segs += EscPosPrinter.Segment("Auth: $auth", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+                if (pType.isNotBlank()) segs += EscPosPrinter.Segment("Type: $pType", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+            }
+            segs += EscPosPrinter.Segment("")
+        }
         segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
         return segs
     }
@@ -298,7 +484,7 @@ object ReceiptPromptHelper {
                 segs += EscPosPrinter.Segment("")
                 segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
 
-                EscPosPrinter.print(activity, segs)
+                EscPosPrinter.print(activity, segs, rs)
                 onDismiss?.invoke()
             }
             .addOnFailureListener { onDismiss?.invoke() }

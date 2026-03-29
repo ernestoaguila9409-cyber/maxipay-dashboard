@@ -43,6 +43,7 @@ data class Transaction(
     val entryType: String = "",
 
     val voided: Boolean = false,
+    val voidedBy: String = "",
     /** True when the batch was closed; only Refund is allowed, not Void. */
     val settled: Boolean = false,
 
@@ -55,5 +56,10 @@ data class Transaction(
     val isMixed: Boolean = false,
 
     /** All payment methods for this transaction (from Firestore payments array). */
-    val payments: List<TransactionPayment> = emptyList()
+    val payments: List<TransactionPayment> = emptyList(),
+
+    /** Tip amount in cents; set after TipAdjust API call. */
+    val tipAmountInCents: Long = 0L,
+    /** True after at least one successful tip adjustment. */
+    val tipAdjusted: Boolean = false
 )

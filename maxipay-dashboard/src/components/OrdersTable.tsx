@@ -2,6 +2,8 @@
 
 import { Clock, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
 
+export type OrderSource = "pos" | "kitchenhub" | "ubereats" | "doordash";
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -10,12 +12,22 @@ export interface Order {
   status: string;
   date: string;
   time: string;
+  source?: OrderSource;
+  externalOrderId?: string | null;
+  rawPayload?: unknown;
 }
 
 interface OrdersTableProps {
   orders: Order[];
   loading?: boolean;
 }
+
+const sourceBadgeConfig: Record<string, { label: string; className: string } | null> = {
+  pos: null,
+  kitchenhub: { label: "Delivery", className: "bg-violet-50 text-violet-700" },
+  ubereats: { label: "Uber Eats", className: "bg-green-50 text-green-700" },
+  doordash: { label: "DoorDash", className: "bg-red-50 text-red-700" },
+};
 
 const statusConfig: Record<
   string,
@@ -73,6 +85,9 @@ export default function OrdersTable({ orders, loading }: OrdersTableProps) {
                 Order #
               </th>
               <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Source
+              </th>
+              <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Type
               </th>
               <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -102,6 +117,17 @@ export default function OrdersTable({ orders, loading }: OrdersTableProps) {
                     <span className="text-sm font-semibold text-slate-800">
                       #{order.orderNumber}
                     </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    {(() => {
+                      const badge = sourceBadgeConfig[order.source || "pos"];
+                      if (!badge) return <span className="text-xs text-slate-400">POS</span>;
+                      return (
+                        <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${badge.className}`}>
+                          {badge.label}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-sm text-slate-600 capitalize">

@@ -242,10 +242,13 @@ export default function BusinessInformationPage() {
     useState<ReceiptVariant>("original");
   const [ps, setPs] = useState<PrintSettings>(DEFAULT_PRINT);
 
+  const [psDirty, setPsDirty] = useState(false);
+  const psTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  /* ── Firestore ── */
+  /* ── Firestore: business info ── */
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -274,6 +277,43 @@ export default function BusinessInformationPage() {
     );
     return () => unsub();
   }, [dirty]);
+
+  /* ── Firestore: receipt / print settings ── */
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      doc(db, DOC_REF, "receiptSettings"),
+      (snap) => {
+        if (snap.exists() && !psDirty) {
+          const d = snap.data();
+          setPs({
+            showServerName: d.showServerName ?? DEFAULT_PRINT.showServerName,
+            showDateTime: d.showDateTime ?? DEFAULT_PRINT.showDateTime,
+            showLogo: d.showLogo ?? DEFAULT_PRINT.showLogo,
+            showEmail: d.showEmail ?? DEFAULT_PRINT.showEmail,
+            boldBizName: d.boldBizName ?? DEFAULT_PRINT.boldBizName,
+            boldAddress: d.boldAddress ?? DEFAULT_PRINT.boldAddress,
+            boldOrderInfo: d.boldOrderInfo ?? DEFAULT_PRINT.boldOrderInfo,
+            boldItems: d.boldItems ?? DEFAULT_PRINT.boldItems,
+            boldTotals: d.boldTotals ?? DEFAULT_PRINT.boldTotals,
+            boldGrandTotal: d.boldGrandTotal ?? DEFAULT_PRINT.boldGrandTotal,
+            boldFooter: d.boldFooter ?? DEFAULT_PRINT.boldFooter,
+            fontSizeBizName: d.fontSizeBizName ?? DEFAULT_PRINT.fontSizeBizName,
+            fontSizeAddress: d.fontSizeAddress ?? DEFAULT_PRINT.fontSizeAddress,
+            fontSizeOrderInfo: d.fontSizeOrderInfo ?? DEFAULT_PRINT.fontSizeOrderInfo,
+            fontSizeItems: d.fontSizeItems ?? DEFAULT_PRINT.fontSizeItems,
+            fontSizeTotals: d.fontSizeTotals ?? DEFAULT_PRINT.fontSizeTotals,
+            fontSizeGrandTotal: d.fontSizeGrandTotal ?? DEFAULT_PRINT.fontSizeGrandTotal,
+            fontSizeFooter: d.fontSizeFooter ?? DEFAULT_PRINT.fontSizeFooter,
+          });
+        }
+      },
+      (err) => {
+        console.error("[PrintSettings] snapshot error:", err);
+      }
+    );
+    return () => unsub();
+  }, [psDirty]);
 
   const update = useCallback(
     (field: keyof BusinessData, value: string) => {
@@ -361,10 +401,28 @@ export default function BusinessInformationPage() {
     setUploadError(null);
   }, []);
 
+  const savePsToFirestore = useCallback((updated: PrintSettings) => {
+    if (psTimerRef.current) clearTimeout(psTimerRef.current);
+    setPsDirty(true);
+    psTimerRef.current = setTimeout(async () => {
+      try {
+        await setDoc(doc(db, DOC_REF, "receiptSettings"), updated, { merge: true });
+        setPsDirty(false);
+      } catch (e) {
+        console.error("[PrintSettings] save error:", e);
+        setPsDirty(false);
+      }
+    }, 800);
+  }, []);
+
   const pSet = useCallback(
     <K extends keyof PrintSettings>(k: K, v: PrintSettings[K]) =>
-      setPs((p) => ({ ...p, [k]: v })),
-    []
+      setPs((prev) => {
+        const next = { ...prev, [k]: v };
+        savePsToFirestore(next);
+        return next;
+      }),
+    [savePsToFirestore]
   );
 
   /* ── loading ── */
@@ -958,7 +1016,7 @@ export default function BusinessInformationPage() {
 
                   <div className="pt-1 pb-2">
                     <p className="text-[11px] text-slate-400 text-center">
-                      Changes preview in real-time. Firestore sync coming soon.
+                      Changes auto-save and sync with the POS app in real-time.
                     </p>
                   </div>
                 </div>

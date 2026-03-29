@@ -63,6 +63,8 @@ export default function OrdersPage() {
               hour: "2-digit",
               minute: "2-digit",
             }),
+            source: data.source || "pos",
+            externalOrderId: data.externalOrderId || null,
           });
         });
 

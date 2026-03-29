@@ -63,6 +63,12 @@ interface MenuEntity {
   scheduleIds: string[];
 }
 
+interface ExternalMappings {
+  kitchenhub?: string;
+  ubereats?: string;
+  doordash?: string;
+}
+
 interface MenuItem {
   id: string;
   name: string;
@@ -80,6 +86,7 @@ interface MenuItem {
   scheduleIds: string[];
   categoryScheduled: boolean;
   categoryScheduleIds: string[];
+  externalMappings?: ExternalMappings;
 }
 
 interface ModifierGroup {
@@ -275,6 +282,7 @@ export default function MenuPage() {
             menuId: data.menuId ?? "",
             isScheduled: data.isScheduled ?? false,
             scheduleIds: Array.isArray(data.scheduleIds) ? data.scheduleIds : [],
+            externalMappings: data.externalMappings ?? {},
           });
         });
         itemSnap.current = list;
@@ -731,6 +739,7 @@ export default function MenuPage() {
         taxIds: Object.entries(addTaxes)
           .filter(([, v]) => v)
           .map(([k]) => k),
+        externalMappings: {},
       };
 
       if (!addUseCategoryTypes) {
@@ -995,9 +1004,9 @@ export default function MenuPage() {
           </div>
         ) : (
           <div className="flex gap-5 min-h-[calc(100vh-11rem)]">
-            {/* ── Category sidebar (fixed 220px) ── */}
+            {/* ── Category sidebar ── */}
             {categories.length > 0 && (
-              <div className="hidden lg:block w-[280px] shrink-0">
+              <div className="hidden lg:block w-[320px] shrink-0">
                 <div className="sticky top-4 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="px-4 py-3 border-b border-slate-100">
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Categories</p>
@@ -1005,14 +1014,14 @@ export default function MenuPage() {
                   <nav className="flex flex-col max-h-[calc(100vh-12rem)] overflow-y-auto py-1">
                     <button
                       onClick={() => setActiveCategory(null)}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-base transition-all duration-150 ${
+                      className={`w-full flex items-center justify-between px-3 py-2.5 text-sm transition-all duration-150 ${
                         activeCategory === null
                           ? "bg-blue-50 text-blue-700 font-bold border-l-4 border-blue-600"
                           : "text-slate-600 font-semibold hover:bg-slate-50 border-l-4 border-transparent"
                       }`}
                     >
                       <span>All Items</span>
-                      <span className="text-xs text-slate-400 font-medium tabular-nums bg-slate-100 px-2 py-0.5 rounded-full">{itemsForMenuType.length}</span>
+                      <span className="text-xs text-slate-400 font-medium tabular-nums bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">{itemsForMenuType.length}</span>
                     </button>
                     {categories.filter((cat) => !menuTypeFilter || visibleCategoryIds.has(cat.id)).map((cat) => {
                       const catItemCount = itemsForMenuType.filter((i) => i.categoryId === cat.id).length;
@@ -1027,34 +1036,34 @@ export default function MenuPage() {
                         >
                           <button
                             onClick={() => setActiveCategory(activeCategory === cat.id ? null : cat.id)}
-                            className={`flex-1 flex items-center justify-between px-4 py-3 text-base truncate ${
+                            className={`flex-1 flex items-center justify-between px-3 py-2.5 text-sm min-w-0 ${
                               activeCategory === cat.id ? "text-blue-700 font-bold" : "text-slate-600 font-semibold"
                             }`}
                           >
-                            <span className="flex items-center gap-2 truncate">
-                              <span className="truncate">{cat.name}</span>
+                            <span className="flex items-center gap-1.5 min-w-0">
+                              <span className="break-words leading-snug">{cat.name}</span>
                               {cat.scheduleIds.length > 0 && (
                                 <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-500 font-bold leading-none shrink-0" title={cat.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}>
                                   Sched
                                 </span>
                               )}
                             </span>
-                            <span className="text-xs text-slate-400 font-medium ml-2 tabular-nums bg-slate-100 px-2 py-0.5 rounded-full">{catItemCount}</span>
+                            <span className="text-xs text-slate-400 font-medium ml-2 tabular-nums bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">{catItemCount}</span>
                           </button>
-                          <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover/cat:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-0 pr-1 opacity-0 group-hover/cat:opacity-100 transition-opacity shrink-0">
                             <button
                               onClick={(e) => { e.stopPropagation(); openEditCategory(cat); }}
-                              className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors"
+                              className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors"
                               title="Edit category"
                             >
-                              <Pencil size={12} />
+                              <Pencil size={11} />
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); setDeleteCategoryTarget(cat); }}
-                              className="p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                              className="p-1 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
                               title="Delete category"
                             >
-                              <Trash2 size={12} />
+                              <Trash2 size={11} />
                             </button>
                           </div>
                         </div>
@@ -1110,10 +1119,10 @@ export default function MenuPage() {
                         <div className="hidden sm:flex items-center gap-4 px-5 py-3 bg-slate-50 border-b border-slate-200">
                           {selectMode && <div className="w-5 shrink-0" />}
                           <div className="flex-1 min-w-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Item</div>
-                          <div className="w-44 text-center shrink-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Type</div>
-                          <div className="w-36 text-center shrink-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Info</div>
-                          <div className="w-24 text-right shrink-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Price</div>
-                          {!selectMode && <div className="w-20 shrink-0" />}
+                          <div className="w-40 text-center shrink-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Type</div>
+                          <div className="w-32 text-center shrink-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Info</div>
+                          <div className="w-20 text-right shrink-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Price</div>
+                          {!selectMode && <div className="w-16 shrink-0" />}
                         </div>
                         <div className="divide-y divide-slate-200">
                           {groupItems.map((item) => {
@@ -1152,14 +1161,14 @@ export default function MenuPage() {
                                     <span className="text-xs text-amber-500 font-semibold shrink-0">{item.stock} left</span>
                                   )}
                                 </div>
-                                <div className="w-44 hidden sm:flex items-center justify-center gap-1.5 shrink-0 flex-wrap">
+                                <div className="w-40 hidden sm:flex items-center justify-center gap-1.5 shrink-0 flex-wrap">
                                   {item.effectiveOrderTypes.map((t) => (
                                     <span key={t} className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-semibold">
                                       {ORDER_TYPE_LABELS[t] ?? t}
                                     </span>
                                   ))}
                                 </div>
-                                <div className="w-36 hidden sm:flex items-center justify-center gap-1.5 shrink-0 flex-wrap">
+                                <div className="w-32 hidden sm:flex items-center justify-center gap-1.5 shrink-0 flex-wrap">
                                   {!item.categoryScheduled && !item.isScheduled && (
                                     <span className="text-[11px] px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-semibold">
                                       POS
@@ -1196,7 +1205,7 @@ export default function MenuPage() {
                                     />
                                   )}
                                 </div>
-                                <span className="w-24 text-right text-lg font-bold text-slate-800 shrink-0 tabular-nums">
+                                <span className="w-20 text-right text-lg font-bold text-slate-800 shrink-0 tabular-nums">
                                   {Object.keys(item.prices).length > 1 ? (
                                     <span title={Object.entries(item.prices).map(([k, v]) => `${menuEntityMap.get(k) ?? k}: $${v.toFixed(2)}`).join(", ")}>
                                       ${Math.min(...Object.values(item.prices)).toFixed(2)}+
@@ -1206,7 +1215,7 @@ export default function MenuPage() {
                                   )}
                                 </span>
                                 {!selectMode && (
-                                  <div className="w-20 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                  <div className="w-16 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                                     <button
                                       onClick={(e) => { e.stopPropagation(); openEdit(item); }}
                                       className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"

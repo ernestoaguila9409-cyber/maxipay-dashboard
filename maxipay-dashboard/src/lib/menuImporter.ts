@@ -567,6 +567,7 @@ export async function importMenuToFirestore(
         categoryId: resolvedCategoryId,
         modifierGroupIds: validModGroupIds,
         taxIds: validTaxIds,
+        externalMappings: {},
       };
 
       if (item.orderTypes.length > 0) {

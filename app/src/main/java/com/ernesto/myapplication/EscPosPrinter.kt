@@ -4,18 +4,20 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothSocket
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.util.Log
 import android.widget.Toast
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
-/**
- * Settings-driven ESC/POS Bluetooth printer targeting the LANDI
- * built-in virtual printer at 00:01:02:03:0A:0B.
- */
 object EscPosPrinter {
 
     private const val TAG = "EscPosPrinter"
@@ -23,7 +25,7 @@ object EscPosPrinter {
     private const val LANDI_BT_ADDRESS = "00:01:02:03:0A:0B"
     private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
-    // ── ESC/POS constants ────────────────────────────────────────
+    private const val PRINTER_WIDTH_PX = 384
 
     private val INIT         = byteArrayOf(0x1B, 0x40)
     private val ALIGN_LEFT   = byteArrayOf(0x1B, 0x61, 0x00)
@@ -34,22 +36,38 @@ object EscPosPrinter {
     private val LF           = byteArrayOf(0x0A)
     private val CUT          = byteArrayOf(0x1D, 0x56, 0x00)
 
-    // ── Segment model ────────────────────────────────────────────
+    // ── Logo cache ────────────────────────────────────────────────
+
+    private var cachedLogoUrl: String = ""
+    private var cachedLogoBitmap: Bitmap? = null
+
+    fun clearLogoCache() {
+        cachedLogoBitmap?.recycle()
+        cachedLogoBitmap = null
+        cachedLogoUrl = ""
+    }
+
+    // ── Segment model ─────────────────────────────────────────────
 
     data class Segment(
         val text: String,
         val bold: Boolean = false,
-        val fontSize: Int = 0,      // 0=Normal, 1=Large, 2=X-Large
+        val fontSize: Int = 0,
         val centered: Boolean = false
     )
 
-    // ── Public API ───────────────────────────────────────────────
+    // ── Public API ────────────────────────────────────────────────
 
     @SuppressLint("MissingPermission")
-    fun print(context: Context, segments: List<Segment>) {
+    fun print(context: Context, segments: List<Segment>, settings: ReceiptSettings? = null) {
         Log.d(TAG, "Print requested (${segments.size} segments) → $LANDI_BT_ADDRESS")
 
         Thread {
+            var logoBitmap: Bitmap? = null
+            if (settings != null && settings.showLogo && settings.logoUrl.isNotBlank()) {
+                logoBitmap = downloadLogo(settings.logoUrl)
+            }
+
             var socket: BluetoothSocket? = null
             try {
                 val adapter = BluetoothAdapter.getDefaultAdapter()
@@ -68,6 +86,14 @@ object EscPosPrinter {
                 val out = socket.outputStream
                 out.write(INIT)
 
+                if (logoBitmap != null) {
+                    out.write(ALIGN_CENTER)
+                    out.write(SIZE_NORMAL)
+                    out.write(BOLD_OFF)
+                    printBitmap(out, logoBitmap)
+                    out.write(LF)
+                }
+
                 for (seg in segments) {
                     out.write(if (seg.centered) ALIGN_CENTER else ALIGN_LEFT)
                     out.write(ReceiptSettings.escPosSizeBytes(seg.fontSize))
@@ -75,7 +101,6 @@ object EscPosPrinter {
                     out.printLine(seg.text)
                 }
 
-                // Reset to normal, feed, cut
                 out.write(SIZE_NORMAL)
                 out.write(BOLD_OFF)
                 out.write(ALIGN_LEFT)
@@ -94,11 +119,11 @@ object EscPosPrinter {
         }.start()
     }
 
-    // ── Test receipt (sample data, driven by settings) ───────────
+    // ── Test receipt ──────────────────────────────────────────────
 
     fun printTestReceipt(context: Context, settings: ReceiptSettings) {
         val segs = buildTestSegments(settings)
-        print(context, segs)
+        print(context, segs, settings)
     }
 
     fun buildTestSegments(settings: ReceiptSettings): List<Segment> {
@@ -117,16 +142,18 @@ object EscPosPrinter {
         val lwt = ReceiptSettings.lineWidthForSize(ft)
         val lwg = ReceiptSettings.lineWidthForSize(fg)
 
-        // Business Name
         segs += Segment(rs.businessName, bold = bn, fontSize = fn, centered = true)
 
-        // Address
         for (line in rs.addressText.split("\n")) {
             segs += Segment(line, bold = ba, fontSize = fa, centered = true)
         }
+
+        if (rs.showEmail && rs.email.isNotBlank()) {
+            segs += Segment(rs.email, bold = ba, fontSize = 0, centered = true)
+        }
+
         segs += Segment("")
 
-        // Order Info (includes RECEIPT label)
         segs += Segment("RECEIPT", bold = bo, fontSize = fo, centered = true)
         segs += Segment("", fontSize = fo, centered = true)
         val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
@@ -136,7 +163,6 @@ object EscPosPrinter {
         if (rs.showDateTime) segs += Segment("Date: $dateStr", bold = bo, fontSize = fo, centered = true)
         segs += Segment("")
 
-        // Items
         segs += Segment("-".repeat(lwi), bold = bi, fontSize = fi)
         segs += Segment(formatLine("2x Burger", "$19.98", lwi), bold = bi, fontSize = fi)
         segs += Segment(formatLine("  + Extra Cheese", "$1.50", lwi), bold = bi, fontSize = fi)
@@ -147,29 +173,101 @@ object EscPosPrinter {
         segs += Segment("-".repeat(lwi), bold = bi, fontSize = fi)
         segs += Segment("")
 
-        // Totals
         segs += Segment(formatLine("Subtotal", "$56.45", lwt), bold = bt, fontSize = ft)
         segs += Segment(formatLine("Tax (8.25%)", "$4.66", lwt), bold = bt, fontSize = ft)
         segs += Segment(formatLine("Tip", "$8.47", lwt), bold = bt, fontSize = ft)
         segs += Segment("=".repeat(lwt), bold = bt, fontSize = ft)
 
-        // Grand total
         segs += Segment(formatLine("TOTAL", "$69.58", lwg), bold = bg, fontSize = fg)
         segs += Segment("")
 
-        // Payment info
         segs += Segment("Visa **** 1234", bold = bf, fontSize = ff, centered = true)
         segs += Segment("Auth: 123456", bold = bf, fontSize = ff, centered = true)
         segs += Segment("Type: Credit", bold = bf, fontSize = ff, centered = true)
         segs += Segment("")
 
-        // Footer
         segs += Segment("Thank you for dining with us!", bold = bf, fontSize = ff, centered = true)
 
         return segs
     }
 
-    // ── Helpers ──────────────────────────────────────────────────
+    // ── Logo download + cache ─────────────────────────────────────
+
+    private fun downloadLogo(url: String): Bitmap? {
+        if (url == cachedLogoUrl && cachedLogoBitmap != null) {
+            Log.d(TAG, "Using cached logo bitmap")
+            return cachedLogoBitmap
+        }
+        return try {
+            Log.d(TAG, "Downloading logo: $url")
+            val client = OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS)
+                .build()
+            val request = Request.Builder().url(url).build()
+            val response = client.newCall(request).execute()
+            val bytes = response.body?.bytes() ?: return null
+            val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+
+            val maxW = PRINTER_WIDTH_PX / 2
+            val scaled = if (original.width > maxW) {
+                val ratio = maxW.toFloat() / original.width
+                val newH = (original.height * ratio).toInt()
+                Bitmap.createScaledBitmap(original, maxW, newH, true).also {
+                    if (it !== original) original.recycle()
+                }
+            } else {
+                original
+            }
+
+            cachedLogoBitmap?.recycle()
+            cachedLogoUrl = url
+            cachedLogoBitmap = scaled
+            Log.d(TAG, "Logo ready: ${scaled.width}x${scaled.height}")
+            scaled
+        } catch (e: Exception) {
+            Log.e(TAG, "Logo download failed: ${e.message}", e)
+            null
+        }
+    }
+
+    // ── ESC/POS raster image (GS v 0) ────────────────────────────
+
+    private fun printBitmap(out: OutputStream, bitmap: Bitmap) {
+        val width = bitmap.width
+        val height = bitmap.height
+        val bytesPerRow = (width + 7) / 8
+
+        val header = byteArrayOf(
+            0x1D, 0x76, 0x30, 0x00,
+            (bytesPerRow and 0xFF).toByte(),
+            ((bytesPerRow shr 8) and 0xFF).toByte(),
+            (height and 0xFF).toByte(),
+            ((height shr 8) and 0xFF).toByte()
+        )
+        out.write(header)
+
+        val rowBuf = ByteArray(bytesPerRow)
+        for (y in 0 until height) {
+            rowBuf.fill(0)
+            for (x in 0 until width) {
+                val pixel = bitmap.getPixel(x, y)
+                val r = Color.red(pixel)
+                val g = Color.green(pixel)
+                val b = Color.blue(pixel)
+                val a = Color.alpha(pixel)
+                if (a < 128) continue
+                val luminance = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+                if (luminance < 128) {
+                    rowBuf[x / 8] = (rowBuf[x / 8].toInt() or (0x80 shr (x % 8))).toByte()
+                }
+            }
+            out.write(rowBuf)
+        }
+        out.flush()
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────
 
     private fun OutputStream.printLine(text: String) {
         write(text.toByteArray(Charsets.UTF_8))

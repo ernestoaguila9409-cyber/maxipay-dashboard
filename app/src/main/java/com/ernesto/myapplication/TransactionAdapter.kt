@@ -29,6 +29,7 @@ class TransactionAdapter(
         val txtDateTime: TextView = itemView.findViewById(R.id.txtDateTime)
         val txtTxnNumber: TextView = itemView.findViewById(R.id.txtTxnNumber)
         val txtRefunds: TextView = itemView.findViewById(R.id.txtRefunds)
+        val txtVoidedBy: TextView = itemView.findViewById(R.id.txtVoidedBy)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -198,8 +199,16 @@ class TransactionAdapter(
             holder.txtVoidBadge.visibility = View.VISIBLE
             holder.itemView.alpha = 0.6f
             holder.txtAmount.paintFlags = holder.txtAmount.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+
+            if (sale.voidedBy.isNotBlank()) {
+                holder.txtVoidedBy.text = "Voided by: ${sale.voidedBy}"
+                holder.txtVoidedBy.visibility = View.VISIBLE
+            } else {
+                holder.txtVoidedBy.visibility = View.GONE
+            }
         } else {
             holder.txtVoidBadge.visibility = View.GONE
+            holder.txtVoidedBy.visibility = View.GONE
             holder.itemView.alpha = 1.0f
             holder.txtAmount.paintFlags = holder.txtAmount.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
         }

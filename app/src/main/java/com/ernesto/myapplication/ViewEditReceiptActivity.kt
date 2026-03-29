@@ -7,8 +7,10 @@ import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -16,6 +18,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import coil.load
+import coil.transform.RoundedCornersTransformation
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -27,14 +31,15 @@ class ViewEditReceiptActivity : AppCompatActivity() {
     }
 
     private lateinit var settings: ReceiptSettings
+    private var currentLogoUrl: String = ""
 
-    // Input fields
     private lateinit var etBusinessName: EditText
     private lateinit var etAddress: EditText
     private lateinit var switchShowServer: SwitchCompat
     private lateinit var switchShowDateTime: SwitchCompat
+    private lateinit var switchShowLogo: SwitchCompat
+    private lateinit var switchShowEmail: SwitchCompat
 
-    // Bold toggles
     private lateinit var switchBoldBizName: SwitchCompat
     private lateinit var switchBoldAddress: SwitchCompat
     private lateinit var switchBoldOrderInfo: SwitchCompat
@@ -43,7 +48,6 @@ class ViewEditReceiptActivity : AppCompatActivity() {
     private lateinit var switchBoldGrandTotal: SwitchCompat
     private lateinit var switchBoldFooter: SwitchCompat
 
-    // Font size
     private lateinit var seekFontBizName: SeekBar
     private lateinit var seekFontAddress: SeekBar
     private lateinit var seekFontOrderInfo: SeekBar
@@ -59,9 +63,10 @@ class ViewEditReceiptActivity : AppCompatActivity() {
     private lateinit var tvFontGrandTotalVal: TextView
     private lateinit var tvFontFooterVal: TextView
 
-    // Preview
+    private lateinit var ivLogo: ImageView
     private lateinit var tvBusinessName: TextView
     private lateinit var tvAddress: TextView
+    private lateinit var tvEmail: TextView
     private lateinit var tvReceiptTitle: TextView
     private lateinit var tvOrderInfo: TextView
     private lateinit var tvSep1: TextView
@@ -84,6 +89,12 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         restoreInputs()
         populatePreview()
         setupListeners()
+        startFirestoreSync()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        ReceiptSettings.stopBusinessInfoSync()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -91,13 +102,24 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         return true
     }
 
-    // ── View binding ─────────────────────────────────────────────
+    private fun startFirestoreSync() {
+        ReceiptSettings.setOnSettingsChangedListener { updated ->
+            runOnUiThread {
+                settings = updated
+                restoreInputs()
+                populatePreview()
+            }
+        }
+        ReceiptSettings.startBusinessInfoSync(this)
+    }
 
     private fun bindViews() {
         etBusinessName = findViewById(R.id.etBusinessName)
         etAddress = findViewById(R.id.etAddress)
         switchShowServer = findViewById(R.id.switchShowServer)
         switchShowDateTime = findViewById(R.id.switchShowDateTime)
+        switchShowLogo = findViewById(R.id.switchShowLogo)
+        switchShowEmail = findViewById(R.id.switchShowEmail)
 
         switchBoldBizName = findViewById(R.id.switchBoldBizName)
         switchBoldAddress = findViewById(R.id.switchBoldAddress)
@@ -122,8 +144,10 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         tvFontGrandTotalVal = findViewById(R.id.tvFontGrandTotalVal)
         tvFontFooterVal = findViewById(R.id.tvFontFooterVal)
 
+        ivLogo = findViewById(R.id.ivLogo)
         tvBusinessName = findViewById(R.id.tvBusinessName)
         tvAddress = findViewById(R.id.tvAddress)
+        tvEmail = findViewById(R.id.tvEmail)
         tvReceiptTitle = findViewById(R.id.tvReceiptTitle)
         tvOrderInfo = findViewById(R.id.tvOrderInfo)
         tvSep1 = findViewById(R.id.tvSep1)
@@ -141,6 +165,8 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         etAddress.setText(settings.addressText)
         switchShowServer.isChecked = settings.showServerName
         switchShowDateTime.isChecked = settings.showDateTime
+        switchShowLogo.isChecked = settings.showLogo
+        switchShowEmail.isChecked = settings.showEmail
 
         switchBoldBizName.isChecked = settings.boldBizName
         switchBoldAddress.isChecked = settings.boldAddress
@@ -166,8 +192,6 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         tvFontFooterVal.text = ReceiptSettings.FONT_SIZE_LABELS[settings.fontSizeFooter]
     }
 
-    // ── Listeners ────────────────────────────────────────────────
-
     private fun setupListeners() {
         etBusinessName.addTextChangedListener(simpleWatcher {
             settings = settings.copy(businessName = it)
@@ -184,8 +208,13 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         switchShowDateTime.setOnCheckedChangeListener { _, c ->
             settings = settings.copy(showDateTime = c); populatePreview()
         }
+        switchShowLogo.setOnCheckedChangeListener { _, c ->
+            settings = settings.copy(showLogo = c); populatePreview()
+        }
+        switchShowEmail.setOnCheckedChangeListener { _, c ->
+            settings = settings.copy(showEmail = c); populatePreview()
+        }
 
-        // Bold toggles
         switchBoldBizName.setOnCheckedChangeListener { _, c ->
             settings = settings.copy(boldBizName = c); populatePreview()
         }
@@ -208,7 +237,6 @@ class ViewEditReceiptActivity : AppCompatActivity() {
             settings = settings.copy(boldFooter = c); populatePreview()
         }
 
-        // Font size seekbars
         fun fontListener(label: TextView, copy: (Int) -> ReceiptSettings) =
             object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar?, p: Int, user: Boolean) {
@@ -234,10 +262,10 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         seekFontFooter.setOnSeekBarChangeListener(
             fontListener(tvFontFooterVal) { settings.copy(fontSizeFooter = it) })
 
-        // Buttons
         findViewById<Button>(R.id.btnSave).setOnClickListener {
             ReceiptSettings.save(this, settings)
-            Toast.makeText(this, "Settings saved!", Toast.LENGTH_SHORT).show()
+            ReceiptSettings.saveToFirestore(settings)
+            Toast.makeText(this, "Settings saved & synced!", Toast.LENGTH_SHORT).show()
         }
 
         findViewById<Button>(R.id.btnTestReceipt).setOnClickListener {
@@ -246,7 +274,12 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnResetDefaults).setOnClickListener {
-            settings = ReceiptSettings()
+            settings = ReceiptSettings(
+                businessName = settings.businessName,
+                addressText = settings.addressText,
+                email = settings.email,
+                logoUrl = settings.logoUrl
+            )
             restoreInputs()
             populatePreview()
             Toast.makeText(this, "Reset to defaults", Toast.LENGTH_SHORT).show()
@@ -259,15 +292,35 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         override fun afterTextChanged(s: Editable?) { onChange(s?.toString() ?: "") }
     }
 
-    // ── Preview ──────────────────────────────────────────────────
-
     private fun fontSizeToSp(fontSize: Int): Float = when (fontSize) {
         1 -> 16f
         2 -> 20f
         else -> 12f
     }
 
+    private fun loadLogo() {
+        val url = settings.logoUrl
+        if (settings.showLogo && url.isNotBlank()) {
+            ivLogo.visibility = View.VISIBLE
+            if (url != currentLogoUrl) {
+                currentLogoUrl = url
+                ivLogo.load(url) {
+                    crossfade(true)
+                    transformations(RoundedCornersTransformation(8f))
+                    listener(
+                        onError = { _, _ -> ivLogo.visibility = View.GONE }
+                    )
+                }
+            }
+        } else {
+            ivLogo.visibility = View.GONE
+            if (!settings.showLogo) currentLogoUrl = ""
+        }
+    }
+
     private fun populatePreview() {
+        loadLogo()
+
         val bizNameSp = fontSizeToSp(settings.fontSizeBizName)
         val addrSp = fontSizeToSp(settings.fontSizeAddress)
         val orderSp = fontSizeToSp(settings.fontSizeOrderInfo)
@@ -290,6 +343,13 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         tvAddress.text = settings.addressText
         tvAddress.setTypeface(null, bold(settings.boldAddress))
         tvAddress.textSize = addrSp
+
+        if (settings.showEmail && settings.email.isNotBlank()) {
+            tvEmail.text = settings.email
+            tvEmail.visibility = View.VISIBLE
+        } else {
+            tvEmail.visibility = View.GONE
+        }
 
         tvReceiptTitle.setTypeface(null, bold(settings.boldOrderInfo))
         tvReceiptTitle.textSize = orderSp + 2f
@@ -345,8 +405,6 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         tvFooter.setTypeface(null, bold(settings.boldFooter))
         tvFooter.textSize = footerSp
     }
-
-    // ── ESC/POS Printing ─────────────────────────────────────────
 
     private fun printTestReceipt() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

@@ -16,8 +16,12 @@ fun formatLine(left: String, right: String, width: Int = LINE_WIDTH): String {
 data class ReceiptSettings(
     val businessName: String = "My Restaurant",
     val addressText: String = "123 Main Street\nCity, ST 12345\nTel: (555) 123-4567",
+    val email: String = "",
+    val logoUrl: String = "",
     val showServerName: Boolean = true,
     val showDateTime: Boolean = true,
+    val showLogo: Boolean = true,
+    val showEmail: Boolean = false,
     val boldBizName: Boolean = true,
     val boldAddress: Boolean = true,
     val boldOrderInfo: Boolean = true,
@@ -62,8 +66,12 @@ data class ReceiptSettings(
                 businessName = p.getString("businessName", null) ?: "My Restaurant",
                 addressText = p.getString("addressText", null)
                     ?: "123 Main Street\nCity, ST 12345\nTel: (555) 123-4567",
+                email = p.getString("email", null) ?: "",
+                logoUrl = p.getString("logoUrl", null) ?: "",
                 showServerName = p.getBoolean("showServerName", true),
                 showDateTime = p.getBoolean("showDateTime", true),
+                showLogo = p.getBoolean("showLogo", true),
+                showEmail = p.getBoolean("showEmail", false),
                 boldBizName = p.getBoolean("boldBizName",
                     p.getBoolean("boldBusinessInfo",
                         p.getBoolean("boldHeader", true))),
@@ -95,8 +103,12 @@ data class ReceiptSettings(
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().apply {
                 putString("businessName", s.businessName)
                 putString("addressText", s.addressText)
+                putString("email", s.email)
+                putString("logoUrl", s.logoUrl)
                 putBoolean("showServerName", s.showServerName)
                 putBoolean("showDateTime", s.showDateTime)
+                putBoolean("showLogo", s.showLogo)
+                putBoolean("showEmail", s.showEmail)
                 putBoolean("boldBizName", s.boldBizName)
                 putBoolean("boldAddress", s.boldAddress)
                 putBoolean("boldOrderInfo", s.boldOrderInfo)
@@ -116,15 +128,17 @@ data class ReceiptSettings(
         }
 
         private var businessInfoListener: ListenerRegistration? = null
+        private var receiptSettingsListener: ListenerRegistration? = null
+        private var onSettingsChanged: ((ReceiptSettings) -> Unit)? = null
 
-        /**
-         * Start a real-time listener on Settings/businessInfo.
-         * Whenever the web dashboard changes business name, address, or phone,
-         * the local ReceiptSettings SharedPreferences are updated immediately.
-         */
+        fun setOnSettingsChangedListener(listener: ((ReceiptSettings) -> Unit)?) {
+            onSettingsChanged = listener
+        }
+
         fun startBusinessInfoSync(context: Context) {
             stopBusinessInfoSync()
             val db = FirebaseFirestore.getInstance()
+
             businessInfoListener = db.collection("Settings").document("businessInfo")
                 .addSnapshotListener { snap, err ->
                     if (err != null) {
@@ -136,6 +150,8 @@ data class ReceiptSettings(
                     val bizName = snap.getString("businessName") ?: return@addSnapshotListener
                     val address = snap.getString("address") ?: ""
                     val phone = snap.getString("phone") ?: ""
+                    val email = snap.getString("email") ?: ""
+                    val logoUrl = snap.getString("logoUrl") ?: ""
 
                     val addressBlock = buildString {
                         if (address.isNotBlank()) append(address)
@@ -146,12 +162,52 @@ data class ReceiptSettings(
                     }
 
                     val current = load(context)
-                    if (current.businessName != bizName || current.addressText != addressBlock) {
-                        save(context, current.copy(
-                            businessName = bizName,
-                            addressText = addressBlock
-                        ))
+                    val updated = current.copy(
+                        businessName = bizName,
+                        addressText = addressBlock,
+                        email = email,
+                        logoUrl = logoUrl
+                    )
+                    if (current != updated) {
+                        save(context, updated)
+                        onSettingsChanged?.invoke(updated)
                         Log.d("ReceiptSettings", "Synced business info: $bizName")
+                    }
+                }
+
+            receiptSettingsListener = db.collection("Settings").document("receiptSettings")
+                .addSnapshotListener { snap, err ->
+                    if (err != null) {
+                        Log.w("ReceiptSettings", "Receipt settings sync error", err)
+                        return@addSnapshotListener
+                    }
+                    if (snap == null || !snap.exists()) return@addSnapshotListener
+
+                    val current = load(context)
+                    val updated = current.copy(
+                        showServerName = snap.getBoolean("showServerName") ?: current.showServerName,
+                        showDateTime = snap.getBoolean("showDateTime") ?: current.showDateTime,
+                        showLogo = snap.getBoolean("showLogo") ?: current.showLogo,
+                        showEmail = snap.getBoolean("showEmail") ?: current.showEmail,
+                        boldBizName = snap.getBoolean("boldBizName") ?: current.boldBizName,
+                        boldAddress = snap.getBoolean("boldAddress") ?: current.boldAddress,
+                        boldOrderInfo = snap.getBoolean("boldOrderInfo") ?: current.boldOrderInfo,
+                        boldItems = snap.getBoolean("boldItems") ?: current.boldItems,
+                        boldTotals = snap.getBoolean("boldTotals") ?: current.boldTotals,
+                        boldGrandTotal = snap.getBoolean("boldGrandTotal") ?: current.boldGrandTotal,
+                        boldFooter = snap.getBoolean("boldFooter") ?: current.boldFooter,
+                        fontSizeBizName = snap.getLong("fontSizeBizName")?.toInt() ?: current.fontSizeBizName,
+                        fontSizeAddress = snap.getLong("fontSizeAddress")?.toInt() ?: current.fontSizeAddress,
+                        fontSizeOrderInfo = snap.getLong("fontSizeOrderInfo")?.toInt() ?: current.fontSizeOrderInfo,
+                        fontSizeItems = snap.getLong("fontSizeItems")?.toInt() ?: current.fontSizeItems,
+                        fontSizeTotals = snap.getLong("fontSizeTotals")?.toInt() ?: current.fontSizeTotals,
+                        fontSizeGrandTotal = snap.getLong("fontSizeGrandTotal")?.toInt() ?: current.fontSizeGrandTotal,
+                        fontSizeFooter = snap.getLong("fontSizeFooter")?.toInt() ?: current.fontSizeFooter
+                    )
+                    if (current != updated) {
+                        save(context, updated)
+                        onSettingsChanged?.invoke(updated)
+                        Log.d("ReceiptSettings", "Synced receipt settings from Firestore")
                     }
                 }
         }
@@ -159,6 +215,54 @@ data class ReceiptSettings(
         fun stopBusinessInfoSync() {
             businessInfoListener?.remove()
             businessInfoListener = null
+            receiptSettingsListener?.remove()
+            receiptSettingsListener = null
+            onSettingsChanged = null
+        }
+
+        fun saveToFirestore(s: ReceiptSettings) {
+            val db = FirebaseFirestore.getInstance()
+
+            val receiptData = hashMapOf(
+                "showServerName" to s.showServerName,
+                "showDateTime" to s.showDateTime,
+                "showLogo" to s.showLogo,
+                "showEmail" to s.showEmail,
+                "boldBizName" to s.boldBizName,
+                "boldAddress" to s.boldAddress,
+                "boldOrderInfo" to s.boldOrderInfo,
+                "boldItems" to s.boldItems,
+                "boldTotals" to s.boldTotals,
+                "boldGrandTotal" to s.boldGrandTotal,
+                "boldFooter" to s.boldFooter,
+                "fontSizeBizName" to s.fontSizeBizName,
+                "fontSizeAddress" to s.fontSizeAddress,
+                "fontSizeOrderInfo" to s.fontSizeOrderInfo,
+                "fontSizeItems" to s.fontSizeItems,
+                "fontSizeTotals" to s.fontSizeTotals,
+                "fontSizeGrandTotal" to s.fontSizeGrandTotal,
+                "fontSizeFooter" to s.fontSizeFooter
+            )
+            db.collection("Settings").document("receiptSettings")
+                .set(receiptData)
+                .addOnSuccessListener { Log.d("ReceiptSettings", "Receipt settings saved to Firestore") }
+                .addOnFailureListener { Log.w("ReceiptSettings", "Receipt settings Firestore save failed", it) }
+
+            val parts = s.addressText.split("\n")
+            val address = parts.firstOrNull() ?: ""
+            val phone = if (parts.size > 1) parts.last() else ""
+
+            val bizData = hashMapOf<String, Any>(
+                "businessName" to s.businessName,
+                "address" to address,
+                "phone" to phone,
+                "email" to s.email,
+                "logoUrl" to s.logoUrl
+            )
+            db.collection("Settings").document("businessInfo")
+                .set(bizData, com.google.firebase.firestore.SetOptions.merge())
+                .addOnSuccessListener { Log.d("ReceiptSettings", "Business info saved to Firestore") }
+                .addOnFailureListener { Log.w("ReceiptSettings", "Business info Firestore save failed", it) }
         }
     }
 }

@@ -1092,3 +1092,59 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+
+// ── Temporary: Set Storage CORS (remove after running once) ──
+const { onRequest } = require("firebase-functions/v2/https");
+
+exports.fixStorageCors = onRequest(async (req, res) => {
+  const corsConfig = [
+    {
+      origin: [
+        "https://www.maxipaypos.com",
+        "https://maxipaypos.com",
+        "http://localhost:3000",
+      ],
+      method: ["GET", "POST", "PUT"],
+      responseHeader: ["Content-Type"],
+      maxAgeSeconds: 3600,
+    },
+  ];
+
+  try {
+    const { Storage } = require("@google-cloud/storage");
+    const gcs = new Storage();
+
+    const [allBuckets] = await gcs.getBuckets();
+    const allNames = allBuckets.map((b) => b.name);
+
+    const storageBuckets = allNames.filter(
+      (n) =>
+        n.includes("restaurantapp") &&
+        !n.startsWith("gcf-") &&
+        !n.includes("cloudfunctions")
+    );
+
+    const targets =
+      storageBuckets.length > 0
+        ? storageBuckets
+        : allNames;
+
+    const results = { allBuckets: allNames, targets };
+
+    for (const name of targets) {
+      try {
+        const bucket = gcs.bucket(name);
+        await bucket.setCorsConfiguration(corsConfig);
+        const [metadata] = await bucket.getMetadata();
+        results[name] = { success: true, cors: metadata.cors };
+      } catch (err) {
+        results[name] = { error: err.message };
+      }
+    }
+
+    res.json(results);
+  } catch (err) {
+    logger.error("CORS fix failed", err);
+    res.status(500).json({ error: err.message });
+  }
+});

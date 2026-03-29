@@ -19,6 +19,11 @@ data class PreAuthResult(
     val transactionId: String
 )
 
+data class TipAdjustResult(
+    val approved: Boolean,
+    val message: String
+)
+
 data class CaptureResult(
     val referenceId: String,
     val authCode: String,
@@ -253,6 +258,73 @@ class PaymentService(private val context: Context) {
                     }
                 } catch (e: Exception) {
                     Log.e("CAPTURE", "Parse error", e)
+                    onFailure("Invalid response: ${e.message}")
+                }
+            }
+        })
+    }
+
+    fun tipAdjust(
+        originalAmount: Double,
+        tipAmount: Double,
+        referenceId: String,
+        onSuccess: (TipAdjustResult) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val json = JSONObject().apply {
+            put("Amount", String.format(Locale.US, "%.2f", originalAmount))
+            put("TipAmount", String.format(Locale.US, "%.2f", tipAmount))
+            put("PaymentType", "Credit")
+            put("ReferenceId", referenceId)
+            put("GetExtendedData", true)
+            put("Tpn", TerminalPrefs.getTpn(context))
+            put("RegisterId", TerminalPrefs.getRegisterId(context))
+            put("Authkey", TerminalPrefs.getAuthKey(context))
+        }
+
+        Log.d("TIP_ADJUST_REQ", json.toString())
+
+        val body = json.toString().toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url("https://spinpos.net/v2/Payment/TipAdjust")
+            .post(body)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e("TIP_ADJUST", "Network error", e)
+                onFailure("Network error: ${e.message}")
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val responseText = response.body?.string() ?: ""
+                Log.d("TIP_ADJUST_RAW", responseText)
+
+                if (!response.isSuccessful) {
+                    onFailure("Server error (${response.code})")
+                    return
+                }
+
+                try {
+                    val jsonObj = JSONObject(responseText)
+                    val resultCode = jsonObj
+                        .optJSONObject("GeneralResponse")
+                        ?.optString("ResultCode", "") ?: ""
+
+                    if (resultCode == "0") {
+                        Log.d("TIP_ADJUST", "Approved – ref=$referenceId tip=$tipAmount")
+                        onSuccess(TipAdjustResult(approved = true, message = "Tip adjusted successfully"))
+                    } else {
+                        val msg = jsonObj.optJSONObject("GeneralResponse")
+                            ?.optString("ResultMessage", "")
+                            ?.takeIf { it.isNotBlank() }
+                            ?: "Tip adjustment declined."
+                        Log.w("TIP_ADJUST", "Declined – code=$resultCode msg=$msg")
+                        onFailure(msg)
+                    }
+                } catch (e: Exception) {
+                    Log.e("TIP_ADJUST", "Parse error", e)
                     onFailure("Invalid response: ${e.message}")
                 }
             }
