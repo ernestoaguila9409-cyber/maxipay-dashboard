@@ -1,319 +1,312 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:background="#F5F5F5"
-    android:fillViewport="true">
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp"
+    android:fitsSystemWindows="true">
 
+    <!-- Amount due (compact header) -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Amount Due"
+        android:textSize="13sp"
+        android:textColor="#757575"
+        android:gravity="center" />
+
+    <TextView
+        android:id="@+id/txtAmountDue"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="32sp"
+        android:textStyle="bold"
+        android:textColor="#212121"
+        android:gravity="center"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="4dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="QUICK DENOMINATIONS"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:textColor="#9E9E9E"
+        android:letterSpacing="0.08"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp" />
+
+    <!-- Row 1: $5 $10 $20 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="24dp">
+        android:orientation="horizontal">
 
-        <!-- ==================== Amount Due ==================== -->
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Amount Due"
-            android:textSize="16sp"
-            android:textColor="#757575"
-            android:gravity="center"
-            android:layout_marginTop="8dp" />
-
-        <TextView
-            android:id="@+id/txtAmountDue"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="44sp"
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDenom5"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:text="$5"
+            android:textSize="15sp"
             android:textStyle="bold"
-            android:textColor="#212121"
-            android:gravity="center"
-            android:layout_marginTop="4dp" />
+            android:textAllCaps="false"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            app:cornerRadius="8dp"
+            app:strokeColor="#BDBDBD"
+            android:layout_marginEnd="4dp" />
 
-        <!-- ==================== Divider ==================== -->
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#E0E0E0"
-            android:layout_marginTop="24dp" />
-
-        <!-- ==================== Quick Denominations ==================== -->
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="QUICK DENOMINATIONS"
-            android:textSize="12sp"
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDenom10"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:text="$10"
+            android:textSize="15sp"
             android:textStyle="bold"
-            android:textColor="#9E9E9E"
-            android:letterSpacing="0.1"
-            android:layout_marginTop="20dp"
-            android:layout_marginBottom="12dp" />
+            android:textAllCaps="false"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            app:cornerRadius="8dp"
+            app:strokeColor="#BDBDBD"
+            android:layout_marginHorizontal="4dp" />
 
-        <!-- Row 1: $5, $10, $20 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDenom20"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:text="$20"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textAllCaps="false"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            app:cornerRadius="8dp"
+            app:strokeColor="#BDBDBD"
+            android:layout_marginStart="4dp" />
+    </LinearLayout>
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnDenom5"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="56dp"
-                android:layout_weight="1"
-                android:text="$5"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:textAllCaps="false"
-                app:cornerRadius="12dp"
-                app:strokeColor="#BDBDBD"
-                android:layout_marginEnd="6dp" />
+    <!-- Row 2: $50 $100 Exact -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="4dp">
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnDenom10"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="56dp"
-                android:layout_weight="1"
-                android:text="$10"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:textAllCaps="false"
-                app:cornerRadius="12dp"
-                app:strokeColor="#BDBDBD"
-                android:layout_marginHorizontal="6dp" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDenom50"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:text="$50"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textAllCaps="false"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            app:cornerRadius="8dp"
+            app:strokeColor="#BDBDBD"
+            android:layout_marginEnd="4dp" />
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnDenom20"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="56dp"
-                android:layout_weight="1"
-                android:text="$20"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:textAllCaps="false"
-                app:cornerRadius="12dp"
-                app:strokeColor="#BDBDBD"
-                android:layout_marginStart="6dp" />
-        </LinearLayout>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDenom100"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:text="$100"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textAllCaps="false"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            app:cornerRadius="8dp"
+            app:strokeColor="#BDBDBD"
+            android:layout_marginHorizontal="4dp" />
 
-        <!-- Row 2: $50, $100 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="10dp">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnDenom50"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="56dp"
-                android:layout_weight="1"
-                android:text="$50"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:textAllCaps="false"
-                app:cornerRadius="12dp"
-                app:strokeColor="#BDBDBD"
-                android:layout_marginEnd="6dp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnDenom100"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="56dp"
-                android:layout_weight="1"
-                android:text="$100"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:textAllCaps="false"
-                app:cornerRadius="12dp"
-                app:strokeColor="#BDBDBD"
-                android:layout_marginStart="6dp" />
-        </LinearLayout>
-
-        <!-- Exact Amount -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnExactAmount"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:text="Exact Amount"
-            android:textSize="16sp"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:text="Exact"
+            android:textSize="13sp"
             android:textAllCaps="false"
-            android:layout_marginTop="12dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
             app:icon="@drawable/ic_cash"
             app:iconGravity="textStart"
-            app:iconPadding="12dp"
-            app:cornerRadius="12dp"
-            app:backgroundTint="#2E7D32" />
+            app:iconPadding="4dp"
+            app:iconSize="18dp"
+            app:cornerRadius="8dp"
+            app:backgroundTint="#2E7D32"
+            android:layout_marginStart="4dp" />
+    </LinearLayout>
 
-        <!-- ==================== Divider ==================== -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="CUSTOM AMOUNT"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:textColor="#9E9E9E"
+        android:letterSpacing="0.08"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="4dp" />
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#E0E0E0"
-            android:layout_marginTop="20dp" />
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Cash received"
+        app:boxCornerRadiusTopStart="8dp"
+        app:boxCornerRadiusTopEnd="8dp"
+        app:boxCornerRadiusBottomStart="8dp"
+        app:boxCornerRadiusBottomEnd="8dp"
+        app:prefixText="$"
+        app:boxStrokeWidth="1dp"
+        app:boxStrokeWidthFocused="1dp"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
-        <!-- ==================== Custom Amount ==================== -->
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="CUSTOM AMOUNT"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="#9E9E9E"
-            android:letterSpacing="0.1"
-            android:layout_marginTop="20dp"
-            android:layout_marginBottom="8dp" />
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Cash received"
-            app:boxCornerRadiusTopStart="12dp"
-            app:boxCornerRadiusTopEnd="12dp"
-            app:boxCornerRadiusBottomStart="12dp"
-            app:boxCornerRadiusBottomEnd="12dp"
-            app:prefixText="$"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/inputCustomAmount"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="numberDecimal"
-                android:textSize="18sp" />
-
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <!-- ==================== Change Display Card ==================== -->
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardChange"
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/inputCustomAmount"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            app:cardCornerRadius="12dp"
-            app:cardElevation="0dp"
-            app:strokeWidth="1dp"
-            app:strokeColor="#E0E0E0"
-            android:visibility="gone">
+            android:minHeight="44dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:inputType="numberDecimal"
+            android:textSize="16sp" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardChange"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        app:cardCornerRadius="8dp"
+        app:cardElevation="0dp"
+        app:strokeWidth="1dp"
+        app:strokeColor="#E0E0E0"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="20dp">
+                android:orientation="horizontal">
 
-                <!-- Cash Received -->
-                <LinearLayout
-                    android:layout_width="match_parent"
+                <TextView
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:paddingBottom="10dp">
+                    android:layout_weight="1"
+                    android:text="Cash Received"
+                    android:textSize="14sp"
+                    android:textColor="#424242" />
 
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Cash Received"
-                        android:textSize="15sp"
-                        android:textColor="#424242" />
-
-                    <TextView
-                        android:id="@+id/txtCashReceived"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="15sp"
-                        android:textStyle="bold"
-                        android:textColor="#212121" />
-                </LinearLayout>
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:background="#E0E0E0" />
-
-                <!-- Change -->
-                <LinearLayout
-                    android:layout_width="match_parent"
+                <TextView
+                    android:id="@+id/txtCashReceived"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:paddingTop="10dp">
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Change"
-                        android:textSize="16sp"
-                        android:textStyle="bold"
-                        android:textColor="#212121" />
-
-                    <TextView
-                        android:id="@+id/txtChange"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="20sp"
-                        android:textStyle="bold"
-                        android:textColor="#2E7D32" />
-                </LinearLayout>
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#212121" />
             </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
 
-        <!-- Insufficient amount warning -->
-        <TextView
-            android:id="@+id/txtWarning"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Amount received is less than amount due"
-            android:textSize="13sp"
-            android:textColor="#C62828"
-            android:gravity="center"
-            android:layout_marginTop="12dp"
-            android:visibility="gone" />
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="6dp"
+                android:background="#E0E0E0" />
 
-        <!-- Spacer -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="24dp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
 
-        <!-- ==================== Complete Button ==================== -->
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Change"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:textColor="#212121" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnComplete"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:text="Complete Cash Payment"
-            android:textSize="16sp"
-            android:textAllCaps="false"
-            app:cornerRadius="12dp"
-            app:backgroundTint="#1565C0"
-            android:enabled="false" />
+                <TextView
+                    android:id="@+id/txtChange"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="17sp"
+                    android:textStyle="bold"
+                    android:textColor="#2E7D32" />
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
 
-        <!-- Cancel -->
-        <com.google.android.material.button.MaterialButton
-            style="@style/Widget.Material3.Button.TextButton"
-            android:id="@+id/btnCancelCash"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="Cancel"
-            android:textSize="15sp"
-            android:textAllCaps="false"
-            android:textColor="#C62828"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="16dp"
-            app:cornerRadius="12dp"
-            app:rippleColor="#33C62828" />
+    <TextView
+        android:id="@+id/txtWarning"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Amount received is less than amount due"
+        android:textSize="12sp"
+        android:textColor="#C62828"
+        android:gravity="center"
+        android:layout_marginTop="4dp"
+        android:visibility="gone" />
 
-    </LinearLayout>
-</ScrollView>
+    <!-- Fills space so Complete + Cancel stay pinned to bottom -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnComplete"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:text="Complete Cash Payment"
+        android:textSize="15sp"
+        android:textAllCaps="false"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        app:cornerRadius="8dp"
+        app:backgroundTint="#1565C0"
+        android:enabled="false" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnCancelCash"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:text="Cancel"
+        android:textSize="14sp"
+        android:textAllCaps="false"
+        android:textColor="#C62828"
+        android:layout_marginTop="2dp"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        app:cornerRadius="8dp"
+        app:rippleColor="#33C62828" />
+
+</LinearLayout>

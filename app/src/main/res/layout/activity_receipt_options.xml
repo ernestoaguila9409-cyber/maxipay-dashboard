@@ -91,6 +91,37 @@
                 android:textStyle="bold"/>
         </LinearLayout>
 
+        <!-- SMS Receipt Card -->
+        <LinearLayout
+            android:id="@+id/btnSmsReceipt"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:background="@drawable/bg_order_type_button"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?attr/selectableItemBackground"
+            android:padding="24dp"
+            android:layout_marginBottom="16dp">
+
+            <ImageView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:src="@drawable/ic_message"
+                android:contentDescription="SMS"
+                app:tint="@android:color/white"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:text="Text Receipt"
+                android:textColor="@android:color/white"
+                android:textSize="18sp"
+                android:textStyle="bold"/>
+        </LinearLayout>
+
         <!-- Skip Receipt Card -->
         <LinearLayout
             android:id="@+id/btnSkipReceipt"
@@ -146,6 +177,45 @@
 
         <Button
             android:id="@+id/btnBackToOptions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:text="Back"/>
+
+    </LinearLayout>
+
+    <!-- SMS form (hidden initially) -->
+    <LinearLayout
+        android:id="@+id/smsFormContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/txtTitle"
+        android:layout_marginTop="48dp"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:padding="24dp">
+
+        <EditText
+            android:id="@+id/etReceiptPhone"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Customer Phone (+1XXXXXXXXXX)"
+            android:inputType="phone"
+            android:padding="16dp"/>
+
+        <Button
+            android:id="@+id/btnSendSms"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Send Text"
+            android:textSize="16sp"
+            android:padding="16dp"
+            android:backgroundTint="#6A4FB3"/>
+
+        <Button
+            android:id="@+id/btnBackFromSms"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"

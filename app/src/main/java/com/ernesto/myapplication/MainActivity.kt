@@ -57,6 +57,10 @@ class MainActivity : AppCompatActivity() {
         setupDashboardGrid()
         listenForOpenOrders()
         ensureOpenBatch()
+        ReceiptSettings.startBusinessInfoSync(this)
+
+        val bizName = ReceiptSettings.load(this).businessName
+        CustomerDisplayManager.setIdle(this, bizName)
 
         findViewById<View>(R.id.todaySalesArea).setOnClickListener {
             startActivity(Intent(this, TodaySalesActivity::class.java))
@@ -179,6 +183,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        CustomerDisplayManager.attach(this)
         loadCurrentSales()
         applyOrderTypeVisibility()
         refreshDashboardFromServer()

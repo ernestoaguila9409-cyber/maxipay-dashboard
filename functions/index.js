@@ -7,7 +7,39 @@ const sgMail = require("@sendgrid/mail");
 const { Vonage } = require("@vonage/server-sdk");
 const logger = require("firebase-functions/logger");
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+/**
+ * SendGrid returns error.message "Unauthorized" (HTTP 401) when the API key is missing,
+ * revoked, or lacks Mail Send permission. Keys must be set on the deployed function:
+ *   firebase functions:secrets:set SENDGRID_API_KEY
+ * and (v2) bound in code or set as env in Google Cloud Console → Cloud Functions → Runtime.
+ */
+function getSendGridApiKey() {
+  const k = process.env.SENDGRID_API_KEY;
+  return k && String(k).trim() ? String(k).trim() : null;
+}
+
+async function sendGridMail(msg) {
+  const key = getSendGridApiKey();
+  if (!key) {
+    const err = new Error("SENDGRID_API_KEY is not set");
+    err.code = "CONFIG";
+    throw err;
+  }
+  sgMail.setApiKey(key);
+  return sgMail.send(msg);
+}
+
+function sendGridErrorForClient(error) {
+  if (error?.code === "CONFIG") {
+    return "Email service is not configured. Set SENDGRID_API_KEY for Cloud Functions.";
+  }
+  const msg = error?.message ? String(error.message) : "Unknown error";
+  const code = error?.response?.statusCode ?? error?.code;
+  if (msg === "Unauthorized" || code === 401) {
+    return "SendGrid rejected the request (401). Create a new API key with Mail Send permission, set SENDGRID_API_KEY as a function secret, and redeploy.";
+  }
+  return msg;
+}
 
 const vonage = new Vonage({
   apiKey: process.env.VONAGE_API_KEY,
@@ -16,7 +48,9 @@ const vonage = new Vonage({
 
 setGlobalOptions({ maxInstances: 10 });
 
-const LOGO_URL = "https://your-server-or-storage/maxipay-logo.png";
+const DEFAULT_LOGO_URL = "https://your-server-or-storage/maxipay-logo.png";
+
+const BUSINESS_TIMEZONE = "America/New_York";
 
 const ORDER_TYPE_LABELS = {
   DINE_IN: "DINE IN",
@@ -32,20 +66,46 @@ const ORDER_TYPE_COLORS = {
 };
 
 // ---------------------------------------------------------------------------
+// Business info from Firestore
+// ---------------------------------------------------------------------------
+
+async function fetchBusinessInfo(db) {
+  const snap = await db.collection("Settings").doc("businessInfo").get();
+  if (!snap.exists) return {};
+  return snap.data();
+}
+
+// ---------------------------------------------------------------------------
 // Shared HTML helpers
 // ---------------------------------------------------------------------------
 
-function brandedHeader() {
+function brandedHeader(biz) {
+  const name = biz.businessName || "My Restaurant";
+  const logoUrl = biz.logoUrl || DEFAULT_LOGO_URL;
+  const address = biz.address || "";
+  const phone = biz.phone || "";
+  const email = biz.email || "";
+
+  const addressLines = address
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => escapeHtml(l))
+    .join("<br>");
+
+  let contactLine = "";
+  if (phone) contactLine += escapeHtml(phone);
+  if (phone && email) contactLine += "<br>";
+  if (email) contactLine += escapeHtml(email);
+
+  const detailLines = [addressLines, contactLine].filter(Boolean).join("<br>");
+
   return `
     <div style="text-align:center;margin-bottom:20px;">
-      <img src="${LOGO_URL}" alt="Volt Merchant Solutions"
+      <img src="${logoUrl}" alt="${escapeHtml(name)}"
            style="max-width:120px;height:auto;margin-bottom:10px;display:inline-block;">
-      <div style="font-weight:bold;font-size:18px;color:#222;">Volt Merchant Solutions</div>
-      <div style="font-size:13px;color:#555;line-height:1.5;">
-        2105 NW 102 AVE ST 3<br>
-        Doral FL 33172<br>
-        305-407-1100
-      </div>
+      <div style="font-weight:bold;font-size:18px;color:#222;">${escapeHtml(name)}</div>
+      ${detailLines ? `<div style="font-size:13px;color:#555;line-height:1.5;">${detailLines}</div>` : ""}
     </div>
     <hr style="border:none;border-top:1px solid #ddd;margin:16px 0;">`;
 }
@@ -69,8 +129,8 @@ function orderMetaSection(order) {
   let dateStr = "";
   let timeStr = "";
   if (ts) {
-    dateStr = ts.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-    timeStr = ts.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+    dateStr = ts.toLocaleDateString("en-US", { timeZone: BUSINESS_TIMEZONE, month: "short", day: "numeric", year: "numeric" });
+    timeStr = ts.toLocaleTimeString("en-US", { timeZone: BUSINESS_TIMEZONE, hour: "numeric", minute: "2-digit", hour12: true });
   }
 
   const rows = [];
@@ -385,8 +445,16 @@ exports.sendReceiptEmail = onCall(async (request) => {
     logger.error("SENDGRID_FROM_EMAIL is not configured");
     return { success: false, error: "Email service is not configured." };
   }
+  if (!getSendGridApiKey()) {
+    logger.error("SENDGRID_API_KEY is not configured");
+    return {
+      success: false,
+      error: "Email service is not configured. Set SENDGRID_API_KEY for Cloud Functions.",
+    };
+  }
 
   const db = admin.firestore();
+  const biz = await fetchBusinessInfo(db);
   const orderRef = db.collection("Orders").doc(orderId);
   const orderDoc = await orderRef.get();
 
@@ -412,7 +480,7 @@ exports.sendReceiptEmail = onCall(async (request) => {
   const total = totalInCents / 100;
 
   const body =
-    brandedHeader() +
+    brandedHeader(biz) +
     orderMetaSection(order) +
     itemsTableHtml(items, false, appliedDiscounts) +
     totalsHtml({ subtotal, tax, taxBreakdown, tip, total, discountInCents, appliedDiscounts }) +
@@ -422,7 +490,7 @@ exports.sendReceiptEmail = onCall(async (request) => {
   const html = wrapEmail(body);
 
   try {
-    await sgMail.send({
+    await sendGridMail({
       to: email,
       from: fromEmail,
       subject: `Receipt - Order #${order.orderNumber || orderId}`,
@@ -435,7 +503,7 @@ exports.sendReceiptEmail = onCall(async (request) => {
     if (error.response) {
       logger.error("SendGrid response:", JSON.stringify(error.response.body));
     }
-    return { success: false, error: error.message };
+    return { success: false, error: sendGridErrorForClient(error) };
   }
 });
 
@@ -455,8 +523,16 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
     logger.error("SENDGRID_FROM_EMAIL is not configured");
     return { success: false, error: "Email service is not configured." };
   }
+  if (!getSendGridApiKey()) {
+    logger.error("SENDGRID_API_KEY is not configured");
+    return {
+      success: false,
+      error: "Email service is not configured. Set SENDGRID_API_KEY for Cloud Functions.",
+    };
+  }
 
   const db = admin.firestore();
+  const biz = await fetchBusinessInfo(db);
   const orderDoc = await db.collection("Orders").doc(orderId).get();
 
   if (!orderDoc.exists) {
@@ -473,7 +549,7 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
 
   const voidedBy = order.voidedBy ?? "";
   const voidedAt = parseTimestamp(order.voidedAt);
-  const voidedAtStr = voidedAt ? voidedAt.toLocaleString("en-US") : "";
+  const voidedAtStr = voidedAt ? voidedAt.toLocaleString("en-US", { timeZone: BUSINESS_TIMEZONE }) : "";
 
   const itemsSnap = await db.collection("Orders").doc(orderId).collection("items").get();
   const { items, subtotalInCents } = parseItems(itemsSnap);
@@ -492,7 +568,7 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
   }
 
   const body =
-    brandedHeader() +
+    brandedHeader(biz) +
     statusBadge("VOIDED", "#D32F2F") +
     voidMeta +
     orderMetaSection(order) +
@@ -503,7 +579,7 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
   const html = wrapEmail(body);
 
   try {
-    await sgMail.send({
+    await sendGridMail({
       to: email,
       from: fromEmail,
       subject: `VOID Receipt - Order #${order.orderNumber || orderId}`,
@@ -516,7 +592,7 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
     if (error.response) {
       logger.error("SendGrid response:", JSON.stringify(error.response.body));
     }
-    return { success: false, error: error.message };
+    return { success: false, error: sendGridErrorForClient(error) };
   }
 });
 
@@ -537,8 +613,16 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
       logger.error("SENDGRID_FROM_EMAIL is not configured");
       return { success: false, error: "Email service is not configured." };
     }
+    if (!getSendGridApiKey()) {
+      logger.error("SENDGRID_API_KEY is not configured");
+      return {
+        success: false,
+        error: "Email service is not configured. Set SENDGRID_API_KEY for Cloud Functions.",
+      };
+    }
 
     const db = admin.firestore();
+    const biz = await fetchBusinessInfo(db);
     const orderDoc = await db.collection("Orders").doc(orderId).get();
 
     if (!orderDoc.exists) {
@@ -669,8 +753,8 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
     const ts = parseTimestamp(order.createdAt);
     let dateTimeStr = "";
     if (ts) {
-      dateTimeStr = ts.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" }) +
-        " " + ts.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+      dateTimeStr = ts.toLocaleDateString("en-US", { timeZone: BUSINESS_TIMEZONE, month: "2-digit", day: "2-digit", year: "numeric" }) +
+        " " + ts.toLocaleTimeString("en-US", { timeZone: BUSINESS_TIMEZONE, hour: "numeric", minute: "2-digit", hour12: true });
     }
     let orderInfoHtml = '<div style="text-align:center;font-size:14px;color:#333;margin-bottom:4px;">';
     if (orderNumber) orderInfoHtml += `<div style="font-weight:bold;">Order #${escapeHtml(String(orderNumber))}</div>`;
@@ -753,7 +837,7 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
     footerSection += '<div>Thank you</div></div>';
 
     const body =
-      brandedHeader() +
+      brandedHeader(biz) +
       titleHtml +
       orderInfoHtml +
       refundItemsHtml +
@@ -764,7 +848,7 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
     const html = wrapEmail(body);
 
     try {
-      await sgMail.send({
+      await sendGridMail({
         to: email,
         from: fromEmail,
         subject: `REFUND Receipt - Order #${order.orderNumber || orderId}`,
@@ -777,7 +861,7 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
       if (error.response) {
         logger.error("SendGrid response:", JSON.stringify(error.response.body));
       }
-      return { success: false, error: error.message };
+      return { success: false, error: sendGridErrorForClient(error) };
     }
   } catch (error) {
     logger.error("sendRefundReceiptEmail error:", error.message, error);
@@ -865,6 +949,7 @@ exports.sendReceiptSms = onCall(async (request) => {
   try {
     // Step 1: Firestore read
     logger.info("sendReceiptSms step 1: fetching order from Firestore", { orderId });
+    const biz = await fetchBusinessInfo(db);
     const orderDoc = await db.collection("Orders").doc(orderId).get();
 
     if (!orderDoc.exists) {
@@ -877,7 +962,7 @@ exports.sendReceiptSms = onCall(async (request) => {
     const order = orderDoc.data();
     const orderNumber = order.orderNumber ?? orderId;
     const totalInCents = order.totalInCents ?? 0;
-    const businessName = order.businessName ?? "MaxiPay";
+    const businessName = biz.businessName || order.businessName || "MaxiPay";
 
     logger.info("sendReceiptSms step 2: order data extracted", {
       orderId,

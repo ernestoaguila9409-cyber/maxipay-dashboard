@@ -53,6 +53,8 @@ class PaymentActivity : AppCompatActivity() {
     private var orderType: String = ""
     private var remainingBalance = 0.0
     private var paymentAmount = 0.0
+    private var remainingCents: Long = 0L
+    private var businessName: String = ""
 
     private var splitPayAmount = -1.0
     private var splitTotalCount = 0
@@ -76,6 +78,7 @@ class PaymentActivity : AppCompatActivity() {
                 lastCashTenderedCents = result.data?.getLongExtra(CashPaymentActivity.EXTRA_TENDERED_CENTS, 0L) ?: 0L
                 lastCashChangeCents = result.data?.getLongExtra(CashPaymentActivity.EXTRA_CHANGE_CENTS, 0L) ?: 0L
                 showWaitingStatus()
+                CustomerDisplayManager.showProcessing(this)
                 completePayment("Cash")
             }
         }
@@ -112,6 +115,7 @@ class PaymentActivity : AppCompatActivity() {
 
         orderId = intent.getStringExtra("ORDER_ID")
         batchId = intent.getStringExtra("BATCH_ID")
+        businessName = ReceiptSettings.load(this).businessName
         ensureBatchIdThenLoadBalance()
         loadManualDiscounts()
 
@@ -153,6 +157,7 @@ class PaymentActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        CustomerDisplayManager.attach(this)
         updateMixPaymentsVisibility()
         loadRemainingBalance()
     }
@@ -224,6 +229,7 @@ class PaymentActivity : AppCompatActivity() {
                         ?: 0L
 
                 remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
+                remainingCents = remainingInCents
 
                 if (remainingInCents <= 0L) {
                     setResult(RESULT_OK)
@@ -249,6 +255,7 @@ class PaymentActivity : AppCompatActivity() {
                                 ?: 0L
 
                         remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
+                        remainingCents = remainingInCents
 
                         if (remainingInCents <= 0L) {
                             setResult(RESULT_OK)
@@ -431,6 +438,53 @@ class PaymentActivity : AppCompatActivity() {
                 if (tipAmountInCents > 0L) {
                     totalsContainer?.addView(makeSummaryRow("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), 13f, 0xBBFFFFFF.toInt()))
                 }
+
+                val customerLines = docs.map { doc ->
+                    val n = doc.getString("name") ?: doc.getString("itemName") ?: "Item"
+                    val q = (doc.getLong("qty") ?: doc.getLong("quantity") ?: 1L).toInt()
+                    val lt = doc.getLong("lineTotalInCents") ?: 0L
+                    val ms = (doc.get("modifiers") as? List<*> ?: emptyList<Any>()).mapNotNull { m ->
+                        val map = m as? Map<*, *> ?: return@mapNotNull null
+                        val action = map["action"]?.toString() ?: "ADD"
+                        val modName = map["name"]?.toString() ?: map["first"]?.toString() ?: return@mapNotNull null
+                        if (action == "REMOVE") "No $modName" else modName
+                    }
+                    CustomerOrderLine(n, q, ms, lt)
+                }
+
+                val custDiscountLines = mutableListOf<SummaryLine>()
+                if (groupedDiscounts.isNotEmpty()) {
+                    for (gd in groupedDiscounts) {
+                        custDiscountLines.add(
+                            SummaryLine(DiscountDisplay.formatReceiptLabel(gd.name, gd.type, gd.value), gd.totalCents)
+                        )
+                    }
+                } else if (discountInCents > 0L) {
+                    custDiscountLines.add(SummaryLine("Discount", discountInCents))
+                }
+
+                val custTaxLines = taxBreakdown.map { entry ->
+                    val taxName = entry["name"]?.toString() ?: "Tax"
+                    val taxCents = (entry["amountInCents"] as? Number)?.toLong() ?: 0L
+                    val tRate = (entry["rate"] as? Number)?.toDouble()
+                    val tType = entry["taxType"]?.toString()
+                    SummaryLine(DiscountDisplay.formatTaxLabel(taxName, tType, tRate), taxCents)
+                }
+
+                val custSummary = OrderSummaryInfo(
+                    subtotalCents = subtotalCents,
+                    discountLines = custDiscountLines,
+                    taxLines = custTaxLines,
+                    tipCents = tipAmountInCents
+                )
+
+                CustomerDisplayManager.updateOrder(
+                    this@PaymentActivity,
+                    businessName,
+                    customerLines,
+                    remainingCents,
+                    custSummary
+                )
             }
     }
 
@@ -553,11 +607,13 @@ class PaymentActivity : AppCompatActivity() {
             .setPositiveButton("Credit") { _, _ ->
                 paymentAmount = actualAmount
                 showWaitingStatus()
+                CustomerDisplayManager.showPaymentWaiting(this, businessName, MoneyUtils.dollarsToCents(paymentAmount))
                 processCardPayment("Credit")
             }
             .setNeutralButton("Debit") { _, _ ->
                 paymentAmount = actualAmount
                 showWaitingStatus()
+                CustomerDisplayManager.showPaymentWaiting(this, businessName, MoneyUtils.dollarsToCents(paymentAmount))
                 processCardPayment("Debit")
             }
             .setNegativeButton("Cash") { _, _ ->
@@ -595,6 +651,7 @@ class PaymentActivity : AppCompatActivity() {
             return
         }
         paymentAmount = amount
+        CustomerDisplayManager.showCashPayment(this, businessName, MoneyUtils.dollarsToCents(amount))
         val intent = Intent(this, CashPaymentActivity::class.java)
         intent.putExtra(CashPaymentActivity.EXTRA_AMOUNT_DUE_CENTS, MoneyUtils.dollarsToCents(amount))
         cashPaymentLauncher.launch(intent)
@@ -611,6 +668,7 @@ class PaymentActivity : AppCompatActivity() {
         if (paymentType == "Cash") {
             completePayment(paymentType)
         } else {
+            CustomerDisplayManager.showPaymentWaiting(this, businessName, MoneyUtils.dollarsToCents(paymentAmount))
             processCardPayment(paymentType)
         }
     }
@@ -681,6 +739,7 @@ class PaymentActivity : AppCompatActivity() {
                     launchCashPayment(paymentAmount)
                 } else {
                     showWaitingStatus()
+                    CustomerDisplayManager.showPaymentWaiting(this@PaymentActivity, businessName, MoneyUtils.dollarsToCents(paymentAmount))
                     processCardPayment(paymentType)
                 }
             }
@@ -825,7 +884,7 @@ class PaymentActivity : AppCompatActivity() {
             onSuccess = { remainingInCents ->
 
                 runOnUiThread {
-                    showApproved()
+                    showApproved(paymentType)
                     remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
                     if (remainingInCents <= 0L) {
@@ -874,7 +933,7 @@ class PaymentActivity : AppCompatActivity() {
 
                 runOnUiThread {
 
-                    showApproved()
+                    showApproved(paymentType)
 
                     remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
@@ -899,12 +958,21 @@ class PaymentActivity : AppCompatActivity() {
             }
         )
     }
-    private fun showApproved() {
+    private fun showApproved(paymentType: String) {
         progressBar.visibility = View.GONE
         txtStatus.text = "APPROVED ✅"
         txtStatus.setTextColor(android.graphics.Color.parseColor("#2E7D32"))
         txtSubStatus.text = "Transaction successful"
         fireworksView.launch()
+        val chargedCents = MoneyUtils.dollarsToCents(paymentAmount)
+        val info = PaymentSuccessInfo(
+            isCash = paymentType == "Cash",
+            amountChargedCents = chargedCents,
+            tenderedCents = if (paymentType == "Cash") lastCashTenderedCents else 0L,
+            changeCents = if (paymentType == "Cash") lastCashChangeCents else 0L
+        )
+        CustomerDisplayManager.setPaymentSuccessInfo(info)
+        CustomerDisplayManager.showPaymentApproved(this, info)
     }
     private fun showWaitingStatus() {
         statusContainer.visibility = View.VISIBLE
@@ -920,6 +988,7 @@ class PaymentActivity : AppCompatActivity() {
         txtStatus.setTextColor(android.graphics.Color.parseColor("#C62828"))
         txtSubStatus.text = message
         setButtonsEnabled(true)
+        CustomerDisplayManager.showDeclinedThenOrder(this, message, 2500L)
 
         Handler(Looper.getMainLooper()).postDelayed({
             statusContainer.visibility = View.GONE
@@ -1044,6 +1113,7 @@ class PaymentActivity : AppCompatActivity() {
                     updateOtherSectionVisibility()
 
                     Toast.makeText(this, "${discount.name} applied", Toast.LENGTH_SHORT).show()
+                    loadRemainingBalance()
                 }.addOnFailureListener { e ->
                     selectedManualDiscountId = null
                     Toast.makeText(this, "Failed to apply discount: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -1079,6 +1149,7 @@ class PaymentActivity : AppCompatActivity() {
                     btnDiscounts.visibility = if (availableManualDiscounts.isNotEmpty()) View.VISIBLE else View.GONE
                     updateOtherSectionVisibility()
                     Toast.makeText(this, "Discount removed", Toast.LENGTH_SHORT).show()
+                    loadRemainingBalance()
                 }
             }
     }

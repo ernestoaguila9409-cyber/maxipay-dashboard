@@ -1,6 +1,9 @@
 package com.ernesto.myapplication
 
 import android.content.Context
+import android.util.Log
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 
 const val LINE_WIDTH = 48
 const val LINE_WIDTH_WIDE = 24
@@ -110,6 +113,52 @@ data class ReceiptSettings(
                 putInt("fontSizeFooter", s.fontSizeFooter)
                 apply()
             }
+        }
+
+        private var businessInfoListener: ListenerRegistration? = null
+
+        /**
+         * Start a real-time listener on Settings/businessInfo.
+         * Whenever the web dashboard changes business name, address, or phone,
+         * the local ReceiptSettings SharedPreferences are updated immediately.
+         */
+        fun startBusinessInfoSync(context: Context) {
+            stopBusinessInfoSync()
+            val db = FirebaseFirestore.getInstance()
+            businessInfoListener = db.collection("Settings").document("businessInfo")
+                .addSnapshotListener { snap, err ->
+                    if (err != null) {
+                        Log.w("ReceiptSettings", "Business info sync error", err)
+                        return@addSnapshotListener
+                    }
+                    if (snap == null || !snap.exists()) return@addSnapshotListener
+
+                    val bizName = snap.getString("businessName") ?: return@addSnapshotListener
+                    val address = snap.getString("address") ?: ""
+                    val phone = snap.getString("phone") ?: ""
+
+                    val addressBlock = buildString {
+                        if (address.isNotBlank()) append(address)
+                        if (phone.isNotBlank()) {
+                            if (isNotEmpty()) append("\n")
+                            append(phone)
+                        }
+                    }
+
+                    val current = load(context)
+                    if (current.businessName != bizName || current.addressText != addressBlock) {
+                        save(context, current.copy(
+                            businessName = bizName,
+                            addressText = addressBlock
+                        ))
+                        Log.d("ReceiptSettings", "Synced business info: $bizName")
+                    }
+                }
+        }
+
+        fun stopBusinessInfoSync() {
+            businessInfoListener?.remove()
+            businessInfoListener = null
         }
     }
 }

@@ -403,16 +403,16 @@ class ReportPreviewActivity : AppCompatActivity() {
         val segs = mutableListOf<EscPosPrinter.Segment>()
         val lw = LINE_WIDTH
 
-        segs += EscPosPrinter.Segment(sanitize(data.title), bold = true, fontSize = 1, centered = true)
+        segs += EscPosPrinter.Segment(sanitize(data.title).uppercase(), bold = true, centered = true)
         val dateRangeText = sanitize(txtDateRange.text.toString())
         if (dateRangeText.isNotBlank()) {
             segs += EscPosPrinter.Segment(dateRangeText, centered = true)
         }
-        segs += EscPosPrinter.Segment("")
+        segs += EscPosPrinter.Segment("-".repeat(lw))
 
         for (section in data.sections) {
-            segs += EscPosPrinter.Segment("=".repeat(lw))
-            segs += EscPosPrinter.Segment(sanitize(section.title), bold = true, fontSize = 1, centered = true)
+            segs += EscPosPrinter.Segment("")
+            segs += EscPosPrinter.Segment(sanitize(section.title).uppercase(), bold = true)
             segs += EscPosPrinter.Segment("-".repeat(lw))
 
             for (row in section.rows) {
@@ -421,7 +421,7 @@ class ReportPreviewActivity : AppCompatActivity() {
                 val bold = row.isBold || row.isTotal
 
                 when {
-                    row.isDivider -> segs += EscPosPrinter.Segment("-".repeat(lw))
+                    row.isDivider -> segs += EscPosPrinter.Segment("")
                     row.isSectionHeader -> segs += EscPosPrinter.Segment(label, bold = true)
                     value.isBlank() -> {
                         val indent = "  ".repeat(row.indent)
@@ -439,10 +439,10 @@ class ReportPreviewActivity : AppCompatActivity() {
                     }
                 }
             }
-            segs += EscPosPrinter.Segment("")
         }
 
-        segs += EscPosPrinter.Segment("=".repeat(lw))
+        segs += EscPosPrinter.Segment("")
+        segs += EscPosPrinter.Segment("-".repeat(lw))
         val printDate = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
         segs += EscPosPrinter.Segment("Printed: $printDate", centered = true)
 

@@ -167,6 +167,9 @@ class MenuActivity : AppCompatActivity() {
         discountEngine.loadDiscounts { refreshCart() }
         updateCustomerDisplay()
 
+        val bizName = ReceiptSettings.load(this).businessName
+        CustomerDisplayManager.setIdle(this, bizName)
+
         // ✅ Load existing order items into cart if ORDER_ID was provided
         currentOrderId?.let { existingOrderId ->
             loadExistingOrderIntoCart(existingOrderId)
@@ -211,6 +214,7 @@ class MenuActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        CustomerDisplayManager.attach(this)
         loadAllTaxes()
         discountEngine.loadDiscounts { refreshCart() }
     }
@@ -1299,6 +1303,7 @@ class MenuActivity : AppCompatActivity() {
         txtTotal.text = "Total: ${MoneyUtils.centsToDisplay((totalAmount * 100).toLong())}"
 
         syncOrderTotal()
+        pushOrderToCustomerDisplay()
     }
 
     private fun syncOrderTotal() {
@@ -1372,6 +1377,96 @@ class MenuActivity : AppCompatActivity() {
         }
 
         db.collection("Orders").document(oid).update(updates)
+    }
+
+    private fun pushOrderToCustomerDisplay() {
+        if (cartMap.isEmpty()) {
+            val name = ReceiptSettings.load(this).businessName
+            CustomerDisplayManager.setIdle(this, name)
+            return
+        }
+
+        val lines = cartMap.entries.map { (_, item) ->
+            val modStrings = item.modifiers.map { mod ->
+                if (mod.action == "REMOVE") "• No ${mod.name}" else "• ${mod.name}"
+            }
+            val unitPrice = item.basePrice + item.modifiers
+                .filter { it.action == "ADD" }
+                .sumOf { it.price }
+            val lineTotalCents = Math.round(unitPrice * item.quantity * 100)
+
+            CustomerOrderLine(
+                name = item.name,
+                quantity = item.quantity,
+                modifiers = modStrings,
+                lineTotalCents = lineTotalCents
+            )
+        }
+
+        val rawSubtotal = cartMap.values.sumOf { item ->
+            val modTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+            (item.basePrice + modTotal) * item.quantity
+        }
+        val subtotalCents = Math.round(rawSubtotal * 100)
+
+        val custDiscountLines = mutableListOf<SummaryLine>()
+        if (discountTotalCents > 0L) {
+            val withAmounts = appliedDiscounts.filter { it.amountInCents > 0L }
+            if (withAmounts.isNotEmpty()) {
+                for (ad in withAmounts) {
+                    custDiscountLines.add(
+                        SummaryLine(
+                            DiscountDisplay.formatReceiptLabel(ad.discountName, ad.type, ad.value),
+                            ad.amountInCents
+                        )
+                    )
+                }
+            } else {
+                custDiscountLines.add(SummaryLine("Discount", discountTotalCents))
+            }
+        }
+
+        val discountedSubtotal = rawSubtotal - (discountTotalCents / 100.0)
+        val custTaxLines = mutableListOf<SummaryLine>()
+        for (tax in allTaxes) {
+            var taxableBase = 0.0
+            for ((lineKey, item) in cartMap.entries) {
+                val modTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+                var lineTotal = (item.basePrice + modTotal) * item.quantity
+
+                val lineDisc = appliedDiscounts.filter { it.lineKey == lineKey }
+                if (lineDisc.isNotEmpty()) {
+                    lineTotal = (lineTotal - lineDisc.sumOf { it.amountInCents } / 100.0).coerceAtLeast(0.0)
+                }
+                val orderDiscount = appliedDiscounts.find {
+                    (it.applyScope == "order" || it.applyScope == "manual") && it.lineKey == null
+                }
+                if (orderDiscount != null && subtotalCents > 0) {
+                    val proportion = lineTotal / rawSubtotal.coerceAtLeast(0.01)
+                    lineTotal = (lineTotal - (orderDiscount.amountInCents / 100.0) * proportion).coerceAtLeast(0.0)
+                }
+                if (item.taxMode == "FORCE_APPLY") {
+                    if (item.taxIds.contains(tax.id)) taxableBase += lineTotal
+                } else if (tax.enabled) {
+                    taxableBase += lineTotal
+                }
+            }
+            if (taxableBase <= 0.0) continue
+            val taxAmount = if (tax.type == "PERCENTAGE") taxableBase * tax.amount / 100.0 else tax.amount
+            val taxCents = Math.round(taxAmount * 100)
+            val label = DiscountDisplay.formatTaxLabel(tax.name, tax.type, tax.amount)
+            custTaxLines.add(SummaryLine(label, taxCents))
+        }
+
+        val summary = OrderSummaryInfo(
+            subtotalCents = subtotalCents,
+            discountLines = custDiscountLines,
+            taxLines = custTaxLines
+        )
+
+        val totalCents = Math.round(totalAmount * 100)
+        val name = ReceiptSettings.load(this).businessName
+        CustomerDisplayManager.updateOrder(this, name, lines, totalCents, summary)
     }
 
     private fun buildCartItemView(lineKey: String, item: CartItem): View {
@@ -1508,9 +1603,11 @@ class MenuActivity : AppCompatActivity() {
             }
         }
 
-        val onSwipeLeft = {
+        val onMinus = {
             if (item.quantity > 1) {
                 decrementCartItem(lineKey, item, 1)
+            } else {
+                removeCartItem(lineKey)
             }
         }
 
@@ -1518,15 +1615,7 @@ class MenuActivity : AppCompatActivity() {
             removeCartItem(lineKey)
         }
 
-        val onLongPress = {
-            if (item.quantity > 1) {
-                showRemoveQuantityDialog(lineKey, item, itemLayout)
-            } else {
-                removeCartItem(lineKey)
-            }
-        }
-
-        return wrapWithSwipeToDelete(itemLayout, onTap, onSwipeLeft, onTrash, onLongPress)
+        return wrapWithSwipeToDelete(itemLayout, onTap, onMinus, onTrash)
     }
 
     private fun removeCartItem(lineKey: String) {
@@ -1570,50 +1659,17 @@ class MenuActivity : AppCompatActivity() {
         }
     }
 
-    private fun showRemoveQuantityDialog(lineKey: String, item: CartItem, contentView: View) {
-        val currentQty = item.quantity
-
-        val input = EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            setText("1")
-            hint = "1 – $currentQty"
-            setSelectAllOnFocus(true)
-            setPadding(48, 32, 48, 32)
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Remove Quantity")
-            .setMessage("Current quantity: $currentQty\nHow many to remove?")
-            .setView(input)
-            .setPositiveButton("Remove") { _, _ ->
-                val removeQty = input.text.toString().toIntOrNull() ?: 1
-                val clamped = removeQty.coerceIn(1, currentQty)
-
-                if (clamped >= currentQty) {
-                    removeCartItem(lineKey)
-                } else {
-                    decrementCartItem(lineKey, item, clamped)
-                }
-            }
-            .setNegativeButton("Cancel") { _, _ ->
-                contentView.animate().translationX(0f).setDuration(150).start()
-            }
-            .setOnCancelListener {
-                contentView.animate().translationX(0f).setDuration(150).start()
-            }
-            .show()
-    }
-
     @Suppress("ClickableViewAccessibility")
     private fun wrapWithSwipeToDelete(
         contentView: View,
         onTap: () -> Unit,
-        onSwipeLeft: () -> Unit,
-        onTrash: () -> Unit,
-        onLongPress: () -> Unit
+        onMinus: () -> Unit,
+        onTrash: () -> Unit
     ): View {
         val density = resources.displayMetrics.density
-        val deleteWidthPx = (72 * density).toInt()
+        val buttonWidthPx = (56 * density).toInt()
+        val totalRevealPx = buttonWidthPx * 2
+        val swipeMax = totalRevealPx.toFloat()
 
         val wrapper = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -1622,47 +1678,68 @@ class MenuActivity : AppCompatActivity() {
             )
         }
 
-        val deleteBtn = FrameLayout(this).apply {
-            setBackgroundColor(Color.parseColor("#E53935"))
+        val buttonsContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             layoutParams = FrameLayout.LayoutParams(
-                deleteWidthPx,
+                totalRevealPx,
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 Gravity.END
             )
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { onTrash() }
         }
 
-        val icon = ImageView(this).apply {
-            setImageResource(R.drawable.ic_delete)
+        val minusBtn = FrameLayout(this).apply {
+            setBackgroundColor(Color.parseColor("#FF9800"))
+            layoutParams = LinearLayout.LayoutParams(buttonWidthPx, LinearLayout.LayoutParams.MATCH_PARENT)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                onMinus()
+                contentView.animate().translationX(0f).setDuration(150).start()
+            }
+        }
+        val minusIcon = ImageView(this@MenuActivity).apply {
+            setImageResource(R.drawable.ic_minus)
             setColorFilter(Color.WHITE)
             layoutParams = FrameLayout.LayoutParams(
-                (28 * density).toInt(),
-                (28 * density).toInt(),
+                (26 * density).toInt(),
+                (26 * density).toInt(),
                 Gravity.CENTER
             )
         }
-        deleteBtn.addView(icon)
+        minusBtn.addView(minusIcon)
+
+        val trashBtn = FrameLayout(this).apply {
+            setBackgroundColor(Color.parseColor("#E53935"))
+            layoutParams = LinearLayout.LayoutParams(buttonWidthPx, LinearLayout.LayoutParams.MATCH_PARENT)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                onTrash()
+            }
+        }
+        val trashIcon = ImageView(this@MenuActivity).apply {
+            setImageResource(R.drawable.ic_delete)
+            setColorFilter(Color.WHITE)
+            layoutParams = FrameLayout.LayoutParams(
+                (26 * density).toInt(),
+                (26 * density).toInt(),
+                Gravity.CENTER
+            )
+        }
+        trashBtn.addView(trashIcon)
+
+        buttonsContainer.addView(minusBtn)
+        buttonsContainer.addView(trashBtn)
 
         contentView.setBackgroundColor(Color.WHITE)
 
-        wrapper.addView(deleteBtn)
+        wrapper.addView(buttonsContainer)
         wrapper.addView(contentView)
 
         var downX = 0f
         var downY = 0f
         var prevX = 0f
         var swiping = false
-        var longPressTriggered = false
-        val swipeMax = deleteWidthPx.toFloat()
-        val longPressTimeout = android.view.ViewConfiguration.getLongPressTimeout().toLong()
-
-        val longPressRunnable = Runnable {
-            longPressTriggered = true
-            contentView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-            onLongPress()
-        }
 
         contentView.setOnTouchListener { v, event ->
             when (event.actionMasked) {
@@ -1671,8 +1748,6 @@ class MenuActivity : AppCompatActivity() {
                     downY = event.rawY
                     prevX = event.rawX
                     swiping = false
-                    longPressTriggered = false
-                    v.handler?.postDelayed(longPressRunnable, longPressTimeout)
                     true
                 }
 
@@ -1682,12 +1757,7 @@ class MenuActivity : AppCompatActivity() {
 
                     if (!swiping && abs(dx) > 12 * density && abs(dx) > abs(dy) * 1.5f) {
                         swiping = true
-                        v.handler?.removeCallbacks(longPressRunnable)
                         v.parent?.requestDisallowInterceptTouchEvent(true)
-                    }
-
-                    if (abs(dy) > 12 * density && !swiping) {
-                        v.handler?.removeCallbacks(longPressRunnable)
                     }
 
                     if (swiping) {
@@ -1700,21 +1770,15 @@ class MenuActivity : AppCompatActivity() {
                 }
 
                 MotionEvent.ACTION_UP -> {
-                    v.handler?.removeCallbacks(longPressRunnable)
                     v.parent?.requestDisallowInterceptTouchEvent(false)
 
-                    if (longPressTriggered) {
-                        // already handled
-                    } else if (!swiping && abs(event.rawX - downX) < 12 * density
+                    if (!swiping && abs(event.rawX - downX) < 12 * density
                         && abs(event.rawY - downY) < 12 * density
                     ) {
                         onTap()
                     } else if (swiping) {
                         if (v.translationX < -swipeMax / 2) {
-                            onSwipeLeft()
-                            if (v.translationX != 0f) {
-                                v.animate().translationX(-swipeMax).setDuration(120).start()
-                            }
+                            v.animate().translationX(-swipeMax).setDuration(120).start()
                         } else {
                             v.animate().translationX(0f).setDuration(150).start()
                         }
@@ -1724,7 +1788,6 @@ class MenuActivity : AppCompatActivity() {
                 }
 
                 MotionEvent.ACTION_CANCEL -> {
-                    v.handler?.removeCallbacks(longPressRunnable)
                     v.parent?.requestDisallowInterceptTouchEvent(false)
                     v.animate().translationX(0f).setDuration(150).start()
                     swiping = false
@@ -1823,6 +1886,7 @@ class MenuActivity : AppCompatActivity() {
         cartTaxSummary.removeAllViews()
         txtTotal.text = "Total: $0.00"
         updateCustomerDisplay()
+        CustomerDisplayManager.setIdle(this, ReceiptSettings.load(this).businessName)
     }
 
     // ── Bar Tab Capture Flow ────────────────────────────────────────

@@ -3,10 +3,11 @@ package com.ernesto.myapplication
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.InputType
+import android.util.TypedValue
 import android.view.Gravity
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -20,7 +21,6 @@ import com.google.firebase.firestore.FirebaseFirestore
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.Date
-import java.util.Locale
 
 class TipActivity : AppCompatActivity() {
 
@@ -30,6 +30,8 @@ class TipActivity : AppCompatActivity() {
     private var subtotalCents: Long = 0L
     private var taxCents: Long = 0L
     private var totalCents: Long = 0L
+
+    private lateinit var btnCustomTip: Button
 
     private val paymentLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -82,77 +84,80 @@ class TipActivity : AppCompatActivity() {
     private fun setupUI() {
         val txtTotal = findViewById<TextView>(R.id.txtTipOrderTotal)
         val txtBaseLabel = findViewById<TextView>(R.id.txtTipBaseLabel)
-        val presetButtonsContainer = findViewById<LinearLayout>(R.id.presetButtonsContainer)
-        val presetAmountsContainer = findViewById<LinearLayout>(R.id.presetAmountsContainer)
-        val btnCustomTip = findViewById<Button>(R.id.btnCustomTip)
-        val btnNoTip = findViewById<Button>(R.id.btnNoTip)
+        val presetContainer = findViewById<LinearLayout>(R.id.presetButtonsContainer)
+        btnCustomTip = findViewById(R.id.btnCustomTip)
+        val btnNoTip = findViewById<TextView>(R.id.btnNoTip)
 
         txtTotal.text = "Order Total: ${MoneyUtils.centsToDisplay(totalCents)}"
 
         val isSubtotal = TipConfig.isSubtotalBased(this)
         val baseCents = if (isSubtotal) subtotalCents else totalCents
-        val baseLabel = if (isSubtotal) "Tip calculated on subtotal (${MoneyUtils.centsToDisplay(subtotalCents)})"
-            else "Tip calculated on total (${MoneyUtils.centsToDisplay(totalCents)})"
+        val baseLabel = if (isSubtotal)
+            "Tip calculated on subtotal (${MoneyUtils.centsToDisplay(subtotalCents)})"
+        else
+            "Tip calculated on total (${MoneyUtils.centsToDisplay(totalCents)})"
         txtBaseLabel.text = baseLabel
 
         val presets = TipConfig.getPresets(this)
+        val showCustom = TipConfig.isCustomTipEnabled(this)
+        val businessName = ReceiptSettings.load(this).businessName
+
+        CustomerDisplayManager.showTipScreen(
+            activity = this,
+            name = businessName,
+            totalCents = totalCents,
+            baseCents = baseCents,
+            baseLabel = baseLabel,
+            presets = presets,
+            showCustomTip = showCustom,
+            onTipSelected = { tipCents -> applyTip(tipCents) }
+        )
+
+        val cardHeight = dpToPx(72)
+        val cardSpacing = dpToPx(10)
 
         for (pct in presets) {
             val tipCents = roundCents(baseCents * pct / 100.0)
             val tipDisplay = MoneyUtils.centsToDisplay(tipCents)
 
-            val btnCol = LinearLayout(this).apply {
+            val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                lp.setMargins(8, 0, 8, 0)
+                setBackgroundResource(R.drawable.bg_tip_option_unselected)
+                val lp = LinearLayout.LayoutParams(0, cardHeight, 1f)
+                lp.setMargins(cardSpacing / 2, 0, cardSpacing / 2, 0)
                 layoutParams = lp
+                setPadding(0, dpToPx(10), 0, dpToPx(10))
+                isClickable = true
+                isFocusable = true
             }
 
-            val pctBtn = Button(this).apply {
+            val pctLabel = TextView(this).apply {
                 text = "$pct%"
                 textSize = 18f
                 setTypeface(null, Typeface.BOLD)
-                setTextColor(Color.WHITE)
-
-                val bg = GradientDrawable()
-                bg.setColor(Color.parseColor("#6A4FB3"))
-                bg.cornerRadius = 16f
-                background = bg
-
-                val btnLp = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-                layoutParams = btnLp
-
-                setOnClickListener { applyTip(tipCents) }
+                setTextColor(Color.parseColor("#1F2937"))
+                gravity = Gravity.CENTER
             }
 
-            val amountLabel = TextView(this).apply {
+            val amtLabel = TextView(this).apply {
                 text = tipDisplay
                 textSize = 13f
                 setTextColor(Color.parseColor("#666666"))
                 gravity = Gravity.CENTER
-                setPadding(0, 8, 0, 0)
+                setPadding(0, dpToPx(2), 0, 0)
             }
 
-            btnCol.addView(pctBtn)
-            presetButtonsContainer.addView(btnCol)
+            card.addView(pctLabel)
+            card.addView(amtLabel)
 
-            val amtCol = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(8, 0, 8, 0)
-                }
-            }
-            amtCol.addView(amountLabel)
-            presetAmountsContainer.addView(amtCol)
+            card.setOnClickListener { applyTip(tipCents) }
+
+            presetContainer.addView(card)
         }
 
         if (TipConfig.isCustomTipEnabled(this)) {
-            btnCustomTip.visibility = android.view.View.VISIBLE
+            btnCustomTip.visibility = View.VISIBLE
             btnCustomTip.setOnClickListener { showCustomTipDialog() }
         }
 
@@ -163,7 +168,7 @@ class TipActivity : AppCompatActivity() {
         val input = EditText(this).apply {
             hint = "Tip amount ($)"
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setPadding(48, 32, 48, 32)
+            setPadding(dpToPx(20), dpToPx(16), dpToPx(20), dpToPx(16))
         }
 
         AlertDialog.Builder(this)
@@ -229,7 +234,17 @@ class TipActivity : AppCompatActivity() {
             .toLong()
     }
 
+    private fun dpToPx(dp: Int): Int {
+        return TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            dp.toFloat(),
+            resources.displayMetrics
+        ).toInt()
+    }
+
+    @Suppress("DEPRECATION")
     override fun onBackPressed() {
+        super.onBackPressed()
         applyTip(0L)
     }
 }

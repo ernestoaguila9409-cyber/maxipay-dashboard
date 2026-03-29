@@ -30,6 +30,8 @@ class ReceiptOptionsActivity : AppCompatActivity() {
 
     private var orderId: String? = null
     private val db = FirebaseFirestore.getInstance()
+    /** When customer email was passed in, merchant UI skips main options — don't mirror receipt grid on customer display. */
+    private var skipCustomerReceiptMirror: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,6 +45,7 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         val etReceiptEmail = findViewById<EditText>(R.id.etReceiptEmail)
 
         if (!customerEmail.isNullOrBlank()) {
+            skipCustomerReceiptMirror = true
             etReceiptEmail.setText(customerEmail)
             optionsContainer.visibility = View.GONE
             emailFormContainer.visibility = View.VISIBLE
@@ -60,6 +63,14 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         findViewById<LinearLayout>(R.id.btnEmailReceipt).setOnClickListener {
             optionsContainer.visibility = View.GONE
             emailFormContainer.visibility = View.VISIBLE
+            showEmailInputOnCustomerDisplay()
+        }
+
+        val smsFormContainer = findViewById<LinearLayout>(R.id.smsFormContainer)
+
+        findViewById<LinearLayout>(R.id.btnSmsReceipt).setOnClickListener {
+            optionsContainer.visibility = View.GONE
+            smsFormContainer.visibility = View.VISIBLE
         }
 
         findViewById<LinearLayout>(R.id.btnSkipReceipt).setOnClickListener {
@@ -80,9 +91,72 @@ class ReceiptOptionsActivity : AppCompatActivity() {
             emailFormContainer.visibility = View.GONE
             optionsContainer.visibility = View.VISIBLE
         }
+
+        findViewById<Button>(R.id.btnSendSms).setOnClickListener {
+            val phone = findViewById<EditText>(R.id.etReceiptPhone).text.toString().trim()
+            if (phone.isEmpty()) {
+                Toast.makeText(this, "Please enter a phone number", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val oid = orderId ?: ""
+            sendReceiptSms(phone, oid)
+        }
+
+        findViewById<Button>(R.id.btnBackFromSms).setOnClickListener {
+            smsFormContainer.visibility = View.GONE
+            optionsContainer.visibility = View.VISIBLE
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        CustomerDisplayManager.attach(this)
+        if (!skipCustomerReceiptMirror && CustomerDisplayManager.getPaymentSuccessInfo() != null) {
+            CustomerDisplayManager.showReceiptOptionsOnCustomerDisplay(this) { option ->
+                runOnUiThread { handleCustomerReceiptChoice(option) }
+            }
+        }
+    }
+
+    private fun handleCustomerReceiptChoice(option: ReceiptOption) {
+        when (option) {
+            ReceiptOption.PRINT -> findViewById<LinearLayout>(R.id.btnPrintReceipt).performClick()
+            ReceiptOption.EMAIL -> showEmailInputOnCustomerDisplay()
+            ReceiptOption.SMS -> findViewById<LinearLayout>(R.id.btnSmsReceipt).performClick()
+            ReceiptOption.SKIP -> findViewById<LinearLayout>(R.id.btnSkipReceipt).performClick()
+        }
+    }
+
+    private fun showEmailInputOnCustomerDisplay() {
+        CustomerDisplayManager.showEmailInputOnCustomerDisplay(
+            this,
+            onSubmit = { email ->
+                runOnUiThread {
+                    val oid = orderId ?: ""
+                    sendReceiptEmail(email, oid)
+                }
+            },
+            onCancel = {
+                runOnUiThread {
+                    if (CustomerDisplayManager.getPaymentSuccessInfo() != null) {
+                        CustomerDisplayManager.showReceiptOptionsOnCustomerDisplay(this) { option ->
+                            runOnUiThread { handleCustomerReceiptChoice(option) }
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    override fun onDestroy() {
+        CustomerDisplayManager.clearReceiptOptionCallback()
+        CustomerDisplayManager.clearEmailInputCallbacks()
+        super.onDestroy()
     }
 
     private fun goToMainScreen() {
+        CustomerDisplayManager.clearPaymentSuccessInfo()
+        CustomerDisplayManager.clearReceiptOptionCallback()
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
@@ -340,6 +414,62 @@ class ReceiptOptionsActivity : AppCompatActivity() {
             val oid = orderId
             if (!oid.isNullOrBlank()) loadAndPrint(oid)
         }
+    }
+
+    // ============================
+    // EMAIL RECEIPT
+    // ============================
+
+    // ============================
+    // SMS RECEIPT
+    // ============================
+
+    private fun sendReceiptSms(phone: String, orderId: String) {
+        var cleaned = phone.replace(Regex("[\\s\\-()]"), "")
+        if (cleaned.length == 10 && !cleaned.startsWith("+")) {
+            cleaned = "+1$cleaned"
+        } else if (cleaned.startsWith("1") && cleaned.length == 11) {
+            cleaned = "+$cleaned"
+        }
+
+        if (!cleaned.matches(Regex("^\\+1\\d{10}$"))) {
+            Toast.makeText(this, "Invalid phone number. Use format: +1XXXXXXXXXX", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val functions = FirebaseFunctions.getInstance()
+        val data = hashMapOf(
+            "phone" to cleaned,
+            "orderId" to orderId
+        )
+
+        val btnSend = findViewById<Button>(R.id.btnSendSms)
+        btnSend.isEnabled = false
+        btnSend.text = "Sending…"
+
+        functions
+            .getHttpsCallable("sendReceiptSms")
+            .call(data)
+            .addOnSuccessListener { result ->
+                val response = result.data as? Map<*, *>
+                if (response?.get("success") == true) {
+                    Log.d("Receipt", "SMS sent successfully")
+                    Toast.makeText(this, "Receipt texted to $cleaned", Toast.LENGTH_SHORT).show()
+                    goToMainScreen()
+                } else {
+                    val errorMsg = response?.get("error")?.toString() ?: "Unknown error"
+                    Log.e("Receipt", "SMS function returned failure: $response")
+                    Toast.makeText(this, "Failed to send SMS: $errorMsg", Toast.LENGTH_LONG).show()
+                    btnSend.isEnabled = true
+                    btnSend.text = "Send Text"
+                }
+            }
+            .addOnFailureListener { e ->
+                Log.e("Receipt", "Error calling sendReceiptSms", e)
+                Toast.makeText(this, "Failed to send SMS: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                btnSend.isEnabled = true
+                btnSend.text = "Send Text"
+            }
     }
 
     // ============================

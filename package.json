@@ -1,0 +1,9 @@
+{
+  "name": "myapplication2",
+  "private": true,
+  "scripts": {
+    "build": "cd maxipay-dashboard && npm run build",
+    "dev": "cd maxipay-dashboard && npm run dev",
+    "lint": "cd maxipay-dashboard && npm run lint"
+  }
+}

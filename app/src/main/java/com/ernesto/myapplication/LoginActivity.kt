@@ -20,6 +20,17 @@ class LoginActivity : AppCompatActivity() {
 
     private val functions = FirebaseFunctions.getInstance()
     private val auth = FirebaseAuth.getInstance()
+
+    /**
+     * Anonymous Firebase Auth is required for Firestore after login. Starting it while the user
+     * enters their PIN overlaps that latency with [verifyPin], so the post-PIN path is often a
+     * single network round trip instead of two sequential calls.
+     */
+    private fun prewarmAnonymousAuth() {
+        if (auth.currentUser == null) {
+            auth.signInAnonymously()
+        }
+    }
     private var isLoggingIn = false
     private val pinBuilder = StringBuilder()
     private val maxPinLength = 4
@@ -33,6 +44,12 @@ class LoginActivity : AppCompatActivity() {
         window.navigationBarColor = Color.parseColor("#12002F")
 
         setContentView(R.layout.activity_login)
+
+        prewarmAnonymousAuth()
+        ReceiptSettings.startBusinessInfoSync(this)
+
+        val bizName = ReceiptSettings.load(this).businessName
+        CustomerDisplayManager.setIdle(this, bizName)
 
         dotsContainer = findViewById(R.id.dotsContainer)
         pinDots = listOf(
@@ -103,13 +120,19 @@ class LoginActivity : AppCompatActivity() {
                 if (pinDots[i].tag != "filled") {
                     pinDots[i].tag = "filled"
                     pinDots[i].setBackgroundResource(R.drawable.pin_dot_filled)
-                    pinDots[i].scaleX = 0.5f
-                    pinDots[i].scaleY = 0.5f
-                    pinDots[i].animate()
-                        .scaleX(1f).scaleY(1f)
-                        .setDuration(200)
-                        .setInterpolator(OvershootInterpolator(3f))
-                        .start()
+                    // Fourth digit: no scale animation so login can feel instant on key up.
+                    if (pinBuilder.length == maxPinLength) {
+                        pinDots[i].scaleX = 1f
+                        pinDots[i].scaleY = 1f
+                    } else {
+                        pinDots[i].scaleX = 0.5f
+                        pinDots[i].scaleY = 0.5f
+                        pinDots[i].animate()
+                            .scaleX(1f).scaleY(1f)
+                            .setDuration(200)
+                            .setInterpolator(OvershootInterpolator(3f))
+                            .start()
+                    }
                 }
             } else {
                 pinDots[i].tag = "empty"
@@ -161,21 +184,27 @@ class LoginActivity : AppCompatActivity() {
                 val name = response["name"] as? String ?: ""
                 val role = response["role"] as? String ?: ""
 
-                auth.signInAnonymously()
-                    .addOnSuccessListener {
-                        isLoggingIn = false
-                        TerminalPrefs.initFromFirestore()
-                        SessionEmployee.setEmployee(this, name, role)
+                fun openMainAfterAuth() {
+                    isLoggingIn = false
+                    TerminalPrefs.initFromFirestore()
+                    SessionEmployee.setEmployee(this, name, role)
 
-                        val intent = Intent(this, MainActivity::class.java)
-                        intent.putExtra("employeeName", name)
-                        intent.putExtra("employeeRole", role)
-                        startActivity(intent)
-                        finish()
-                    }
-                    .addOnFailureListener {
-                        onLoginFailed("Login failed")
-                    }
+                    val intent = Intent(this, MainActivity::class.java)
+                    intent.putExtra("employeeName", name)
+                    intent.putExtra("employeeRole", role)
+                    startActivity(intent)
+                    finish()
+                }
+
+                if (auth.currentUser != null) {
+                    openMainAfterAuth()
+                } else {
+                    auth.signInAnonymously()
+                        .addOnSuccessListener { openMainAfterAuth() }
+                        .addOnFailureListener {
+                            onLoginFailed("Login failed")
+                        }
+                }
             }
             .addOnFailureListener {
                 onLoginFailed("Login failed")
