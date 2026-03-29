@@ -22,14 +22,11 @@ import {
   AlertCircle,
   Receipt,
   Settings2,
-  Type,
-  Bold,
-  Rows3,
-  CreditCard,
-  UserRound,
 } from "lucide-react";
 
-/* ── types ── */
+/* ══════════════════════════════════════════════
+   Types — mirrors Android ReceiptSettings.kt
+   ══════════════════════════════════════════════ */
 
 interface BusinessData {
   businessName: string;
@@ -40,14 +37,24 @@ interface BusinessData {
 }
 
 interface PrintSettings {
-  headerFontSize: number;
-  headerBold: boolean;
-  itemsFontSize: number;
-  itemsCompact: boolean;
-  totalsLarger: boolean;
-  totalsBold: boolean;
-  showTransaction: boolean;
-  showCustomerInfo: boolean;
+  showServerName: boolean;
+  showDateTime: boolean;
+  showLogo: boolean;
+  showEmail: boolean;
+  boldBizName: boolean;
+  boldAddress: boolean;
+  boldOrderInfo: boolean;
+  boldItems: boolean;
+  boldTotals: boolean;
+  boldGrandTotal: boolean;
+  boldFooter: boolean;
+  fontSizeBizName: number;   // 0=Normal 1=Large 2=X-Large
+  fontSizeAddress: number;
+  fontSizeOrderInfo: number;
+  fontSizeItems: number;
+  fontSizeTotals: number;
+  fontSizeGrandTotal: number;
+  fontSizeFooter: number;
 }
 
 const EMPTY: BusinessData = {
@@ -59,15 +66,28 @@ const EMPTY: BusinessData = {
 };
 
 const DEFAULT_PRINT: PrintSettings = {
-  headerFontSize: 18,
-  headerBold: true,
-  itemsFontSize: 12,
-  itemsCompact: false,
-  totalsLarger: false,
-  totalsBold: true,
-  showTransaction: true,
-  showCustomerInfo: false,
+  showServerName: true,
+  showDateTime: true,
+  showLogo: true,
+  showEmail: false,
+  boldBizName: true,
+  boldAddress: false,
+  boldOrderInfo: true,
+  boldItems: false,
+  boldTotals: false,
+  boldGrandTotal: true,
+  boldFooter: false,
+  fontSizeBizName: 2,
+  fontSizeAddress: 2,
+  fontSizeOrderInfo: 2,
+  fontSizeItems: 0,
+  fontSizeTotals: 0,
+  fontSizeGrandTotal: 1,
+  fontSizeFooter: 0,
 };
+
+const FONT_LABELS = ["Normal", "Large", "X-Large"] as const;
+const FONT_PX: Record<number, number> = { 0: 12, 1: 15, 2: 19 };
 
 const DOC_REF = "Settings";
 const DOC_ID = "businessInfo";
@@ -77,7 +97,7 @@ type SaveStatus = "idle" | "saving" | "saved" | "error";
 type RightTab = "preview" | "print";
 type ReceiptVariant = "original" | "refund" | "void";
 
-/* ── helpers ── */
+/* ── image resize ── */
 
 function resizeImage(file: File): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -98,7 +118,8 @@ function resizeImage(file: File): Promise<Blob> {
       if (!ctx) return reject(new Error("Canvas context unavailable"));
       ctx.drawImage(img, 0, 0, w, h);
       canvas.toBlob(
-        (blob) => (blob ? resolve(blob) : reject(new Error("Compress failed"))),
+        (blob) =>
+          blob ? resolve(blob) : reject(new Error("Compress failed")),
         "image/png",
         0.85
       );
@@ -111,7 +132,9 @@ function resizeImage(file: File): Promise<Blob> {
   });
 }
 
-/* ── small reusable components ── */
+/* ══════════════════════════════════════════════
+   Small reusable sub-components
+   ══════════════════════════════════════════════ */
 
 function Toggle({
   checked,
@@ -123,8 +146,8 @@ function Toggle({
   label: string;
 }) {
   return (
-    <label className="flex items-center justify-between gap-3 cursor-pointer group">
-      <span className="text-sm text-slate-700 group-hover:text-slate-900 transition-colors">
+    <label className="flex items-center justify-between gap-3 cursor-pointer group py-1">
+      <span className="text-[13px] text-slate-700 group-hover:text-slate-900 transition-colors">
         {label}
       </span>
       <button
@@ -146,63 +169,58 @@ function Toggle({
   );
 }
 
-function Slider({
+function FontSizePicker({
   value,
-  min,
-  max,
   onChange,
   label,
-  unit = "px",
 }: {
   value: number;
-  min: number;
-  max: number;
   onChange: (v: number) => void;
   label: string;
-  unit?: string;
 }) {
   return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-sm text-slate-700">{label}</span>
-        <span className="text-xs font-medium text-slate-500 tabular-nums">
-          {value}
-          {unit}
-        </span>
+    <div className="py-1">
+      <span className="text-[13px] text-slate-700 block mb-1.5">{label}</span>
+      <div className="flex gap-1.5 bg-slate-100 rounded-lg p-0.5">
+        {FONT_LABELS.map((lbl, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => onChange(i)}
+            className={`flex-1 py-1 text-[11px] font-medium rounded-md transition-all ${
+              value === i
+                ? "bg-white text-slate-800 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {lbl}
+          </button>
+        ))}
       </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full h-1.5 rounded-full appearance-none bg-slate-200 accent-blue-600 cursor-pointer"
-      />
     </div>
   );
 }
 
-function SettingsSection({
-  icon,
+function Section({
   title,
   children,
 }: {
-  icon: React.ReactNode;
   title: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
-        {icon}
+    <div>
+      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
         {title}
-      </div>
-      <div className="space-y-3 pl-0.5">{children}</div>
+      </p>
+      <div className="space-y-1">{children}</div>
     </div>
   );
 }
 
-/* ── main page ── */
+/* ══════════════════════════════════════════════
+   Main page component
+   ══════════════════════════════════════════════ */
 
 export default function BusinessInformationPage() {
   const { user } = useAuth();
@@ -220,13 +238,14 @@ export default function BusinessInformationPage() {
   const [resizedBlob, setResizedBlob] = useState<Blob | null>(null);
 
   const [rightTab, setRightTab] = useState<RightTab>("preview");
-  const [receiptVariant, setReceiptVariant] = useState<ReceiptVariant>("original");
-  const [printSettings, setPrintSettings] = useState<PrintSettings>(DEFAULT_PRINT);
+  const [receiptVariant, setReceiptVariant] =
+    useState<ReceiptVariant>("original");
+  const [ps, setPs] = useState<PrintSettings>(DEFAULT_PRINT);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  /* ── Firestore sync ── */
+  /* ── Firestore ── */
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -283,15 +302,14 @@ export default function BusinessInformationPage() {
       setSaveStatus("saved");
       setDirty(false);
       setTimeout(() => setSaveStatus("idle"), 3500);
-    } catch (e) {
-      console.error("[Business] save error:", e);
+    } catch {
       setSaveStatus("error");
       setSaveError("Save failed. Check your connection and try again.");
       setTimeout(() => setSaveStatus("idle"), 5000);
     }
   }, [data]);
 
-  /* ── logo upload ── */
+  /* ── logo ── */
 
   const processFile = useCallback(async (file: File) => {
     setUploadError(null);
@@ -343,14 +361,13 @@ export default function BusinessInformationPage() {
     setUploadError(null);
   }, []);
 
-  const updatePrint = useCallback(
-    <K extends keyof PrintSettings>(key: K, value: PrintSettings[K]) => {
-      setPrintSettings((prev) => ({ ...prev, [key]: value }));
-    },
+  const pSet = useCallback(
+    <K extends keyof PrintSettings>(k: K, v: PrintSettings[K]) =>
+      setPs((p) => ({ ...p, [k]: v })),
     []
   );
 
-  /* ── loading state ── */
+  /* ── loading ── */
 
   if (loading) {
     return (
@@ -372,7 +389,7 @@ export default function BusinessInformationPage() {
   const displayName = data.businessName.trim() || "Your Business";
   const displayAddress = data.address.trim() || "123 Main Street";
   const displayPhone = data.phone.trim() || "(555) 123-4567";
-  const ps = printSettings;
+  const displayEmail = data.email.trim();
 
   const variantLabel =
     receiptVariant === "refund"
@@ -380,7 +397,6 @@ export default function BusinessInformationPage() {
       : receiptVariant === "void"
         ? "VOID"
         : "RECEIPT";
-
   const variantColor =
     receiptVariant === "refund"
       ? "text-amber-600"
@@ -388,14 +404,18 @@ export default function BusinessInformationPage() {
         ? "text-red-600"
         : "text-slate-700";
 
-  /* ── render ── */
+  const px = (key: number) => FONT_PX[key] ?? 12;
+
+  /* ══════════════════════════════════════════════
+     Render
+     ══════════════════════════════════════════════ */
 
   return (
     <>
       <Header title="Business Information" />
 
       <div className="p-6 flex flex-col xl:flex-row gap-6 items-start">
-        {/* ════════ LEFT COLUMN — FORM (55%) ════════ */}
+        {/* ════════ LEFT — FORM (55%) ════════ */}
         <div className="w-full xl:w-[55%] min-w-0">
           {loadError && (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2 mb-6">
@@ -423,7 +443,6 @@ export default function BusinessInformationPage() {
             </div>
 
             <div className="px-6 space-y-5 flex-1">
-              {/* Business Name */}
               <div>
                 <label
                   htmlFor="businessName"
@@ -441,7 +460,6 @@ export default function BusinessInformationPage() {
                 />
               </div>
 
-              {/* Address */}
               <div>
                 <label
                   htmlFor="address"
@@ -460,7 +478,6 @@ export default function BusinessInformationPage() {
                 />
               </div>
 
-              {/* Phone + Email side by side */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <div>
                   <label
@@ -498,7 +515,6 @@ export default function BusinessInformationPage() {
                 </div>
               </div>
 
-              {/* Logo */}
               <div>
                 <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5">
                   <ImagePlus size={14} className="text-slate-400" />
@@ -547,13 +563,16 @@ export default function BusinessInformationPage() {
               </div>
             </div>
 
-            {/* Sticky save bar */}
+            {/* Sticky save */}
             <div className="sticky bottom-0 bg-white border-t border-slate-100 px-6 py-4 rounded-b-2xl mt-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="min-h-[20px] text-sm">
                   {saveStatus === "saving" && (
                     <span className="text-slate-500 flex items-center gap-2">
-                      <Loader2 size={14} className="animate-spin shrink-0" />
+                      <Loader2
+                        size={14}
+                        className="animate-spin shrink-0"
+                      />
                       Saving…
                     </span>
                   )}
@@ -593,7 +612,7 @@ export default function BusinessInformationPage() {
           </div>
         </div>
 
-        {/* ════════ RIGHT COLUMN — TABS (45%) ════════ */}
+        {/* ════════ RIGHT — TABS (45%) ════════ */}
         <div className="w-full xl:w-[45%] min-w-0">
           <div className="xl:sticky xl:top-6">
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
@@ -625,10 +644,10 @@ export default function BusinessInformationPage() {
                 </button>
               </div>
 
-              {/* Tab content */}
+              {/* ── Receipt Preview Tab ── */}
               {rightTab === "preview" ? (
                 <div className="p-5">
-                  {/* Variant toggles */}
+                  {/* Variant selector */}
                   <div className="flex gap-1.5 mb-5 bg-slate-100 rounded-lg p-1">
                     {(
                       [
@@ -657,52 +676,80 @@ export default function BusinessInformationPage() {
                     <div
                       className="w-full max-w-[320px] bg-white rounded-lg shadow-[0_2px_20px_rgba(0,0,0,0.08)] border border-slate-100 px-7 py-8 text-center"
                       style={{
-                        fontFamily: "'Courier New', Courier, monospace",
+                        fontFamily:
+                          "'Courier New', Courier, monospace",
                       }}
                     >
                       {/* Logo */}
-                      {hasLogo && (
+                      {ps.showLogo && hasLogo && (
                         <div className="flex justify-center mb-3">
                           <img
                             src={data.logoUrl.trim()}
                             alt="Logo"
                             className="h-14 max-w-[140px] object-contain"
                             onError={(e) => {
-                              (e.target as HTMLImageElement).style.display =
-                                "none";
+                              (
+                                e.target as HTMLImageElement
+                              ).style.display = "none";
                             }}
                           />
                         </div>
                       )}
 
-                      {/* Header */}
+                      {/* Business name */}
                       <p
                         className="text-slate-800 leading-tight"
                         style={{
-                          fontSize: `${ps.headerFontSize}px`,
-                          fontWeight: ps.headerBold ? 700 : 400,
+                          fontSize: `${px(ps.fontSizeBizName)}px`,
+                          fontWeight: ps.boldBizName ? 700 : 400,
                         }}
                       >
                         {displayName}
                       </p>
-                      <p className="text-[11px] text-slate-500 mt-1 whitespace-pre-line">
+
+                      {/* Address */}
+                      <p
+                        className="text-slate-500 mt-1 whitespace-pre-line"
+                        style={{
+                          fontSize: `${px(ps.fontSizeAddress)}px`,
+                          fontWeight: ps.boldAddress ? 700 : 400,
+                        }}
+                      >
                         {displayAddress}
-                      </p>
-                      <p className="text-[11px] text-slate-500">
+                        {"\n"}
                         {displayPhone}
                       </p>
 
-                      {/* Variant badge */}
+                      {/* Email */}
+                      {ps.showEmail && displayEmail && (
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {displayEmail}
+                        </p>
+                      )}
+
+                      {/* Receipt label */}
                       <p
-                        className={`text-sm font-bold mt-4 mb-0.5 ${variantColor}`}
+                        className={`mt-4 mb-0.5 ${variantColor}`}
+                        style={{
+                          fontSize: `${px(ps.fontSizeOrderInfo)}px`,
+                          fontWeight: ps.boldOrderInfo ? 700 : 400,
+                        }}
                       >
                         {variantLabel}
                       </p>
 
-                      <div className="text-[10px] text-slate-500 leading-relaxed">
+                      {/* Order info */}
+                      <div
+                        className="text-slate-500 leading-relaxed"
+                        style={{
+                          fontSize: `${Math.max(px(ps.fontSizeOrderInfo) - 3, 10)}px`,
+                          fontWeight: ps.boldOrderInfo ? 600 : 400,
+                        }}
+                      >
                         <p>Order #1042</p>
-                        <p>Type: Dine In &middot; Server: Maria</p>
-                        <p>03/29/2026 12:32 AM</p>
+                        <p>Type: Dine In</p>
+                        {ps.showServerName && <p>Server: Maria</p>}
+                        {ps.showDateTime && <p>03/29/2026 12:32 AM</p>}
                       </div>
 
                       {/* Divider */}
@@ -710,17 +757,17 @@ export default function BusinessInformationPage() {
 
                       {/* Items */}
                       <div
-                        className="text-slate-700 text-left"
+                        className="text-slate-700 text-left space-y-px"
                         style={{
-                          fontSize: `${ps.itemsFontSize}px`,
-                          lineHeight: ps.itemsCompact ? 1.4 : 1.8,
+                          fontSize: `${px(ps.fontSizeItems)}px`,
+                          fontWeight: ps.boldItems ? 600 : 400,
                         }}
                       >
                         <div className="flex justify-between">
                           <span>2x Burger</span>
                           <span>$19.98</span>
                         </div>
-                        <div className="flex justify-between pl-3 text-slate-400">
+                        <div className="flex justify-between pl-3 text-slate-400 font-normal">
                           <span>+ Extra Cheese</span>
                           <span>$1.50</span>
                         </div>
@@ -747,21 +794,21 @@ export default function BusinessInformationPage() {
 
                       {/* Totals */}
                       <div
-                        className="text-slate-700 text-left"
+                        className="text-slate-700 text-left space-y-px"
                         style={{
-                          fontSize: ps.totalsLarger ? "14px" : "12px",
-                          fontWeight: ps.totalsBold ? 600 : 400,
+                          fontSize: `${px(ps.fontSizeTotals)}px`,
+                          fontWeight: ps.boldTotals ? 600 : 400,
                         }}
                       >
                         <div className="flex justify-between">
                           <span>Subtotal</span>
                           <span>$56.45</span>
                         </div>
-                        <div className="flex justify-between font-normal text-[12px]">
+                        <div className="flex justify-between">
                           <span>Tax (8.25%)</span>
                           <span>$4.66</span>
                         </div>
-                        <div className="flex justify-between font-normal text-[12px]">
+                        <div className="flex justify-between">
                           <span>Tip</span>
                           <span>$8.47</span>
                         </div>
@@ -769,110 +816,149 @@ export default function BusinessInformationPage() {
 
                       {/* Grand total */}
                       <div className="border-t-2 border-slate-300 mt-3 pt-2">
-                        <div className="flex justify-between text-base font-bold text-slate-800">
+                        <div
+                          className="flex justify-between text-slate-800 text-left"
+                          style={{
+                            fontSize: `${px(ps.fontSizeGrandTotal)}px`,
+                            fontWeight: ps.boldGrandTotal ? 700 : 400,
+                          }}
+                        >
                           <span>TOTAL</span>
                           <span>$69.58</span>
                         </div>
                       </div>
 
-                      {/* Transaction details */}
-                      {ps.showTransaction && (
-                        <div className="text-[10px] text-slate-500 mt-4 space-y-0.5">
-                          <p>Visa **** 1234</p>
-                          <p>Auth: 123456 &middot; Type: Credit</p>
-                        </div>
-                      )}
-
-                      {/* Customer info */}
-                      {ps.showCustomerInfo && (
-                        <div className="text-[10px] text-slate-500 mt-3 pt-2 border-t border-dashed border-slate-200 space-y-0.5">
-                          <p>Customer: John Doe</p>
-                          <p>john@email.com</p>
-                        </div>
-                      )}
+                      {/* Payment */}
+                      <div className="text-[10px] text-slate-500 mt-4 space-y-0.5">
+                        <p>Visa **** 1234</p>
+                        <p>Auth: 123456 &middot; Type: Credit</p>
+                      </div>
 
                       {/* Footer */}
-                      <p className="text-[10px] text-slate-400 mt-5 italic">
+                      <p
+                        className="text-slate-400 mt-5 italic"
+                        style={{
+                          fontSize: `${px(ps.fontSizeFooter)}px`,
+                          fontWeight: ps.boldFooter ? 600 : 400,
+                        }}
+                      >
                         Thank you for dining with us!
                       </p>
                     </div>
                   </div>
                 </div>
               ) : (
-                /* ── Print Settings tab ── */
-                <div className="p-5 space-y-6">
-                  <SettingsSection
-                    icon={<Type size={12} />}
-                    title="Business Info"
-                  >
-                    <Slider
-                      label="Font size"
-                      value={ps.headerFontSize}
-                      min={12}
-                      max={28}
-                      onChange={(v) => updatePrint("headerFontSize", v)}
+                /* ── Print Settings Tab ── */
+                <div className="p-5 space-y-5 max-h-[calc(100vh-120px)] overflow-y-auto">
+                  {/* Display Options */}
+                  <Section title="Display Options">
+                    <Toggle
+                      label="Show Server Name"
+                      checked={ps.showServerName}
+                      onChange={(v) => pSet("showServerName", v)}
                     />
                     <Toggle
-                      label="Bold business name"
-                      checked={ps.headerBold}
-                      onChange={(v) => updatePrint("headerBold", v)}
+                      label="Show Date/Time"
+                      checked={ps.showDateTime}
+                      onChange={(v) => pSet("showDateTime", v)}
                     />
-                  </SettingsSection>
+                    <Toggle
+                      label="Show Logo"
+                      checked={ps.showLogo}
+                      onChange={(v) => pSet("showLogo", v)}
+                    />
+                    <Toggle
+                      label="Show Email"
+                      checked={ps.showEmail}
+                      onChange={(v) => pSet("showEmail", v)}
+                    />
+                  </Section>
 
                   <div className="border-t border-slate-100" />
 
-                  <SettingsSection icon={<Rows3 size={12} />} title="Items">
-                    <Slider
-                      label="Font size"
-                      value={ps.itemsFontSize}
-                      min={9}
-                      max={18}
-                      onChange={(v) => updatePrint("itemsFontSize", v)}
+                  {/* Bold */}
+                  <Section title="Bold">
+                    <Toggle
+                      label="Business Name"
+                      checked={ps.boldBizName}
+                      onChange={(v) => pSet("boldBizName", v)}
                     />
                     <Toggle
-                      label="Compact spacing"
-                      checked={ps.itemsCompact}
-                      onChange={(v) => updatePrint("itemsCompact", v)}
+                      label="Address"
+                      checked={ps.boldAddress}
+                      onChange={(v) => pSet("boldAddress", v)}
                     />
-                  </SettingsSection>
+                    <Toggle
+                      label="Order Info"
+                      checked={ps.boldOrderInfo}
+                      onChange={(v) => pSet("boldOrderInfo", v)}
+                    />
+                    <Toggle
+                      label="Items"
+                      checked={ps.boldItems}
+                      onChange={(v) => pSet("boldItems", v)}
+                    />
+                    <Toggle
+                      label="Totals"
+                      checked={ps.boldTotals}
+                      onChange={(v) => pSet("boldTotals", v)}
+                    />
+                    <Toggle
+                      label="Grand Total"
+                      checked={ps.boldGrandTotal}
+                      onChange={(v) => pSet("boldGrandTotal", v)}
+                    />
+                    <Toggle
+                      label="Footer"
+                      checked={ps.boldFooter}
+                      onChange={(v) => pSet("boldFooter", v)}
+                    />
+                  </Section>
 
                   <div className="border-t border-slate-100" />
 
-                  <SettingsSection icon={<Bold size={12} />} title="Totals">
-                    <Toggle
-                      label="Larger font"
-                      checked={ps.totalsLarger}
-                      onChange={(v) => updatePrint("totalsLarger", v)}
+                  {/* Font Size */}
+                  <Section title="Font Size">
+                    <FontSizePicker
+                      label="Business Name"
+                      value={ps.fontSizeBizName}
+                      onChange={(v) => pSet("fontSizeBizName", v)}
                     />
-                    <Toggle
-                      label="Bold"
-                      checked={ps.totalsBold}
-                      onChange={(v) => updatePrint("totalsBold", v)}
+                    <FontSizePicker
+                      label="Address"
+                      value={ps.fontSizeAddress}
+                      onChange={(v) => pSet("fontSizeAddress", v)}
                     />
-                  </SettingsSection>
+                    <FontSizePicker
+                      label="Order Info"
+                      value={ps.fontSizeOrderInfo}
+                      onChange={(v) => pSet("fontSizeOrderInfo", v)}
+                    />
+                    <FontSizePicker
+                      label="Items"
+                      value={ps.fontSizeItems}
+                      onChange={(v) => pSet("fontSizeItems", v)}
+                    />
+                    <FontSizePicker
+                      label="Totals"
+                      value={ps.fontSizeTotals}
+                      onChange={(v) => pSet("fontSizeTotals", v)}
+                    />
+                    <FontSizePicker
+                      label="Grand Total"
+                      value={ps.fontSizeGrandTotal}
+                      onChange={(v) => pSet("fontSizeGrandTotal", v)}
+                    />
+                    <FontSizePicker
+                      label="Footer"
+                      value={ps.fontSizeFooter}
+                      onChange={(v) => pSet("fontSizeFooter", v)}
+                    />
+                  </Section>
 
-                  <div className="border-t border-slate-100" />
-
-                  <SettingsSection
-                    icon={<CreditCard size={12} />}
-                    title="Extras"
-                  >
-                    <Toggle
-                      label="Show transaction details"
-                      checked={ps.showTransaction}
-                      onChange={(v) => updatePrint("showTransaction", v)}
-                    />
-                    <Toggle
-                      label="Show customer info"
-                      checked={ps.showCustomerInfo}
-                      onChange={(v) => updatePrint("showCustomerInfo", v)}
-                    />
-                  </SettingsSection>
-
-                  <div className="pt-2">
+                  <div className="pt-1 pb-2">
                     <p className="text-[11px] text-slate-400 text-center">
-                      Changes preview in real-time. Save to Firestore coming
-                      soon.
+                      Changes preview in real-time. Firestore sync coming soon.
                     </p>
                   </div>
                 </div>
