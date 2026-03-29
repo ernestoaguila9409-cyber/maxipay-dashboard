@@ -435,7 +435,7 @@ class PaymentActivity : AppCompatActivity() {
                     totalsContainer?.addView(makeSummaryRow(tLabel, MoneyUtils.centsToDisplay(taxCents), 12f, 0xAAFFFFFF.toInt()))
                 }
 
-                if (tipAmountInCents > 0L) {
+                if (TipConfig.shouldIncludeTipLineOnPrintedReceipt(this, tipAmountInCents)) {
                     totalsContainer?.addView(makeSummaryRow("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), 13f, 0xBBFFFFFF.toInt()))
                 }
 

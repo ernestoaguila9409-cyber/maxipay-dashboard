@@ -48,9 +48,17 @@ const vonage = new Vonage({
 
 setGlobalOptions({ maxInstances: 10 });
 
-const DEFAULT_LOGO_URL = "https://your-server-or-storage/maxipay-logo.png";
-
 const BUSINESS_TIMEZONE = "America/New_York";
+
+/** Public HTTPS URL from Settings/businessInfo.logoUrl (e.g. Firebase Storage). No placeholder — avoids broken images in email clients. */
+function resolveBusinessLogoUrl(biz) {
+  const raw = biz && biz.logoUrl != null ? String(biz.logoUrl).trim() : "";
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  if (lower.includes("your-server-or-storage")) return null;
+  if (lower.startsWith("https://") || lower.startsWith("http://")) return raw;
+  return null;
+}
 
 const ORDER_TYPE_LABELS = {
   DINE_IN: "DINE IN",
@@ -81,7 +89,7 @@ async function fetchBusinessInfo(db) {
 
 function brandedHeader(biz) {
   const name = biz.businessName || "My Restaurant";
-  const logoUrl = biz.logoUrl || DEFAULT_LOGO_URL;
+  const logoUrl = resolveBusinessLogoUrl(biz);
   const address = biz.address || "";
   const phone = biz.phone || "";
   const email = biz.email || "";
@@ -100,10 +108,14 @@ function brandedHeader(biz) {
 
   const detailLines = [addressLines, contactLine].filter(Boolean).join("<br>");
 
+  const logoBlock = logoUrl
+    ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(name)}"
+           style="max-width:160px;height:auto;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;border:0;outline:none;text-decoration:none;">`
+    : "";
+
   return `
     <div style="text-align:center;margin-bottom:20px;">
-      <img src="${logoUrl}" alt="${escapeHtml(name)}"
-           style="max-width:120px;height:auto;margin-bottom:10px;display:inline-block;">
+      ${logoBlock}
       <div style="font-weight:bold;font-size:18px;color:#222;">${escapeHtml(name)}</div>
       ${detailLines ? `<div style="font-size:13px;color:#555;line-height:1.5;">${detailLines}</div>` : ""}
     </div>
@@ -224,9 +236,25 @@ function itemsTableHtml(items, strikethrough, appliedDiscounts) {
     <hr style="border:none;border-top:1px solid #ddd;margin:16px 0;">`;
 }
 
-function totalsHtml({ subtotal, tax, taxBreakdown, tip, total, totalStrike, refundAmount, isFullRefund, discountInCents, appliedDiscounts }) {
+function totalsHtml({
+  subtotal,
+  tax,
+  taxBreakdown,
+  tip,
+  total,
+  totalStrike,
+  refundAmount,
+  isFullRefund,
+  discountInCents,
+  appliedDiscounts,
+  tipConfig,
+  tipAmountInCents,
+  /** Email receipts omit tip rows to match requested layout (no tip line). */
+  omitTipLine,
+}) {
   const totalColor = totalStrike ? "color:#999;text-decoration:line-through;" : "color:#222;";
   const totalSize = totalStrike ? "font-size:16px;" : "font-size:20px;";
+  const tipCents = tipAmountInCents != null ? Math.round(tipAmountInCents) : Math.round((tip ?? 0) * 100);
 
   let body = `
     <table style="width:100%;font-size:14px;color:#333;" cellpadding="0" cellspacing="0">
@@ -288,8 +316,12 @@ function totalsHtml({ subtotal, tax, taxBreakdown, tip, total, totalStrike, refu
     body += `<tr><td style="padding:4px 0;">Tax</td><td style="padding:4px 0;text-align:right;">$${tax.toFixed(2)}</td></tr>`;
   }
 
-  if (tip > 0) {
-    body += `<tr><td style="padding:4px 0;">Tip</td><td style="padding:4px 0;text-align:right;">$${tip.toFixed(2)}</td></tr>`;
+  if (!omitTipLine) {
+    if (shouldIncludeTipLineOnPrintedReceipt(tipConfig, tipCents)) {
+      body += `<tr><td style="padding:4px 0;">Tip</td><td style="padding:4px 0;text-align:right;">$${(tipCents / 100).toFixed(2)}</td></tr>`;
+    } else if ((tip ?? 0) > 0) {
+      body += `<tr><td style="padding:4px 0;">Tip</td><td style="padding:4px 0;text-align:right;">$${tip.toFixed(2)}</td></tr>`;
+    }
   }
 
   body += `
@@ -315,17 +347,39 @@ function totalsHtml({ subtotal, tax, taxBreakdown, tip, total, totalStrike, refu
 function paymentHtml(payments) {
   if (!payments || payments.length === 0) return "";
 
-  let html = '<hr style="border:none;border-top:1px solid #ddd;margin:16px 0;">';
+  let html =
+    '<hr style="border:none;border-top:1px solid #ddd;margin:20px 0 12px 0;">' +
+    '<div style="font-size:13px;font-weight:bold;color:#444;margin-bottom:12px;text-align:center;">Payment information</div>';
 
   payments.forEach((p) => {
     const type = (p.paymentType || "").toUpperCase();
+    const block =
+      "margin:0 auto 14px auto;max-width:340px;padding:14px 18px;background:#fafafa;border:1px solid #e8e8e8;border-radius:6px;" +
+      "text-align:left;font-size:14px;color:#222;line-height:1.65;";
     if (type === "CASH") {
-      html += `<p style="margin:4px 0;font-size:14px;color:#333;">Paid with Cash</p>`;
+      html += `<div style="${block}">`;
+      html += `<div style="font-weight:600;">Paid with Cash</div>`;
+      html += `</div>`;
     } else {
-      const brand = p.cardBrand || "Card";
-      const last4 = p.last4 || "";
-      const display = last4 ? `${escapeHtml(brand)} &bull;&bull;&bull;&bull; ${escapeHtml(last4)}` : escapeHtml(brand);
-      html += `<p style="margin:4px 0;font-size:14px;color:#333;">Paid with ${display}</p>`;
+      const brand = (p.cardBrand || "").trim();
+      const last4 = (p.last4 || "").trim();
+      const cardLine = last4
+        ? `${escapeHtml(brand || "Card")} •••• ${escapeHtml(last4)}`
+        : escapeHtml(brand || "Card");
+      html += `<div style="${block}">`;
+      html += `<div style="font-weight:600;margin-bottom:8px;">${cardLine}</div>`;
+      const auth = p.authCode != null ? String(p.authCode).trim() : "";
+      if (auth) {
+        html += `<div><span style="color:#666;">Auth:</span> ${escapeHtml(auth)}</div>`;
+      }
+      if (p.paymentType) {
+        html += `<div><span style="color:#666;">Type:</span> ${escapeHtml(String(p.paymentType))}</div>`;
+      }
+      const entryLabel = receiptLabelForCardEntryType(p.entryType);
+      if (entryLabel) {
+        html += `<div><span style="color:#666;">Payment method:</span> ${escapeHtml(entryLabel)}</div>`;
+      }
+      html += `</div>`;
     }
   });
 
@@ -429,6 +483,92 @@ async function fetchSalePayments(db, orderId) {
   return tx.payments || [];
 }
 
+/** Full sale/capture transaction doc for status, payments, void flag (matches thermal receipt). */
+async function fetchSaleTransactionForOrder(db, orderId, orderData) {
+  const o = orderData || {};
+  const sid = o.saleTransactionId;
+  if (sid) {
+    const doc = await db.collection("Transactions").doc(String(sid)).get();
+    if (doc.exists) return doc;
+  }
+  let snap = await db
+    .collection("Transactions")
+    .where("orderId", "==", orderId)
+    .where("type", "==", "SALE")
+    .limit(1)
+    .get();
+  if (!snap.empty) return snap.docs[0];
+  snap = await db
+    .collection("Transactions")
+    .where("orderId", "==", orderId)
+    .where("type", "==", "CAPTURE")
+    .limit(1)
+    .get();
+  return snap.empty ? null : snap.docs[0];
+}
+
+/** Synced from app (Settings/tipConfig); mirrors Android TipConfig defaults when missing. */
+async function fetchTipConfig(db) {
+  const snap = await db.collection("Settings").doc("tipConfig").get();
+  if (!snap.exists) {
+    return {
+      tipsEnabled: true,
+      customTipEnabled: true,
+      calculationBase: "TOTAL",
+      tipPresentation: "CUSTOMER_SCREEN",
+      presets: [15, 18, 20],
+    };
+  }
+  const d = snap.data() || {};
+  return {
+    tipsEnabled: d.tipsEnabled !== false,
+    customTipEnabled: d.customTipEnabled !== false,
+    calculationBase: d.calculationBase === "SUBTOTAL" ? "SUBTOTAL" : "TOTAL",
+    tipPresentation: d.tipPresentation === "RECEIPT" ? "RECEIPT" : "CUSTOMER_SCREEN",
+    presets: Array.isArray(d.presets)
+      ? d.presets.map((n) => Number(n)).filter((n) => n > 0 && n <= 100)
+      : [],
+  };
+}
+
+function receiptLabelForCardEntryType(raw) {
+  const s = raw != null ? String(raw).trim() : "";
+  if (!s) return null;
+  const u = s.toUpperCase();
+  if (
+    u.includes("CONTACTLESS") ||
+    u.includes("CTLS") ||
+    u.includes("NFC") ||
+    u.includes("TAP") ||
+    u === "PROX" ||
+    u.includes("PROXIMITY")
+  ) {
+    return "Contactless";
+  }
+  if (
+    u.includes("CHIP") ||
+    u.includes("ICC") ||
+    u.includes("INSERT") ||
+    (u.includes("EMV") && !u.includes("CONTACTLESS"))
+  ) {
+    return "Chip";
+  }
+  if (u.includes("SWIPE") || u.includes("MAG") || u.includes("MSR") || u.includes("TRACK")) {
+    return "Swipe";
+  }
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+function shouldIncludeTipLineOnPrintedReceipt(tipConfig, tipAmountInCents) {
+  if (!tipConfig || tipConfig.tipsEnabled === false) return false;
+  if (tipConfig.tipPresentation === "RECEIPT") return true;
+  return (tipAmountInCents ?? 0) > 0;
+}
+
+function receiptTitleHtml(title) {
+  return `<div style="text-align:center;margin:4px 0 14px 0;font-weight:bold;font-size:17px;letter-spacing:0.5px;color:#222;">${escapeHtml(title)}</div>`;
+}
+
 // ---------------------------------------------------------------------------
 // 1. Standard Receipt
 // ---------------------------------------------------------------------------
@@ -472,7 +612,12 @@ exports.sendReceiptEmail = onCall(async (request) => {
   const itemsSnap = await orderRef.collection("items").get();
   const { items, subtotalInCents } = parseItems(itemsSnap);
   const taxInCents = parseTax(taxBreakdown);
-  const payments = await fetchSalePayments(db, orderId);
+  const tipConfig = await fetchTipConfig(db);
+  const saleTxSnap = await fetchSaleTransactionForOrder(db, orderId, order);
+  const txData = saleTxSnap ? saleTxSnap.data() : null;
+  const payments = txData && txData.payments && txData.payments.length > 0
+    ? txData.payments
+    : await fetchSalePayments(db, orderId);
 
   const subtotal = subtotalInCents / 100;
   const tax = taxInCents / 100;
@@ -481,9 +626,21 @@ exports.sendReceiptEmail = onCall(async (request) => {
 
   const body =
     brandedHeader(biz) +
+    receiptTitleHtml("RECEIPT") +
     orderMetaSection(order) +
     itemsTableHtml(items, false, appliedDiscounts) +
-    totalsHtml({ subtotal, tax, taxBreakdown, tip, total, discountInCents, appliedDiscounts }) +
+    totalsHtml({
+      subtotal,
+      tax,
+      taxBreakdown,
+      tip,
+      total,
+      discountInCents,
+      appliedDiscounts,
+      tipConfig,
+      tipAmountInCents,
+      omitTipLine: true,
+    }) +
     paymentHtml(payments) +
     footerHtml();
 
@@ -554,6 +711,12 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
   const itemsSnap = await db.collection("Orders").doc(orderId).collection("items").get();
   const { items, subtotalInCents } = parseItems(itemsSnap);
   const taxInCents = parseTax(taxBreakdown);
+  const tipConfig = await fetchTipConfig(db);
+  const saleTxSnap = await fetchSaleTransactionForOrder(db, orderId, order);
+  const txData = saleTxSnap ? saleTxSnap.data() : null;
+  const payments = txData && txData.payments && txData.payments.length > 0
+    ? txData.payments
+    : await fetchSalePayments(db, orderId);
 
   const subtotal = subtotalInCents / 100;
   const tax = taxInCents / 100;
@@ -570,10 +733,24 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
   const body =
     brandedHeader(biz) +
     statusBadge("VOIDED", "#D32F2F") +
+    receiptTitleHtml("VOID RECEIPT") +
     voidMeta +
     orderMetaSection(order) +
     itemsTableHtml(items, true, appliedDiscounts) +
-    totalsHtml({ subtotal, tax, taxBreakdown, tip, total, totalStrike: true, discountInCents, appliedDiscounts }) +
+    totalsHtml({
+      subtotal,
+      tax,
+      taxBreakdown,
+      tip,
+      total,
+      totalStrike: true,
+      discountInCents,
+      appliedDiscounts,
+      tipConfig,
+      tipAmountInCents,
+      omitTipLine: true,
+    }) +
+    paymentHtml(payments) +
     footerHtml('<span style="color:#D32F2F;">This transaction has been voided.</span>');
 
   const html = wrapEmail(body);
@@ -703,35 +880,25 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
     let refundSubtotalCents = 0;
     refundedItems.forEach((ri) => { refundSubtotalCents += ri.baseCents; });
 
-    // Payment info from the latest refund doc
-    let paymentLabel = "";
-    if (allRefundDocs.length > 0) {
-      const latestRefund = allRefundDocs.sort((a, b) => {
+    // Original sale payments (matches thermal refund); fallback to latest refund doc
+    const saleTxSnapRf = await fetchSaleTransactionForOrder(db, orderId, order);
+    let salePaymentsRf = saleTxSnapRf ? (saleTxSnapRf.data().payments || []) : [];
+    if (salePaymentsRf.length === 0 && allRefundDocs.length > 0) {
+      const latestRefund = [...allRefundDocs].sort((a, b) => {
         const aTime = a.data().createdAt?.toMillis?.() ?? a.data().createdAt?._seconds ?? 0;
         const bTime = b.data().createdAt?.toMillis?.() ?? b.data().createdAt?._seconds ?? 0;
         return bTime - aTime;
       })[0].data();
-      const payments = latestRefund.payments ?? [];
-      if (payments.length > 0) {
-        const p = payments[0];
-        if ((p.paymentType || "").toLowerCase() === "cash") {
-          paymentLabel = "Cash";
-        } else {
-          const parts = [];
-          if (p.cardBrand) parts.push(p.cardBrand);
-          if (p.last4) parts.push(`**** ${p.last4}`);
-          paymentLabel = parts.length > 0 ? parts.join(" ") : (p.paymentType || "");
-        }
-      } else {
-        const pt = latestRefund.paymentType || "";
-        if (pt.toLowerCase() === "cash") {
-          paymentLabel = "Cash";
-        } else {
-          const parts = [];
-          if (latestRefund.cardBrand) parts.push(latestRefund.cardBrand);
-          if (latestRefund.last4) parts.push(`**** ${latestRefund.last4}`);
-          paymentLabel = parts.length > 0 ? parts.join(" ") : pt;
-        }
+      if (latestRefund.payments && latestRefund.payments.length > 0) {
+        salePaymentsRf = latestRefund.payments;
+      } else if (latestRefund.paymentType || latestRefund.cardBrand) {
+        salePaymentsRf = [{
+          paymentType: latestRefund.paymentType || "Credit",
+          cardBrand: latestRefund.cardBrand || "",
+          last4: latestRefund.last4 || "",
+          authCode: latestRefund.authCode || "",
+          entryType: latestRefund.entryType || "",
+        }];
       }
     }
 
@@ -742,11 +909,7 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
 
     // --- Build email body matching printed receipt layout ---
 
-    // Title
-    const titleHtml = `
-      <div style="text-align:center;margin:16px 0;">
-        <span style="font-size:22px;font-weight:bold;color:#222;">REFUND RECEIPT</span>
-      </div>`;
+    const titleHtml = receiptTitleHtml("REFUND RECEIPT");
 
     // Order # and Date (centered, like printed receipt)
     const orderNumber = order.orderNumber ?? "";
@@ -831,11 +994,6 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
         <hr style="border:none;border-top:3px double #333;margin:8px 0 0 0;">
       </div>`;
 
-    // Payment + Thank you footer
-    let footerSection = '<div style="text-align:center;margin-top:20px;font-size:14px;color:#333;">';
-    if (paymentLabel) footerSection += `<div style="margin-bottom:8px;">${escapeHtml(paymentLabel)}</div>`;
-    footerSection += '<div>Thank you</div></div>';
-
     const body =
       brandedHeader(biz) +
       titleHtml +
@@ -843,7 +1001,8 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
       refundItemsHtml +
       taxesHtml +
       totalRefundHtml +
-      footerSection;
+      paymentHtml(salePaymentsRf) +
+      footerHtml();
 
     const html = wrapEmail(body);
 

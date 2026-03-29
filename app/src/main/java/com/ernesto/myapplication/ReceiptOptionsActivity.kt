@@ -201,8 +201,12 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                                 .addOnSuccessListener { txDoc ->
                                     @Suppress("UNCHECKED_CAST")
                                     val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                                    val txStatus = txDoc?.getString("status")
+                                    val txVoided = txDoc?.getBoolean("voided") ?: false
                                     val rs = ReceiptSettings.load(this)
-                                    val segments = buildReceiptSegments(orderDoc, itemsSnap.documents, payments)
+                                    val segments = buildReceiptSegments(
+                                        orderDoc, itemsSnap.documents, payments, txStatus, txVoided
+                                    )
                                     EscPosPrinter.print(this, segments, rs)
                                     goToMainScreen()
                                 }
@@ -234,7 +238,9 @@ class ReceiptOptionsActivity : AppCompatActivity() {
     private fun buildReceiptSegments(
         orderDoc: com.google.firebase.firestore.DocumentSnapshot,
         items: List<com.google.firebase.firestore.DocumentSnapshot>,
-        payments: List<Map<String, Any>>
+        payments: List<Map<String, Any>>,
+        transactionStatus: String? = null,
+        transactionVoided: Boolean = false
     ): List<EscPosPrinter.Segment> {
         val rs = ReceiptSettings.load(this)
         val segs = mutableListOf<EscPosPrinter.Segment>()
@@ -368,7 +374,7 @@ class ReceiptOptionsActivity : AppCompatActivity() {
             val tLabel = DiscountDisplay.formatTaxLabel(name, tType, tRate)
             total(formatLine(tLabel, MoneyUtils.centsToDisplay(amountCents), lwt))
         }
-        if (tipAmountInCents > 0L) {
+        if (TipConfig.shouldIncludeTipLineOnPrintedReceipt(this, tipAmountInCents)) {
             total(formatLine("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), lwt))
         }
         total("=".repeat(lwt))
@@ -376,6 +382,20 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         // ── Grand Total ──
         grand(formatLine("TOTAL", MoneyUtils.centsToDisplay(totalInCents), lwg))
         segs += EscPosPrinter.Segment("")
+
+        segs.addAll(
+            buildCreditTipReceiptFollowUpSegments(
+                this,
+                rs,
+                subtotalCents,
+                taxTotalCents,
+                totalInCents,
+                tipAmountInCents,
+                payments,
+                transactionStatus,
+                transactionVoided
+            )
+        )
 
         // ── Payment Info ──
         for (p in payments) {
@@ -401,6 +421,9 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                 }
                 if (pType.isNotBlank()) {
                     footer("Type: $pType")
+                }
+                receiptLabelForCardEntryType(p["entryType"]?.toString())?.let { method ->
+                    footer("Payment method: $method")
                 }
             }
             segs += EscPosPrinter.Segment("")

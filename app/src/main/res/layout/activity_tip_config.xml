@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="#F5F5F5">
+
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="#F5F5F5"
     android:padding="24dp">
 
     <TextView
@@ -20,7 +25,65 @@
         android:text="Configure tip options for your customers."
         android:textSize="16sp"
         android:textColor="@android:color/darker_gray"
-        android:paddingBottom="24dp"/>
+        android:paddingBottom="16dp"/>
+
+    <!-- Where tips are collected (shown first) -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="WHERE TO COLLECT TIPS"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="@android:color/darker_gray"
+        android:paddingBottom="4dp"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Choose before adjusting presets and other options below."
+        android:textSize="12sp"
+        android:textColor="@android:color/darker_gray"
+        android:paddingBottom="12dp"/>
+
+    <LinearLayout
+        android:id="@+id/tipPresentationContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@android:color/white"
+        android:padding="16dp"
+        android:layout_marginBottom="8dp">
+
+        <RadioGroup
+            android:id="@+id/rgTipPresentation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/rbTipCustomerScreen"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Tips on customer-facing screen"
+                android:textSize="15sp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"/>
+
+            <RadioButton
+                android:id="@+id/rbTipReceipt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Tips on the receipt"
+                android:textSize="15sp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"/>
+
+        </RadioGroup>
+    </LinearLayout>
 
     <!-- Enable Tips -->
     <LinearLayout
@@ -325,3 +388,4 @@
     </LinearLayout>
 
 </LinearLayout>
+</ScrollView>

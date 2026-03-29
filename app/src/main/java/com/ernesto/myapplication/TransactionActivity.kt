@@ -696,7 +696,13 @@ class TransactionActivity : AppCompatActivity() {
                             db.collection("Transactions").document(txId).get()
                                 .addOnSuccessListener { txDoc ->
                                     val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
-                                    EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, payments), rs)
+                                    val txStatus = txDoc?.getString("status")
+                                    val txVoided = txDoc?.getBoolean("voided") ?: false
+                                    EscPosPrinter.print(
+                                        this,
+                                        buildOriginalSegments(orderDoc, itemsSnap.documents, payments, txStatus, txVoided),
+                                        rs
+                                    )
                                 }
                                 .addOnFailureListener {
                                     EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()), rs)
@@ -718,7 +724,9 @@ class TransactionActivity : AppCompatActivity() {
     private fun buildOriginalSegments(
         orderDoc: com.google.firebase.firestore.DocumentSnapshot,
         items: List<com.google.firebase.firestore.DocumentSnapshot>,
-        payments: List<Map<String, Any>>
+        payments: List<Map<String, Any>>,
+        transactionStatus: String? = null,
+        transactionVoided: Boolean = false
     ): List<EscPosPrinter.Segment> {
         val rs = ReceiptSettings.load(this)
         val segs = mutableListOf<EscPosPrinter.Segment>()
@@ -808,12 +816,26 @@ class TransactionActivity : AppCompatActivity() {
             val tLabel = DiscountDisplay.formatTaxLabel(tName, tType, tRate)
             segs += EscPosPrinter.Segment(formatLine(tLabel, MoneyUtils.centsToDisplay(aCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
         }
-        if (tipAmountInCents > 0L) {
+        if (TipConfig.shouldIncludeTipLineOnPrintedReceipt(this, tipAmountInCents)) {
             segs += EscPosPrinter.Segment(formatLine("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
         }
         segs += EscPosPrinter.Segment("=".repeat(lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
         segs += EscPosPrinter.Segment(formatLine("TOTAL", MoneyUtils.centsToDisplay(totalInCents), lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
         segs += EscPosPrinter.Segment("")
+
+        segs.addAll(
+            buildCreditTipReceiptFollowUpSegments(
+                this,
+                rs,
+                subtotalCents,
+                taxTotalCents,
+                totalInCents,
+                tipAmountInCents,
+                payments,
+                transactionStatus,
+                transactionVoided
+            )
+        )
 
         for (p in payments) {
             val pType = p["paymentType"]?.toString() ?: ""
@@ -828,6 +850,14 @@ class TransactionActivity : AppCompatActivity() {
                 }
                 if (auth.isNotBlank()) segs += EscPosPrinter.Segment("Auth: $auth", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
                 if (pType.isNotBlank()) segs += EscPosPrinter.Segment("Type: $pType", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+                receiptLabelForCardEntryType(p["entryType"]?.toString())?.let { method ->
+                    segs += EscPosPrinter.Segment(
+                        "Payment method: $method",
+                        bold = rs.boldFooter,
+                        fontSize = rs.fontSizeFooter,
+                        centered = true
+                    )
+                }
             }
             segs += EscPosPrinter.Segment("")
         }
@@ -1044,6 +1074,20 @@ class TransactionActivity : AppCompatActivity() {
         if (paymentInfo.isNotBlank()) {
             segs += EscPosPrinter.Segment(paymentInfo, bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
         }
+        val pFirst = transaction.payments.firstOrNull()
+        val notCash = pFirst?.let { !it.paymentType.equals("Cash", true) }
+            ?: !transaction.paymentType.equals("Cash", true)
+        if (notCash) {
+            val entryRaw = pFirst?.entryType?.takeIf { it.isNotBlank() } ?: transaction.entryType
+            receiptLabelForCardEntryType(entryRaw)?.let { method ->
+                segs += EscPosPrinter.Segment(
+                    "Payment method: $method",
+                    bold = rs.boldFooter,
+                    fontSize = rs.fontSizeFooter,
+                    centered = true
+                )
+            }
+        }
         segs += EscPosPrinter.Segment("")
         segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
 
@@ -1171,7 +1215,7 @@ class TransactionActivity : AppCompatActivity() {
             val tLabel = DiscountDisplay.formatTaxLabel(tName, tType, tRate)
             segs += EscPosPrinter.Segment(formatLine(tLabel, MoneyUtils.centsToDisplay(aCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
         }
-        if (tipAmountInCents > 0L) {
+        if (TipConfig.shouldIncludeTipLineOnPrintedReceipt(this, tipAmountInCents)) {
             segs += EscPosPrinter.Segment(formatLine("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
         }
         segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
@@ -1192,6 +1236,14 @@ class TransactionActivity : AppCompatActivity() {
                 }
                 if (p.authCode.isNotBlank()) segs += EscPosPrinter.Segment("Auth: ${p.authCode}", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
                 if (pType.isNotBlank()) segs += EscPosPrinter.Segment("Type: $pType", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+                receiptLabelForCardEntryType(p.entryType)?.let { method ->
+                    segs += EscPosPrinter.Segment(
+                        "Payment method: $method",
+                        bold = rs.boldFooter,
+                        fontSize = rs.fontSizeFooter,
+                        centered = true
+                    )
+                }
             }
             segs += EscPosPrinter.Segment("")
         }
@@ -1258,6 +1310,20 @@ class TransactionActivity : AppCompatActivity() {
         }
         if (paymentInfo.isNotBlank()) {
             segs += EscPosPrinter.Segment(paymentInfo, bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+        }
+        val pFirstSimple = transaction.payments.firstOrNull()
+        val notCashSimple = pFirstSimple?.let { !it.paymentType.equals("Cash", true) }
+            ?: !transaction.paymentType.equals("Cash", true)
+        if (notCashSimple) {
+            val entryRaw = pFirstSimple?.entryType?.takeIf { it.isNotBlank() } ?: transaction.entryType
+            receiptLabelForCardEntryType(entryRaw)?.let { method ->
+                segs += EscPosPrinter.Segment(
+                    "Payment method: $method",
+                    bold = rs.boldFooter,
+                    fontSize = rs.fontSizeFooter,
+                    centered = true
+                )
+            }
         }
         segs += EscPosPrinter.Segment("")
         segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)

@@ -195,7 +195,9 @@ class MenuActivity : AppCompatActivity() {
                         orderId = oid,
                         onSuccess = {
                             btnCheckout.isEnabled = true
-                            val targetActivity = if (TipConfig.isTipsEnabled(this)) TipActivity::class.java else PaymentActivity::class.java
+                            val targetActivity = if (
+                                TipConfig.isTipsEnabled(this) && TipConfig.isTipOnCustomerScreen(this)
+                            ) TipActivity::class.java else PaymentActivity::class.java
                             val intent = Intent(this, targetActivity).apply {
                                 putExtra("ORDER_ID", oid)
                                 putExtra("BATCH_ID", currentBatchId ?: "")

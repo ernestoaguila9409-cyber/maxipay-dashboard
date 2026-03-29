@@ -190,10 +190,14 @@ class CustomerDisplayPresentation(
             }
         }
 
+        val ctx = context.applicationContext
+        val showTipOnCustomer =
+            summary.tipCents > 0L && TipConfig.isTipOnCustomerScreen(ctx)
+
         val hasSummary = summary.subtotalCents > 0L
                 || summary.discountLines.isNotEmpty()
                 || summary.taxLines.isNotEmpty()
-                || summary.tipCents > 0L
+                || showTipOnCustomer
 
         if (hasSummary) {
             orderItemsContainer.addView(makeSummaryDivider())
@@ -216,7 +220,7 @@ class CustomerDisplayPresentation(
                 )
             }
 
-            if (summary.tipCents > 0L) {
+            if (showTipOnCustomer) {
                 orderItemsContainer.addView(
                     buildSummaryRow("Tip", MoneyUtils.centsToDisplay(summary.tipCents), Color.parseColor("#CCCCCC"))
                 )

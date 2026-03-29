@@ -9,6 +9,8 @@ import android.widget.RadioGroup
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 
 class TipConfigActivity : AppCompatActivity() {
 
@@ -30,6 +32,9 @@ class TipConfigActivity : AppCompatActivity() {
         val rbSubtotal = findViewById<RadioButton>(R.id.rbSubtotal)
         val rbTotal = findViewById<RadioButton>(R.id.rbTotal)
         val calculationBaseContainer = findViewById<LinearLayout>(R.id.calculationBaseContainer)
+        val rgTipPresentation = findViewById<RadioGroup>(R.id.rgTipPresentation)
+        val rbTipCustomerScreen = findViewById<RadioButton>(R.id.rbTipCustomerScreen)
+        val rbTipReceipt = findViewById<RadioButton>(R.id.rbTipReceipt)
 
         switchTips.isChecked = TipConfig.isTipsEnabled(this)
         switchCustomTip.isChecked = TipConfig.isCustomTipEnabled(this)
@@ -44,6 +49,19 @@ class TipConfigActivity : AppCompatActivity() {
             rbSubtotal.isChecked = true
         } else {
             rbTotal.isChecked = true
+        }
+
+        if (TipConfig.isTipOnCustomerScreen(this)) {
+            rbTipCustomerScreen.isChecked = true
+        } else {
+            rbTipReceipt.isChecked = true
+        }
+
+        rgTipPresentation.setOnCheckedChangeListener { _, checkedId ->
+            when (checkedId) {
+                R.id.rbTipCustomerScreen -> TipConfig.setTipPresentation(this, TipConfig.PRESENTATION_CUSTOMER_SCREEN)
+                R.id.rbTipReceipt -> TipConfig.setTipPresentation(this, TipConfig.PRESENTATION_RECEIPT)
+            }
         }
 
         rgCalculationBase.setOnCheckedChangeListener { _, checkedId ->
@@ -102,6 +120,25 @@ class TipConfigActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         saveAllPresets()
+        syncTipConfigToFirestore()
+    }
+
+    /** Keeps email receipt tip guide / tip line in sync with thermal receipt (Cloud Functions reads Settings/tipConfig). */
+    private fun syncTipConfigToFirestore() {
+        val presets = mutableListOf<Int>()
+        for (i in 0 until TipConfig.getPresetCount()) {
+            val v = TipConfig.getPresetValue(this, i)
+            if (v > 0) presets.add(v)
+        }
+        val data = hashMapOf<String, Any>(
+            "tipsEnabled" to TipConfig.isTipsEnabled(this),
+            "customTipEnabled" to TipConfig.isCustomTipEnabled(this),
+            "calculationBase" to TipConfig.getCalculationBase(this),
+            "tipPresentation" to TipConfig.getTipPresentation(this),
+            "presets" to presets
+        )
+        FirebaseFirestore.getInstance().collection("Settings").document("tipConfig")
+            .set(data, SetOptions.merge())
     }
 
     private fun saveAllPresets() {

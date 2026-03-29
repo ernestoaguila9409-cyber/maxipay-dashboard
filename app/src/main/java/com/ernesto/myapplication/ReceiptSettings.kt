@@ -2,6 +2,7 @@ package com.ernesto.myapplication
 
 import android.content.Context
 import android.util.Log
+import java.util.Locale
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 
@@ -11,6 +12,22 @@ const val LINE_WIDTH_WIDE = 24
 fun formatLine(left: String, right: String, width: Int = LINE_WIDTH): String {
     val space = (width - left.length - right.length).coerceAtLeast(1)
     return left + " ".repeat(space) + right
+}
+
+/**
+ * Maps gateway [CardData.EntryType] (e.g. Dejavoo spinpos) to a short thermal-receipt label.
+ */
+fun receiptLabelForCardEntryType(raw: String?): String? {
+    val s = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val u = s.uppercase(Locale.US)
+    return when {
+        u.contains("CONTACTLESS") || u.contains("CTLS") || u.contains("NFC") ||
+            u.contains("TAP") || u == "PROX" || u.contains("PROXIMITY") -> "Contactless"
+        u.contains("CHIP") || u.contains("ICC") || u.contains("INSERT") ||
+            (u.contains("EMV") && !u.contains("CONTACTLESS")) -> "Chip"
+        u.contains("SWIPE") || u.contains("MAG") || u.contains("MSR") || u.contains("TRACK") -> "Swipe"
+        else -> s.replaceFirstChar { c -> if (c.isLowerCase()) c.titlecase(Locale.US) else c.toString() }
+    }
 }
 
 data class ReceiptSettings(

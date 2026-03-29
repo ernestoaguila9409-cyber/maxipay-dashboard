@@ -8,6 +8,11 @@ object TipConfig {
     private const val KEY_TIPS_ENABLED = "tips_enabled"
     private const val KEY_CUSTOM_TIP_ENABLED = "custom_tip_enabled"
     private const val KEY_CALCULATION_BASE = "calculation_base"
+    private const val KEY_TIP_PRESENTATION = "tip_presentation"
+    /** Tip collection on register / customer display (Tip screen before payment). */
+    const val PRESENTATION_CUSTOMER_SCREEN = "CUSTOMER_SCREEN"
+    /** Skip tip screen; tips taken on receipt / at payment (no customer-facing tip UI). */
+    const val PRESENTATION_RECEIPT = "RECEIPT"
     private const val PRESET_COUNT = 5
     private const val NOT_SET = -1
 
@@ -59,6 +64,32 @@ object TipConfig {
 
     fun setCalculationBase(context: Context, base: String) {
         prefs(context).edit().putString(KEY_CALCULATION_BASE, base).apply()
+    }
+
+    fun getTipPresentation(context: Context): String =
+        prefs(context).getString(KEY_TIP_PRESENTATION, PRESENTATION_CUSTOMER_SCREEN)
+            ?: PRESENTATION_CUSTOMER_SCREEN
+
+    fun setTipPresentation(context: Context, mode: String) {
+        val v = when (mode) {
+            PRESENTATION_RECEIPT -> PRESENTATION_RECEIPT
+            else -> PRESENTATION_CUSTOMER_SCREEN
+        }
+        prefs(context).edit().putString(KEY_TIP_PRESENTATION, v).apply()
+    }
+
+    /** True = show TipActivity (customer-facing / register tip) before payment when tips are enabled. */
+    fun isTipOnCustomerScreen(context: Context): Boolean =
+        getTipPresentation(context) == PRESENTATION_CUSTOMER_SCREEN
+
+    /**
+     * Printed / thermal receipt: show a Tip line when tips are enabled.
+     * In receipt mode, always show the line (including $0.00) so staff can write tip on paper.
+     * In customer-screen mode, show only when tip amount is greater than zero.
+     */
+    fun shouldIncludeTipLineOnPrintedReceipt(context: Context, tipAmountInCents: Long): Boolean {
+        if (!isTipsEnabled(context)) return false
+        return if (!isTipOnCustomerScreen(context)) true else tipAmountInCents > 0L
     }
 
     fun isSubtotalBased(context: Context): Boolean =

@@ -600,3 +600,93 @@ export async function importMenuToFirestore(
     logs,
   };
 }
+
+// ─── Picture scan → Firestore (add-only, does not replace existing menu) ───
+
+export interface ScannedMenuItemRow {
+  id: string;
+  name: string;
+  price: number | null;
+  priceUncertain?: boolean;
+}
+
+export interface ScannedMenuCategoryRow {
+  id: string;
+  name: string;
+  items: ScannedMenuItemRow[];
+}
+
+export interface ScannedMenuImportResult {
+  categories: number;
+  items: number;
+}
+
+export async function importScannedMenuToFirestore(
+  rows: ScannedMenuCategoryRow[],
+  onProgress?: (p: ImportProgress) => void
+): Promise<ScannedMenuImportResult> {
+  const catClientToFirestore = new Map<string, string>();
+  let batch = writeBatch(db);
+  let count = 0;
+
+  const commitIfNeeded = async () => {
+    if (count >= MAX_BATCH_OPS) {
+      await batch.commit();
+      batch = writeBatch(db);
+      count = 0;
+    }
+  };
+
+  onProgress?.({ stage: "Creating categories…", current: 0, total: 2 });
+
+  for (const cat of rows) {
+    const name = cat.name.trim();
+    if (!name) continue;
+    const ref = doc(collection(db, "Categories"));
+    batch.set(ref, {
+      name,
+      availableOrderTypes: ["DINE_IN", "TO_GO", "BAR_TAB"],
+      scheduleIds: [],
+    });
+    catClientToFirestore.set(cat.id, ref.id);
+    count++;
+    await commitIfNeeded();
+  }
+  if (count > 0) await batch.commit();
+  batch = writeBatch(db);
+  count = 0;
+
+  onProgress?.({ stage: "Importing menu items…", current: 1, total: 2 });
+
+  let itemCount = 0;
+  for (const cat of rows) {
+    const fid = catClientToFirestore.get(cat.id);
+    if (!fid) continue;
+    for (const it of cat.items) {
+      const nm = it.name.trim();
+      if (!nm) continue;
+      const price =
+        it.price != null && !Number.isNaN(it.price) ? Math.max(0, it.price) : 0;
+      const ref = doc(collection(db, "MenuItems"));
+      batch.set(ref, {
+        name: nm,
+        price,
+        prices: { default: price },
+        stock: 9999,
+        categoryId: fid,
+        menuId: "",
+        isScheduled: false,
+        scheduleIds: [],
+        modifierGroupIds: [],
+        taxIds: [],
+        externalMappings: {},
+      });
+      itemCount++;
+      count++;
+      await commitIfNeeded();
+    }
+  }
+  if (count > 0) await batch.commit();
+
+  return { categories: catClientToFirestore.size, items: itemCount };
+}

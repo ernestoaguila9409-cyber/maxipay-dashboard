@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothSocket
 import android.content.Context
+import com.ernesto.myapplication.engine.MoneyUtils
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -281,4 +282,87 @@ object EscPosPrinter {
             }
         }
     }
+}
+
+/**
+ * Segments printed after the grand TOTAL line for credit card sales: suggested tip guide (no tip yet)
+ * or a Tip + Total summary after tip adjust. Uses [TipConfig] for calculation base, [TipConfig.getPresets]
+ * for percentage rows, and [TipConfig.isCustomTipEnabled] for the Custom Tip line.
+ */
+fun buildCreditTipReceiptFollowUpSegments(
+    context: Context,
+    rs: ReceiptSettings,
+    subtotalCents: Long,
+    taxTotalCents: Long,
+    orderTotalInCents: Long,
+    tipAmountInCents: Long,
+    payments: List<Map<String, Any>>,
+    transactionStatus: String?,
+    transactionVoided: Boolean
+): List<EscPosPrinter.Segment> {
+    if (!TipConfig.isTipsEnabled(context) || transactionVoided) return emptyList()
+    val hasCredit = payments.any { p ->
+        p["paymentType"]?.toString()?.equals("Credit", ignoreCase = true) == true
+    }
+    if (!hasCredit) return emptyList()
+
+    val lwt = ReceiptSettings.lineWidthForSize(rs.fontSizeTotals)
+    val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
+
+    fun totalSeg(left: String, right: String) = EscPosPrinter.Segment(
+        formatLine(left, right, lwt),
+        bold = rs.boldTotals,
+        fontSize = rs.fontSizeTotals
+    )
+
+    fun grandSeg(left: String, right: String) = EscPosPrinter.Segment(
+        formatLine(left, right, lwg),
+        bold = rs.boldGrandTotal,
+        fontSize = rs.fontSizeGrandTotal
+    )
+
+    val out = mutableListOf<EscPosPrinter.Segment>()
+
+    if (tipAmountInCents > 0L) {
+        out += totalSeg("Tip:", MoneyUtils.centsToDisplay(tipAmountInCents))
+        out += grandSeg("Total:", MoneyUtils.centsToDisplay(orderTotalInCents))
+        out += EscPosPrinter.Segment("")
+        return out
+    }
+
+    val st = transactionStatus?.trim()?.uppercase(Locale.US).orEmpty()
+    // Firestore sale docs use COMPLETED; APPROVED matches gateway-style payloads.
+    if (st != "APPROVED" && st != "COMPLETED") return emptyList()
+
+    val presets = TipConfig.getPresets(context)
+    val customTipEnabled = TipConfig.isCustomTipEnabled(context)
+
+    val subtotal = MoneyUtils.centsToDouble(subtotalCents)
+    val tax = MoneyUtils.centsToDouble(taxTotalCents)
+    fun tipAmountDisplay(percent: Double): String {
+        val dollars = TipConfig.calculateTip(subtotal, tax, percent, context)
+        return MoneyUtils.centsToDisplay(MoneyUtils.dollarsToCents(dollars))
+    }
+
+    val writeInSuffix = "   ______"
+    if (presets.isNotEmpty() || customTipEnabled) {
+        out += EscPosPrinter.Segment("Tip Guide:", bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
+        out += EscPosPrinter.Segment("")
+    }
+    for (pct in presets) {
+        val label = "$pct%"
+        val right = tipAmountDisplay(pct.toDouble()) + writeInSuffix
+        out += totalSeg(label, right)
+        out += EscPosPrinter.Segment("")
+    }
+    if (customTipEnabled) {
+        out += totalSeg("Custom Tip:", "__________")
+        out += EscPosPrinter.Segment("")
+    }
+    out += totalSeg("TOTAL:", "__________")
+    out += EscPosPrinter.Segment("")
+    val sigRight = "_".repeat((lwt - "Signature:".length - 1).coerceIn(8, 20))
+    out += totalSeg("Signature:", sigRight)
+    out += EscPosPrinter.Segment("")
+    return out
 }

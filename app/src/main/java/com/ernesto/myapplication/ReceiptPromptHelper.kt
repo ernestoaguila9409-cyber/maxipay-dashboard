@@ -310,6 +310,14 @@ object ReceiptPromptHelper {
                 }
                 if (auth.isNotBlank()) segs += EscPosPrinter.Segment("Auth: $auth", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
                 if (pType.isNotBlank()) segs += EscPosPrinter.Segment("Type: $pType", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+                receiptLabelForCardEntryType(p["entryType"]?.toString())?.let { method ->
+                    segs += EscPosPrinter.Segment(
+                        "Payment method: $method",
+                        bold = rs.boldFooter,
+                        fontSize = rs.fontSizeFooter,
+                        centered = true
+                    )
+                }
             }
             segs += EscPosPrinter.Segment("")
         }
@@ -415,7 +423,7 @@ object ReceiptPromptHelper {
             val tLabel = DiscountDisplay.formatTaxLabel(tName, tType, tRate)
             segs += EscPosPrinter.Segment(formatLine(tLabel, MoneyUtils.centsToDisplay(aCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
         }
-        if (tipAmountInCents > 0L) {
+        if (TipConfig.shouldIncludeTipLineOnPrintedReceipt(activity, tipAmountInCents)) {
             segs += EscPosPrinter.Segment(formatLine("Tip", MoneyUtils.centsToDisplay(tipAmountInCents), lwt), bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
         }
         segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
@@ -439,6 +447,14 @@ object ReceiptPromptHelper {
                 }
                 if (auth.isNotBlank()) segs += EscPosPrinter.Segment("Auth: $auth", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
                 if (pType.isNotBlank()) segs += EscPosPrinter.Segment("Type: $pType", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
+                receiptLabelForCardEntryType(p["entryType"]?.toString())?.let { method ->
+                    segs += EscPosPrinter.Segment(
+                        "Payment method: $method",
+                        bold = rs.boldFooter,
+                        fontSize = rs.fontSizeFooter,
+                        centered = true
+                    )
+                }
             }
             segs += EscPosPrinter.Segment("")
         }
