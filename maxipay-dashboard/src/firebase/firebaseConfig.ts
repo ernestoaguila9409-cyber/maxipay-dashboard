@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 import { getFirestore, type Firestore } from "firebase/firestore";
+import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -13,6 +14,7 @@ const firebaseConfig = {
 
 let auth = {} as Auth;
 let db = {} as Firestore;
+let storage = {} as FirebaseStorage;
 
 if (typeof window !== "undefined") {
   const missingKeys = Object.entries(firebaseConfig)
@@ -36,8 +38,9 @@ if (typeof window !== "undefined") {
   const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
   auth = getAuth(app);
   db = getFirestore(app);
+  storage = getStorage(app);
 
   console.log("[Firebase] Initialized successfully");
 }
 
-export { auth, db };
+export { auth, db, storage };

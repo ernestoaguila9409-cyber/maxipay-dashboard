@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Header from "@/components/Header";
-import { db } from "@/firebase/firebaseConfig";
+import { db, storage } from "@/firebase/firebaseConfig";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { useAuth } from "@/context/AuthContext";
 import {
   Save,
   Check,
@@ -12,7 +14,11 @@ import {
   MapPin,
   Phone,
   Mail,
-  Image,
+  ImagePlus,
+  Camera,
+  Upload,
+  Trash2,
+  X,
   AlertCircle,
 } from "lucide-react";
 
@@ -34,10 +40,55 @@ const EMPTY: BusinessData = {
 
 const DOC_REF = "Settings";
 const DOC_ID = "businessInfo";
+const MAX_LOGO_WIDTH = 512;
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+function resizeImage(file: File): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+
+      let w = img.naturalWidth;
+      let h = img.naturalHeight;
+
+      if (w > MAX_LOGO_WIDTH) {
+        h = Math.round(h * (MAX_LOGO_WIDTH / w));
+        w = MAX_LOGO_WIDTH;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("Canvas context unavailable"));
+
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("Failed to compress image"));
+        },
+        "image/png",
+        0.85
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read image file"));
+    };
+
+    img.src = url;
+  });
+}
+
 export default function BusinessInformationPage() {
+  const { user } = useAuth();
   const [data, setData] = useState<BusinessData>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -45,9 +96,16 @@ export default function BusinessInformationPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
 
-  useEffect(() => {
-    console.log("Business page loaded");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [resizedBlob, setResizedBlob] = useState<Blob | null>(null);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
     const unsub = onSnapshot(
       doc(db, DOC_REF, DOC_ID),
       (snap) => {
@@ -72,7 +130,6 @@ export default function BusinessInformationPage() {
         setLoading(false);
       }
     );
-
     return () => unsub();
   }, [dirty]);
 
@@ -111,6 +168,60 @@ export default function BusinessInformationPage() {
     }
   }, [data]);
 
+  const processFile = useCallback(async (file: File) => {
+    setUploadError(null);
+    try {
+      const blob = await resizeImage(file);
+      const previewUrl = URL.createObjectURL(blob);
+      setPreview(previewUrl);
+      setResizedBlob(blob);
+    } catch (err) {
+      console.error("[Business] resize error:", err);
+      setUploadError("Could not process image. Try a different file.");
+    }
+  }, []);
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) processFile(file);
+      e.target.value = "";
+    },
+    [processFile]
+  );
+
+  const handleConfirmUpload = useCallback(async () => {
+    if (!resizedBlob || !user) return;
+
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const storageRef = ref(storage, `businesses/${user.uid}/logo.png`);
+      await uploadBytes(storageRef, resizedBlob);
+      const downloadURL = await getDownloadURL(storageRef);
+      setData((prev) => ({ ...prev, logoUrl: downloadURL }));
+      setDirty(true);
+      closeModal();
+    } catch (err) {
+      console.error("[Business] logo upload error:", err);
+      setUploadError("Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
+    }
+  }, [resizedBlob, user]);
+
+  const handleRemoveLogo = useCallback(() => {
+    setData((prev) => ({ ...prev, logoUrl: "" }));
+    setDirty(true);
+  }, []);
+
+  const closeModal = useCallback(() => {
+    setModalOpen(false);
+    setPreview(null);
+    setResizedBlob(null);
+    setUploadError(null);
+  }, []);
+
   if (loading) {
     return (
       <>
@@ -125,6 +236,8 @@ export default function BusinessInformationPage() {
     );
   }
 
+  const hasLogo = data.logoUrl.trim().length > 0;
+
   return (
     <>
       <Header title="Business Information" />
@@ -136,7 +249,6 @@ export default function BusinessInformationPage() {
           </div>
         )}
 
-        {/* Business Details Card */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
           <div className="flex items-start gap-3 mb-6">
             <div className="p-2 rounded-xl bg-blue-50">
@@ -226,36 +338,52 @@ export default function BusinessInformationPage() {
               />
             </div>
 
-            {/* Logo URL */}
+            {/* Logo */}
             <div>
-              <label
-                htmlFor="logoUrl"
-                className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
-              >
-                <Image size={14} className="text-slate-400" />
-                Logo URL
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5">
+                <ImagePlus size={14} className="text-slate-400" />
+                Logo
                 <span className="text-slate-400 font-normal">(optional)</span>
               </label>
-              <input
-                id="logoUrl"
-                value={data.logoUrl}
-                onChange={(e) => update("logoUrl", e.target.value)}
-                placeholder="https://…"
-                type="url"
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 transition-colors"
-              />
-              {data.logoUrl.trim() && (
-                <div className="mt-3 p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center gap-3">
+
+              {hasLogo ? (
+                <div className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
                   <img
                     src={data.logoUrl.trim()}
-                    alt="Logo preview"
-                    className="w-12 h-12 rounded-lg object-contain bg-white border border-slate-200"
+                    alt="Business logo"
+                    className="w-20 h-20 rounded-lg object-contain bg-white border border-slate-200 p-1"
                     onError={(e) => {
                       (e.target as HTMLImageElement).style.display = "none";
                     }}
                   />
-                  <span className="text-xs text-slate-500">Logo preview</span>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                    >
+                      <ImagePlus size={14} />
+                      Change
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRemoveLogo}
+                      className="inline-flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-600 transition-colors"
+                    >
+                      <Trash2 size={14} />
+                      Remove
+                    </button>
+                  </div>
                 </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-slate-300 text-sm font-medium text-slate-600 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/50 transition-colors"
+                >
+                  <ImagePlus size={16} />
+                  Add Logo
+                </button>
               )}
             </div>
           </div>
@@ -290,9 +418,9 @@ export default function BusinessInformationPage() {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saveStatus === "saving" || !dirty}
+              disabled={saveStatus === "saving" || uploading || !dirty}
               className={`inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-all ${
-                saveStatus === "saving" || !dirty
+                saveStatus === "saving" || uploading || !dirty
                   ? "bg-slate-300 cursor-not-allowed"
                   : "bg-blue-600 hover:bg-blue-700 shadow-sm hover:shadow-md"
               }`}
@@ -303,6 +431,147 @@ export default function BusinessInformationPage() {
           </div>
         </div>
       </div>
+
+      {/* Hidden file inputs */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+
+      {/* Logo Modal */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={!uploading ? closeModal : undefined}
+          />
+
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-6 pt-5 pb-3">
+              <h3 className="text-lg font-semibold text-slate-800">
+                {preview ? "Preview Logo" : "Add Logo"}
+              </h3>
+              {!uploading && (
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              )}
+            </div>
+
+            <div className="px-6 pb-6">
+              {!preview ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-slate-500 mb-4">
+                    Choose how you want to add your business logo.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-slate-200 text-left hover:border-blue-400 hover:bg-blue-50/50 transition-colors group"
+                  >
+                    <div className="p-2 rounded-lg bg-blue-50 group-hover:bg-blue-100 transition-colors">
+                      <Upload size={20} className="text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">Upload from device</p>
+                      <p className="text-xs text-slate-400">JPG, PNG, or WebP</p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-slate-200 text-left hover:border-blue-400 hover:bg-blue-50/50 transition-colors group"
+                  >
+                    <div className="p-2 rounded-lg bg-purple-50 group-hover:bg-purple-100 transition-colors">
+                      <Camera size={20} className="text-purple-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">Take a photo</p>
+                      <p className="text-xs text-slate-400">Use your device camera</p>
+                    </div>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex justify-center p-4 rounded-xl bg-slate-50 border border-slate-100">
+                    <img
+                      src={preview}
+                      alt="Logo preview"
+                      className="max-h-48 max-w-full object-contain rounded-lg"
+                    />
+                  </div>
+
+                  <p className="text-xs text-center text-slate-400">
+                    Resized to {MAX_LOGO_WIDTH}px max width &middot; PNG
+                  </p>
+
+                  {uploadError && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 flex items-center gap-2">
+                      <AlertCircle size={14} className="shrink-0" />
+                      {uploadError}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPreview(null);
+                        setResizedBlob(null);
+                        setUploadError(null);
+                      }}
+                      disabled={uploading}
+                      className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                    >
+                      Choose another
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmUpload}
+                      disabled={uploading}
+                      className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all ${
+                        uploading
+                          ? "bg-blue-400 cursor-not-allowed"
+                          : "bg-blue-600 hover:bg-blue-700"
+                      }`}
+                    >
+                      {uploading ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" />
+                          Uploading…
+                        </>
+                      ) : (
+                        <>
+                          <Upload size={16} />
+                          Use this logo
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
