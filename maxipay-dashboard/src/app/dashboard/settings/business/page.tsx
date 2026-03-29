@@ -237,197 +237,319 @@ export default function BusinessInformationPage() {
   }
 
   const hasLogo = data.logoUrl.trim().length > 0;
+  const displayName = data.businessName.trim() || "Your Business";
+  const displayAddress = data.address.trim() || "123 Main Street";
+  const displayPhone = data.phone.trim() || "(555) 123-4567";
 
   return (
     <>
       <Header title="Business Information" />
-      <div className="p-6 space-y-6 max-w-2xl">
-        {loadError && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
-            <AlertCircle size={16} className="shrink-0" />
-            {loadError}
+      <div className="p-6 flex flex-col lg:flex-row gap-6">
+        {/* Left column — form */}
+        <div className="flex-1 min-w-0 max-w-2xl space-y-6">
+          {loadError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
+              <AlertCircle size={16} className="shrink-0" />
+              {loadError}
+            </div>
+          )}
+
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+            <div className="flex items-start gap-3 mb-6">
+              <div className="p-2 rounded-xl bg-blue-50">
+                <Store size={20} className="text-blue-600" />
+              </div>
+              <div>
+                <h2 className="font-semibold text-slate-800">Business Details</h2>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  This information appears on receipts and syncs with the POS app.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-5">
+              {/* Business Name */}
+              <div>
+                <label
+                  htmlFor="businessName"
+                  className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
+                >
+                  <Store size={14} className="text-slate-400" />
+                  Business Name
+                </label>
+                <input
+                  id="businessName"
+                  value={data.businessName}
+                  onChange={(e) => update("businessName", e.target.value)}
+                  placeholder="My Restaurant"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 transition-colors"
+                />
+              </div>
+
+              {/* Address */}
+              <div>
+                <label
+                  htmlFor="address"
+                  className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
+                >
+                  <MapPin size={14} className="text-slate-400" />
+                  Address
+                </label>
+                <textarea
+                  id="address"
+                  value={data.address}
+                  onChange={(e) => update("address", e.target.value)}
+                  placeholder={"123 Main Street\nCity, ST 12345"}
+                  rows={3}
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 resize-y min-h-[88px] transition-colors"
+                />
+              </div>
+
+              {/* Phone */}
+              <div>
+                <label
+                  htmlFor="phone"
+                  className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
+                >
+                  <Phone size={14} className="text-slate-400" />
+                  Phone
+                </label>
+                <input
+                  id="phone"
+                  value={data.phone}
+                  onChange={(e) => update("phone", e.target.value)}
+                  placeholder="(555) 123-4567"
+                  type="tel"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 transition-colors"
+                />
+              </div>
+
+              {/* Email */}
+              <div>
+                <label
+                  htmlFor="email"
+                  className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
+                >
+                  <Mail size={14} className="text-slate-400" />
+                  Email
+                </label>
+                <input
+                  id="email"
+                  value={data.email}
+                  onChange={(e) => update("email", e.target.value)}
+                  placeholder="contact@mybusiness.com"
+                  type="email"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 transition-colors"
+                />
+              </div>
+
+              {/* Logo */}
+              <div>
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5">
+                  <ImagePlus size={14} className="text-slate-400" />
+                  Logo
+                  <span className="text-slate-400 font-normal">(optional)</span>
+                </label>
+
+                {hasLogo ? (
+                  <div className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
+                    <img
+                      src={data.logoUrl.trim()}
+                      alt="Business logo"
+                      className="w-20 h-20 rounded-lg object-contain bg-white border border-slate-200 p-1"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                      }}
+                    />
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                      >
+                        <ImagePlus size={14} />
+                        Change
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRemoveLogo}
+                        className="inline-flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-600 transition-colors"
+                      >
+                        <Trash2 size={14} />
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setModalOpen(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-slate-300 text-sm font-medium text-slate-600 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/50 transition-colors"
+                  >
+                    <ImagePlus size={16} />
+                    Add Logo
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Save bar */}
+            <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="min-h-[24px] text-sm">
+                {saveStatus === "saving" && (
+                  <span className="text-slate-500 flex items-center gap-2">
+                    <Loader2 size={16} className="animate-spin shrink-0" />
+                    Saving to Firebase…
+                  </span>
+                )}
+                {saveStatus === "saved" && (
+                  <span className="text-green-600 font-medium flex items-center gap-1.5">
+                    <Check size={16} />
+                    Saved successfully — changes will sync to the POS app
+                  </span>
+                )}
+                {saveStatus === "error" && saveError && (
+                  <span className="text-red-600 flex items-center gap-1.5">
+                    <AlertCircle size={16} />
+                    {saveError}
+                  </span>
+                )}
+                {saveStatus === "idle" && dirty && (
+                  <span className="text-amber-600 font-medium">
+                    You have unsaved changes
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saveStatus === "saving" || uploading || !dirty}
+                className={`inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-all ${
+                  saveStatus === "saving" || uploading || !dirty
+                    ? "bg-slate-300 cursor-not-allowed"
+                    : "bg-blue-600 hover:bg-blue-700 shadow-sm hover:shadow-md"
+                }`}
+              >
+                <Save size={16} />
+                {saveStatus === "saving" ? "Saving…" : "Save Changes"}
+              </button>
+            </div>
           </div>
-        )}
+        </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-          <div className="flex items-start gap-3 mb-6">
-            <div className="p-2 rounded-xl bg-blue-50">
-              <Store size={20} className="text-blue-600" />
-            </div>
-            <div>
-              <h2 className="font-semibold text-slate-800">Business Details</h2>
-              <p className="text-sm text-slate-500 mt-0.5">
-                This information appears on receipts and syncs with the POS app.
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-5">
-            {/* Business Name */}
-            <div>
-              <label
-                htmlFor="businessName"
-                className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
+        {/* Right column — receipt preview */}
+        <div className="lg:w-[340px] shrink-0">
+          <div className="lg:sticky lg:top-6">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+              Receipt Preview
+            </p>
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <div
+                className="px-8 py-8 text-center"
+                style={{ fontFamily: "'Courier New', Courier, monospace" }}
               >
-                <Store size={14} className="text-slate-400" />
-                Business Name
-              </label>
-              <input
-                id="businessName"
-                value={data.businessName}
-                onChange={(e) => update("businessName", e.target.value)}
-                placeholder="My Restaurant"
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 transition-colors"
-              />
-            </div>
+                {/* Logo */}
+                {hasLogo && (
+                  <div className="flex justify-center mb-3">
+                    <img
+                      src={data.logoUrl.trim()}
+                      alt="Logo"
+                      className="h-16 max-w-[160px] object-contain"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                      }}
+                    />
+                  </div>
+                )}
 
-            {/* Address */}
-            <div>
-              <label
-                htmlFor="address"
-                className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
-              >
-                <MapPin size={14} className="text-slate-400" />
-                Address
-              </label>
-              <textarea
-                id="address"
-                value={data.address}
-                onChange={(e) => update("address", e.target.value)}
-                placeholder={"123 Main Street\nCity, ST 12345"}
-                rows={3}
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 resize-y min-h-[88px] transition-colors"
-              />
-            </div>
+                {/* Business header */}
+                <p className="text-lg font-bold text-slate-800 leading-tight">
+                  {displayName}
+                </p>
+                <p className="text-xs text-slate-500 mt-1 whitespace-pre-line">
+                  {displayAddress}
+                </p>
+                <p className="text-xs text-slate-500">{displayPhone}</p>
 
-            {/* Phone */}
-            <div>
-              <label
-                htmlFor="phone"
-                className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
-              >
-                <Phone size={14} className="text-slate-400" />
-                Phone
-              </label>
-              <input
-                id="phone"
-                value={data.phone}
-                onChange={(e) => update("phone", e.target.value)}
-                placeholder="(555) 123-4567"
-                type="tel"
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 transition-colors"
-              />
-            </div>
+                {/* Receipt title */}
+                <p className="text-sm font-bold text-slate-700 mt-4 mb-1">
+                  RECEIPT
+                </p>
+                <div className="text-[11px] text-slate-500 leading-relaxed">
+                  <p>Order #1042</p>
+                  <p>Type: Dine In</p>
+                  <p>Server: Maria</p>
+                  <p>Date: 03/29/2026 12:32 AM</p>
+                </div>
 
-            {/* Email */}
-            <div>
-              <label
-                htmlFor="email"
-                className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
-              >
-                <Mail size={14} className="text-slate-400" />
-                Email
-              </label>
-              <input
-                id="email"
-                value={data.email}
-                onChange={(e) => update("email", e.target.value)}
-                placeholder="contact@mybusiness.com"
-                type="email"
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 transition-colors"
-              />
-            </div>
+                {/* Divider */}
+                <p className="text-slate-300 text-[10px] my-3 select-none overflow-hidden whitespace-nowrap">
+                  - - - - - - - - - - - - - - - - - - - - - - - - - -
+                </p>
 
-            {/* Logo */}
-            <div>
-              <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5">
-                <ImagePlus size={14} className="text-slate-400" />
-                Logo
-                <span className="text-slate-400 font-normal">(optional)</span>
-              </label>
-
-              {hasLogo ? (
-                <div className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
-                  <img
-                    src={data.logoUrl.trim()}
-                    alt="Business logo"
-                    className="w-20 h-20 rounded-lg object-contain bg-white border border-slate-200 p-1"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                    }}
-                  />
-                  <div className="flex flex-col gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setModalOpen(true)}
-                      className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
-                    >
-                      <ImagePlus size={14} />
-                      Change
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleRemoveLogo}
-                      className="inline-flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-600 transition-colors"
-                    >
-                      <Trash2 size={14} />
-                      Remove
-                    </button>
+                {/* Items */}
+                <div className="text-[11px] text-slate-700 space-y-0.5 text-left">
+                  <div className="flex justify-between">
+                    <span>2x Burger</span><span>$19.98</span>
+                  </div>
+                  <div className="flex justify-between pl-3 text-slate-500">
+                    <span>+ Extra Cheese</span><span>$1.50</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>1x Caesar Salad</span><span>$12.50</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>1x Fries</span><span>$5.99</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>2x Iced Tea</span><span>$7.98</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>1x Chocolate Cake</span><span>$8.50</span>
                   </div>
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-slate-300 text-sm font-medium text-slate-600 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/50 transition-colors"
-                >
-                  <ImagePlus size={16} />
-                  Add Logo
-                </button>
-              )}
-            </div>
-          </div>
 
-          {/* Save bar */}
-          <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="min-h-[24px] text-sm">
-              {saveStatus === "saving" && (
-                <span className="text-slate-500 flex items-center gap-2">
-                  <Loader2 size={16} className="animate-spin shrink-0" />
-                  Saving to Firebase…
-                </span>
-              )}
-              {saveStatus === "saved" && (
-                <span className="text-green-600 font-medium flex items-center gap-1.5">
-                  <Check size={16} />
-                  Saved successfully — changes will sync to the POS app
-                </span>
-              )}
-              {saveStatus === "error" && saveError && (
-                <span className="text-red-600 flex items-center gap-1.5">
-                  <AlertCircle size={16} />
-                  {saveError}
-                </span>
-              )}
-              {saveStatus === "idle" && dirty && (
-                <span className="text-amber-600 font-medium">
-                  You have unsaved changes
-                </span>
-              )}
+                {/* Divider */}
+                <p className="text-slate-300 text-[10px] my-3 select-none overflow-hidden whitespace-nowrap">
+                  - - - - - - - - - - - - - - - - - - - - - - - - - -
+                </p>
+
+                {/* Totals */}
+                <div className="text-[11px] text-slate-700 space-y-0.5 text-left">
+                  <div className="flex justify-between">
+                    <span>Subtotal</span><span>$56.45</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Tax (8.25%)</span><span>$4.66</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Tip</span><span>$8.47</span>
+                  </div>
+                </div>
+
+                {/* Total divider */}
+                <p className="text-slate-400 text-[10px] my-2 select-none overflow-hidden whitespace-nowrap font-bold">
+                  ══════════════════════════════
+                </p>
+
+                {/* Grand total */}
+                <div className="flex justify-between text-sm font-bold text-slate-800 text-left">
+                  <span>TOTAL</span><span>$69.58</span>
+                </div>
+
+                {/* Payment info */}
+                <div className="text-[11px] text-slate-500 mt-4 space-y-0.5">
+                  <p>Visa **** 1234</p>
+                  <p>Auth: 123456</p>
+                  <p>Type: Credit</p>
+                </div>
+
+                {/* Footer */}
+                <p className="text-[11px] text-slate-500 mt-5 italic">
+                  Thank you for dining with us!
+                </p>
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saveStatus === "saving" || uploading || !dirty}
-              className={`inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-all ${
-                saveStatus === "saving" || uploading || !dirty
-                  ? "bg-slate-300 cursor-not-allowed"
-                  : "bg-blue-600 hover:bg-blue-700 shadow-sm hover:shadow-md"
-              }`}
-            >
-              <Save size={16} />
-              {saveStatus === "saving" ? "Saving…" : "Save Changes"}
-            </button>
           </div>
         </div>
       </div>
