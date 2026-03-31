@@ -13,7 +13,16 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
-import { firestoreDate, formatOrderTypeLabel } from "@/lib/orderDisplayUtils";
+import {
+  firestoreDate,
+  formatDiscountReceiptLabel,
+  formatOrderTypeLabel,
+  formatTaxBreakdownLabel,
+  formatTipSummaryLabel,
+  groupAppliedDiscounts,
+  orderTypeBadgeStyle,
+  parseTaxBreakdown,
+} from "@/lib/orderDisplayUtils";
 
 interface LineItem {
   id: string;
@@ -148,6 +157,21 @@ export default function OrderDetailPage() {
   const tableName = String(orderData?.tableName ?? "");
   const batchId = String(orderData?.batchId ?? "");
 
+  const taxEntries = orderData ? parseTaxBreakdown(orderData.taxBreakdown) : [];
+  const taxTotalCents = taxEntries.reduce((s, e) => s + e.amountInCents, 0);
+  const tipAmountInCents = Number(orderData?.tipAmountInCents ?? 0);
+  const discountInCents = Number(orderData?.discountInCents ?? 0);
+  const groupedDiscounts = orderData
+    ? groupAppliedDiscounts(orderData.appliedDiscounts)
+    : [];
+  const hasDiscountLines =
+    groupedDiscounts.length > 0 || discountInCents > 0;
+  const subtotalCents =
+    totalInCents + discountInCents - taxTotalCents - tipAmountInCents;
+  const tipLabel = formatTipSummaryLabel(tipAmountInCents, subtotalCents);
+  const remainingInCents = Math.max(0, totalInCents - totalRefundedInCents);
+  const typeBadge = orderTypeBadgeStyle(orderTypeRaw);
+
   return (
     <>
       <Header title={`Order #${orderNumStr}`} />
@@ -188,8 +212,14 @@ export default function OrderDetailPage() {
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
                 <div>
                   <dt className="text-slate-500">Type</dt>
-                  <dd className="font-medium text-slate-800">
-                    {formatOrderTypeLabel(orderTypeRaw)}
+                  <dd className="mt-1">
+                    <span
+                      className="inline-block text-xs font-semibold text-white px-2.5 py-1 rounded-full tracking-wide"
+                      style={{ backgroundColor: typeBadge.backgroundColor }}
+                      aria-label={formatOrderTypeLabel(orderTypeRaw)}
+                    >
+                      {typeBadge.label}
+                    </span>
                   </dd>
                 </div>
                 <div>
@@ -225,28 +255,6 @@ export default function OrderDetailPage() {
                   </div>
                 ) : null}
               </dl>
-              <div className="pt-4 border-t border-slate-100 flex flex-wrap gap-6 text-sm">
-                <div>
-                  <span className="text-slate-500">Total </span>
-                  <span className="font-semibold text-slate-900">
-                    ${centsToMoney(totalInCents)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500">Paid </span>
-                  <span className="font-medium text-slate-800">
-                    ${centsToMoney(totalPaidInCents)}
-                  </span>
-                </div>
-                {totalRefundedInCents > 0 && (
-                  <div>
-                    <span className="text-slate-500">Refunded </span>
-                    <span className="font-medium text-slate-800">
-                      ${centsToMoney(totalRefundedInCents)}
-                    </span>
-                  </div>
-                )}
-              </div>
             </div>
 
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -297,6 +305,99 @@ export default function OrderDetailPage() {
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {totalInCents > 0 && (
+                <div className="px-6 py-4 border-t border-slate-200 space-y-3 text-sm text-[#555555]">
+                  <div className="flex justify-between gap-4">
+                    <span>Subtotal</span>
+                    <span>${centsToMoney(subtotalCents)}</span>
+                  </div>
+
+                  {hasDiscountLines && (
+                    <>
+                      <p className="text-xs font-semibold text-slate-600 pt-1">
+                        Discounts
+                      </p>
+                      <div className="h-px bg-slate-200" />
+                      {groupedDiscounts.length > 0 ? (
+                        groupedDiscounts.map((gd, i) => (
+                          <div
+                            key={`${gd.name}-${i}`}
+                            className="flex justify-between gap-4"
+                          >
+                            <span>
+                              •{" "}
+                              {formatDiscountReceiptLabel(
+                                gd.name,
+                                gd.type,
+                                gd.value
+                              )}
+                            </span>
+                            <span>-${centsToMoney(gd.totalCents)}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="flex justify-between gap-4">
+                          <span>• Discount</span>
+                          <span>-${centsToMoney(discountInCents)}</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {taxEntries.length > 0 && (
+                    <>
+                      <p className="text-xs font-semibold text-slate-600 pt-1">
+                        Taxes
+                      </p>
+                      <div className="h-px bg-slate-200" />
+                      {taxEntries.map((entry, i) => (
+                        <div
+                          key={`${entry.name}-${i}`}
+                          className="flex justify-between gap-4"
+                        >
+                          <span>{formatTaxBreakdownLabel(entry)}</span>
+                          <span>${centsToMoney(entry.amountInCents)}</span>
+                        </div>
+                      ))}
+                    </>
+                  )}
+
+                  <div className="flex justify-between gap-4 pt-1">
+                    <span className="text-[#2E7D32]">{tipLabel}</span>
+                    <span className="text-[#2E7D32]">
+                      ${centsToMoney(tipAmountInCents)}
+                    </span>
+                  </div>
+
+                  <div className="h-px bg-slate-300 my-2" />
+
+                  <div className="flex justify-between gap-4">
+                    <span>Original Total</span>
+                    <span>${centsToMoney(totalInCents)}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span>Paid</span>
+                    <span className="font-medium text-slate-900">
+                      ${centsToMoney(totalPaidInCents)}
+                    </span>
+                  </div>
+                  {totalRefundedInCents > 0 && (
+                    <div className="flex justify-between gap-4">
+                      <span>Refunded</span>
+                      <span>${centsToMoney(totalRefundedInCents)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between gap-4 pt-1 text-base">
+                    <span className="font-semibold text-slate-800">
+                      Remaining
+                    </span>
+                    <span className="font-bold text-slate-900">
+                      ${centsToMoney(remainingInCents)}
+                    </span>
+                  </div>
+                </div>
               )}
             </div>
 

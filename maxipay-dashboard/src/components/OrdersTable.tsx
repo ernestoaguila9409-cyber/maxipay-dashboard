@@ -10,6 +10,8 @@ import {
   RotateCcw,
 } from "lucide-react";
 
+import { orderTypeBadgeStyle } from "@/lib/orderDisplayUtils";
+
 export type OrderSource = "pos" | "kitchenhub" | "ubereats" | "doordash";
 
 export interface Order {
@@ -173,6 +175,7 @@ export default function OrdersTable({
             {orders.map((order) => {
               const status = statusRow(order.status);
               const StatusIcon = status.icon;
+              const typeBadge = orderTypeBadgeStyle(order.orderTypeRaw ?? "");
               const href = `${linkBase}/${encodeURIComponent(order.id)}`;
               return (
                 <tr
@@ -202,8 +205,12 @@ export default function OrdersTable({
                     </span>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="text-sm text-slate-600 capitalize">
-                      {order.orderType}
+                    <span
+                      className="inline-block text-xs font-semibold text-white px-2.5 py-1 rounded-full tracking-wide"
+                      style={{ backgroundColor: typeBadge.backgroundColor }}
+                      aria-label={order.orderType}
+                    >
+                      {typeBadge.label}
                     </span>
                   </td>
                   <td className="px-6 py-4">
