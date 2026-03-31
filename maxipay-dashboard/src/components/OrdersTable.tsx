@@ -26,6 +26,8 @@ export interface Order {
   rawPayload?: unknown;
   employeeName?: string;
   customerName?: string;
+  /** Parsed from Firestore when available — used for in-memory date filtering. */
+  createdAt?: Date | null;
   /** Unix ms from Firestore `createdAt` — used for merging/sorting lists. */
   createdAtMs?: number;
 }

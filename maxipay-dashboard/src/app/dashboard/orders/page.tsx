@@ -16,7 +16,7 @@ import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import OrdersTable, { type Order } from "@/components/OrdersTable";
-import { Filter, Download } from "lucide-react";
+import { Calendar, Filter, Download } from "lucide-react";
 import {
   mapFirestoreOrderDoc,
   mergeOrderSnapshots,
@@ -96,6 +96,51 @@ function mapSnapshotToSortedOrders(
   return list.sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
 }
 
+export type DateFilterId = "today" | "yesterday" | "7days" | "all" | "custom";
+
+function getDateRange(
+  filter: DateFilterId
+): { start: Date; end: Date } | null {
+  const now = new Date();
+
+  if (filter === "all" || filter === "custom") {
+    return null;
+  }
+
+  if (filter === "today") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    return { start, end: now };
+  }
+
+  if (filter === "yesterday") {
+    const start = new Date(now);
+    start.setDate(start.getDate() - 1);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(start);
+    end.setHours(23, 59, 59, 999);
+
+    return { start, end };
+  }
+
+  if (filter === "7days") {
+    const start = new Date(now);
+    start.setDate(start.getDate() - 7);
+    return { start, end: now };
+  }
+
+  return null;
+}
+
+function orderCreatedAt(order: Order): Date | null {
+  if (order.createdAt) return order.createdAt;
+  if (order.createdAtMs && order.createdAtMs > 0) {
+    return new Date(order.createdAtMs);
+  }
+  return null;
+}
+
 /** POS order statuses (Android OrderEngine / Firestore). */
 export type PosStatusFilter =
   | "all"
@@ -131,6 +176,7 @@ export default function OrdersPage() {
   const { user } = useAuth();
   const [rawOrders, setRawOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dateFilter, setDateFilter] = useState<DateFilterId>("today");
   const [statusFilter, setStatusFilter] = useState<PosStatusFilter>("all");
   const [orderTypeFilter, setOrderTypeFilter] =
     useState<PosOrderTypeFilter>("all");
@@ -280,30 +326,107 @@ export default function OrdersPage() {
     };
   }, [user]);
 
-  const orders = useMemo(() => {
-    if (ORDERS_FETCH_MODE === "debug_raw") {
+  const dateFiltered = useMemo(() => {
+    const range = getDateRange(dateFilter);
+    if (!range) {
       return rawOrders;
     }
-    return rawOrders.filter((o) => {
+    return rawOrders.filter((order) => {
+      const d = orderCreatedAt(order);
+      if (!d) return false;
+      return d >= range.start && d <= range.end;
+    });
+  }, [rawOrders, dateFilter]);
+
+  const orders = useMemo(() => {
+    if (ORDERS_FETCH_MODE === "debug_raw") {
+      return dateFiltered;
+    }
+    return dateFiltered.filter((o) => {
       if (!passesStatusFilter(o.status, statusFilter)) return false;
       if (!passesOrderTypeFilter(o.orderTypeRaw ?? "", orderTypeFilter))
         return false;
       return true;
     });
-  }, [rawOrders, statusFilter, orderTypeFilter]);
+  }, [dateFiltered, statusFilter, orderTypeFilter]);
 
-  const filteredOut =
+  const noOrdersForSelectedDate =
     !loading &&
     orders.length === 0 &&
     rawOrders.length > 0 &&
-    ORDERS_FETCH_MODE !== "debug_raw";
+    dateFilter !== "all" &&
+    dateFilter !== "custom" &&
+    dateFiltered.length === 0;
+
+  const filteredOutByStatusType =
+    !loading &&
+    orders.length === 0 &&
+    rawOrders.length > 0 &&
+    ORDERS_FETCH_MODE !== "debug_raw" &&
+    dateFiltered.length > 0;
+
+  const dateFilterButtonClass = (value: DateFilterId) =>
+    `px-3 py-2 rounded-xl border text-sm transition-colors ${
+      dateFilter === value
+        ? "border-blue-500 bg-blue-50 text-blue-900 font-medium"
+        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+    }`;
 
   return (
     <>
       <Header title="Orders" />
       <div className="p-6 space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 gap-y-3">
+            <button
+              type="button"
+              onClick={() => setDateFilter("today")}
+              className={dateFilterButtonClass("today")}
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => setDateFilter("yesterday")}
+              className={dateFilterButtonClass("yesterday")}
+            >
+              Yesterday
+            </button>
+            <button
+              type="button"
+              onClick={() => setDateFilter("7days")}
+              className={dateFilterButtonClass("7days")}
+            >
+              7 Days
+            </button>
+            <button
+              type="button"
+              onClick={() => setDateFilter("all")}
+              className={dateFilterButtonClass("all")}
+            >
+              All
+            </button>
+            <div className="relative">
+              <Calendar
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <select
+                value={dateFilter === "custom" ? "all" : dateFilter}
+                onChange={(e) =>
+                  setDateFilter(e.target.value as DateFilterId)
+                }
+                className="pl-9 pr-8 py-2 rounded-xl bg-white border border-slate-200 text-sm text-slate-700 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 appearance-none cursor-pointer min-w-[160px]"
+              >
+                <option value="today">Today</option>
+                <option value="yesterday">Yesterday</option>
+                <option value="7days">Last 7 days</option>
+                <option value="all">All time</option>
+                <option value="custom" disabled>
+                  Custom (coming soon)
+                </option>
+              </select>
+            </div>
             <div className="relative">
               <Filter
                 size={16}
@@ -357,17 +480,25 @@ export default function OrdersPage() {
           loading={loading}
           linkBase="/dashboard/orders"
           emptyMessage={
-            filteredOut ? "No orders match current filters" : undefined
+            noOrdersForSelectedDate
+              ? "No orders for selected date"
+              : filteredOutByStatusType
+                ? "No orders match current filters"
+                : undefined
           }
-          emptySubMessage={filteredOut ? "" : undefined}
+          emptySubMessage={
+            noOrdersForSelectedDate || filteredOutByStatusType ? "" : undefined
+          }
         />
 
         <div className="flex items-center justify-between text-sm text-slate-500">
           <p>
             Showing {orders.length} order{orders.length === 1 ? "" : "s"}
-            {ORDERS_FETCH_MODE !== "debug_raw" &&
-            (statusFilter !== "all" || orderTypeFilter !== "all")
-              ? ` (filtered from ${rawOrders.length} loaded)`
+            {dateFilter !== "all" ||
+            ORDERS_FETCH_MODE !== "debug_raw" ||
+            statusFilter !== "all" ||
+            orderTypeFilter !== "all"
+              ? ` (${rawOrders.length} loaded from Firestore)`
               : ""}
           </p>
           <p className="text-xs text-slate-400 max-w-md text-right">

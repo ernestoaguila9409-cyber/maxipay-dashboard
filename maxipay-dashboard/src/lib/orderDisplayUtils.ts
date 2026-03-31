@@ -69,6 +69,7 @@ export function mapFirestoreOrderDoc(
     orderTypeRaw: otRaw,
     total: totalInCents / 100,
     status: String(data.status ?? "OPEN"),
+    createdAt: createdAt ?? null,
     createdAtMs: createdAt ? createdAt.getTime() : 0,
     date: createdAt ? createdAt.toLocaleDateString() : "—",
     time: createdAt
