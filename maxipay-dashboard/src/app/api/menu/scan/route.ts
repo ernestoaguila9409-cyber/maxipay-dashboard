@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { ImageAnnotatorClient } from "@google-cloud/vision";
 import OpenAI from "openai";
-import { getFirebaseAdminApp, verifyIdToken } from "@/lib/firebaseAdmin";
+import {
+  getFirebaseAdminApp,
+  verifyIdToken,
+  serviceAccountCredentials,
+} from "@/lib/firebaseAdmin";
 import { getStorage } from "firebase-admin/storage";
 import { normalizeStructuredMenu } from "@/lib/menuScanNormalize";
 
@@ -32,10 +36,9 @@ function getOpenAI(): OpenAI {
 }
 
 function getVisionClient(): ImageAnnotatorClient {
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  if (!raw?.trim()) throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON missing");
-  const credentials = JSON.parse(raw) as Record<string, unknown>;
-  return new ImageAnnotatorClient({ credentials });
+  return new ImageAnnotatorClient({
+    credentials: serviceAccountCredentials as Record<string, unknown>,
+  });
 }
 
 async function runAiStructuring(menuText: string): Promise<ReturnType<typeof normalizeStructuredMenu>> {

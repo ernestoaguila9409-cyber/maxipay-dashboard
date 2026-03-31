@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   X,
   Upload,
@@ -31,6 +31,8 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onImportComplete: () => void;
+  /** Which tab to show when the modal opens (default: excel). */
+  initialTab?: "excel" | "picture";
 }
 
 type Tab = "excel" | "picture";
@@ -72,12 +74,13 @@ export default function MenuUploadModal({
   open,
   onClose,
   onImportComplete,
+  initialTab = "excel",
 }: Props) {
   const { user } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
   const picInputRef = useRef<HTMLInputElement>(null);
 
-  const [tab, setTab] = useState<Tab>("excel");
+  const [tab, setTab] = useState<Tab>(initialTab);
 
   const [excelStage, setExcelStage] = useState<ExcelStage>("pick");
   const [fileName, setFileName] = useState("");
@@ -127,6 +130,13 @@ export default function MenuUploadModal({
     resetPicture();
     setTab("excel");
   }, [resetExcel, resetPicture]);
+
+  useEffect(() => {
+    if (!open) return;
+    resetExcel();
+    resetPicture();
+    setTab(initialTab);
+  }, [open, initialTab, resetExcel, resetPicture]);
 
   const handleClose = () => {
     reset();

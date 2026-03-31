@@ -1,6 +1,10 @@
 import * as admin from "firebase-admin";
 import serviceAccount from "../../serviceAccountKey.json";
 
+/** Same JSON Google Cloud Vision and firebase-admin use (server-only). */
+export const serviceAccountCredentials =
+  serviceAccount as admin.ServiceAccount;
+
 let app: admin.app.App | null = null;
 
 export function getFirebaseAdminApp(): admin.app.App {
@@ -13,9 +17,7 @@ export function getFirebaseAdminApp(): admin.app.App {
     process.env.FIREBASE_STORAGE_BUCKET ||
     process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
   app = admin.initializeApp({
-    credential: admin.credential.cert(
-      serviceAccount as admin.ServiceAccount
-    ),
+    credential: admin.credential.cert(serviceAccountCredentials),
     storageBucket: bucket,
   });
   return app;
