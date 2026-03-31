@@ -166,6 +166,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                         CategoryModel(
                             id = doc.id,
                             name = name,
+                            normalizedName = doc.getString("normalizedName"),
                             availableOrderTypes = availableOrderTypes,
                             scheduleIds = scheduleIds
                         )
@@ -423,15 +424,18 @@ class MenuOnlyActivity : AppCompatActivity() {
     }
 
     private fun checkCategoryExists(name: String, callback: (Boolean) -> Unit) {
-        val normalizedName = name.trim().lowercase()
+        val wanted = CategoryNameUtils.normalizeCategoryName(name)
 
         db.collection("Categories")
             .get()
             .addOnSuccessListener { documents ->
                 var exists = false
                 for (doc in documents) {
-                    val existingName = doc.getString("name") ?: continue
-                    if (existingName.trim().lowercase() == normalizedName) {
+                    val key = CategoryNameUtils.normalizedKeyForDocument(
+                        doc.getString("name"),
+                        doc.getString("normalizedName")
+                    )
+                    if (key == wanted) {
                         exists = true
                         break
                     }
@@ -441,15 +445,18 @@ class MenuOnlyActivity : AppCompatActivity() {
     }
 
     private fun saveCategory(name: String, availableOrderTypes: List<String>) {
-        val normalizedName = name.trim().lowercase()
+        val wanted = CategoryNameUtils.normalizeCategoryName(name)
 
         db.collection("Categories")
             .get()
             .addOnSuccessListener { documents ->
                 var exists = false
                 for (doc in documents) {
-                    val existingName = doc.getString("name") ?: continue
-                    if (existingName.trim().lowercase() == normalizedName) {
+                    val key = CategoryNameUtils.normalizedKeyForDocument(
+                        doc.getString("name"),
+                        doc.getString("normalizedName")
+                    )
+                    if (key == wanted) {
                         exists = true
                         break
                     }
@@ -459,7 +466,8 @@ class MenuOnlyActivity : AppCompatActivity() {
                     Toast.makeText(this, "Category already exists", Toast.LENGTH_SHORT).show()
                 } else {
                     val category = hashMapOf(
-                        "name" to name,
+                        "name" to name.trim(),
+                        "normalizedName" to wanted,
                         "availableOrderTypes" to availableOrderTypes
                     )
 

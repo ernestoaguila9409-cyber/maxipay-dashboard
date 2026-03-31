@@ -139,6 +139,7 @@ class CategoryAdapter(
                         .update(
                             mapOf(
                                 "name" to newName,
+                                "normalizedName" to CategoryNameUtils.normalizeCategoryName(newName),
                                 "availableOrderTypes" to selectedTypes
                             )
                         )

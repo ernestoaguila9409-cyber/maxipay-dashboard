@@ -20,6 +20,8 @@ data class ItemModel(
 data class CategoryModel(
     val id: String = "",
     val name: String = "",
+    /** Canonical key for deduplication (OCR / imports); may be absent on legacy rows. */
+    val normalizedName: String? = null,
     val availableOrderTypes: List<String> = listOf(),
     val scheduleIds: List<String> = listOf()
 )
