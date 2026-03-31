@@ -70,6 +70,40 @@ function assignScanIds(data: {
   }));
 }
 
+function formatPriceForDraft(price: number | null): string {
+  if (price == null || Number.isNaN(price)) return "";
+  const rounded = Math.round(price * 100) / 100;
+  return String(rounded);
+}
+
+function buildPriceDraftMap(
+  rows: ScannedMenuCategoryRow[]
+): Record<string, string> {
+  const m: Record<string, string> = {};
+  for (const c of rows) {
+    for (const it of c.items) {
+      m[it.id] = formatPriceForDraft(it.price);
+    }
+  }
+  return m;
+}
+
+function sanitizePriceInput(raw: string): string {
+  const cleaned = raw.replace(/,/g, ".").replace(/[^0-9.]/g, "");
+  const dot = cleaned.indexOf(".");
+  if (dot === -1) return cleaned;
+  return (
+    cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, "")
+  );
+}
+
+function priceFromSanitized(s: string): number | null {
+  if (s === "" || s === ".") return null;
+  const n = parseFloat(s);
+  if (Number.isNaN(n)) return null;
+  return Math.max(0, n);
+}
+
 export default function MenuUploadModal({
   open,
   onClose,
@@ -102,6 +136,10 @@ export default function MenuUploadModal({
   const [picError, setPicError] = useState("");
   const [reprocessing, setReprocessing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  /** Raw string while editing so values like "9." are not collapsed to 9 before the user finishes typing. */
+  const [priceDraftByItemId, setPriceDraftByItemId] = useState<
+    Record<string, string>
+  >({});
 
   const resetExcel = useCallback(() => {
     setExcelStage("pick");
@@ -122,6 +160,7 @@ export default function MenuUploadModal({
     setPicResult(null);
     setPicError("");
     setReprocessing(false);
+    setPriceDraftByItemId({});
     if (picInputRef.current) picInputRef.current.value = "";
   }, []);
 
@@ -227,7 +266,9 @@ export default function MenuUploadModal({
       fd.append("file", file);
       const data = await callScanApi(fd);
       setScanRawText(data.rawText ?? "");
-      setScanCategories(assignScanIds({ categories: data.categories! }));
+      const rows = assignScanIds({ categories: data.categories! });
+      setScanCategories(rows);
+      setPriceDraftByItemId(buildPriceDraftMap(rows));
       setPictureStage("preview");
     } catch (err) {
       setPicError(err instanceof Error ? err.message : "Scan failed");
@@ -262,7 +303,9 @@ export default function MenuUploadModal({
       const data = await callScanApi(
         JSON.stringify({ text: scanRawText, reprocess: true })
       );
-      setScanCategories(assignScanIds({ categories: data.categories! }));
+      const rows = assignScanIds({ categories: data.categories! });
+      setScanCategories(rows);
+      setPriceDraftByItemId(buildPriceDraftMap(rows));
     } catch (err) {
       setPicError(err instanceof Error ? err.message : "Reprocess failed");
     } finally {
@@ -295,8 +338,9 @@ export default function MenuUploadModal({
     itemId: string,
     priceStr: string
   ) => {
-    const n = parseFloat(priceStr.replace(/[^0-9.]/g, ""));
-    const price = Number.isNaN(n) ? null : Math.max(0, n);
+    const sanitized = sanitizePriceInput(priceStr);
+    setPriceDraftByItemId((prev) => ({ ...prev, [itemId]: sanitized }));
+    const price = priceFromSanitized(sanitized);
     setScanCategories((prev) => {
       if (!prev) return prev;
       return prev.map((c) =>
@@ -314,7 +358,15 @@ export default function MenuUploadModal({
     });
   };
 
+  const clearPriceDraft = (itemId: string) => {
+    setPriceDraftByItemId((prev) => {
+      const { [itemId]: _, ...rest } = prev;
+      return rest;
+    });
+  };
+
   const deleteItem = (catId: string, itemId: string) => {
+    clearPriceDraft(itemId);
     setScanCategories((prev) => {
       if (!prev) return prev;
       return prev
@@ -329,7 +381,17 @@ export default function MenuUploadModal({
 
   const handleConfirmScanImport = async () => {
     if (!scanCategories?.length) return;
-    const cleaned = scanCategories
+    const mergedFromDrafts = scanCategories.map((c) => ({
+      ...c,
+      items: c.items.map((it) => {
+        const draft = priceDraftByItemId[it.id];
+        if (draft === undefined) return it;
+        const s = sanitizePriceInput(draft);
+        const price = priceFromSanitized(s);
+        return { ...it, price, priceUncertain: false };
+      }),
+    }));
+    const cleaned = mergedFromDrafts
       .map((c) => ({
         ...c,
         items: c.items.filter((it) => it.name.trim()),
@@ -762,9 +824,12 @@ export default function MenuUploadModal({
                                 <input
                                   type="text"
                                   inputMode="decimal"
+                                  lang="en-US"
                                   placeholder="0.00"
+                                  autoComplete="off"
                                   value={
-                                    it.price == null ? "" : String(it.price)
+                                    priceDraftByItemId[it.id] ??
+                                    formatPriceForDraft(it.price)
                                   }
                                   onChange={(e) =>
                                     updateItemPrice(
