@@ -1,90 +1,309 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   collection,
   query,
-  where,
-  getDocs,
   orderBy,
   limit,
+  where,
+  onSnapshot,
+  type DocumentData,
+  type QuerySnapshot,
 } from "firebase/firestore";
+import { getApp } from "firebase/app";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
-import OrdersTable, { Order } from "@/components/OrdersTable";
+import OrdersTable, { type Order } from "@/components/OrdersTable";
 import { Filter, Download } from "lucide-react";
+import {
+  mapFirestoreOrderDoc,
+  mergeOrderSnapshots,
+} from "@/lib/orderDisplayUtils";
+
+/** Expected Firebase project (dashboard env must match POS). */
+const EXPECTED_FIREBASE_PROJECT_ID = "restaurantapp-180da";
+
+/**
+ * Fetch strategy — flip after confirming console logs:
+ * - `debug_raw`: collection("Orders") only — no where/orderBy/limit
+ * - `step_a`: orderBy("createdAt", "desc") only
+ * - `step_b`: recent window + OPEN merge (production-style), with index error logging
+ */
+type OrdersFetchMode = "debug_raw" | "step_a" | "step_b";
+const ORDERS_FETCH_MODE: OrdersFetchMode = "debug_raw";
+
+const ORDERS_LIMIT = 200;
+const OPEN_ORDERS_LIMIT = 500;
+
+function isIndexRequiredError(err: unknown): boolean {
+  const e = err as { code?: string; message?: string };
+  const code = e?.code;
+  const msg = e?.message ?? "";
+  return (
+    code === "failed-precondition" ||
+    /requires an index|create a composite index|The query requires an index/i.test(
+      msg
+    )
+  );
+}
+
+function logOrdersFirestoreError(context: string, err: unknown) {
+  const e = err as { code?: string; message?: string };
+  console.error(`[Orders] ${context} — code:`, e?.code, "| message:", e?.message ?? err);
+  if (isIndexRequiredError(err)) {
+    console.error(
+      "[Orders] INDEX REQUIRED — Firestore composite index missing. " +
+        "Typical fix: collection `Orders`, fields `status` (Ascending) + `createdAt` (Descending). " +
+        "Deploy `firestore.indexes.json` or use the index-creation URL from the error message above."
+    );
+  }
+}
+
+function logFirebaseProject() {
+  try {
+    const app = getApp();
+    const projectId = app.options.projectId ?? "MISSING";
+    console.log("[Orders] Firebase projectId (dashboard):", projectId);
+    if (projectId !== EXPECTED_FIREBASE_PROJECT_ID) {
+      console.error(
+        "[Orders] Project mismatch — expected:",
+        EXPECTED_FIREBASE_PROJECT_ID,
+        "| actual:",
+        projectId
+      );
+    } else {
+      console.log("[Orders] projectId matches expected:", EXPECTED_FIREBASE_PROJECT_ID);
+    }
+  } catch (e) {
+    console.error("[Orders] getApp() failed — Firebase may not be initialized:", e);
+  }
+}
+
+function mapSnapshotToSortedOrders(
+  snapshot: QuerySnapshot<DocumentData>
+): Order[] {
+  const list: Order[] = [];
+  snapshot.forEach((docSnap) => {
+    list.push(
+      mapFirestoreOrderDoc(
+        docSnap.id,
+        docSnap.data() as Record<string, unknown>
+      )
+    );
+  });
+  return list.sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
+}
+
+/** POS order statuses (Android OrderEngine / Firestore). */
+export type PosStatusFilter =
+  | "all"
+  | "OPEN"
+  | "CLOSED"
+  | "VOIDED"
+  | "REFUNDED";
+
+export type PosOrderTypeFilter = "all" | "DINE_IN" | "TO_GO" | "BAR";
+
+function passesStatusFilter(status: string, filter: PosStatusFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "REFUNDED") {
+    return (
+      status === "REFUNDED" || status === "PARTIALLY_REFUNDED"
+    );
+  }
+  return status === filter;
+}
+
+function passesOrderTypeFilter(
+  orderTypeRaw: string,
+  filter: PosOrderTypeFilter
+): boolean {
+  if (filter === "all") return true;
+  if (filter === "BAR") {
+    return orderTypeRaw === "BAR" || orderTypeRaw === "BAR_TAB";
+  }
+  return orderTypeRaw === filter;
+}
 
 export default function OrdersPage() {
   const { user } = useAuth();
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [rawOrders, setRawOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<PosStatusFilter>("all");
+  const [orderTypeFilter, setOrderTypeFilter] =
+    useState<PosOrderTypeFilter>("all");
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setRawOrders([]);
+      setLoading(false);
+      console.log("[Orders] Skipping Firestore — no authenticated user.");
+      return;
+    }
 
-    const fetchOrders = async () => {
-      setLoading(true);
-      try {
-        const ordersRef = collection(db, "orders");
-        let q = query(
-          ordersRef,
-          where("merchantId", "==", user.uid),
-          orderBy("createdAt", "desc"),
-          limit(50)
-        );
+    logFirebaseProject();
+    console.log("[Orders] ORDERS_FETCH_MODE =", ORDERS_FETCH_MODE);
 
-        if (statusFilter !== "all") {
-          q = query(
-            ordersRef,
-            where("merchantId", "==", user.uid),
-            where("status", "==", statusFilter),
-            orderBy("createdAt", "desc"),
-            limit(50)
+    setLoading(true);
+
+    const unsubscribers: (() => void)[] = [];
+
+    if (ORDERS_FETCH_MODE === "debug_raw") {
+      const col = collection(db, "Orders");
+      console.log(
+        "[Orders debug] Subscribing to collection(db, \"Orders\") — no where/orderBy/limit"
+      );
+
+      const unsub = onSnapshot(
+        col,
+        (snapshot) => {
+          console.log(
+            "[Orders debug] total documents returned:",
+            snapshot.size
           );
+          const first = snapshot.docs[0];
+          if (first) {
+            console.log("[Orders debug] first document id:", first.id);
+            console.log("[Orders debug] first document data:", first.data());
+          } else {
+            console.log("[Orders debug] first document: (none — collection empty)");
+          }
+
+          const list = mapSnapshotToSortedOrders(snapshot);
+          setRawOrders(list);
+          setLoading(false);
+          console.log("[Orders debug] mapped rows:", list.length);
+        },
+        (err) => {
+          logOrdersFirestoreError("debug_raw onSnapshot", err);
+          setRawOrders([]);
+          setLoading(false);
         }
+      );
+      unsubscribers.push(unsub);
+    } else if (ORDERS_FETCH_MODE === "step_a") {
+      const q = query(collection(db, "Orders"), orderBy("createdAt", "desc"));
+      console.log(
+        "[Orders step_a] query: orderBy(createdAt desc) only — no where/limit"
+      );
 
-        const snapshot = await getDocs(q);
-        const ordersList: Order[] = [];
+      const unsub = onSnapshot(
+        q,
+        (snapshot) => {
+          console.log("[Orders step_a] total documents:", snapshot.size);
+          const list = mapSnapshotToSortedOrders(snapshot);
+          setRawOrders(list);
+          setLoading(false);
+          console.log("[Orders step_a] mapped rows:", list.length);
+        },
+        (err) => {
+          logOrdersFirestoreError("step_a onSnapshot", err);
+          setRawOrders([]);
+          setLoading(false);
+        }
+      );
+      unsubscribers.push(unsub);
+    } else {
+      // step_b: recent + OPEN merge
+      console.log(
+        "[Orders step_b] recent query + OPEN query (merge); OPEN failure logs index requirement"
+      );
 
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          const createdAt = data.createdAt?.toDate?.() || new Date();
+      const qRecent = query(
+        collection(db, "Orders"),
+        orderBy("createdAt", "desc"),
+        limit(ORDERS_LIMIT)
+      );
+      const qOpen = query(
+        collection(db, "Orders"),
+        where("status", "==", "OPEN"),
+        orderBy("createdAt", "desc"),
+        limit(OPEN_ORDERS_LIMIT)
+      );
 
-          ordersList.push({
-            id: doc.id,
-            orderNumber: data.orderNumber || doc.id.slice(-6),
-            orderType: data.orderType || "dine-in",
-            total: data.total || 0,
-            status: data.status || "completed",
-            date: createdAt.toLocaleDateString(),
-            time: createdAt.toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-            source: data.source || "pos",
-            externalOrderId: data.externalOrderId || null,
-          });
-        });
+      let recent: QuerySnapshot<DocumentData> | null = null;
+      let openSnap: QuerySnapshot<DocumentData> | null = null;
 
-        setOrders(ordersList);
-      } catch (error) {
-        console.error("Error fetching orders:", error);
-      } finally {
+      const applyMerge = () => {
+        if (!recent) return;
+        const merged = mergeOrderSnapshots(recent, openSnap);
+        setRawOrders(merged);
         setLoading(false);
-      }
-    };
+        console.log(
+          "[Orders step_b] merged row count:",
+          merged.length,
+          "| recent snapshot size:",
+          recent.size,
+          "| open snapshot size:",
+          openSnap?.size ?? "(not loaded)"
+        );
+      };
 
-    fetchOrders();
-  }, [user, statusFilter]);
+      unsubscribers.push(
+        onSnapshot(
+          qRecent,
+          (snapshot) => {
+            recent = snapshot;
+            applyMerge();
+          },
+          (err) => {
+            logOrdersFirestoreError("step_b qRecent onSnapshot", err);
+            setRawOrders([]);
+            setLoading(false);
+          }
+        )
+      );
+
+      unsubscribers.push(
+        onSnapshot(
+          qOpen,
+          (snapshot) => {
+            openSnap = snapshot;
+            applyMerge();
+          },
+          (err) => {
+            logOrdersFirestoreError("step_b qOpen (OPEN + orderBy) onSnapshot", err);
+            console.error(
+              "[Orders step_b] OPEN query failed — continuing with recent-only merge. Fix index and reload."
+            );
+            openSnap = null;
+            if (recent) applyMerge();
+          }
+        )
+      );
+    }
+
+    return () => {
+      unsubscribers.forEach((u) => u());
+    };
+  }, [user]);
+
+  const orders = useMemo(() => {
+    if (ORDERS_FETCH_MODE === "debug_raw") {
+      return rawOrders;
+    }
+    return rawOrders.filter((o) => {
+      if (!passesStatusFilter(o.status, statusFilter)) return false;
+      if (!passesOrderTypeFilter(o.orderTypeRaw ?? "", orderTypeFilter))
+        return false;
+      return true;
+    });
+  }, [rawOrders, statusFilter, orderTypeFilter]);
+
+  const filteredOut =
+    !loading &&
+    orders.length === 0 &&
+    rawOrders.length > 0 &&
+    ORDERS_FETCH_MODE !== "debug_raw";
 
   return (
     <>
       <Header title="Orders" />
       <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="relative">
               <Filter
                 size={16}
@@ -92,28 +311,69 @@ export default function OrdersPage() {
               />
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="pl-9 pr-8 py-2 rounded-xl bg-white border border-slate-200 text-sm text-slate-700 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 appearance-none cursor-pointer"
+                onChange={(e) =>
+                  setStatusFilter(e.target.value as PosStatusFilter)
+                }
+                className="pl-9 pr-8 py-2 rounded-xl bg-white border border-slate-200 text-sm text-slate-700 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 appearance-none cursor-pointer min-w-[140px]"
               >
-                <option value="all">All Status</option>
-                <option value="completed">Completed</option>
-                <option value="pending">Pending</option>
-                <option value="cancelled">Cancelled</option>
-                <option value="refunded">Refunded</option>
+                <option value="all">All status</option>
+                <option value="OPEN">Open</option>
+                <option value="CLOSED">Closed</option>
+                <option value="VOIDED">Voided</option>
+                <option value="REFUNDED">Paid / refunded</option>
+              </select>
+            </div>
+            <div className="relative">
+              <Filter
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <select
+                value={orderTypeFilter}
+                onChange={(e) =>
+                  setOrderTypeFilter(e.target.value as PosOrderTypeFilter)
+                }
+                className="pl-9 pr-8 py-2 rounded-xl bg-white border border-slate-200 text-sm text-slate-700 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 appearance-none cursor-pointer min-w-[160px]"
+              >
+                <option value="all">All order types</option>
+                <option value="DINE_IN">Dine In</option>
+                <option value="TO_GO">To Go</option>
+                <option value="BAR">Bar</option>
               </select>
             </div>
           </div>
 
-          <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 transition-colors">
+          <button
+            type="button"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+          >
             <Download size={16} />
             Export
           </button>
         </div>
 
-        <OrdersTable orders={orders} loading={loading} />
+        <OrdersTable
+          orders={orders}
+          loading={loading}
+          linkBase="/dashboard/orders"
+          emptyMessage={
+            filteredOut ? "No orders match current filters" : undefined
+          }
+          emptySubMessage={filteredOut ? "" : undefined}
+        />
 
         <div className="flex items-center justify-between text-sm text-slate-500">
-          <p>Showing {orders.length} orders</p>
+          <p>
+            Showing {orders.length} order{orders.length === 1 ? "" : "s"}
+            {ORDERS_FETCH_MODE !== "debug_raw" &&
+            (statusFilter !== "all" || orderTypeFilter !== "all")
+              ? ` (filtered from ${rawOrders.length} loaded)`
+              : ""}
+          </p>
+          <p className="text-xs text-slate-400 max-w-md text-right">
+            Synced live from Firestore <code className="text-slate-500">Orders</code>{" "}
+            (same as the POS app). Click a row for details.
+          </p>
         </div>
       </div>
     </>

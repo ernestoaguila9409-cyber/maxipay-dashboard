@@ -4,16 +4,23 @@ import { useEffect, useState } from "react";
 import {
   collection,
   query,
+  orderBy,
+  limit,
   where,
   getDocs,
-  Timestamp,
+  type DocumentData,
+  type QuerySnapshot,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import StatCard from "@/components/StatCard";
-import OrdersTable, { Order } from "@/components/OrdersTable";
+import OrdersTable, { type Order } from "@/components/OrdersTable";
 import { DollarSign, Receipt, TrendingUp, Wallet } from "lucide-react";
+import { mergeOrderSnapshots } from "@/lib/orderDisplayUtils";
+
+const FETCH_LIMIT = 300;
+const OPEN_ORDERS_LIMIT = 500;
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -33,7 +40,11 @@ export default function DashboardPage() {
         const startOfDay = new Date(
           now.getFullYear(),
           now.getMonth(),
-          now.getDate()
+          now.getDate(),
+          0,
+          0,
+          0,
+          0
         );
         const endOfDay = new Date(
           now.getFullYear(),
@@ -41,55 +52,70 @@ export default function DashboardPage() {
           now.getDate(),
           23,
           59,
-          59
+          59,
+          999
         );
 
-        const ordersRef = collection(db, "orders");
-        const q = query(
-          ordersRef,
-          where("merchantId", "==", user.uid),
-          where("createdAt", ">=", Timestamp.fromDate(startOfDay)),
-          where("createdAt", "<=", Timestamp.fromDate(endOfDay))
+        const qRecent = query(
+          collection(db, "Orders"),
+          orderBy("createdAt", "desc"),
+          limit(FETCH_LIMIT)
+        );
+        const qOpen = query(
+          collection(db, "Orders"),
+          where("status", "==", "OPEN"),
+          orderBy("createdAt", "desc"),
+          limit(OPEN_ORDERS_LIMIT)
         );
 
-        const snapshot = await getDocs(q);
+        const snapshotRecent = await getDocs(qRecent);
+        let snapshotOpen: QuerySnapshot<DocumentData> | null = null;
+        try {
+          snapshotOpen = await getDocs(qOpen);
+        } catch (e) {
+          console.error(
+            "OPEN orders query failed (deploy firestore.indexes.json):",
+            e
+          );
+        }
 
-        let totalSales = 0;
-        let totalTips = 0;
-        const ordersList: Order[] = [];
+        let totalSalesCents = 0;
+        let totalTipsCents = 0;
+        let txToday = 0;
 
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          const total = data.total || 0;
-          const tip = data.tip || 0;
+        snapshotRecent.forEach((docSnap) => {
+          const data = docSnap.data();
+          const createdAt = data.createdAt?.toDate?.() ?? new Date();
+          if (createdAt < startOfDay || createdAt > endOfDay) {
+            return;
+          }
 
-          totalSales += total;
-          totalTips += tip;
+          const status = String(data.status ?? "");
+          if (status === "VOIDED") {
+            return;
+          }
 
-          const createdAt = data.createdAt?.toDate?.() || new Date();
+          txToday += 1;
 
-          ordersList.push({
-            id: doc.id,
-            orderNumber: data.orderNumber || doc.id.slice(-6),
-            orderType: data.orderType || "dine-in",
-            total,
-            status: data.status || "completed",
-            date: createdAt.toLocaleDateString(),
-            time: createdAt.toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-            source: data.source || "pos",
-            externalOrderId: data.externalOrderId || null,
-          });
+          const paid = Number(data.totalPaidInCents ?? 0);
+          const totalIn = Number(data.totalInCents ?? 0);
+          totalSalesCents += paid > 0 ? paid : totalIn;
+          totalTipsCents += Number(data.tipAmountInCents ?? 0);
         });
 
-        const txCount = snapshot.size;
-        setSalesToday(totalSales);
-        setTransactionsToday(txCount);
-        setTipsToday(totalTips);
-        setAvgTicket(txCount > 0 ? totalSales / txCount : 0);
-        setRecentOrders(ordersList.slice(0, 10));
+        const mergedForTable = mergeOrderSnapshots(
+          snapshotRecent,
+          snapshotOpen
+        );
+
+        const salesDollars = totalSalesCents / 100;
+        const tipsDollars = totalTipsCents / 100;
+
+        setSalesToday(salesDollars);
+        setTransactionsToday(txToday);
+        setTipsToday(tipsDollars);
+        setAvgTicket(txToday > 0 ? salesDollars / txToday : 0);
+        setRecentOrders(mergedForTable.slice(0, 10));
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
       } finally {
