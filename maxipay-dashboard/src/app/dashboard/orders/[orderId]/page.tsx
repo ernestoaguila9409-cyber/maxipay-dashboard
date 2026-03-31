@@ -7,6 +7,8 @@ import {
   getDoc,
   collection,
   getDocs,
+  query,
+  where,
   type Timestamp,
 } from "firebase/firestore";
 import { ArrowLeft, Loader2 } from "lucide-react";
@@ -37,6 +39,29 @@ function centsToMoney(c: number): string {
   return (c / 100).toFixed(2);
 }
 
+function formatFirestoreTimestamp(ts: unknown): string | null {
+  if (
+    ts &&
+    typeof ts === "object" &&
+    "toDate" in ts &&
+    typeof (ts as Timestamp).toDate === "function"
+  ) {
+    try {
+      return (ts as Timestamp).toDate().toLocaleString();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+interface RefundActivityRow {
+  id: string;
+  refundedBy: string;
+  amountInCents: number;
+  createdAtLabel: string | null;
+}
+
 export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -49,6 +74,10 @@ export default function OrderDetailPage() {
     null
   );
   const [lines, setLines] = useState<LineItem[]>([]);
+  const [saleTransactionData, setSaleTransactionData] = useState<
+    Record<string, unknown> | null
+  >(null);
+  const [refundActivity, setRefundActivity] = useState<RefundActivityRow[]>([]);
 
   useEffect(() => {
     if (!user || !orderId) {
@@ -73,6 +102,72 @@ export default function OrderDetailPage() {
         }
         const data = snap.data() as Record<string, unknown>;
         setOrderData(data);
+
+        const saleId = String(
+          data.saleTransactionId ?? data.transactionId ?? ""
+        ).trim();
+        setSaleTransactionData(null);
+        setRefundActivity([]);
+
+        if (saleId) {
+          try {
+            const txSnap = await getDoc(doc(db, "Transactions", saleId));
+            if (!cancelled && txSnap.exists()) {
+              setSaleTransactionData(txSnap.data() as Record<string, unknown>);
+            }
+          } catch {
+            /* ignore missing sale transaction */
+          }
+
+          const totalRefunded = Number(data.totalRefundedInCents ?? 0);
+          const statusStr = String(data.status ?? "");
+          const mayHaveRefunds =
+            totalRefunded > 0 ||
+            statusStr === "REFUNDED" ||
+            statusStr === "PARTIALLY_REFUNDED";
+          if (mayHaveRefunds) {
+            try {
+              const refundQ = query(
+                collection(db, "Transactions"),
+                where("type", "==", "REFUND"),
+                where("originalReferenceId", "==", saleId)
+              );
+              const refundSnap = await getDocs(refundQ);
+              const sortedDocs = refundSnap.docs.slice().sort((a, b) => {
+                const ta = a.data().createdAt as Timestamp | undefined;
+                const tb = b.data().createdAt as Timestamp | undefined;
+                const da =
+                  ta && typeof ta.toDate === "function"
+                    ? ta.toDate().getTime()
+                    : 0;
+                const dbt =
+                  tb && typeof tb.toDate === "function"
+                    ? tb.toDate().getTime()
+                    : 0;
+                return dbt - da;
+              });
+              const rows: RefundActivityRow[] = sortedDocs.map((d) => {
+                const rd = d.data() as Record<string, unknown>;
+                const amt = rd.amountInCents;
+                const amountInCents = Math.round(
+                  typeof amt === "number" ? amt : Number(amt ?? 0)
+                );
+                return {
+                  id: d.id,
+                  refundedBy: String(rd.refundedBy ?? "").trim() || "—",
+                  amountInCents,
+                  createdAtLabel: formatFirestoreTimestamp(rd.createdAt),
+                };
+              });
+              if (!cancelled) setRefundActivity(rows);
+            } catch (err) {
+              console.error(
+                "[Order detail] Refund transactions query failed (index may be required):",
+                err
+              );
+            }
+          }
+        }
 
         const itemsSnap = await getDocs(collection(ref, "items"));
         if (cancelled) return;
@@ -172,6 +267,14 @@ export default function OrderDetailPage() {
   const remainingInCents = Math.max(0, totalInCents - totalRefundedInCents);
   const typeBadge = orderTypeBadgeStyle(orderTypeRaw);
 
+  const voidedByOrder = String(orderData?.voidedBy ?? "").trim();
+  const voidedAtOrderLabel = formatFirestoreTimestamp(orderData?.voidedAt);
+  const saleVoided = saleTransactionData?.voided === true;
+  const saleVoidedBy = String(saleTransactionData?.voidedBy ?? "").trim();
+  const saleVoidedAtLabel = formatFirestoreTimestamp(
+    saleTransactionData?.voidedAt
+  );
+
   return (
     <>
       <Header title={`Order #${orderNumStr}`} />
@@ -251,6 +354,57 @@ export default function OrderDetailPage() {
                     <dt className="text-slate-500">Batch</dt>
                     <dd className="font-mono text-xs text-slate-700 break-all">
                       {batchId}
+                    </dd>
+                  </div>
+                ) : null}
+                {status === "VOIDED" && (voidedByOrder || voidedAtOrderLabel) ? (
+                  <>
+                    {voidedByOrder ? (
+                      <div>
+                        <dt className="text-slate-500">Voided by</dt>
+                        <dd className="font-medium text-slate-800">
+                          {voidedByOrder}
+                        </dd>
+                      </div>
+                    ) : null}
+                    {voidedAtOrderLabel ? (
+                      <div>
+                        <dt className="text-slate-500">Voided at</dt>
+                        <dd className="font-medium text-slate-800">
+                          {voidedAtOrderLabel}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+                {saleVoided && saleVoidedBy ? (
+                  <div className="sm:col-span-2">
+                    <dt className="text-slate-500">Payment void</dt>
+                    <dd className="font-medium text-slate-800">
+                      Voided by {saleVoidedBy}
+                      {saleVoidedAtLabel ? ` · ${saleVoidedAtLabel}` : ""}
+                    </dd>
+                  </div>
+                ) : null}
+                {refundActivity.length > 0 ? (
+                  <div className="sm:col-span-2">
+                    <dt className="text-slate-500">Refunds</dt>
+                    <dd className="mt-1 space-y-2 text-sm text-slate-800">
+                      {refundActivity.map((r) => (
+                        <div key={r.id}>
+                          <span className="font-medium">
+                            ${centsToMoney(r.amountInCents)}
+                          </span>
+                          {" refunded by "}
+                          <span>{r.refundedBy}</span>
+                          {r.createdAtLabel ? (
+                            <span className="text-slate-500">
+                              {" "}
+                              · {r.createdAtLabel}
+                            </span>
+                          ) : null}
+                        </div>
+                      ))}
                     </dd>
                   </div>
                 ) : null}
