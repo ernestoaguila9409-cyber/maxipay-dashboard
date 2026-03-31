@@ -4,7 +4,7 @@ import OpenAI from "openai";
 import {
   getFirebaseAdminApp,
   verifyIdToken,
-  serviceAccountCredentials,
+  getServiceAccountCredentials,
 } from "@/lib/firebaseAdmin";
 import { getStorage } from "firebase-admin/storage";
 import { normalizeStructuredMenu } from "@/lib/menuScanNormalize";
@@ -37,7 +37,7 @@ function getOpenAI(): OpenAI {
 
 function getVisionClient(): ImageAnnotatorClient {
   return new ImageAnnotatorClient({
-    credentials: serviceAccountCredentials as Record<string, unknown>,
+    credentials: getServiceAccountCredentials() as Record<string, unknown>,
   });
 }
 

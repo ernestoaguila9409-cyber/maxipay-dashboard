@@ -4,8 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prebuild": "node scripts/copy-service-account.cjs",
-    "predev": "node scripts/copy-service-account.cjs",
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
