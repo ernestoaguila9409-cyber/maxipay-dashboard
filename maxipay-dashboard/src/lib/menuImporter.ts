@@ -7,6 +7,10 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import {
+  formatCategoryDisplayName,
+  normalizeCategoryName,
+} from "@/lib/categoryNameUtils";
 
 // ─── Parsed types ────────────────────────────────────────────────────
 
@@ -432,6 +436,7 @@ export async function importMenuToFirestore(
       const ref = doc(db, "Categories", cat.id);
       batch.set(ref, {
         name: cat.name,
+        normalizedName: normalizeCategoryName(cat.name),
         availableOrderTypes: ["DINE_IN", "TO_GO", "BAR_TAB"],
       });
       log("info", `Created category "${cat.name}" (${cat.id})`);
@@ -637,20 +642,47 @@ export async function importScannedMenuToFirestore(
     }
   };
 
+  onProgress?.({ stage: "Loading categories…", current: 0, total: 2 });
+
+  const existingSnap = await getDocs(collection(db, "Categories"));
+  /** normalized key → Firestore category id (existing + created this run) */
+  const normToFirestoreId = new Map<string, string>();
+  for (const d of existingSnap.docs) {
+    const name = (d.get("name") as string) || "";
+    const stored = d.get("normalizedName") as string | undefined;
+    const rawKey =
+      stored && String(stored).trim().length > 0 ? String(stored).trim() : name;
+    const key = normalizeCategoryName(rawKey);
+    if (key.length > 0 && !normToFirestoreId.has(key)) {
+      normToFirestoreId.set(key, d.id);
+    }
+  }
+
   onProgress?.({ stage: "Creating categories…", current: 0, total: 2 });
+
+  let newCategoriesCreated = 0;
 
   for (const cat of rows) {
     const name = cat.name.trim();
     if (!name) continue;
-    const ref = doc(collection(db, "Categories"));
-    batch.set(ref, {
-      name,
-      availableOrderTypes: ["DINE_IN", "TO_GO", "BAR_TAB"],
-      scheduleIds: [],
-    });
-    catClientToFirestore.set(cat.id, ref.id);
-    count++;
-    await commitIfNeeded();
+    const norm = normalizeCategoryName(name) || "general";
+
+    let firestoreId = normToFirestoreId.get(norm);
+    if (firestoreId === undefined) {
+      const ref = doc(collection(db, "Categories"));
+      batch.set(ref, {
+        name: formatCategoryDisplayName(name),
+        normalizedName: norm,
+        availableOrderTypes: ["DINE_IN", "TO_GO", "BAR_TAB"],
+        scheduleIds: [],
+      });
+      firestoreId = ref.id;
+      normToFirestoreId.set(norm, firestoreId);
+      newCategoriesCreated++;
+      count++;
+      await commitIfNeeded();
+    }
+    catClientToFirestore.set(cat.id, firestoreId);
   }
   if (count > 0) await batch.commit();
   batch = writeBatch(db);
@@ -688,5 +720,5 @@ export async function importScannedMenuToFirestore(
   }
   if (count > 0) await batch.commit();
 
-  return { categories: catClientToFirestore.size, items: itemCount };
+  return { categories: newCategoriesCreated, items: itemCount };
 }
