@@ -1,8 +1,5 @@
 import * as admin from "firebase-admin";
 import { createPrivateKey } from "crypto";
-import fs from "fs";
-import path from "path";
-import bundled from "../../serviceAccountKey.json";
 
 /** Returns true if Node can use this PEM (same check firebase-admin uses internally). */
 function isValidPkcs8Pem(pem: string): boolean {
@@ -123,32 +120,11 @@ function loadRawServiceAccountFromEnv(): admin.ServiceAccount | null {
   const serviceAccount = tryParseJson(envJson.trim());
   if (!serviceAccount) return null;
   console.log("SERVICE ACCOUNT LOADED FROM ENV");
-  serviceAccount.private_key = fixPrivateKey(serviceAccount.private_key);
-  return serviceAccount;
-}
-
-function loadRawServiceAccountFromDisk(): admin.ServiceAccount | null {
-  if (typeof window !== "undefined") return null;
-  const candidates = [
-    path.join(process.cwd(), "serviceAccountKey.json"),
-    path.join(process.cwd(), "maxipay-dashboard", "serviceAccountKey.json"),
-  ];
-  for (const p of candidates) {
-    try {
-      if (fs.existsSync(p)) {
-        const raw = fs.readFileSync(p, "utf8");
-        const parsed = tryParseJson(raw);
-        if (parsed) return parsed;
-      }
-    } catch {
-      /* try next path */
-    }
+  const sa = serviceAccount as Record<string, unknown>;
+  if (typeof sa.private_key === "string") {
+    sa.private_key = fixPrivateKey(sa.private_key);
   }
-  return null;
-}
-
-function loadRawServiceAccountFromBundle(): admin.ServiceAccount {
-  return bundled as admin.ServiceAccount;
+  return serviceAccount;
 }
 
 function assertServiceAccountUsable(sa: admin.ServiceAccount): void {
@@ -172,60 +148,45 @@ function assertServiceAccountUsable(sa: admin.ServiceAccount): void {
  * Single object shape google-auth / firebase-admin expect (snake_case fields).
  */
 function buildNormalizedCredentials(): admin.ServiceAccount {
-  const sources: admin.ServiceAccount[] = [];
-  const fromEnv = loadRawServiceAccountFromEnv();
-  if (fromEnv) sources.push(fromEnv);
-  const fromDisk = loadRawServiceAccountFromDisk();
-  if (fromDisk) sources.push(fromDisk);
-  sources.push(loadRawServiceAccountFromBundle());
-
-  const tried: string[] = [];
-  for (const raw of sources) {
-    const tag =
-      fromEnv && raw === fromEnv
-        ? "FIREBASE_SERVICE_ACCOUNT_JSON"
-        : fromDisk && raw === fromDisk
-          ? "serviceAccountKey.json (disk)"
-          : "bundled serviceAccountKey.json";
-    try {
-      assertServiceAccountUsable(raw);
-      const fixedKey = finalizePrivateKey(getPrivateKeyRaw(raw));
-      const o = raw as Record<string, unknown>;
-
-      const cred = {
-        type: (o.type as string) || "service_account",
-        project_id: o.project_id as string,
-        private_key: fixedKey,
-        client_email: o.client_email as string,
-        client_id: o.client_id as string,
-        auth_uri: o.auth_uri as string,
-        token_uri: o.token_uri as string,
-        auth_provider_x509_cert_url: o.auth_provider_x509_cert_url as string,
-        client_x509_cert_url: o.client_x509_cert_url as string,
-        ...(o.universe_domain
-          ? { universe_domain: o.universe_domain as string }
-          : {}),
-      } as admin.ServiceAccount;
-
-      return cred;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg === "template_or_placeholder_key") {
-        tried.push(`${tag}: still template/placeholder — replace with real Firebase JSON`);
-      } else if (msg === "missing_begin_private_key") {
-        tried.push(`${tag}: private_key missing PKCS#8 header`);
-      } else {
-        tried.push(`${tag}: ${msg}`);
-      }
-    }
+  const raw = loadRawServiceAccountFromEnv();
+  if (!raw) {
+    throw new Error(
+      "No valid Firebase service account could be loaded. " +
+        "Set FIREBASE_SERVICE_ACCOUNT_JSON on your host to the full JSON from Firebase Console → Project settings → Service accounts → Generate new private key."
+    );
   }
+  const tag = "FIREBASE_SERVICE_ACCOUNT_JSON";
+  try {
+    assertServiceAccountUsable(raw);
+    const fixedKey = finalizePrivateKey(getPrivateKeyRaw(raw));
+    const o = raw as Record<string, unknown>;
 
-  throw new Error(
-    "No valid Firebase service account could be loaded. " +
-      tried.join(" · ") +
-      " Fix: Firebase Console → Project settings → Service accounts → Generate new private key. " +
-      "Set FIREBASE_SERVICE_ACCOUNT_JSON on your host to the full JSON (recommended), or deploy a real serviceAccountKey.json file."
-  );
+    return {
+      type: (o.type as string) || "service_account",
+      project_id: o.project_id as string,
+      private_key: fixedKey,
+      client_email: o.client_email as string,
+      client_id: o.client_id as string,
+      auth_uri: o.auth_uri as string,
+      token_uri: o.token_uri as string,
+      auth_provider_x509_cert_url: o.auth_provider_x509_cert_url as string,
+      client_x509_cert_url: o.client_x509_cert_url as string,
+      ...(o.universe_domain
+        ? { universe_domain: o.universe_domain as string }
+        : {}),
+    } as admin.ServiceAccount;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "template_or_placeholder_key") {
+      throw new Error(
+        `${tag}: still template/placeholder — replace with real Firebase JSON`
+      );
+    }
+    if (msg === "missing_begin_private_key") {
+      throw new Error(`${tag}: private_key missing PKCS#8 header`);
+    }
+    throw new Error(`${tag}: ${msg}`);
+  }
 }
 
 let cachedCredentials: admin.ServiceAccount | null = null;
