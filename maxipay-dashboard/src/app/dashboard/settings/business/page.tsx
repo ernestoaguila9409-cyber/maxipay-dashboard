@@ -23,6 +23,10 @@ import {
   Receipt,
   Settings2,
 } from "lucide-react";
+import {
+  thermalCharsPerLine,
+  wrapThermalText,
+} from "@/lib/receiptThermal";
 
 /* ══════════════════════════════════════════════
    Types — mirrors Android ReceiptSettings.kt
@@ -464,6 +468,23 @@ export default function BusinessInformationPage() {
 
   const px = (key: number) => FONT_PX[key] ?? 12;
 
+  const bizNameChars = thermalCharsPerLine(ps.fontSizeBizName);
+  const addrChars = thermalCharsPerLine(ps.fontSizeAddress);
+
+  const nameLines = wrapThermalText(displayName, bizNameChars);
+  const addressLines = wrapThermalText(displayAddress, addrChars);
+  const phoneLines = wrapThermalText(displayPhone, addrChars);
+  const emailLines = displayEmail.trim()
+    ? wrapThermalText(displayEmail.trim(), thermalCharsPerLine(0))
+    : [];
+
+  const addressLinesRaw = data.address.split(/\r?\n/);
+  const addressLongestLineLen = addressLinesRaw.reduce(
+    (m, l) => Math.max(m, l.length),
+    0
+  );
+  const addressLineOverLimit = addressLongestLineLen > addrChars;
+
   /* ══════════════════════════════════════════════
      Render
      ══════════════════════════════════════════════ */
@@ -534,6 +555,26 @@ export default function BusinessInformationPage() {
                   rows={2}
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 resize-y min-h-[64px] transition-colors"
                 />
+                <p className="mt-1.5 text-[11px] text-slate-400 leading-snug">
+                  Receipt width matches the POS thermal printer (~{addrChars}{" "}
+                  characters per line
+                  {ps.fontSizeAddress === 2
+                    ? " at X-Large address font"
+                    : " at Normal/Large address font"}
+                  ). Long lines wrap on the preview like on paper.
+                </p>
+                {addressLineOverLimit ? (
+                  <p className="mt-1 text-[11px] text-amber-700 flex items-start gap-1.5">
+                    <AlertCircle
+                      size={14}
+                      className="shrink-0 mt-0.5"
+                      aria-hidden
+                    />
+                    Longest line is {addressLongestLineLen} characters — it will
+                    wrap to multiple lines on the receipt (max ~{addrChars} chars
+                    per line for this font size).
+                  </p>
+                ) : null}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -732,7 +773,7 @@ export default function BusinessInformationPage() {
                   {/* Receipt paper */}
                   <div className="flex justify-center">
                     <div
-                      className="w-full max-w-[320px] bg-white rounded-lg shadow-[0_2px_20px_rgba(0,0,0,0.08)] border border-slate-100 px-7 py-8 text-center"
+                      className="w-full max-w-[320px] bg-white rounded-lg shadow-[0_2px_20px_rgba(0,0,0,0.08)] border border-slate-100 px-7 py-8 text-center overflow-hidden"
                       style={{
                         fontFamily:
                           "'Courier New', Courier, monospace",
@@ -754,35 +795,73 @@ export default function BusinessInformationPage() {
                         </div>
                       )}
 
-                      {/* Business name */}
-                      <p
-                        className="text-slate-800 leading-tight"
-                        style={{
-                          fontSize: `${px(ps.fontSizeBizName)}px`,
-                          fontWeight: ps.boldBizName ? 700 : 400,
-                        }}
+                      {/* Business name — wrapped to thermal line width */}
+                      <div
+                        className="mx-auto"
+                        style={{ maxWidth: `${bizNameChars}ch` }}
                       >
-                        {displayName}
-                      </p>
+                        {nameLines.map((line, i) => (
+                          <p
+                            key={`name-${i}`}
+                            className="text-slate-800 leading-tight [overflow-wrap:anywhere] break-words"
+                            style={{
+                              fontSize: `${px(ps.fontSizeBizName)}px`,
+                              fontWeight: ps.boldBizName ? 700 : 400,
+                            }}
+                          >
+                            {line || "\u00a0"}
+                          </p>
+                        ))}
+                      </div>
 
-                      {/* Address */}
-                      <p
-                        className="text-slate-500 mt-1 whitespace-pre-line"
-                        style={{
-                          fontSize: `${px(ps.fontSizeAddress)}px`,
-                          fontWeight: ps.boldAddress ? 700 : 400,
-                        }}
+                      {/* Address + phone — wrapped like ESC/POS */}
+                      <div
+                        className="text-slate-500 mt-1 mx-auto"
+                        style={{ maxWidth: `${addrChars}ch` }}
                       >
-                        {displayAddress}
-                        {"\n"}
-                        {displayPhone}
-                      </p>
+                        {addressLines.map((line, i) => (
+                          <p
+                            key={`addr-${i}`}
+                            className="leading-snug [overflow-wrap:anywhere] break-words"
+                            style={{
+                              fontSize: `${px(ps.fontSizeAddress)}px`,
+                              fontWeight: ps.boldAddress ? 700 : 400,
+                            }}
+                          >
+                            {line || "\u00a0"}
+                          </p>
+                        ))}
+                        {phoneLines.map((line, i) => (
+                          <p
+                            key={`ph-${i}`}
+                            className="leading-snug [overflow-wrap:anywhere] break-words"
+                            style={{
+                              fontSize: `${px(ps.fontSizeAddress)}px`,
+                              fontWeight: ps.boldAddress ? 700 : 400,
+                            }}
+                          >
+                            {line || "\u00a0"}
+                          </p>
+                        ))}
+                      </div>
 
                       {/* Email */}
                       {ps.showEmail && displayEmail && (
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          {displayEmail}
-                        </p>
+                        <div
+                          className="text-[11px] text-slate-400 mt-0.5 mx-auto"
+                          style={{
+                            maxWidth: `${thermalCharsPerLine(0)}ch`,
+                          }}
+                        >
+                          {emailLines.map((line, i) => (
+                            <p
+                              key={`em-${i}`}
+                              className="[overflow-wrap:anywhere] break-words"
+                            >
+                              {line || "\u00a0"}
+                            </p>
+                          ))}
+                        </div>
                       )}
 
                       {/* Receipt label */}
