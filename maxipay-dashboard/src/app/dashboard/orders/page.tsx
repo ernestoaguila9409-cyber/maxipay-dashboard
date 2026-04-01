@@ -16,7 +16,7 @@ import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import OrdersTable, { type Order } from "@/components/OrdersTable";
-import { Calendar, Filter, Download } from "lucide-react";
+import { Calendar, Filter, Download, User } from "lucide-react";
 import {
   mapFirestoreOrderDoc,
   mergeOrderSnapshots,
@@ -96,41 +96,16 @@ function mapSnapshotToSortedOrders(
   return list.sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
 }
 
-export type DateFilterId = "today" | "yesterday" | "7days" | "all" | "custom";
+export type DateFilterId = "today" | "yesterday" | "7days" | "custom";
 
-function getDateRange(
-  filter: DateFilterId
-): { start: Date; end: Date } | null {
-  const now = new Date();
+function defaultCustomStart(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 7);
+  return d.toISOString().slice(0, 10);
+}
 
-  if (filter === "all" || filter === "custom") {
-    return null;
-  }
-
-  if (filter === "today") {
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    return { start, end: now };
-  }
-
-  if (filter === "yesterday") {
-    const start = new Date(now);
-    start.setDate(start.getDate() - 1);
-    start.setHours(0, 0, 0, 0);
-
-    const end = new Date(start);
-    end.setHours(23, 59, 59, 999);
-
-    return { start, end };
-  }
-
-  if (filter === "7days") {
-    const start = new Date(now);
-    start.setDate(start.getDate() - 7);
-    return { start, end: now };
-  }
-
-  return null;
+function defaultCustomEnd(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function orderCreatedAt(order: Order): Date | null {
@@ -172,14 +147,27 @@ function passesOrderTypeFilter(
   return orderTypeRaw === filter;
 }
 
+function passesEmployeeFilter(
+  employeeName: string | undefined,
+  filter: string
+): boolean {
+  if (filter === "all") return true;
+  const a = (employeeName ?? "").trim().toLowerCase();
+  const b = filter.trim().toLowerCase();
+  return a === b;
+}
+
 export default function OrdersPage() {
   const { user } = useAuth();
   const [rawOrders, setRawOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState<DateFilterId>("today");
+  const [customStart, setCustomStart] = useState<string>(defaultCustomStart);
+  const [customEnd, setCustomEnd] = useState<string>(defaultCustomEnd);
   const [statusFilter, setStatusFilter] = useState<PosStatusFilter>("all");
   const [orderTypeFilter, setOrderTypeFilter] =
     useState<PosOrderTypeFilter>("all");
+  const [employeeFilter, setEmployeeFilter] = useState<string>("all");
 
   useEffect(() => {
     if (!user) {
@@ -326,8 +314,46 @@ export default function OrdersPage() {
     };
   }, [user]);
 
+  const dateRange = useMemo((): { start: Date; end: Date } | null => {
+    const now = new Date();
+    if (dateFilter === "today") {
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      return { start, end: now };
+    }
+    if (dateFilter === "yesterday") {
+      const start = new Date(now);
+      start.setDate(start.getDate() - 1);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setHours(23, 59, 59, 999);
+      return { start, end };
+    }
+    if (dateFilter === "7days") {
+      const start = new Date(now);
+      start.setDate(start.getDate() - 7);
+      return { start, end: now };
+    }
+    if (dateFilter === "custom") {
+      if (!customStart?.trim() || !customEnd?.trim()) return null;
+      const start = new Date(`${customStart.trim()}T00:00:00`);
+      const end = new Date(`${customEnd.trim()}T23:59:59.999`);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return null;
+      }
+      if (start > end) {
+        return { start: end, end: start };
+      }
+      return { start, end };
+    }
+    return null;
+  }, [dateFilter, customStart, customEnd]);
+
   const dateFiltered = useMemo(() => {
-    const range = getDateRange(dateFilter);
+    const range = dateRange;
+    if (dateFilter === "custom" && !range) {
+      return [];
+    }
     if (!range) {
       return rawOrders;
     }
@@ -336,39 +362,55 @@ export default function OrdersPage() {
       if (!d) return false;
       return d >= range.start && d <= range.end;
     });
-  }, [rawOrders, dateFilter]);
+  }, [rawOrders, dateRange, dateFilter]);
+
+  const employeeNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const o of rawOrders) {
+      const n = (o.employeeName ?? "").trim();
+      if (n && n !== "—") set.add(n);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [rawOrders]);
+
+  useEffect(() => {
+    if (
+      employeeFilter !== "all" &&
+      !employeeNames.includes(employeeFilter)
+    ) {
+      setEmployeeFilter("all");
+    }
+  }, [employeeNames, employeeFilter]);
+
+  const employeeFiltered = useMemo(() => {
+    if (employeeFilter === "all") return dateFiltered;
+    return dateFiltered.filter((o) =>
+      passesEmployeeFilter(o.employeeName, employeeFilter)
+    );
+  }, [dateFiltered, employeeFilter]);
 
   const orders = useMemo(() => {
-    return dateFiltered.filter((o) => {
+    return employeeFiltered.filter((o) => {
       if (!passesStatusFilter(o.status, statusFilter)) return false;
       if (!passesOrderTypeFilter(o.orderTypeRaw ?? "", orderTypeFilter)) {
         return false;
       }
       return true;
     });
-  }, [dateFiltered, statusFilter, orderTypeFilter]);
+  }, [employeeFiltered, statusFilter, orderTypeFilter]);
 
   const noOrdersForSelectedDate =
     !loading &&
     orders.length === 0 &&
     rawOrders.length > 0 &&
-    dateFilter !== "all" &&
-    dateFilter !== "custom" &&
     dateFiltered.length === 0;
 
-  /** Date range included rows, but status/type (or future filters) excluded all. */
+  /** Date range had rows, but employee, status, or type excluded all. */
   const filteredOutByStatusType =
     !loading &&
     orders.length === 0 &&
     rawOrders.length > 0 &&
     !noOrdersForSelectedDate;
-
-  const dateFilterButtonClass = (value: DateFilterId) =>
-    `px-3 py-2 rounded-xl border text-sm transition-colors ${
-      dateFilter === value
-        ? "border-blue-500 bg-blue-50 text-blue-900 font-medium"
-        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-    }`;
 
   return (
     <>
@@ -376,59 +418,82 @@ export default function OrdersPage() {
       <div className="p-6 space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2 gap-y-3">
-            <button
-              type="button"
-              onClick={() => setDateFilter("today")}
-              className={dateFilterButtonClass("today")}
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              onClick={() => setDateFilter("yesterday")}
-              className={dateFilterButtonClass("yesterday")}
-            >
-              Yesterday
-            </button>
-            <button
-              type="button"
-              onClick={() => setDateFilter("7days")}
-              className={dateFilterButtonClass("7days")}
-            >
-              7 Days
-            </button>
-            <button
-              type="button"
-              onClick={() => setDateFilter("all")}
-              className={dateFilterButtonClass("all")}
-            >
-              All
-            </button>
             <div className="relative">
               <Calendar
                 size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
               />
               <select
-                value={dateFilter === "custom" ? "all" : dateFilter}
-                onChange={(e) =>
-                  setDateFilter(e.target.value as DateFilterId)
-                }
-                className="pl-9 pr-8 py-2 rounded-xl bg-white border border-slate-200 text-sm text-slate-700 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 appearance-none cursor-pointer min-w-[160px]"
+                value={dateFilter}
+                onChange={(e) => {
+                  const v = e.target.value as DateFilterId;
+                  setDateFilter(v);
+                  if (v === "custom") {
+                    setCustomStart((s) => s || defaultCustomStart());
+                    setCustomEnd((end) => end || defaultCustomEnd());
+                  }
+                }}
+                className="pl-9 pr-8 py-2 rounded-xl bg-white border border-slate-200 text-sm text-slate-700 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 appearance-none cursor-pointer min-w-[180px]"
               >
                 <option value="today">Today</option>
                 <option value="yesterday">Yesterday</option>
                 <option value="7days">Last 7 days</option>
-                <option value="all">All time</option>
-                <option value="custom" disabled>
-                  Custom (coming soon)
-                </option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            {dateFilter === "custom" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <label
+                  htmlFor="order-custom-start"
+                  className="text-xs text-slate-500 sr-only"
+                >
+                  From date
+                </label>
+                <input
+                  id="order-custom-start"
+                  type="date"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                />
+                <span className="text-xs text-slate-400">to</span>
+                <label
+                  htmlFor="order-custom-end"
+                  className="text-xs text-slate-500 sr-only"
+                >
+                  To date
+                </label>
+                <input
+                  id="order-custom-end"
+                  type="date"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                />
+              </div>
+            ) : null}
+            <div className="relative">
+              <User
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+              />
+              <select
+                value={employeeFilter}
+                onChange={(e) => setEmployeeFilter(e.target.value)}
+                className="pl-9 pr-8 py-2 rounded-xl bg-white border border-slate-200 text-sm text-slate-700 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 appearance-none cursor-pointer min-w-[160px]"
+              >
+                <option value="all">All employees</option>
+                {employeeNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="relative">
               <Filter
                 size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
               />
               <select
                 value={statusFilter}
@@ -447,7 +512,7 @@ export default function OrdersPage() {
             <div className="relative">
               <Filter
                 size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
               />
               <select
                 value={orderTypeFilter}
@@ -492,9 +557,10 @@ export default function OrdersPage() {
         <div className="flex items-center justify-between text-sm text-slate-500">
           <p>
             Showing {orders.length} order{orders.length === 1 ? "" : "s"}
-            {dateFilter !== "all" ||
+            {dateFilter !== "today" ||
             statusFilter !== "all" ||
-            orderTypeFilter !== "all"
+            orderTypeFilter !== "all" ||
+            employeeFilter !== "all"
               ? ` (${rawOrders.length} loaded from Firestore)`
               : ""}
           </p>
