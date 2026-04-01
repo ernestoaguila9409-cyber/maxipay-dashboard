@@ -277,6 +277,31 @@ export default function MenuUploadModal({
     return data;
   };
 
+  const runDuplicateCheck = async (rows: ScannedMenuCategoryRow[]) => {
+    setPictureStage("checking-duplicates");
+    try {
+      const existing = await fetchExistingMenuItems();
+      const flattened = flattenScannedCategories(rows);
+      const result = detectDuplicates(flattened, existing);
+      setDupResult(result);
+      setSkipDuplicateIds(
+        new Set(result.duplicateItems.map((d) => d.scannedItem.id))
+      );
+      setSkipPossibleIds(new Set());
+
+      if (
+        result.duplicateItems.length === 0 &&
+        result.possibleDuplicates.length === 0
+      ) {
+        setPictureStage("preview");
+      } else {
+        setPictureStage("duplicates");
+      }
+    } catch {
+      setPictureStage("preview");
+    }
+  };
+
   const runPictureScan = async (file: File) => {
     setPictureFileName(file.name);
     setPicError("");
@@ -289,7 +314,7 @@ export default function MenuUploadModal({
       const rows = assignScanIds({ categories: data.categories! });
       setScanCategories(rows);
       setPriceDraftByItemId(buildPriceDraftMap(rows));
-      setPictureStage("preview");
+      await runDuplicateCheck(rows);
     } catch (err) {
       setPicError(err instanceof Error ? err.message : "Scan failed");
       setPictureStage("error");
@@ -326,6 +351,7 @@ export default function MenuUploadModal({
       const rows = assignScanIds({ categories: data.categories! });
       setScanCategories(rows);
       setPriceDraftByItemId(buildPriceDraftMap(rows));
+      await runDuplicateCheck(rows);
     } catch (err) {
       setPicError(err instanceof Error ? err.message : "Reprocess failed");
     } finally {
@@ -419,7 +445,7 @@ export default function MenuUploadModal({
       .filter((c) => c.name.trim() && c.items.length > 0);
   };
 
-  const handleCheckDuplicates = async () => {
+  const handleConfirmFromPreview = async () => {
     const cleaned = getMergedCleanRows();
     if (cleaned.length === 0) {
       setPicError("Add at least one category with items.");
@@ -974,7 +1000,7 @@ export default function MenuUploadModal({
                       </button>
                       <button
                         type="button"
-                        onClick={handleCheckDuplicates}
+                        onClick={handleConfirmFromPreview}
                         className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
                       >
                         Confirm &amp; Import Menu
