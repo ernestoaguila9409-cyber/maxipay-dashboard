@@ -92,6 +92,8 @@ const DEFAULT_PRINT: PrintSettings = {
 
 const FONT_LABELS = ["Normal", "Large", "X-Large"] as const;
 const FONT_PX: Record<number, number> = { 0: 12, 1: 15, 2: 19 };
+/** Makes the receipt preview easier to read on large screens (does not affect POS print). */
+const PREVIEW_FONT_SCALE = 1.28;
 
 const DOC_REF = "Settings";
 const DOC_ID = "businessInfo";
@@ -466,7 +468,8 @@ export default function BusinessInformationPage() {
         ? "text-red-600"
         : "text-slate-700";
 
-  const px = (key: number) => FONT_PX[key] ?? 12;
+  const px = (key: number) =>
+    Math.round((FONT_PX[key] ?? 12) * PREVIEW_FONT_SCALE);
 
   const bizNameChars = thermalCharsPerLine(ps.fontSizeBizName);
   const addrChars = thermalCharsPerLine(ps.fontSizeAddress);
@@ -745,7 +748,7 @@ export default function BusinessInformationPage() {
 
               {/* ── Receipt Preview Tab ── */}
               {rightTab === "preview" ? (
-                <div className="p-5">
+                <div className="p-5 sm:p-6">
                   {/* Variant selector */}
                   <div className="flex gap-1.5 mb-5 bg-slate-100 rounded-lg p-1">
                     {(
@@ -770,10 +773,10 @@ export default function BusinessInformationPage() {
                     ))}
                   </div>
 
-                  {/* Receipt paper */}
-                  <div className="flex justify-center">
+                  {/* Receipt paper — wider + scaled fonts so preview is readable */}
+                  <div className="flex justify-center overflow-x-auto pb-4">
                     <div
-                      className="w-full max-w-[320px] bg-white rounded-lg shadow-[0_2px_20px_rgba(0,0,0,0.08)] border border-slate-100 px-7 py-8 text-center overflow-hidden"
+                      className="w-full max-w-[min(100%,440px)] min-w-[280px] bg-white rounded-lg shadow-[0_2px_20px_rgba(0,0,0,0.08)] border border-slate-100 px-8 py-9 sm:px-10 sm:py-10 text-center overflow-hidden"
                       style={{
                         fontFamily:
                           "'Courier New', Courier, monospace",
@@ -785,7 +788,7 @@ export default function BusinessInformationPage() {
                           <img
                             src={data.logoUrl.trim()}
                             alt="Logo"
-                            className="h-14 max-w-[140px] object-contain"
+                            className="h-16 sm:h-[4.5rem] max-w-[168px] object-contain"
                             onError={(e) => {
                               (
                                 e.target as HTMLImageElement
@@ -848,9 +851,10 @@ export default function BusinessInformationPage() {
                       {/* Email */}
                       {ps.showEmail && displayEmail && (
                         <div
-                          className="text-[11px] text-slate-400 mt-0.5 mx-auto"
+                          className="text-slate-400 mt-0.5 mx-auto"
                           style={{
                             maxWidth: `${thermalCharsPerLine(0)}ch`,
+                            fontSize: `${Math.round(11 * PREVIEW_FONT_SCALE)}px`,
                           }}
                         >
                           {emailLines.map((line, i) => (
@@ -879,7 +883,11 @@ export default function BusinessInformationPage() {
                       <div
                         className="text-slate-500 leading-relaxed"
                         style={{
-                          fontSize: `${Math.max(px(ps.fontSizeOrderInfo) - 3, 10)}px`,
+                          fontSize: `${Math.max(
+                            px(ps.fontSizeOrderInfo) -
+                              Math.round(3 * PREVIEW_FONT_SCALE),
+                            Math.round(10 * PREVIEW_FONT_SCALE),
+                          )}px`,
                           fontWeight: ps.boldOrderInfo ? 600 : 400,
                         }}
                       >
@@ -966,7 +974,12 @@ export default function BusinessInformationPage() {
                       </div>
 
                       {/* Payment */}
-                      <div className="text-[10px] text-slate-500 mt-4 space-y-0.5">
+                      <div
+                        className="text-slate-500 mt-4 space-y-0.5"
+                        style={{
+                          fontSize: `${Math.round(10 * PREVIEW_FONT_SCALE)}px`,
+                        }}
+                      >
                         <p>Visa **** 1234</p>
                         <p>Auth: 123456 &middot; Type: Credit</p>
                       </div>
