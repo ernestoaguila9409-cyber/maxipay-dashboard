@@ -26,6 +26,12 @@ import {
   type ScannedMenuItemRow,
   type ScannedMenuImportResult,
 } from "@/lib/menuImporter";
+import {
+  fetchExistingMenuItems,
+  flattenScannedCategories,
+  detectDuplicates,
+  type DuplicateDetectionResult,
+} from "@/lib/menuDuplicateDetector";
 
 interface Props {
   open: boolean;
@@ -42,6 +48,8 @@ type PictureStage =
   | "pick"
   | "scanning"
   | "preview"
+  | "checking-duplicates"
+  | "duplicates"
   | "importing"
   | "done"
   | "error";
@@ -140,6 +148,15 @@ export default function MenuUploadModal({
   const [priceDraftByItemId, setPriceDraftByItemId] = useState<
     Record<string, string>
   >({});
+  const [dupResult, setDupResult] = useState<DuplicateDetectionResult | null>(
+    null
+  );
+  const [skipDuplicateIds, setSkipDuplicateIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [skipPossibleIds, setSkipPossibleIds] = useState<Set<string>>(
+    new Set()
+  );
 
   const resetExcel = useCallback(() => {
     setExcelStage("pick");
@@ -161,6 +178,9 @@ export default function MenuUploadModal({
     setPicError("");
     setReprocessing(false);
     setPriceDraftByItemId({});
+    setDupResult(null);
+    setSkipDuplicateIds(new Set());
+    setSkipPossibleIds(new Set());
     if (picInputRef.current) picInputRef.current.value = "";
   }, []);
 
@@ -379,8 +399,8 @@ export default function MenuUploadModal({
     });
   };
 
-  const handleConfirmScanImport = async () => {
-    if (!scanCategories?.length) return;
+  const getMergedCleanRows = (): ScannedMenuCategoryRow[] => {
+    if (!scanCategories?.length) return [];
     const mergedFromDrafts = scanCategories.map((c) => ({
       ...c,
       items: c.items.map((it) => {
@@ -391,21 +411,54 @@ export default function MenuUploadModal({
         return { ...it, price, priceUncertain: false };
       }),
     }));
-    const cleaned = mergedFromDrafts
+    return mergedFromDrafts
       .map((c) => ({
         ...c,
         items: c.items.filter((it) => it.name.trim()),
       }))
       .filter((c) => c.name.trim() && c.items.length > 0);
+  };
+
+  const handleCheckDuplicates = async () => {
+    const cleaned = getMergedCleanRows();
     if (cleaned.length === 0) {
       setPicError("Add at least one category with items.");
       return;
     }
 
+    setPictureStage("checking-duplicates");
+    setPicError("");
+    try {
+      const existing = await fetchExistingMenuItems();
+      const flattened = flattenScannedCategories(cleaned);
+      const result = detectDuplicates(flattened, existing);
+      setDupResult(result);
+      setSkipDuplicateIds(
+        new Set(result.duplicateItems.map((d) => d.scannedItem.id))
+      );
+      setSkipPossibleIds(new Set());
+
+      if (
+        result.duplicateItems.length === 0 &&
+        result.possibleDuplicates.length === 0
+      ) {
+        await doImport(cleaned);
+      } else {
+        setPictureStage("duplicates");
+      }
+    } catch (err) {
+      setPicError(
+        err instanceof Error ? err.message : "Duplicate check failed"
+      );
+      setPictureStage("error");
+    }
+  };
+
+  const doImport = async (rows: ScannedMenuCategoryRow[]) => {
     setPictureStage("importing");
     setPicError("");
     try {
-      const res = await importScannedMenuToFirestore(cleaned, setPicProgress);
+      const res = await importScannedMenuToFirestore(rows, setPicProgress);
       setPicResult(res);
       setPictureStage("done");
       onImportComplete();
@@ -415,11 +468,52 @@ export default function MenuUploadModal({
     }
   };
 
+  const handleConfirmAfterDuplicates = async () => {
+    const cleaned = getMergedCleanRows();
+    if (cleaned.length === 0) return;
+
+    const idsToSkip = new Set([...skipDuplicateIds, ...skipPossibleIds]);
+
+    const filtered = cleaned
+      .map((c) => ({
+        ...c,
+        items: c.items.filter((it) => !idsToSkip.has(it.id)),
+      }))
+      .filter((c) => c.items.length > 0);
+
+    if (filtered.length === 0) {
+      setPicError("All items were marked as duplicates. Nothing to import.");
+      return;
+    }
+
+    await doImport(filtered);
+  };
+
+  const toggleSkipDuplicate = (id: string) => {
+    setSkipDuplicateIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSkipPossible = (id: string) => {
+    setSkipPossibleIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   if (!open) return null;
 
   const widePreview =
     tab === "picture" &&
     (pictureStage === "preview" ||
+      pictureStage === "duplicates" ||
+      pictureStage === "checking-duplicates" ||
       pictureStage === "importing" ||
       pictureStage === "error");
 
@@ -880,7 +974,7 @@ export default function MenuUploadModal({
                       </button>
                       <button
                         type="button"
-                        onClick={handleConfirmScanImport}
+                        onClick={handleCheckDuplicates}
                         className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
                       >
                         Confirm &amp; Import Menu
@@ -888,6 +982,31 @@ export default function MenuUploadModal({
                     </div>
                   </div>
                 </>
+              )}
+
+              {pictureStage === "checking-duplicates" && (
+                <div className="flex flex-col items-center gap-4 py-8">
+                  <Loader2
+                    size={36}
+                    className="text-blue-600 animate-spin"
+                  />
+                  <p className="text-sm font-medium text-slate-700">
+                    Checking for duplicates…
+                  </p>
+                </div>
+              )}
+
+              {pictureStage === "duplicates" && dupResult && (
+                <DuplicateReviewPanel
+                  result={dupResult}
+                  skipDuplicateIds={skipDuplicateIds}
+                  skipPossibleIds={skipPossibleIds}
+                  onToggleDuplicate={toggleSkipDuplicate}
+                  onTogglePossible={toggleSkipPossible}
+                  onBack={() => setPictureStage("preview")}
+                  onConfirm={handleConfirmAfterDuplicates}
+                  error={picError}
+                />
               )}
 
               {pictureStage === "importing" && (
@@ -996,5 +1115,197 @@ function LogLine({ entry }: { entry: ImportLogEntry }) {
       <span className="flex-shrink-0 w-3 text-center">{icon}</span>
       <span>{entry.message}</span>
     </p>
+  );
+}
+
+// ─── Duplicate review panel ──────────────────────────────────────────────
+
+function DuplicateReviewPanel({
+  result,
+  skipDuplicateIds,
+  skipPossibleIds,
+  onToggleDuplicate,
+  onTogglePossible,
+  onBack,
+  onConfirm,
+  error,
+}: {
+  result: DuplicateDetectionResult;
+  skipDuplicateIds: Set<string>;
+  skipPossibleIds: Set<string>;
+  onToggleDuplicate: (id: string) => void;
+  onTogglePossible: (id: string) => void;
+  onBack: () => void;
+  onConfirm: () => void;
+  error?: string;
+}) {
+  const { newItems, duplicateItems, possibleDuplicates } = result;
+  const importCount =
+    newItems.length +
+    duplicateItems.filter((d) => !skipDuplicateIds.has(d.scannedItem.id))
+      .length +
+    possibleDuplicates.filter((d) => !skipPossibleIds.has(d.scannedItem.id))
+      .length;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-2">
+        <AlertTriangle size={18} className="text-amber-500 flex-shrink-0" />
+        <p className="text-sm font-medium text-slate-700">
+          Duplicate check complete
+        </p>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <SummaryCard label="New items" count={newItems.length} />
+        <SummaryCard label="Exact matches" count={duplicateItems.length} />
+        <SummaryCard label="Possible matches" count={possibleDuplicates.length} />
+      </div>
+
+      <div className="space-y-4 max-h-[45vh] overflow-y-auto pr-1">
+        {duplicateItems.length > 0 && (
+          <div className="border border-red-200 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 bg-red-50 border-b border-red-200">
+              <p className="text-xs font-semibold text-red-700 uppercase tracking-wide">
+                Exact duplicates (skipped by default)
+              </p>
+            </div>
+            <ul className="divide-y divide-red-100">
+              {duplicateItems.map((d) => (
+                <DuplicateRow
+                  key={d.scannedItem.id}
+                  scannedName={d.scannedItem.name}
+                  matchedName={d.matchedItem.name}
+                  similarity={1}
+                  priceChanged={d.priceChanged}
+                  oldPrice={d.oldPrice}
+                  newPrice={d.newPrice}
+                  skipped={skipDuplicateIds.has(d.scannedItem.id)}
+                  onToggle={() => onToggleDuplicate(d.scannedItem.id)}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {possibleDuplicates.length > 0 && (
+          <div className="border border-amber-200 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200">
+              <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                Possible duplicates (imported by default)
+              </p>
+            </div>
+            <ul className="divide-y divide-amber-100">
+              {possibleDuplicates.map((d) => (
+                <DuplicateRow
+                  key={d.scannedItem.id}
+                  scannedName={d.scannedItem.name}
+                  matchedName={d.matchedItem.name}
+                  similarity={d.similarity}
+                  priceChanged={d.priceChanged}
+                  oldPrice={d.oldPrice}
+                  newPrice={d.newPrice}
+                  skipped={skipPossibleIds.has(d.scannedItem.id)}
+                  onToggle={() => onTogglePossible(d.scannedItem.id)}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {newItems.length > 0 && (
+          <div className="border border-emerald-200 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 bg-emerald-50 border-b border-emerald-200">
+              <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">
+                New items ({newItems.length})
+              </p>
+            </div>
+            <ul className="divide-y divide-emerald-100">
+              {newItems.map((it) => (
+                <li
+                  key={it.id}
+                  className="px-4 py-2.5 flex items-center justify-between"
+                >
+                  <span className="text-sm text-slate-700">{it.name}</span>
+                  <span className="text-sm text-slate-500">
+                    {it.price != null ? `$${it.price.toFixed(2)}` : "—"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <div className="flex gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+        >
+          Back
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+        >
+          Import {importCount} item{importCount !== 1 ? "s" : ""}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DuplicateRow({
+  scannedName,
+  matchedName,
+  similarity,
+  priceChanged,
+  oldPrice,
+  newPrice,
+  skipped,
+  onToggle,
+}: {
+  scannedName: string;
+  matchedName: string;
+  similarity: number;
+  priceChanged: boolean;
+  oldPrice: number;
+  newPrice: number | null;
+  skipped: boolean;
+  onToggle: () => void;
+}) {
+  const pct = Math.round(similarity * 100);
+  return (
+    <li className="px-4 py-3 flex items-start gap-3">
+      <input
+        type="checkbox"
+        checked={!skipped}
+        onChange={onToggle}
+        className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+        title={skipped ? "Include this item" : "Skip this item"}
+      />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium text-slate-700 truncate">
+            {scannedName}
+          </span>
+          <span className="text-xs text-slate-400 shrink-0">
+            {pct === 100 ? "exact" : `${pct}%`} match
+          </span>
+        </div>
+        <p className="text-xs text-slate-400 mt-0.5 truncate">
+          Existing: {matchedName}
+        </p>
+        {priceChanged && newPrice != null && (
+          <p className="text-xs text-amber-600 mt-0.5">
+            Price: ${oldPrice.toFixed(2)} &rarr; ${newPrice.toFixed(2)}
+          </p>
+        )}
+      </div>
+    </li>
   );
 }
