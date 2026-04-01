@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   collection,
   query,
@@ -14,21 +15,37 @@ import {
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
-import StatCard from "@/components/StatCard";
+import MetricCard from "@/components/MetricCard";
+import SalesChart, { type HourlySalesPoint } from "@/components/SalesChart";
+import PaymentBreakdown from "@/components/PaymentBreakdown";
 import OrdersTable, { type Order } from "@/components/OrdersTable";
-import { DollarSign, Receipt, TrendingUp, Wallet } from "lucide-react";
+import { DollarSign, Receipt, TrendingUp, RotateCcw } from "lucide-react";
 import { mergeOrderSnapshots } from "@/lib/orderDisplayUtils";
+import {
+  aggregatePaymentBreakdownFromTransactionIds,
+  buildHourlySalesPoints,
+} from "@/lib/dashboardFinance";
 
 const FETCH_LIMIT = 300;
 const OPEN_ORDERS_LIMIT = 500;
+const PLACEHOLDER_TREND = "+5% vs yesterday";
+
+type DashboardPeriod = "today" | "yesterday" | "7d";
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const [salesToday, setSalesToday] = useState(0);
-  const [transactionsToday, setTransactionsToday] = useState(0);
-  const [tipsToday, setTipsToday] = useState(0);
+  const [period, setPeriod] = useState<DashboardPeriod>("today");
+  const [netSales, setNetSales] = useState(0);
+  const [ordersToday, setOrdersToday] = useState(0);
   const [avgTicket, setAvgTicket] = useState(0);
+  const [refundsToday, setRefundsToday] = useState(0);
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+  const [hourlySales, setHourlySales] = useState<HourlySalesPoint[]>([]);
+  const [paymentBreakdown, setPaymentBreakdown] = useState({
+    card: 0,
+    cash: 0,
+    other: 0,
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -80,8 +97,9 @@ export default function DashboardPage() {
         }
 
         let totalSalesCents = 0;
-        let totalTipsCents = 0;
+        let totalRefundsCents = 0;
         let txToday = 0;
+        const saleTransactionIds: string[] = [];
 
         snapshotRecent.forEach((docSnap) => {
           const data = docSnap.data();
@@ -100,7 +118,12 @@ export default function DashboardPage() {
           const paid = Number(data.totalPaidInCents ?? 0);
           const totalIn = Number(data.totalInCents ?? 0);
           totalSalesCents += paid > 0 ? paid : totalIn;
-          totalTipsCents += Number(data.tipAmountInCents ?? 0);
+          totalRefundsCents += Number(data.totalRefundedInCents ?? 0);
+
+          const sid = String(data.saleTransactionId ?? "").trim();
+          if (sid) {
+            saleTransactionIds.push(sid);
+          }
         });
 
         const mergedForTable = mergeOrderSnapshots(
@@ -109,13 +132,22 @@ export default function DashboardPage() {
         );
 
         const salesDollars = totalSalesCents / 100;
-        const tipsDollars = totalTipsCents / 100;
+        const refundsDollars = totalRefundsCents / 100;
 
-        setSalesToday(salesDollars);
-        setTransactionsToday(txToday);
-        setTipsToday(tipsDollars);
+        setNetSales(salesDollars);
+        setOrdersToday(txToday);
         setAvgTicket(txToday > 0 ? salesDollars / txToday : 0);
-        setRecentOrders(mergedForTable.slice(0, 10));
+        setRefundsToday(refundsDollars);
+        setRecentOrders(mergedForTable.slice(0, 15));
+
+        setHourlySales(
+          buildHourlySalesPoints(snapshotRecent, startOfDay, endOfDay)
+        );
+
+        const payments = await aggregatePaymentBreakdownFromTransactionIds(
+          saleTransactionIds
+        );
+        setPaymentBreakdown(payments);
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
       } finally {
@@ -129,40 +161,104 @@ export default function DashboardPage() {
   return (
     <>
       <Header title="Dashboard" />
-      <div className="p-6 space-y-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            title="Sales Today"
-            value={`$${salesToday.toFixed(2)}`}
+      <div className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <p className="text-sm text-slate-500">
+              How is the business doing{" "}
+              <span className="font-medium text-slate-700">today</span>?
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              {period === "today" && "Figures below are for today."}
+              {period === "yesterday" &&
+                "Yesterday view is not wired yet — still showing today."}
+              {period === "7d" &&
+                "Last 7 days view is not wired yet — still showing today."}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <label htmlFor="dashboard-period" className="sr-only">
+              Date range
+            </label>
+            <select
+              id="dashboard-period"
+              value={period}
+              onChange={(e) =>
+                setPeriod(e.target.value as DashboardPeriod)
+              }
+              className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+            >
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="7d">Last 7 days</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <MetricCard
+            label="Net sales"
+            value={`$${netSales.toFixed(2)}`}
+            subtext={PLACEHOLDER_TREND}
             icon={DollarSign}
-            color="blue"
+            accent="blue"
           />
-          <StatCard
-            title="Transactions Today"
-            value={transactionsToday.toString()}
+          <MetricCard
+            label="Orders"
+            value={ordersToday.toString()}
+            subtext={PLACEHOLDER_TREND}
             icon={Receipt}
-            color="green"
+            accent="emerald"
           />
-          <StatCard
-            title="Tips Today"
-            value={`$${tipsToday.toFixed(2)}`}
-            icon={Wallet}
-            color="purple"
-          />
-          <StatCard
-            title="Average Ticket"
+          <MetricCard
+            label="Average ticket"
             value={`$${avgTicket.toFixed(2)}`}
+            subtext={PLACEHOLDER_TREND}
             icon={TrendingUp}
-            color="orange"
+            accent="violet"
+          />
+          <MetricCard
+            label="Refunds"
+            value={`$${refundsToday.toFixed(2)}`}
+            subtext={PLACEHOLDER_TREND}
+            icon={RotateCcw}
+            accent="amber"
           />
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800 mb-4">
-            Recent Orders
-          </h2>
-          <OrdersTable orders={recentOrders} loading={loading} />
-        </div>
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-slate-800">Sales today</h2>
+          <SalesChart
+            data={hourlySales}
+            loading={loading}
+            emptyTitle="No sales yet today"
+            emptyDescription="Start taking orders to see data here."
+          />
+        </section>
+
+        <section className="space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <h2 className="text-lg font-semibold text-slate-800">
+              Recent orders
+            </h2>
+            <Link
+              href="/dashboard/orders"
+              className="inline-flex items-center justify-center text-sm font-medium text-blue-600 hover:text-blue-700"
+            >
+              View all orders →
+            </Link>
+          </div>
+          <OrdersTable
+            orders={recentOrders}
+            loading={loading}
+            emptyMessage="No orders yet today"
+            emptySubMessage="Start taking orders on the POS — they appear here in real time."
+          />
+        </section>
+
+        <section>
+          <PaymentBreakdown totals={paymentBreakdown} loading={loading} />
+        </section>
       </div>
     </>
   );
