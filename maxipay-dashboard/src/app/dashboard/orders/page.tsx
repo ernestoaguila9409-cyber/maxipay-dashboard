@@ -339,13 +339,11 @@ export default function OrdersPage() {
   }, [rawOrders, dateFilter]);
 
   const orders = useMemo(() => {
-    if (ORDERS_FETCH_MODE === "debug_raw") {
-      return dateFiltered;
-    }
     return dateFiltered.filter((o) => {
       if (!passesStatusFilter(o.status, statusFilter)) return false;
-      if (!passesOrderTypeFilter(o.orderTypeRaw ?? "", orderTypeFilter))
+      if (!passesOrderTypeFilter(o.orderTypeRaw ?? "", orderTypeFilter)) {
         return false;
+      }
       return true;
     });
   }, [dateFiltered, statusFilter, orderTypeFilter]);
@@ -358,12 +356,12 @@ export default function OrdersPage() {
     dateFilter !== "custom" &&
     dateFiltered.length === 0;
 
+  /** Date range included rows, but status/type (or future filters) excluded all. */
   const filteredOutByStatusType =
     !loading &&
     orders.length === 0 &&
     rawOrders.length > 0 &&
-    ORDERS_FETCH_MODE !== "debug_raw" &&
-    dateFiltered.length > 0;
+    !noOrdersForSelectedDate;
 
   const dateFilterButtonClass = (value: DateFilterId) =>
     `px-3 py-2 rounded-xl border text-sm transition-colors ${
@@ -495,7 +493,6 @@ export default function OrdersPage() {
           <p>
             Showing {orders.length} order{orders.length === 1 ? "" : "s"}
             {dateFilter !== "all" ||
-            ORDERS_FETCH_MODE !== "debug_raw" ||
             statusFilter !== "all" ||
             orderTypeFilter !== "all"
               ? ` (${rawOrders.length} loaded from Firestore)`
