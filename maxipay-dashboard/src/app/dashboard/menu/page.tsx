@@ -34,7 +34,6 @@ import {
   LayoutGrid,
   List,
   Clock,
-  ImageIcon,
 } from "lucide-react";
 import type * as XLSXType from "xlsx";
 
@@ -113,9 +112,6 @@ export default function MenuPage() {
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [uploadModalTab, setUploadModalTab] = useState<"excel" | "picture">(
-    "excel"
-  );
   const [deleteTarget, setDeleteTarget] = useState<MenuItem | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [editTarget, setEditTarget] = useState<MenuItem | null>(null);
@@ -983,27 +979,12 @@ export default function MenuPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setUploadModalTab("excel");
-                    setUploadOpen(true);
-                  }}
+                  onClick={() => setUploadOpen(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
                   title="Upload menu from Excel"
                 >
                   <Upload size={14} />
                   <span className="hidden lg:inline">Upload</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUploadModalTab("picture");
-                    setUploadOpen(true);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-                  title="Upload menu from a photo (OCR)"
-                >
-                  <ImageIcon size={14} />
-                  <span className="hidden lg:inline">Picture</span>
                 </button>
                 <button
                   onClick={() => {
@@ -1412,7 +1393,7 @@ export default function MenuPage() {
 
       <MenuUploadModal
         open={uploadOpen}
-        initialTab={uploadModalTab}
+        initialTab="excel"
         onClose={() => setUploadOpen(false)}
         onImportComplete={() => {}}
       />
