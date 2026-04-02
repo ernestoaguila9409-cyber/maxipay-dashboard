@@ -17,6 +17,7 @@ import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import MenuUploadModal from "@/components/MenuUploadModal";
+import Link from "next/link";
 import {
   Search,
   Plus,
@@ -34,6 +35,7 @@ import {
   LayoutGrid,
   List,
   Clock,
+  Layers,
 } from "lucide-react";
 import type * as XLSXType from "xlsx";
 
@@ -1183,6 +1185,14 @@ export default function MenuPage() {
                             <span className="text-xs text-slate-400 font-medium ml-2 tabular-nums bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">{catItemCount}</span>
                           </button>
                           <div className="flex items-center gap-0 pr-1 opacity-0 group-hover/cat:opacity-100 transition-opacity shrink-0">
+                            <Link
+                              href={`/dashboard/menu/subcategories?categoryId=${cat.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                              title="Manage Subcategories"
+                            >
+                              <Layers size={11} />
+                            </Link>
                             <button
                               onClick={(e) => { e.stopPropagation(); openEditCategory(cat); }}
                               className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors"
@@ -2121,20 +2131,22 @@ export default function MenuPage() {
                   </div>
                 )}
 
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                    POS Price ($)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={addPosPrice}
-                    onChange={(e) => setAddPosPrice(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
-                  />
-                </div>
+                {!addCategoryHasSchedule && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      POS Price ($)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={addPosPrice}
+                      onChange={(e) => setAddPosPrice(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                    />
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
                   <div>
@@ -2292,7 +2304,7 @@ export default function MenuPage() {
                 </button>
                 <button
                   onClick={handleAddItem}
-                  disabled={addSaving || !addName.trim() || !addCategoryId || Object.values(addPrices).every((v) => !v) || (stockCountingEnabled && !addStock)}
+                  disabled={addSaving || !addName.trim() || !addCategoryId || (!addPosPrice && Object.values(addMenuPrices).every((v) => !v)) || (stockCountingEnabled && !addStock)}
                   className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {addSaving ? (
@@ -2409,19 +2421,21 @@ export default function MenuPage() {
                   </div>
                 ) : null}
 
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                    POS Price ($)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={editPosPrice}
-                    onChange={(e) => setEditPosPrice(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
-                  />
-                </div>
+                {!editCategoryHasSchedule && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      POS Price ($)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={editPosPrice}
+                      onChange={(e) => setEditPosPrice(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                    />
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
                   <div>
