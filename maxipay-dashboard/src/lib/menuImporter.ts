@@ -129,7 +129,7 @@ function parseCategories(wb: XLSX.WorkBook): ParsedCategory[] {
   if (rows.length < 2) return [];
 
   const headers = rows[0].map(String);
-  const idCol = findColumn(headers, "categoryid", "id");
+  const idCol = findColumn(headers, "categoryid", "id", "cloverid");
   const nameCol = findColumn(headers, "categoryname", "name", "category");
   if (nameCol === -1) return [];
 
@@ -316,10 +316,10 @@ function parseItems(wb: XLSX.WorkBook): ParsedItem[] {
   if (rows.length < 2) return [];
 
   const headers = rows[0].map(String);
-  const idCol = findColumn(headers, "itemid", "id");
+  const idCol = findColumn(headers, "itemid", "id", "cloverid");
   const nameCol = findColumn(headers, "name", "itemname", "item");
   const priceCol = findColumn(headers, "price", "unitprice", "amount");
-  const catCol = findColumn(headers, "categoryid", "category", "categoryname");
+  const catCol = findColumn(headers, "categoryid", "category", "categoryname", "categories");
   const modCol = findColumn(headers, "modifiergroupids", "modifiergroups", "modifiers");
   const taxCol = findColumn(headers, "taxids", "taxrates", "taxrate", "tax");
   const orderTypesCol = findColumn(headers, "ordertypes", "ordertype", "availableordertypes");
@@ -346,7 +346,8 @@ function parseItems(wb: XLSX.WorkBook): ParsedItem[] {
         ? rawPrice
         : parseFloat(String(rawPrice).replace(/[^0-9.]/g, "")) || 0;
 
-    const categoryId = catCol >= 0 ? String(row[catCol] ?? "").trim() : "";
+    const rawCategory = catCol >= 0 ? String(row[catCol] ?? "").trim() : "";
+    const categoryId = rawCategory.split(/[;,|]/)[0].trim();
 
     const modRaw = modCol >= 0 ? String(row[modCol] ?? "").trim() : "";
     const modifierGroupIds = modRaw
