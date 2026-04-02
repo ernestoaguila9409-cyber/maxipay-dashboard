@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   collection,
   addDoc,
@@ -27,18 +27,21 @@ import {
   AlertTriangle,
   ChevronRight,
   CheckSquare,
+  Link2,
 } from "lucide-react";
 
 interface ModifierOption {
   id: string;
   name: string;
   price: number;
+  triggersModifierGroupIds: string[];
 }
 
 interface ModifierGroup {
   id: string;
   name: string;
   required: boolean;
+  minSelection: number;
   maxSelection: number;
   groupType: string;
   options: ModifierOption[];
@@ -56,6 +59,7 @@ export default function ModifiersPage() {
   const [editingGroup, setEditingGroup] = useState<ModifierGroup | null>(null);
   const [groupName, setGroupName] = useState("");
   const [groupRequired, setGroupRequired] = useState(false);
+  const [groupMinSelection, setGroupMinSelection] = useState("0");
   const [groupMaxSelection, setGroupMaxSelection] = useState("1");
   const [groupIsRemove, setGroupIsRemove] = useState(false);
   const [groupSaving, setGroupSaving] = useState(false);
@@ -64,6 +68,7 @@ export default function ModifiersPage() {
   const [editingOption, setEditingOption] = useState<ModifierOption | null>(null);
   const [optionName, setOptionName] = useState("");
   const [optionPrice, setOptionPrice] = useState("");
+  const [optionTriggerGroupIds, setOptionTriggerGroupIds] = useState<Set<string>>(new Set());
   const [optionSaving, setOptionSaving] = useState(false);
 
   const [deleteGroupTarget, setDeleteGroupTarget] = useState<ModifierGroup | null>(null);
@@ -95,12 +100,14 @@ export default function ModifiersPage() {
           id: (o.id as string) || `opt_${i}`,
           name: (o.name as string) || "",
           price: (o.price as number) || 0,
+          triggersModifierGroupIds: Array.isArray(o.triggersModifierGroupIds) ? (o.triggersModifierGroupIds as string[]) : [],
         }));
 
         list.push({
           id: d.id,
           name: data.name ?? "",
           required: data.required ?? false,
+          minSelection: data.minSelection ?? (data.required ? 1 : 0),
           maxSelection: data.maxSelection ?? 1,
           groupType: data.groupType ?? "ADD",
           options,
@@ -124,6 +131,7 @@ export default function ModifiersPage() {
   const filteredOptions = selectedOptions.filter(
     (o) => !search || o.name.toLowerCase().includes(search.toLowerCase())
   );
+  const groupMap = new Map(groups.map((g) => [g.id, g]));
 
   // ── Group CRUD ──
 
@@ -131,6 +139,7 @@ export default function ModifiersPage() {
     setEditingGroup(null);
     setGroupName("");
     setGroupRequired(false);
+    setGroupMinSelection("0");
     setGroupMaxSelection("1");
     setGroupIsRemove(false);
     setGroupModalOpen(true);
@@ -140,6 +149,7 @@ export default function ModifiersPage() {
     setEditingGroup(g);
     setGroupName(g.name);
     setGroupRequired(g.required);
+    setGroupMinSelection(String(g.minSelection));
     setGroupMaxSelection(String(g.maxSelection));
     setGroupIsRemove(g.groupType === "REMOVE");
     setGroupModalOpen(true);
@@ -148,6 +158,7 @@ export default function ModifiersPage() {
   const handleSaveGroup = async () => {
     const name = groupName.trim();
     if (!name) return;
+    const minSelection = parseInt(groupMinSelection, 10) || 0;
     const maxSelection = parseInt(groupMaxSelection, 10) || 1;
     const groupType = groupIsRemove ? "REMOVE" : "ADD";
 
@@ -157,6 +168,7 @@ export default function ModifiersPage() {
         await updateDoc(doc(db, "ModifierGroups", editingGroup.id), {
           name,
           required: groupRequired,
+          minSelection,
           maxSelection,
           groupType,
         });
@@ -164,6 +176,7 @@ export default function ModifiersPage() {
         await addDoc(collection(db, "ModifierGroups"), {
           name,
           required: groupRequired,
+          minSelection,
           maxSelection,
           groupType,
           options: [],
@@ -212,6 +225,7 @@ export default function ModifiersPage() {
     setEditingOption(null);
     setOptionName("");
     setOptionPrice("");
+    setOptionTriggerGroupIds(new Set());
     setOptionModalOpen(true);
   };
 
@@ -219,6 +233,7 @@ export default function ModifiersPage() {
     setEditingOption(o);
     setOptionName(o.name);
     setOptionPrice(o.price.toFixed(2));
+    setOptionTriggerGroupIds(new Set(o.triggersModifierGroupIds));
     setOptionModalOpen(true);
   };
 
@@ -227,21 +242,23 @@ export default function ModifiersPage() {
     const name = optionName.trim();
     if (!name) return;
     const price = selectedGroup.groupType === "REMOVE" ? 0 : parseFloat(optionPrice) || 0;
+    const triggersModifierGroupIds = Array.from(optionTriggerGroupIds);
 
     setOptionSaving(true);
     try {
       if (editingOption) {
         const updatedOptions = selectedGroup.options.map((o) =>
-          o.id === editingOption.id ? { ...o, name, price } : o
+          o.id === editingOption.id ? { ...o, name, price, triggersModifierGroupIds } : o
         );
         await updateDoc(doc(db, "ModifierGroups", selectedGroup.id), {
           options: updatedOptions,
         });
       } else {
-        const newOption: ModifierOption = {
+        const newOption = {
           id: `opt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
           name,
           price,
+          triggersModifierGroupIds,
         };
         await updateDoc(doc(db, "ModifierGroups", selectedGroup.id), {
           options: arrayUnion(newOption),
@@ -501,7 +518,7 @@ export default function ModifiersPage() {
                               >
                                 {g.groupType === "REMOVE"
                                   ? "Remove ingredients"
-                                  : `Add-ons · max ${g.maxSelection}`}
+                                  : `Add-ons · ${g.minSelection}–${g.maxSelection} sel`}
                                 {g.required && " · Required"}
                                 {` · ${g.options.length} opt`}
                               </p>
@@ -561,6 +578,9 @@ export default function ModifiersPage() {
                         {filteredOptions.length !== 1 ? "s" : ""}
                         {selectedGroup.groupType === "REMOVE" && (
                           <span className="text-red-400 ml-1">· Remove group</span>
+                        )}
+                        {selectedGroup.groupType !== "REMOVE" && (
+                          <span className="ml-1">· {selectedGroup.required ? "Required" : "Optional"} · {selectedGroup.minSelection}–{selectedGroup.maxSelection} sel</span>
                         )}
                       </p>
                     </div>
@@ -668,11 +688,14 @@ export default function ModifiersPage() {
                         <tbody>
                           {filteredOptions.map((opt) => {
                             const isOptSelected = selectedOptionIds.has(opt.id);
+                            const triggeredGroups = opt.triggersModifierGroupIds
+                              .map((gId) => groupMap.get(gId))
+                              .filter(Boolean) as ModifierGroup[];
                             return (
+                            <React.Fragment key={opt.id}>
                             <tr
-                              key={opt.id}
                               onClick={optionSelectMode ? () => toggleSelectOption(opt.id) : undefined}
-                              className={`border-b border-slate-50 hover:bg-slate-50/50 transition-colors group/row ${
+                              className={`border-b ${triggeredGroups.length > 0 ? "border-transparent" : "border-slate-50"} hover:bg-slate-50/50 transition-colors group/row ${
                                 optionSelectMode ? "cursor-pointer" : ""
                               } ${isOptSelected ? "bg-blue-50/50" : ""}`}
                             >
@@ -696,6 +719,14 @@ export default function ModifiersPage() {
                                 >
                                   {opt.name}
                                 </span>
+                                {triggeredGroups.length > 0 && (
+                                  <div className="flex items-center gap-1.5 mt-1">
+                                    <Link2 size={11} className="text-blue-400 shrink-0" />
+                                    <span className="text-[10px] text-blue-500 font-medium">
+                                      Triggers {triggeredGroups.length} group{triggeredGroups.length !== 1 ? "s" : ""}
+                                    </span>
+                                  </div>
+                                )}
                               </td>
                               {selectedGroup.groupType !== "REMOVE" && (
                                 <td className="px-5 py-3.5">
@@ -725,6 +756,41 @@ export default function ModifiersPage() {
                               </td>
                               )}
                             </tr>
+                            {triggeredGroups.length > 0 && (
+                              <tr className="border-b border-slate-50">
+                                <td colSpan={optionSelectMode ? 4 : (selectedGroup.groupType === "REMOVE" ? 2 : 3)} className="px-5 pb-3 pt-0">
+                                  <div className="ml-4 flex flex-col gap-1.5">
+                                    {triggeredGroups.map((tg) => (
+                                      <div
+                                        key={tg.id}
+                                        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50/70 border border-blue-100"
+                                      >
+                                        <div className="w-1 h-6 rounded-full bg-blue-400 shrink-0" />
+                                        <div className="flex-1 min-w-0">
+                                          <span className="text-xs font-semibold text-blue-700">{tg.name}</span>
+                                          <span className="text-[10px] text-blue-500 ml-1.5">
+                                            {tg.required ? "Required" : "Optional"} · {tg.minSelection}–{tg.maxSelection} sel · {tg.options.length} opt
+                                          </span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-1">
+                                          {tg.options.slice(0, 5).map((to) => (
+                                            <span key={to.id} className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-blue-100 text-blue-600">
+                                              {to.name}{to.price > 0 ? ` +$${to.price.toFixed(2)}` : ""}
+                                            </span>
+                                          ))}
+                                          {tg.options.length > 5 && (
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-blue-100 text-blue-400">
+                                              +{tg.options.length - 5} more
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                            </React.Fragment>
                             );
                           })}
                         </tbody>
@@ -774,17 +840,31 @@ export default function ModifiersPage() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                    Max Selections
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={groupMaxSelection}
-                    onChange={(e) => setGroupMaxSelection(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      Min Selections
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={groupMinSelection}
+                      onChange={(e) => setGroupMinSelection(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      Max Selections
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={groupMaxSelection}
+                      onChange={(e) => setGroupMaxSelection(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -896,6 +976,52 @@ export default function ModifiersPage() {
                       placeholder="0.00"
                       className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
                     />
+                  </div>
+                )}
+
+                {/* Triggered Modifier Groups */}
+                {groups.filter((g) => g.id !== selectedGroup.id).length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      Triggers Modifier Groups
+                    </label>
+                    <p className="text-[11px] text-slate-400 mb-2">
+                      When this option is selected, these groups become required choices.
+                    </p>
+                    <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto rounded-xl border border-slate-200 p-2">
+                      {groups
+                        .filter((g) => g.id !== selectedGroup.id)
+                        .map((g) => (
+                          <label
+                            key={g.id}
+                            className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${
+                              optionTriggerGroupIds.has(g.id)
+                                ? "bg-blue-50 border border-blue-200"
+                                : "hover:bg-slate-50 border border-transparent"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={optionTriggerGroupIds.has(g.id)}
+                              onChange={(e) => {
+                                setOptionTriggerGroupIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(g.id);
+                                  else next.delete(g.id);
+                                  return next;
+                                });
+                              }}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm text-slate-700 font-medium">{g.name}</span>
+                              <span className="text-[10px] text-slate-400 ml-1.5">
+                                {g.required ? "Required" : "Optional"} · {g.minSelection}–{g.maxSelection} sel · {g.options.length} opt
+                              </span>
+                            </div>
+                          </label>
+                        ))}
+                    </div>
                   </div>
                 )}
               </div>

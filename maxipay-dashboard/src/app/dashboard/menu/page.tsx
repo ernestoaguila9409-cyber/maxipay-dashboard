@@ -117,8 +117,11 @@ interface MenuItem {
 interface ModifierGroup {
   id: string;
   name: string;
+  required: boolean;
+  minSelection: number;
+  maxSelection: number;
   groupType: string;
-  options: { id: string; name: string; price: number }[];
+  options: { id: string; name: string; price: number; triggersModifierGroupIds: string[] }[];
 }
 
 interface TaxEntry {
@@ -419,12 +422,16 @@ export default function MenuPage() {
             list.push({
               id: d.id,
               name: data.name,
+              required: data.required ?? false,
+              minSelection: data.minSelection ?? (data.required ? 1 : 0),
+              maxSelection: data.maxSelection ?? 1,
               groupType: data.groupType ?? "ADD",
               options: Array.isArray(data.options)
                 ? data.options.map((o: Record<string, unknown>) => ({
                     id: String(o.id ?? ""),
                     name: String(o.name ?? ""),
                     price: typeof o.price === "number" ? o.price : 0,
+                    triggersModifierGroupIds: Array.isArray(o.triggersModifierGroupIds) ? (o.triggersModifierGroupIds as string[]) : [],
                   }))
                 : [],
             });
@@ -1145,6 +1152,7 @@ export default function MenuPage() {
 
   // ── Helper to get names for badges ──
   const modGroupMap = new Map(modifierGroups.map((g) => [g.id, g.name]));
+  const modGroupFullMap = new Map(modifierGroups.map((g) => [g.id, g]));
   const taxMap = new Map(taxes.map((t) => [t.id, t.name]));
   const menuEntityMap = new Map(menuEntities.map((m) => [m.id, m.name]));
   const scheduleMap = new Map(allSchedules.map((s) => [s.id, s.name]));
@@ -1792,11 +1800,15 @@ export default function MenuPage() {
                                     {ORDER_TYPE_LABELS[t] ?? t}
                                   </span>
                                 ))}
-                                {item.modifierGroupIds.length > 0 && item.modifierGroupIds.map((id) => (
-                                  <span key={id} className="text-[10px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 font-medium">
-                                    {modGroupMap.get(id) ?? id}
-                                  </span>
-                                ))}
+                                {item.modifierGroupIds.length > 0 && item.modifierGroupIds.map((id) => {
+                                  const grp = modGroupFullMap.get(id);
+                                  const hasNested = grp?.options.some((o) => o.triggersModifierGroupIds.length > 0);
+                                  return (
+                                    <span key={id} className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${hasNested ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200" : "bg-purple-50 text-purple-600"}`}>
+                                      {modGroupMap.get(id) ?? id}{hasNested ? " ⤵" : ""}
+                                    </span>
+                                  );
+                                })}
                                 {item.taxIds.length > 0 && item.taxIds.map((id) => (
                                   <span key={id} className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 font-medium">
                                     {taxMap.get(id) ?? id}
@@ -2634,14 +2646,23 @@ export default function MenuPage() {
                 </div>
 
                 {/* ── Assign Modifiers ── */}
-                {modifierGroups.length > 0 && (
+                {modifierGroups.length > 0 && (() => {
+                  const nestedIds = new Set<string>();
+                  for (const g of modifierGroups) {
+                    for (const o of g.options) {
+                      for (const tid of o.triggersModifierGroupIds) nestedIds.add(tid);
+                    }
+                  }
+                  const topLevelGroups = modifierGroups.filter((g) => !nestedIds.has(g.id));
+                  const nestedGroups = modifierGroups.filter((g) => nestedIds.has(g.id));
+                  return (
                   <div>
                     <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
                       <SlidersHorizontal size={15} />
                       Assign Modifiers
                     </label>
                     <div className="flex flex-col gap-2 pl-1 max-h-40 overflow-y-auto">
-                      {modifierGroups.map((g) => (
+                      {topLevelGroups.map((g) => (
                         <label
                           key={g.id}
                           className="flex items-center gap-2 cursor-pointer"
@@ -2667,9 +2688,37 @@ export default function MenuPage() {
                           </span>
                         </label>
                       ))}
+                      {nestedGroups.length > 0 && (
+                        <div className="mt-1 pt-1 border-t border-slate-100">
+                          <p className="text-[10px] text-slate-400 mb-1">Triggered by modifier options:</p>
+                          {nestedGroups.map((g) => (
+                            <label
+                              key={g.id}
+                              className="flex items-center gap-2 cursor-pointer opacity-60"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={addModifiers[g.id] ?? false}
+                                onChange={(e) =>
+                                  setAddModifiers((prev) => ({
+                                    ...prev,
+                                    [g.id]: e.target.checked,
+                                  }))
+                                }
+                                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="text-sm text-slate-700">{g.name}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-50 text-blue-500">
+                                Nested
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
-                )}
+                  );
+                })()}
 
                 {/* ── Assign Taxes ── */}
                 {taxes.length > 0 && (
@@ -2945,14 +2994,23 @@ export default function MenuPage() {
                 </div>
 
                 {/* ── Assign Modifiers ── */}
-                {modifierGroups.length > 0 && (
+                {modifierGroups.length > 0 && (() => {
+                  const nestedIds = new Set<string>();
+                  for (const g of modifierGroups) {
+                    for (const o of g.options) {
+                      for (const tid of o.triggersModifierGroupIds) nestedIds.add(tid);
+                    }
+                  }
+                  const topLevelGroups = modifierGroups.filter((g) => !nestedIds.has(g.id));
+                  const nestedGroups = modifierGroups.filter((g) => nestedIds.has(g.id));
+                  return (
                   <div>
                     <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
                       <SlidersHorizontal size={15} />
                       Assign Modifiers
                     </label>
                     <div className="flex flex-col gap-2 pl-1 max-h-40 overflow-y-auto">
-                      {modifierGroups.map((g) => (
+                      {topLevelGroups.map((g) => (
                         <label
                           key={g.id}
                           className="flex items-center gap-2 cursor-pointer"
@@ -2978,9 +3036,37 @@ export default function MenuPage() {
                           </span>
                         </label>
                       ))}
+                      {nestedGroups.length > 0 && (
+                        <div className="mt-1 pt-1 border-t border-slate-100">
+                          <p className="text-[10px] text-slate-400 mb-1">Triggered by modifier options:</p>
+                          {nestedGroups.map((g) => (
+                            <label
+                              key={g.id}
+                              className="flex items-center gap-2 cursor-pointer opacity-60"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={editModifiers[g.id] ?? false}
+                                onChange={(e) =>
+                                  setEditModifiers((prev) => ({
+                                    ...prev,
+                                    [g.id]: e.target.checked,
+                                  }))
+                                }
+                                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="text-sm text-slate-700">{g.name}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-50 text-blue-500">
+                                Nested
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
-                )}
+                  );
+                })()}
 
                 {/* ── Assign Taxes ── */}
                 {taxes.length > 0 && (
