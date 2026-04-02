@@ -55,6 +55,7 @@ interface MenuItem {
   prices: Record<string, number>;
   categoryId: string;
   menuId: string;
+  menuIds: string[];
   isScheduled: boolean;
   scheduleIds: string[];
 }
@@ -211,6 +212,10 @@ export default function MenusPage() {
         const legacyPrice: number = data.price ?? 0;
         const prices = Object.keys(rawPrices).length > 0 ? rawPrices : { default: legacyPrice };
         const displayPrice = Object.values(prices)[0] ?? 0;
+        const rawMenuIds = Array.isArray(data.menuIds) ? data.menuIds as string[] : [];
+        const menuIdsResolved = rawMenuIds.length > 0
+          ? rawMenuIds
+          : (data.menuId ? [data.menuId as string] : []);
         list.push({
           id: d.id,
           name: data.name ?? "Unnamed",
@@ -218,6 +223,7 @@ export default function MenusPage() {
           prices,
           categoryId: data.categoryId ?? "",
           menuId: data.menuId ?? "",
+          menuIds: menuIdsResolved,
           isScheduled: data.isScheduled ?? false,
           scheduleIds: Array.isArray(data.scheduleIds) ? data.scheduleIds : [],
         });
@@ -267,13 +273,14 @@ export default function MenusPage() {
     }
     for (const item of items) {
       const counted = new Set<string>();
-      if (item.menuId) counted.add(item.menuId);
+      for (const mid of item.menuIds) counted.add(mid);
+      if (item.menuId && !counted.has(item.menuId)) counted.add(item.menuId);
       const sIds = item.scheduleIds.length > 0
         ? item.scheduleIds
         : (catScheduleMap.get(item.categoryId) ?? []);
       for (const sid of sIds) {
-        const menuIds = menuScheduleLookup.get(sid);
-        if (menuIds) for (const mid of menuIds) counted.add(mid);
+        const mIds = menuScheduleLookup.get(sid);
+        if (mIds) for (const mid of mIds) counted.add(mid);
       }
       for (const mid of counted) {
         map.set(mid, (map.get(mid) ?? 0) + 1);
@@ -315,10 +322,18 @@ export default function MenusPage() {
     const result: MenuItem[] = [];
     for (const item of items) {
       if (seen.has(item.id)) continue;
-      const menu = item.menuId ? menuMapById.get(item.menuId) : null;
-      const menuHasSchedules = menu && (menu.scheduleIds?.length ?? 0) > 0;
-      const menuIsActive = !menuHasSchedules || (menu!.scheduleIds.some((sid) => activeSchedIds.has(sid)));
-      if (!menuIsActive) continue;
+      const itemMenuIds = item.menuIds.length > 0 ? item.menuIds : (item.menuId ? [item.menuId] : []);
+      let anyMenuActive = itemMenuIds.length === 0;
+      for (const mid of itemMenuIds) {
+        const menu = menuMapById.get(mid);
+        if (!menu) continue;
+        const menuHasSchedules = (menu.scheduleIds?.length ?? 0) > 0;
+        if (!menuHasSchedules || menu.scheduleIds.some((sid) => activeSchedIds.has(sid))) {
+          anyMenuActive = true;
+          break;
+        }
+      }
+      if (!anyMenuActive) continue;
 
       if (!item.isScheduled) {
         seen.add(item.id);
@@ -378,8 +393,15 @@ export default function MenusPage() {
       const batch = writeBatch(db);
       batch.delete(doc(db, "menus", deleteMenuTarget.id));
       for (const item of items) {
-        if (item.menuId === deleteMenuTarget.id) {
-          batch.update(doc(db, "MenuItems", item.id), { menuId: "" });
+        const inMenuIds = item.menuIds.includes(deleteMenuTarget.id);
+        const isLegacy = item.menuId === deleteMenuTarget.id;
+        if (inMenuIds || isLegacy) {
+          const newMenuIds = item.menuIds.filter((id) => id !== deleteMenuTarget.id);
+          const update: Record<string, unknown> = {
+            menuIds: newMenuIds,
+            menuId: newMenuIds.length > 0 ? newMenuIds[0] : "",
+          };
+          batch.update(doc(db, "MenuItems", item.id), update);
         }
       }
       await batch.commit();
@@ -907,18 +929,15 @@ export default function MenusPage() {
                             <p className="text-xs font-semibold text-slate-700 truncate">
                               {item.name}
                             </p>
-                            <div className="flex items-center gap-1.5 mt-0.5">
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                               <span className="text-[10px] text-slate-400">
                                 {catMap.get(item.categoryId) ?? "Uncategorized"}
                               </span>
-                              {item.menuId && (
-                                <>
-                                  <span className="text-[10px] text-slate-300">·</span>
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-500 font-medium">
-                                    {menuMap.get(item.menuId) ?? "No Menu"}
-                                  </span>
-                                </>
-                              )}
+                              {(item.menuIds.length > 0 ? item.menuIds : (item.menuId ? [item.menuId] : [])).map((mid) => (
+                                <span key={mid} className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-500 font-medium">
+                                  {menuMap.get(mid) ?? "Menu"}
+                                </span>
+                              ))}
                             </div>
                           </div>
                           <span className="text-xs font-medium text-slate-500 tabular-nums">
@@ -951,18 +970,15 @@ export default function MenusPage() {
                             <p className="text-xs font-semibold text-slate-700 truncate">
                               {item.name}
                             </p>
-                            <div className="flex items-center gap-1.5 mt-0.5">
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                               <span className="text-[10px] text-slate-400">
                                 {catMap.get(item.categoryId) ?? "Uncategorized"}
                               </span>
-                              {item.menuId && (
-                                <>
-                                  <span className="text-[10px] text-slate-300">·</span>
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-500 font-medium">
-                                    {menuMap.get(item.menuId) ?? "No Menu"}
-                                  </span>
-                                </>
-                              )}
+                              {(item.menuIds.length > 0 ? item.menuIds : (item.menuId ? [item.menuId] : [])).map((mid) => (
+                                <span key={mid} className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-500 font-medium">
+                                  {menuMap.get(mid) ?? "Menu"}
+                                </span>
+                              ))}
                             </div>
                           </div>
                           <span className="text-xs font-medium text-slate-500 tabular-nums">
@@ -1492,18 +1508,15 @@ export default function MenusPage() {
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-1.5 mt-0.5">
+                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                           <span className="text-[10px] text-slate-400">
                             {catMap.get(item.categoryId) ?? "Uncategorized"}
                           </span>
-                          {item.menuId && (
-                            <>
-                              <span className="text-[10px] text-slate-300">·</span>
-                              <span className="text-[10px] text-purple-500 font-medium">
-                                {menuMap.get(item.menuId) ?? ""}
-                              </span>
-                            </>
-                          )}
+                          {(item.menuIds.length > 0 ? item.menuIds : (item.menuId ? [item.menuId] : [])).map((mid) => (
+                            <span key={mid} className="text-[10px] text-purple-500 font-medium">
+                              {menuMap.get(mid) ?? ""}
+                            </span>
+                          ))}
                         </div>
                       </div>
                       <span className="text-xs font-medium text-slate-500 tabular-nums shrink-0 ml-3">
