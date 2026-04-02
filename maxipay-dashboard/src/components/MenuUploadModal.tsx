@@ -12,6 +12,8 @@ import {
   ImageIcon,
   Trash2,
   Sparkles,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -23,7 +25,10 @@ import {
   type ImportResult,
   type ImportLogEntry,
   type ScannedMenuCategoryRow,
+  type ScannedSubcategoryRow,
   type ScannedMenuItemRow,
+  type ScannedModifierGroupRow,
+  type ScannedModifierOptionRow,
   type ScannedMenuImportResult,
 } from "@/lib/menuImporter";
 import {
@@ -32,12 +37,17 @@ import {
   detectDuplicates,
   type DuplicateDetectionResult,
 } from "@/lib/menuDuplicateDetector";
+import type {
+  NormalizedScanCategory,
+  NormalizedSubcategory,
+  NormalizedScanItem,
+  NormalizedModifierGroup,
+} from "@/lib/menuScanNormalize";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   onImportComplete: () => void;
-  /** Which tab to show when the modal opens (default: excel). */
   initialTab?: "excel" | "picture";
 }
 
@@ -54,29 +64,52 @@ type PictureStage =
   | "done"
   | "error";
 
-function assignScanIds(data: {
-  categories: Array<{
-    name: string;
-    items: Array<{
-      name: string;
-      price: number | null;
-      priceUncertain?: boolean;
-    }>;
-  }>;
-}): ScannedMenuCategoryRow[] {
-  return data.categories.map((c) => ({
+// ─── ID assignment helpers ──────────────────────────────────────────
+
+function assignModifiers(
+  mgs: NormalizedModifierGroup[]
+): ScannedModifierGroupRow[] {
+  return mgs.map((mg) => ({
     id: crypto.randomUUID(),
-    name: c.name,
-    items: c.items.map(
-      (it): ScannedMenuItemRow => ({
+    name: mg.name,
+    options: mg.options.map(
+      (opt): ScannedModifierOptionRow => ({
         id: crypto.randomUUID(),
-        name: it.name,
-        price: it.price,
-        priceUncertain: it.priceUncertain,
+        name: opt.name,
+        price: opt.price,
       })
     ),
   }));
 }
+
+function assignItemRow(it: NormalizedScanItem): ScannedMenuItemRow {
+  return {
+    id: crypto.randomUUID(),
+    name: it.name,
+    price: it.price,
+    priceUncertain: it.priceUncertain,
+    modifierGroups: assignModifiers(it.modifierGroups),
+  };
+}
+
+function assignScanIds(data: {
+  categories: NormalizedScanCategory[];
+}): ScannedMenuCategoryRow[] {
+  return data.categories.map((c) => ({
+    id: crypto.randomUUID(),
+    name: c.name,
+    subcategories: (c.subcategories ?? []).map(
+      (sub: NormalizedSubcategory): ScannedSubcategoryRow => ({
+        id: crypto.randomUUID(),
+        name: sub.name,
+        items: sub.items.map(assignItemRow),
+      })
+    ),
+    items: c.items.map(assignItemRow),
+  }));
+}
+
+// ─── Price helpers ──────────────────────────────────────────────────
 
 function formatPriceForDraft(price: number | null): string {
   if (price == null || Number.isNaN(price)) return "";
@@ -88,9 +121,20 @@ function buildPriceDraftMap(
   rows: ScannedMenuCategoryRow[]
 ): Record<string, string> {
   const m: Record<string, string> = {};
-  for (const c of rows) {
-    for (const it of c.items) {
+  function walkItems(items: ScannedMenuItemRow[]) {
+    for (const it of items) {
       m[it.id] = formatPriceForDraft(it.price);
+      for (const mg of it.modifierGroups) {
+        for (const opt of mg.options) {
+          m[opt.id] = formatPriceForDraft(opt.price);
+        }
+      }
+    }
+  }
+  for (const c of rows) {
+    walkItems(c.items);
+    for (const sub of c.subcategories) {
+      walkItems(sub.items);
     }
   }
   return m;
@@ -111,6 +155,56 @@ function priceFromSanitized(s: string): number | null {
   if (Number.isNaN(n)) return null;
   return Math.max(0, n);
 }
+
+// ─── Deep update helpers ────────────────────────────────────────────
+
+function mapItems(
+  items: ScannedMenuItemRow[],
+  itemId: string,
+  fn: (it: ScannedMenuItemRow) => ScannedMenuItemRow
+): ScannedMenuItemRow[] {
+  return items.map((it) => (it.id === itemId ? fn(it) : it));
+}
+
+function mapCategoriesForItem(
+  cats: ScannedMenuCategoryRow[],
+  itemId: string,
+  fn: (it: ScannedMenuItemRow) => ScannedMenuItemRow
+): ScannedMenuCategoryRow[] {
+  return cats.map((c) => ({
+    ...c,
+    items: mapItems(c.items, itemId, fn),
+    subcategories: c.subcategories.map((sub) => ({
+      ...sub,
+      items: mapItems(sub.items, itemId, fn),
+    })),
+  }));
+}
+
+function filterItem(
+  cats: ScannedMenuCategoryRow[],
+  itemId: string
+): ScannedMenuCategoryRow[] {
+  return cats
+    .map((c) => ({
+      ...c,
+      items: c.items.filter((it) => it.id !== itemId),
+      subcategories: c.subcategories
+        .map((sub) => ({
+          ...sub,
+          items: sub.items.filter((it) => it.id !== itemId),
+        }))
+        .filter((sub) => sub.items.length > 0 || sub.name.trim() !== ""),
+    }))
+    .filter(
+      (c) =>
+        c.items.length > 0 ||
+        c.subcategories.length > 0 ||
+        c.name.trim() !== ""
+    );
+}
+
+// ─── Main component ─────────────────────────────────────────────────
 
 export default function MenuUploadModal({
   open,
@@ -144,7 +238,6 @@ export default function MenuUploadModal({
   const [picError, setPicError] = useState("");
   const [reprocessing, setReprocessing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  /** Raw string while editing so values like "9." are not collapsed to 9 before the user finishes typing. */
   const [priceDraftByItemId, setPriceDraftByItemId] = useState<
     Record<string, string>
   >({});
@@ -155,6 +248,9 @@ export default function MenuUploadModal({
     new Set()
   );
   const [skipPossibleIds, setSkipPossibleIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [expandedModifiers, setExpandedModifiers] = useState<Set<string>>(
     new Set()
   );
 
@@ -181,6 +277,7 @@ export default function MenuUploadModal({
     setDupResult(null);
     setSkipDuplicateIds(new Set());
     setSkipPossibleIds(new Set());
+    setExpandedModifiers(new Set());
     if (picInputRef.current) picInputRef.current.value = "";
   }, []);
 
@@ -260,14 +357,7 @@ export default function MenuUploadModal({
     const data = (await res.json()) as {
       success?: boolean;
       error?: string;
-      categories?: Array<{
-        name: string;
-        items: Array<{
-          name: string;
-          price: number | null;
-          priceUncertain?: boolean;
-        }>;
-      }>;
+      categories?: NormalizedScanCategory[];
       rawText?: string;
     };
     if (!res.ok || !data.success) {
@@ -359,90 +449,185 @@ export default function MenuUploadModal({
     }
   };
 
-  const updateItemName = (
-    catId: string,
-    itemId: string,
-    name: string
-  ) => {
+  // ─── Edit handlers ──────────────────────────────────────────────────
+
+  const updateItemName = (itemId: string, name: string) => {
     setScanCategories((prev) => {
       if (!prev) return prev;
-      return prev.map((c) =>
-        c.id !== catId
-          ? c
-          : {
-              ...c,
-              items: c.items.map((it) =>
-                it.id === itemId ? { ...it, name } : it
-              ),
-            }
-      );
+      return mapCategoriesForItem(prev, itemId, (it) => ({ ...it, name }));
     });
   };
 
-  const updateItemPrice = (
-    catId: string,
-    itemId: string,
-    priceStr: string
-  ) => {
+  const updateItemPrice = (itemId: string, priceStr: string) => {
     const sanitized = sanitizePriceInput(priceStr);
     setPriceDraftByItemId((prev) => ({ ...prev, [itemId]: sanitized }));
     const price = priceFromSanitized(sanitized);
     setScanCategories((prev) => {
       if (!prev) return prev;
-      return prev.map((c) =>
-        c.id !== catId
-          ? c
-          : {
-              ...c,
-              items: c.items.map((it) =>
-                it.id === itemId
-                  ? { ...it, price, priceUncertain: false }
-                  : it
-              ),
-            }
-      );
+      return mapCategoriesForItem(prev, itemId, (it) => ({
+        ...it,
+        price,
+        priceUncertain: false,
+      }));
     });
   };
 
-  const clearPriceDraft = (itemId: string) => {
+  const deleteItem = (itemId: string) => {
     setPriceDraftByItemId((prev) => {
       const { [itemId]: _, ...rest } = prev;
       return rest;
     });
-  };
-
-  const deleteItem = (catId: string, itemId: string) => {
-    clearPriceDraft(itemId);
     setScanCategories((prev) => {
       if (!prev) return prev;
-      return prev
-        .map((c) =>
-          c.id !== catId
-            ? c
-            : { ...c, items: c.items.filter((it) => it.id !== itemId) }
-        )
-        .filter((c) => c.items.length > 0 || c.name.trim() !== "");
+      return filterItem(prev, itemId);
     });
   };
 
+  const updateModifierGroupName = (
+    itemId: string,
+    mgId: string,
+    name: string
+  ) => {
+    setScanCategories((prev) => {
+      if (!prev) return prev;
+      return mapCategoriesForItem(prev, itemId, (it) => ({
+        ...it,
+        modifierGroups: it.modifierGroups.map((mg) =>
+          mg.id === mgId ? { ...mg, name } : mg
+        ),
+      }));
+    });
+  };
+
+  const updateModifierOptionName = (
+    itemId: string,
+    mgId: string,
+    optId: string,
+    name: string
+  ) => {
+    setScanCategories((prev) => {
+      if (!prev) return prev;
+      return mapCategoriesForItem(prev, itemId, (it) => ({
+        ...it,
+        modifierGroups: it.modifierGroups.map((mg) =>
+          mg.id !== mgId
+            ? mg
+            : {
+                ...mg,
+                options: mg.options.map((opt) =>
+                  opt.id === optId ? { ...opt, name } : opt
+                ),
+              }
+        ),
+      }));
+    });
+  };
+
+  const updateModifierOptionPrice = (
+    itemId: string,
+    optId: string,
+    priceStr: string
+  ) => {
+    const sanitized = sanitizePriceInput(priceStr);
+    setPriceDraftByItemId((prev) => ({ ...prev, [optId]: sanitized }));
+    const price = priceFromSanitized(sanitized) ?? 0;
+    setScanCategories((prev) => {
+      if (!prev) return prev;
+      return mapCategoriesForItem(prev, itemId, (it) => ({
+        ...it,
+        modifierGroups: it.modifierGroups.map((mg) => ({
+          ...mg,
+          options: mg.options.map((opt) =>
+            opt.id === optId ? { ...opt, price } : opt
+          ),
+        })),
+      }));
+    });
+  };
+
+  const deleteModifierGroup = (itemId: string, mgId: string) => {
+    setScanCategories((prev) => {
+      if (!prev) return prev;
+      return mapCategoriesForItem(prev, itemId, (it) => ({
+        ...it,
+        modifierGroups: it.modifierGroups.filter((mg) => mg.id !== mgId),
+      }));
+    });
+  };
+
+  const deleteModifierOption = (
+    itemId: string,
+    mgId: string,
+    optId: string
+  ) => {
+    setPriceDraftByItemId((prev) => {
+      const { [optId]: _, ...rest } = prev;
+      return rest;
+    });
+    setScanCategories((prev) => {
+      if (!prev) return prev;
+      return mapCategoriesForItem(prev, itemId, (it) => ({
+        ...it,
+        modifierGroups: it.modifierGroups
+          .map((mg) =>
+            mg.id !== mgId
+              ? mg
+              : { ...mg, options: mg.options.filter((o) => o.id !== optId) }
+          )
+          .filter((mg) => mg.options.length > 0),
+      }));
+    });
+  };
+
+  const toggleModifierExpanded = (itemId: string) => {
+    setExpandedModifiers((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  };
+
+  // ─── Clean & merge ────────────────────────────────────────────────
+
   const getMergedCleanRows = (): ScannedMenuCategoryRow[] => {
     if (!scanCategories?.length) return [];
-    const mergedFromDrafts = scanCategories.map((c) => ({
-      ...c,
-      items: c.items.map((it) => {
-        const draft = priceDraftByItemId[it.id];
-        if (draft === undefined) return it;
-        const s = sanitizePriceInput(draft);
-        const price = priceFromSanitized(s);
-        return { ...it, price, priceUncertain: false };
-      }),
-    }));
-    return mergedFromDrafts
+
+    function mergeItems(items: ScannedMenuItemRow[]): ScannedMenuItemRow[] {
+      return items
+        .map((it) => {
+          const draft = priceDraftByItemId[it.id];
+          const price =
+            draft !== undefined
+              ? priceFromSanitized(sanitizePriceInput(draft))
+              : it.price;
+          const mergedMgs = it.modifierGroups.map((mg) => ({
+            ...mg,
+            options: mg.options.map((opt) => {
+              const optDraft = priceDraftByItemId[opt.id];
+              return optDraft !== undefined
+                ? { ...opt, price: priceFromSanitized(sanitizePriceInput(optDraft)) ?? 0 }
+                : opt;
+            }),
+          }));
+          return { ...it, price, priceUncertain: false, modifierGroups: mergedMgs };
+        })
+        .filter((it) => it.name.trim());
+    }
+
+    return scanCategories
       .map((c) => ({
         ...c,
-        items: c.items.filter((it) => it.name.trim()),
+        items: mergeItems(c.items),
+        subcategories: c.subcategories
+          .map((sub) => ({ ...sub, items: mergeItems(sub.items) }))
+          .filter((sub) => sub.name.trim() && sub.items.length > 0),
       }))
-      .filter((c) => c.name.trim() && c.items.length > 0);
+      .filter(
+        (c) =>
+          c.name.trim() &&
+          (c.items.length > 0 || c.subcategories.length > 0)
+      );
   };
 
   const handleConfirmFromPreview = async () => {
@@ -500,12 +685,19 @@ export default function MenuUploadModal({
 
     const idsToSkip = new Set([...skipDuplicateIds, ...skipPossibleIds]);
 
+    function filterItems(items: ScannedMenuItemRow[]) {
+      return items.filter((it) => !idsToSkip.has(it.id));
+    }
+
     const filtered = cleaned
       .map((c) => ({
         ...c,
-        items: c.items.filter((it) => !idsToSkip.has(it.id)),
+        items: filterItems(c.items),
+        subcategories: c.subcategories
+          .map((sub) => ({ ...sub, items: filterItems(sub.items) }))
+          .filter((sub) => sub.items.length > 0),
       }))
-      .filter((c) => c.items.length > 0);
+      .filter((c) => c.items.length > 0 || c.subcategories.length > 0);
 
     if (filtered.length === 0) {
       setPicError("All items were marked as duplicates. Nothing to import.");
@@ -543,6 +735,32 @@ export default function MenuUploadModal({
       pictureStage === "importing" ||
       pictureStage === "error");
 
+  // ─── Count helpers for summary ────────────────────────────────────
+
+  function countScanTotals(cats: ScannedMenuCategoryRow[]) {
+    let items = 0;
+    let subcategories = 0;
+    let modGroups = 0;
+    let modOptions = 0;
+    function walkItems(arr: ScannedMenuItemRow[]) {
+      items += arr.length;
+      for (const it of arr) {
+        modGroups += it.modifierGroups.length;
+        for (const mg of it.modifierGroups) {
+          modOptions += mg.options.length;
+        }
+      }
+    }
+    for (const c of cats) {
+      walkItems(c.items);
+      subcategories += c.subcategories.length;
+      for (const sub of c.subcategories) {
+        walkItems(sub.items);
+      }
+    }
+    return { items, subcategories, modGroups, modOptions };
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div
@@ -552,7 +770,7 @@ export default function MenuUploadModal({
 
       <div
         className={`relative bg-white rounded-2xl shadow-xl w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto ${
-          widePreview ? "max-w-2xl" : "max-w-lg"
+          widePreview ? "max-w-3xl" : "max-w-lg"
         }`}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
@@ -838,7 +1056,8 @@ export default function MenuUploadModal({
                 <>
                   <p className="text-sm text-slate-500">
                     Upload a picture of your menu and we&apos;ll automatically
-                    create your items. Use a clear, well-lit photo (JPG or PNG).
+                    create your items, categories, subcategories, and modifiers.
+                    Use a clear, well-lit photo (JPG or PNG).
                   </p>
 
                   <div
@@ -914,68 +1133,130 @@ export default function MenuUploadModal({
                     </button>
                   </div>
 
+                  {/* Summary counts */}
+                  {(() => {
+                    const totals = countScanTotals(scanCategories);
+                    return (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <MiniStat label="Categories" count={scanCategories.length} />
+                        {totals.subcategories > 0 && (
+                          <MiniStat label="Subcategories" count={totals.subcategories} />
+                        )}
+                        <MiniStat label="Items" count={totals.items} />
+                        {totals.modGroups > 0 && (
+                          <MiniStat label="Modifier Groups" count={totals.modGroups} />
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <div className="space-y-6 max-h-[50vh] overflow-y-auto pr-1">
                     {scanCategories.map((cat) => (
                       <div
                         key={cat.id}
                         className="border border-slate-200 rounded-xl overflow-hidden"
                       >
+                        {/* Category header */}
                         <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200">
                           <p className="text-sm font-semibold text-slate-800">
                             {cat.name}
                           </p>
                         </div>
-                        <ul className="divide-y divide-slate-100">
-                          {cat.items.map((it) => (
-                            <li
-                              key={it.id}
-                              className="p-3 flex flex-col sm:flex-row gap-2 sm:items-center"
-                            >
-                              <input
-                                type="text"
-                                value={it.name}
-                                onChange={(e) =>
-                                  updateItemName(cat.id, it.id, e.target.value)
+
+                        {/* Direct items (no subcategory) */}
+                        {cat.items.length > 0 && (
+                          <ul className="divide-y divide-slate-100">
+                            {cat.items.map((it) => (
+                              <ScanItemRow
+                                key={it.id}
+                                item={it}
+                                priceDraft={priceDraftByItemId}
+                                expanded={expandedModifiers.has(it.id)}
+                                onToggleModifiers={() =>
+                                  toggleModifierExpanded(it.id)
                                 }
-                                className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-200 text-sm"
+                                onNameChange={(name) =>
+                                  updateItemName(it.id, name)
+                                }
+                                onPriceChange={(p) =>
+                                  updateItemPrice(it.id, p)
+                                }
+                                onDelete={() => deleteItem(it.id)}
+                                onMgNameChange={(mgId, name) =>
+                                  updateModifierGroupName(it.id, mgId, name)
+                                }
+                                onOptNameChange={(mgId, optId, name) =>
+                                  updateModifierOptionName(
+                                    it.id,
+                                    mgId,
+                                    optId,
+                                    name
+                                  )
+                                }
+                                onOptPriceChange={(optId, p) =>
+                                  updateModifierOptionPrice(it.id, optId, p)
+                                }
+                                onDeleteMg={(mgId) =>
+                                  deleteModifierGroup(it.id, mgId)
+                                }
+                                onDeleteOpt={(mgId, optId) =>
+                                  deleteModifierOption(it.id, mgId, optId)
+                                }
                               />
-                              <div className="flex items-center gap-2 shrink-0">
-                                <span className="text-slate-400 text-sm">$</span>
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  lang="en-US"
-                                  placeholder="0.00"
-                                  autoComplete="off"
-                                  value={
-                                    priceDraftByItemId[it.id] ??
-                                    formatPriceForDraft(it.price)
+                            ))}
+                          </ul>
+                        )}
+
+                        {/* Subcategories */}
+                        {cat.subcategories.map((sub) => (
+                          <div key={sub.id}>
+                            <div className="px-4 py-2 bg-blue-50/60 border-y border-slate-200">
+                              <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
+                                {sub.name}
+                              </p>
+                            </div>
+                            <ul className="divide-y divide-slate-100">
+                              {sub.items.map((it) => (
+                                <ScanItemRow
+                                  key={it.id}
+                                  item={it}
+                                  priceDraft={priceDraftByItemId}
+                                  expanded={expandedModifiers.has(it.id)}
+                                  onToggleModifiers={() =>
+                                    toggleModifierExpanded(it.id)
                                   }
-                                  onChange={(e) =>
-                                    updateItemPrice(
-                                      cat.id,
+                                  onNameChange={(name) =>
+                                    updateItemName(it.id, name)
+                                  }
+                                  onPriceChange={(p) =>
+                                    updateItemPrice(it.id, p)
+                                  }
+                                  onDelete={() => deleteItem(it.id)}
+                                  onMgNameChange={(mgId, name) =>
+                                    updateModifierGroupName(it.id, mgId, name)
+                                  }
+                                  onOptNameChange={(mgId, optId, name) =>
+                                    updateModifierOptionName(
                                       it.id,
-                                      e.target.value
+                                      mgId,
+                                      optId,
+                                      name
                                     )
                                   }
-                                  className={`w-24 px-2 py-2 rounded-lg border text-sm ${
-                                    it.priceUncertain
-                                      ? "border-amber-400 bg-amber-50/50"
-                                      : "border-slate-200"
-                                  }`}
+                                  onOptPriceChange={(optId, p) =>
+                                    updateModifierOptionPrice(it.id, optId, p)
+                                  }
+                                  onDeleteMg={(mgId) =>
+                                    deleteModifierGroup(it.id, mgId)
+                                  }
+                                  onDeleteOpt={(mgId, optId) =>
+                                    deleteModifierOption(it.id, mgId, optId)
+                                  }
                                 />
-                                <button
-                                  type="button"
-                                  onClick={() => deleteItem(cat.id, it.id)}
-                                  className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
-                                  title="Remove item"
-                                >
-                                  <Trash2 size={18} />
-                                </button>
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>
@@ -1061,11 +1342,32 @@ export default function MenuUploadModal({
                       count={picResult.categories}
                       success
                     />
+                    {picResult.subcategories > 0 && (
+                      <SummaryCard
+                        label="Subcategories added"
+                        count={picResult.subcategories}
+                        success
+                      />
+                    )}
                     <SummaryCard
                       label="Items added"
                       count={picResult.items}
                       success
                     />
+                    {picResult.modifierGroups > 0 && (
+                      <SummaryCard
+                        label="Modifier Groups"
+                        count={picResult.modifierGroups}
+                        success
+                      />
+                    )}
+                    {picResult.modifierOptions > 0 && (
+                      <SummaryCard
+                        label="Modifier Options"
+                        count={picResult.modifierOptions}
+                        success
+                      />
+                    )}
                   </div>
                   <p className="text-xs text-slate-400 text-center">
                     Existing menu items were not modified.
@@ -1103,6 +1405,179 @@ export default function MenuUploadModal({
     </div>
   );
 }
+
+// ─── Scan item row with modifiers ───────────────────────────────────
+
+function ScanItemRow({
+  item,
+  priceDraft,
+  expanded,
+  onToggleModifiers,
+  onNameChange,
+  onPriceChange,
+  onDelete,
+  onMgNameChange,
+  onOptNameChange,
+  onOptPriceChange,
+  onDeleteMg,
+  onDeleteOpt,
+}: {
+  item: ScannedMenuItemRow;
+  priceDraft: Record<string, string>;
+  expanded: boolean;
+  onToggleModifiers: () => void;
+  onNameChange: (name: string) => void;
+  onPriceChange: (price: string) => void;
+  onDelete: () => void;
+  onMgNameChange: (mgId: string, name: string) => void;
+  onOptNameChange: (mgId: string, optId: string, name: string) => void;
+  onOptPriceChange: (optId: string, price: string) => void;
+  onDeleteMg: (mgId: string) => void;
+  onDeleteOpt: (mgId: string, optId: string) => void;
+}) {
+  const hasModifiers = item.modifierGroups.length > 0;
+
+  return (
+    <li className="p-3">
+      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+        <input
+          type="text"
+          value={item.name}
+          onChange={(e) => onNameChange(e.target.value)}
+          className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-200 text-sm"
+        />
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-slate-400 text-sm">$</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            lang="en-US"
+            placeholder="0.00"
+            autoComplete="off"
+            value={
+              priceDraft[item.id] ?? formatPriceForDraft(item.price)
+            }
+            onChange={(e) => onPriceChange(e.target.value)}
+            className={`w-24 px-2 py-2 rounded-lg border text-sm ${
+              item.priceUncertain
+                ? "border-amber-400 bg-amber-50/50"
+                : "border-slate-200"
+            }`}
+          />
+          {hasModifiers && (
+            <button
+              type="button"
+              onClick={onToggleModifiers}
+              className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+              title={expanded ? "Collapse modifiers" : "Expand modifiers"}
+            >
+              {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onDelete}
+            className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
+            title="Remove item"
+          >
+            <Trash2 size={18} />
+          </button>
+        </div>
+      </div>
+
+      {hasModifiers && !expanded && (
+        <button
+          type="button"
+          onClick={onToggleModifiers}
+          className="mt-1 text-xs text-blue-500 hover:text-blue-700"
+        >
+          {item.modifierGroups.length} modifier group
+          {item.modifierGroups.length !== 1 ? "s" : ""} &middot; click to
+          expand
+        </button>
+      )}
+
+      {hasModifiers && expanded && (
+        <div className="mt-2 ml-3 space-y-3 border-l-2 border-blue-100 pl-3">
+          {item.modifierGroups.map((mg) => (
+            <div key={mg.id} className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={mg.name}
+                  onChange={(e) => onMgNameChange(mg.id, e.target.value)}
+                  className="flex-1 min-w-0 px-2 py-1.5 rounded-md border border-blue-200 bg-blue-50/40 text-xs font-medium text-blue-800"
+                  placeholder="Group name"
+                />
+                <button
+                  type="button"
+                  onClick={() => onDeleteMg(mg.id)}
+                  className="p-1 rounded text-slate-400 hover:text-red-500"
+                  title="Remove modifier group"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+              {mg.options.map((opt) => (
+                <div
+                  key={opt.id}
+                  className="flex items-center gap-2 pl-3"
+                >
+                  <input
+                    type="text"
+                    value={opt.name}
+                    onChange={(e) =>
+                      onOptNameChange(mg.id, opt.id, e.target.value)
+                    }
+                    className="flex-1 min-w-0 px-2 py-1.5 rounded-md border border-slate-200 text-xs"
+                    placeholder="Option name"
+                  />
+                  <span className="text-slate-400 text-xs">+$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    lang="en-US"
+                    placeholder="0"
+                    autoComplete="off"
+                    value={
+                      priceDraft[opt.id] ??
+                      formatPriceForDraft(opt.price)
+                    }
+                    onChange={(e) =>
+                      onOptPriceChange(opt.id, e.target.value)
+                    }
+                    className="w-16 px-2 py-1.5 rounded-md border border-slate-200 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onDeleteOpt(mg.id, opt.id)}
+                    className="p-1 rounded text-slate-400 hover:text-red-500"
+                    title="Remove option"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </li>
+  );
+}
+
+// ─── Mini stat for preview ──────────────────────────────────────────
+
+function MiniStat({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-center">
+      <p className="text-lg font-bold text-slate-800">{count}</p>
+      <p className="text-[10px] text-slate-500 leading-tight">{label}</p>
+    </div>
+  );
+}
+
+// ─── Reusable components ────────────────────────────────────────────
 
 function SummaryCard({
   label,

@@ -12,22 +12,77 @@ import { normalizeStructuredMenu } from "@/lib/menuScanNormalize";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const MENU_JSON_INSTRUCTION = `Convert this restaurant menu text into structured JSON.
-Group items into categories when section headings or layout suggest it.
-If a price is missing, unclear, or ambiguous, set price to null and priceUncertain to true.
-Use priceUncertain false when the price is clearly readable.
-Return ONLY valid JSON (no markdown) in this exact shape:
+const MENU_JSON_INSTRUCTION = `Extract structured menu data from this restaurant menu text.
+Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
 {
   "categories": [
     {
       "name": "string",
+      "subcategories": [
+        {
+          "name": "string",
+          "items": [
+            {
+              "name": "string",
+              "price": number | null,
+              "priceUncertain": boolean,
+              "modifierGroups": [
+                {
+                  "name": "string",
+                  "options": [
+                    { "name": "string", "price": number }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
       "items": [
-        { "name": "string", "price": number | null, "priceUncertain": boolean }
+        {
+          "name": "string",
+          "price": number | null,
+          "priceUncertain": boolean,
+          "modifierGroups": [
+            {
+              "name": "string",
+              "options": [
+                { "name": "string", "price": number }
+              ]
+            }
+          ]
+        }
       ]
     }
   ]
 }
-If you cannot detect categories, use a single category named "General" with all items.`;
+
+Category detection:
+- Group items into categories when section headings or layout suggest it (e.g. Drinks, Burgers, Appetizers).
+- If you cannot detect categories, use a single category named "General".
+
+Subcategory detection:
+- Detect subcategories when a category has nested sections (e.g. Coffee under Drinks, Craft under Beer).
+- Place items under subcategories when applicable.
+- If no subcategories are detected for a category, leave subcategories as an empty array and place items directly in the category items array.
+
+Modifier detection:
+- Identify modifier groups such as: Choose size, Add-ons, Extras, Combo options, Toppings, Sides, Dressings.
+- Identify modifier options such as: Small, Medium, Large, Add Bacon (+2), Extra Cheese (+1).
+- Group related options under the correct modifier group.
+- Extract price differences as numeric values. If no extra price is listed for an option, default to 0.
+- If no modifiers are detected for an item, use an empty array for modifierGroups.
+
+Price rules:
+- Extract prices as numbers only (no currency symbols).
+- If a price is missing, unclear, or ambiguous, set price to null and priceUncertain to true.
+- Use priceUncertain false when the price is clearly readable.
+
+General rules:
+- Do not hallucinate or invent data that is not in the text.
+- Do not include descriptions.
+- If unsure about any field, leave it empty or use defaults instead of guessing.
+- Return only JSON with no explanation.`;
 
 function getOpenAI(): OpenAI {
   const key = process.env.OPENAI_API_KEY;

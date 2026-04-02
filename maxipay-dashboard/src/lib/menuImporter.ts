@@ -608,29 +608,153 @@ export async function importMenuToFirestore(
 
 // ─── Picture scan → Firestore (add-only, does not replace existing menu) ───
 
+export interface ScannedModifierOptionRow {
+  id: string;
+  name: string;
+  price: number;
+}
+
+export interface ScannedModifierGroupRow {
+  id: string;
+  name: string;
+  options: ScannedModifierOptionRow[];
+}
+
 export interface ScannedMenuItemRow {
   id: string;
   name: string;
   price: number | null;
   priceUncertain?: boolean;
+  modifierGroups: ScannedModifierGroupRow[];
 }
 
-export interface ScannedMenuCategoryRow {
+export interface ScannedSubcategoryRow {
   id: string;
   name: string;
   items: ScannedMenuItemRow[];
 }
 
+export interface ScannedMenuCategoryRow {
+  id: string;
+  name: string;
+  subcategories: ScannedSubcategoryRow[];
+  items: ScannedMenuItemRow[];
+}
+
 export interface ScannedMenuImportResult {
   categories: number;
+  subcategories: number;
   items: number;
+  modifierGroups: number;
+  modifierOptions: number;
+}
+
+/**
+ * Prepares the flat data mapping for Firestore from the nested scan structure.
+ * Returns arrays ready for batch writes but does NOT execute them.
+ */
+export function prepareScannedMenuForFirestore(rows: ScannedMenuCategoryRow[]) {
+  const categoryDocs: Array<{ clientId: string; name: string; normalizedName: string }> = [];
+  const subcategoryDocs: Array<{ clientId: string; name: string; parentCategoryClientId: string }> = [];
+  const itemDocs: Array<{
+    clientId: string;
+    name: string;
+    price: number;
+    categoryClientId: string;
+    subcategoryClientId: string | null;
+    modifierGroupClientIds: string[];
+  }> = [];
+  const modifierGroupDocs: Array<{
+    clientId: string;
+    name: string;
+    options: Array<{ clientId: string; name: string; price: number }>;
+  }> = [];
+
+  const seenModifierGroups = new Map<string, string>();
+
+  function processItem(
+    it: ScannedMenuItemRow,
+    categoryClientId: string,
+    subcategoryClientId: string | null
+  ) {
+    const price =
+      it.price != null && !Number.isNaN(it.price) ? Math.max(0, it.price) : 0;
+    const mgIds: string[] = [];
+
+    for (const mg of it.modifierGroups) {
+      const mgName = mg.name.trim();
+      if (!mgName) continue;
+      const dedupeKey = mgName.toLowerCase();
+      let existingId = seenModifierGroups.get(dedupeKey);
+      if (!existingId) {
+        existingId = mg.id;
+        seenModifierGroups.set(dedupeKey, existingId);
+        modifierGroupDocs.push({
+          clientId: mg.id,
+          name: mgName,
+          options: mg.options
+            .filter((o) => o.name.trim())
+            .map((o) => ({
+              clientId: o.id,
+              name: o.name.trim(),
+              price: Math.max(0, o.price),
+            })),
+        });
+      }
+      mgIds.push(existingId);
+    }
+
+    itemDocs.push({
+      clientId: it.id,
+      name: it.name.trim(),
+      price,
+      categoryClientId,
+      subcategoryClientId,
+      modifierGroupClientIds: mgIds,
+    });
+  }
+
+  for (const cat of rows) {
+    const catName = cat.name.trim();
+    if (!catName) continue;
+    categoryDocs.push({
+      clientId: cat.id,
+      name: formatCategoryDisplayName(catName),
+      normalizedName: normalizeCategoryName(catName) || "general",
+    });
+
+    for (const sub of cat.subcategories) {
+      const subName = sub.name.trim();
+      if (!subName) continue;
+      subcategoryDocs.push({
+        clientId: sub.id,
+        name: formatCategoryDisplayName(subName),
+        parentCategoryClientId: cat.id,
+      });
+      for (const it of sub.items) {
+        if (!it.name.trim()) continue;
+        processItem(it, cat.id, sub.id);
+      }
+    }
+
+    for (const it of cat.items) {
+      if (!it.name.trim()) continue;
+      processItem(it, cat.id, null);
+    }
+  }
+
+  return { categoryDocs, subcategoryDocs, itemDocs, modifierGroupDocs };
 }
 
 export async function importScannedMenuToFirestore(
   rows: ScannedMenuCategoryRow[],
   onProgress?: (p: ImportProgress) => void
 ): Promise<ScannedMenuImportResult> {
+  const prepared = prepareScannedMenuForFirestore(rows);
+
   const catClientToFirestore = new Map<string, string>();
+  const subClientToFirestore = new Map<string, string>();
+  const mgClientToFirestore = new Map<string, string>();
   let batch = writeBatch(db);
   let count = 0;
 
@@ -642,10 +766,9 @@ export async function importScannedMenuToFirestore(
     }
   };
 
-  onProgress?.({ stage: "Loading categories…", current: 0, total: 2 });
+  onProgress?.({ stage: "Loading categories…", current: 0, total: 4 });
 
   const existingSnap = await getDocs(collection(db, "Categories"));
-  /** normalized key → Firestore category id (existing + created this run) */
   const normToFirestoreId = new Map<string, string>();
   for (const d of existingSnap.docs) {
     const name = (d.get("name") as string) || "";
@@ -658,70 +781,131 @@ export async function importScannedMenuToFirestore(
     }
   }
 
-  onProgress?.({ stage: "Creating categories…", current: 0, total: 2 });
-
+  // 1 ─ Categories
+  onProgress?.({ stage: "Creating categories…", current: 1, total: 4 });
   let newCategoriesCreated = 0;
 
-  for (const cat of rows) {
-    const name = cat.name.trim();
-    if (!name) continue;
-    const norm = normalizeCategoryName(name) || "general";
-
-    let firestoreId = normToFirestoreId.get(norm);
+  for (const cat of prepared.categoryDocs) {
+    let firestoreId = normToFirestoreId.get(cat.normalizedName);
     if (firestoreId === undefined) {
       const ref = doc(collection(db, "Categories"));
       batch.set(ref, {
-        name: formatCategoryDisplayName(name),
-        normalizedName: norm,
+        name: cat.name,
+        normalizedName: cat.normalizedName,
         availableOrderTypes: ["DINE_IN", "TO_GO", "BAR_TAB"],
         scheduleIds: [],
       });
       firestoreId = ref.id;
-      normToFirestoreId.set(norm, firestoreId);
+      normToFirestoreId.set(cat.normalizedName, firestoreId);
       newCategoriesCreated++;
       count++;
       await commitIfNeeded();
     }
-    catClientToFirestore.set(cat.id, firestoreId);
+    catClientToFirestore.set(cat.clientId, firestoreId);
   }
   if (count > 0) await batch.commit();
   batch = writeBatch(db);
   count = 0;
 
-  onProgress?.({ stage: "Importing menu items…", current: 1, total: 2 });
-
-  let itemCount = 0;
-  for (const cat of rows) {
-    const fid = catClientToFirestore.get(cat.id);
-    if (!fid) continue;
-    for (const it of cat.items) {
-      const nm = it.name.trim();
-      if (!nm) continue;
-      const price =
-        it.price != null && !Number.isNaN(it.price) ? Math.max(0, it.price) : 0;
-      const ref = doc(collection(db, "MenuItems"));
+  // 2 ─ Subcategories (stored as Categories with parentCategoryId)
+  let newSubcategoriesCreated = 0;
+  for (const sub of prepared.subcategoryDocs) {
+    const parentFid = catClientToFirestore.get(sub.parentCategoryClientId);
+    if (!parentFid) continue;
+    const norm = normalizeCategoryName(sub.name) || "general";
+    let firestoreId = normToFirestoreId.get(norm);
+    if (firestoreId === undefined) {
+      const ref = doc(collection(db, "Categories"));
       batch.set(ref, {
-        name: nm,
-        price,
-        prices: { default: price },
-        pricing: { pos: price, online: price },
-        channels: { pos: true, online: false },
-        stock: 9999,
-        categoryId: fid,
-        menuId: "",
-        menuIds: [],
-        isScheduled: false,
+        name: sub.name,
+        normalizedName: norm,
+        parentCategoryId: parentFid,
+        availableOrderTypes: ["DINE_IN", "TO_GO", "BAR_TAB"],
         scheduleIds: [],
-        modifierGroupIds: [],
-        taxIds: [],
-        externalMappings: {},
       });
-      itemCount++;
+      firestoreId = ref.id;
+      normToFirestoreId.set(norm, firestoreId);
+      newSubcategoriesCreated++;
       count++;
       await commitIfNeeded();
     }
+    subClientToFirestore.set(sub.clientId, firestoreId);
+  }
+  if (count > 0) await batch.commit();
+  batch = writeBatch(db);
+  count = 0;
+
+  // 3 ─ Modifier groups
+  onProgress?.({ stage: "Creating modifier groups…", current: 2, total: 4 });
+  let newModifierGroups = 0;
+  let totalModifierOptions = 0;
+  for (const mg of prepared.modifierGroupDocs) {
+    const ref = doc(collection(db, "ModifierGroups"));
+    batch.set(ref, {
+      name: mg.name,
+      required: false,
+      maxSelection: mg.options.length || 1,
+      groupType: "ADD",
+      options: mg.options.map((opt) => ({
+        id: opt.clientId,
+        name: opt.name,
+        price: opt.price,
+      })),
+    });
+    mgClientToFirestore.set(mg.clientId, ref.id);
+    newModifierGroups++;
+    totalModifierOptions += mg.options.length;
+    count++;
+    await commitIfNeeded();
+  }
+  if (count > 0) await batch.commit();
+  batch = writeBatch(db);
+  count = 0;
+
+  // 4 ─ Menu items
+  onProgress?.({ stage: "Importing menu items…", current: 3, total: 4 });
+  let itemCount = 0;
+  for (const it of prepared.itemDocs) {
+    const catFid = catClientToFirestore.get(it.categoryClientId);
+    if (!catFid) continue;
+    const subFid = it.subcategoryClientId
+      ? subClientToFirestore.get(it.subcategoryClientId)
+      : undefined;
+
+    const resolvedMgIds = it.modifierGroupClientIds
+      .map((cid) => mgClientToFirestore.get(cid))
+      .filter((id): id is string => !!id);
+
+    const effectiveCategoryId = subFid ?? catFid;
+
+    const ref = doc(collection(db, "MenuItems"));
+    batch.set(ref, {
+      name: it.name,
+      price: it.price,
+      prices: { default: it.price },
+      pricing: { pos: it.price, online: it.price },
+      channels: { pos: true, online: false },
+      stock: 9999,
+      categoryId: effectiveCategoryId,
+      menuId: "",
+      menuIds: [],
+      isScheduled: false,
+      scheduleIds: [],
+      modifierGroupIds: resolvedMgIds,
+      taxIds: [],
+      externalMappings: {},
+    });
+    itemCount++;
+    count++;
+    await commitIfNeeded();
   }
   if (count > 0) await batch.commit();
 
-  return { categories: newCategoriesCreated, items: itemCount };
+  return {
+    categories: newCategoriesCreated,
+    subcategories: newSubcategoriesCreated,
+    items: itemCount,
+    modifierGroups: newModifierGroups,
+    modifierOptions: totalModifierOptions,
+  };
 }

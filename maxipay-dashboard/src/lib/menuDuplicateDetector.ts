@@ -193,6 +193,11 @@ export function flattenScannedCategories(
     id: string;
     name: string;
     items: Array<{ id: string; name: string; price: number | null }>;
+    subcategories?: Array<{
+      id: string;
+      name: string;
+      items: Array<{ id: string; name: string; price: number | null }>;
+    }>;
   }>,
 ): ScannedItem[] {
   const result: ScannedItem[] = [];
@@ -205,6 +210,20 @@ export function flattenScannedCategories(
           price: item.price,
           categoryName: cat.name,
         });
+      }
+    }
+    if (cat.subcategories) {
+      for (const sub of cat.subcategories) {
+        for (const item of sub.items) {
+          if (item.name.trim()) {
+            result.push({
+              id: item.id,
+              name: item.name,
+              price: item.price,
+              categoryName: `${cat.name} > ${sub.name}`,
+            });
+          }
+        }
       }
     }
   }
