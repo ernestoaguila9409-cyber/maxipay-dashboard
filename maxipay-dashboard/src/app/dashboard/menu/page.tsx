@@ -37,6 +37,7 @@ import {
   List,
   Clock,
   Layers,
+  ArrowRightLeft,
 } from "lucide-react";
 import type * as XLSXType from "xlsx";
 
@@ -217,6 +218,13 @@ export default function MenuPage() {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+
+  const [transferMode, setTransferMode] = useState(false);
+  const [transferItems, setTransferItems] = useState<Set<string>>(new Set());
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [transferCategoryId, setTransferCategoryId] = useState("");
+  const [transferSubcategoryId, setTransferSubcategoryId] = useState("");
+  const [transferring, setTransferring] = useState(false);
   const [viewMode, setViewMode] = useState<"compact" | "card">("compact");
   const [menuTypeFilter, setMenuTypeFilter] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
@@ -605,6 +613,57 @@ export default function MenuPage() {
   const exitSelectMode = () => {
     setSelectMode(false);
     setSelectedItems(new Set());
+  };
+
+  const toggleTransferItem = (id: string) => {
+    setTransferItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleTransferAll = () => {
+    if (transferItems.size === filtered.length) {
+      setTransferItems(new Set());
+    } else {
+      setTransferItems(new Set(filtered.map((i) => i.id)));
+    }
+  };
+
+  const exitTransferMode = () => {
+    setTransferMode(false);
+    setTransferItems(new Set());
+  };
+
+  const openTransferModal = () => {
+    if (transferItems.size === 0) return;
+    setTransferCategoryId("");
+    setTransferSubcategoryId("");
+    setTransferModalOpen(true);
+  };
+
+  const handleTransfer = async () => {
+    if (transferItems.size === 0 || !transferCategoryId) return;
+    setTransferring(true);
+    try {
+      const batch = writeBatch(db);
+      for (const id of transferItems) {
+        const ref = doc(db, "MenuItems", id);
+        batch.update(ref, {
+          categoryId: transferCategoryId,
+          subcategoryId: transferSubcategoryId || "",
+        });
+      }
+      await batch.commit();
+      setTransferModalOpen(false);
+      exitTransferMode();
+    } catch (err) {
+      console.error("Failed to transfer items:", err);
+    } finally {
+      setTransferring(false);
+    }
   };
 
   const handleBulkDelete = async () => {
@@ -1210,6 +1269,31 @@ export default function MenuPage() {
                   Cancel
                 </button>
               </>
+            ) : transferMode ? (
+              <>
+                <button
+                  onClick={toggleTransferAll}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  <CheckSquare size={14} />
+                  {transferItems.size === filtered.length ? "Deselect All" : "Select All"}
+                </button>
+                <button
+                  onClick={openTransferModal}
+                  disabled={transferItems.size === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <ArrowRightLeft size={14} />
+                  Transfer{transferItems.size > 0 ? ` (${transferItems.size})` : ""}
+                </button>
+                <button
+                  onClick={exitTransferMode}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  <X size={14} />
+                  Cancel
+                </button>
+              </>
             ) : (
               <>
                 <button
@@ -1266,6 +1350,15 @@ export default function MenuPage() {
                 >
                   <Layers size={14} />
                   <span className="hidden lg:inline">Subcategory</span>
+                </button>
+                <button
+                  onClick={() => setTransferMode(true)}
+                  disabled={items.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Transfer items to another category"
+                >
+                  <ArrowRightLeft size={14} />
+                  <span className="hidden lg:inline">Transfer</span>
                 </button>
                 <button
                   onClick={() => { resetAddForm(); setAddOpen(true); }}
@@ -1447,37 +1540,37 @@ export default function MenuPage() {
                       </div>
                       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                         <div className="hidden sm:flex items-center gap-4 px-5 py-3 bg-slate-50 border-b border-slate-200">
-                          {selectMode && <div className="w-5 shrink-0" />}
+                          {(selectMode || transferMode) && <div className="w-5 shrink-0" />}
                           <div className="flex-1 min-w-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Item</div>
                           <div className="w-40 text-center shrink-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Type</div>
                           <div className="w-32 text-center shrink-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Info</div>
                           <div className="w-20 text-right shrink-0 text-xs font-bold text-slate-400 uppercase tracking-wider">Price</div>
-                          {!selectMode && <div className="w-16 shrink-0" />}
+                          {!selectMode && !transferMode && <div className="w-16 shrink-0" />}
                         </div>
                         <div className="divide-y divide-slate-200">
                           {groupItems.map((item) => {
                             const inStock = !stockCountingEnabled || item.stock > 0;
-                            const isSelected = selectedItems.has(item.id);
+                            const isSelected = selectMode ? selectedItems.has(item.id) : transferMode ? transferItems.has(item.id) : false;
                             return (
                               <div
                                 key={item.id}
-                                onClick={selectMode ? () => toggleSelectItem(item.id) : () => setSelectedItem((prev) => (prev?.id === item.id ? null : item))}
+                                onClick={selectMode ? () => toggleSelectItem(item.id) : transferMode ? () => toggleTransferItem(item.id) : () => setSelectedItem((prev) => (prev?.id === item.id ? null : item))}
                                 className={`flex items-center gap-4 px-5 py-4 transition-all duration-150 group cursor-pointer ${
-                                  selectedItem?.id === item.id
+                                  selectedItem?.id === item.id && !transferMode
                                     ? "bg-blue-50 ring-1 ring-inset ring-blue-200"
                                     : isSelected
-                                    ? "bg-blue-50/60"
+                                    ? transferMode ? "bg-indigo-50/60" : "bg-blue-50/60"
                                     : !inStock
                                     ? "bg-red-50/30"
                                     : "hover:bg-slate-50"
                                 }`}
                               >
-                                {selectMode && (
+                                {(selectMode || transferMode) && (
                                   <input
                                     type="checkbox"
                                     checked={isSelected}
                                     readOnly
-                                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 pointer-events-none shrink-0"
+                                    className={`w-4 h-4 rounded border-slate-300 focus:ring-blue-500 pointer-events-none shrink-0 ${transferMode ? "text-indigo-600" : "text-blue-600"}`}
                                   />
                                 )}
                                 <div className="flex-1 min-w-0 flex items-center gap-3">
@@ -1554,7 +1647,7 @@ export default function MenuPage() {
                                     <>${item.price.toFixed(2)}</>
                                   )}
                                 </span>
-                                {!selectMode && (
+                                {!selectMode && !transferMode && (
                                   <div className="w-16 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                                     <button
                                       onClick={(e) => { e.stopPropagation(); openEdit(item); }}
@@ -1592,16 +1685,16 @@ export default function MenuPage() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
                         {groupItems.map((item) => {
                           const inStock = !stockCountingEnabled || item.stock > 0;
-                          const isSelected = selectedItems.has(item.id);
+                          const isSelected = selectMode ? selectedItems.has(item.id) : transferMode ? transferItems.has(item.id) : false;
                           return (
                             <div
                               key={item.id}
-                              onClick={selectMode ? () => toggleSelectItem(item.id) : () => setSelectedItem((prev) => (prev?.id === item.id ? null : item))}
+                              onClick={selectMode ? () => toggleSelectItem(item.id) : transferMode ? () => toggleTransferItem(item.id) : () => setSelectedItem((prev) => (prev?.id === item.id ? null : item))}
                               className={`group bg-white rounded-xl p-5 border hover:shadow-md transition-all duration-200 cursor-pointer ${
-                                selectedItem?.id === item.id
+                                selectedItem?.id === item.id && !transferMode
                                   ? "border-blue-400 bg-blue-50/60 ring-2 ring-blue-400/40 shadow-md"
                                   : isSelected
-                                  ? "border-blue-400 bg-blue-50/40 ring-1 ring-blue-400/30"
+                                  ? transferMode ? "border-indigo-400 bg-indigo-50/40 ring-1 ring-indigo-400/30" : "border-blue-400 bg-blue-50/40 ring-1 ring-blue-400/30"
                                   : inStock
                                   ? "border-slate-200 hover:border-slate-300"
                                   : "border-red-200 bg-red-50/30"
@@ -1609,19 +1702,19 @@ export default function MenuPage() {
                             >
                               <div className="flex items-start justify-between mb-3">
                                 <div className="flex items-center gap-2 min-w-0">
-                                  {selectMode && (
+                                  {(selectMode || transferMode) && (
                                     <input
                                       type="checkbox"
                                       checked={isSelected}
                                       readOnly
-                                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 pointer-events-none shrink-0"
+                                      className={`w-4 h-4 rounded border-slate-300 focus:ring-blue-500 pointer-events-none shrink-0 ${transferMode ? "text-indigo-600" : "text-blue-600"}`}
                                     />
                                   )}
                                   <h3 className={`text-base font-bold truncate ${inStock ? "text-slate-800" : "text-slate-400"}`}>
                                     {item.name}
                                   </h3>
                                 </div>
-                                {!selectMode && (
+                                {!selectMode && !transferMode && (
                                   <div className="flex items-center gap-0.5 shrink-0">
                                     <button
                                       onClick={(e) => { e.stopPropagation(); openEdit(item); }}
@@ -2110,6 +2203,113 @@ export default function MenuPage() {
                     </>
                   ) : (
                     "Delete All"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Transfer items modal ── */}
+      {transferModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => !transferring && setTransferModalOpen(false)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="px-6 py-5 space-y-5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center">
+                    <ArrowRightLeft size={20} className="text-indigo-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-800">
+                      Transfer {transferItems.size} Item{transferItems.size !== 1 ? "s" : ""}
+                    </h3>
+                    <p className="text-xs text-slate-400">Move to another category or subcategory</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setTransferModalOpen(false)}
+                  disabled={transferring}
+                  className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                >
+                  <X size={18} className="text-slate-400" />
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Target Category
+                </label>
+                <select
+                  value={transferCategoryId}
+                  onChange={(e) => {
+                    setTransferCategoryId(e.target.value);
+                    setTransferSubcategoryId("");
+                  }}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                >
+                  <option value="">Select a category…</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {transferCategoryId && allSubcategories.filter((s) => s.categoryId === transferCategoryId).length > 0 && (
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    Target Subcategory <span className="text-slate-400 font-normal">(optional)</span>
+                  </label>
+                  <select
+                    value={transferSubcategoryId}
+                    onChange={(e) => setTransferSubcategoryId(e.target.value)}
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                  >
+                    <option value="">None (category only)</option>
+                    {allSubcategories
+                      .filter((s) => s.categoryId === transferCategoryId)
+                      .map((sub) => (
+                        <option key={sub.id} value={sub.id}>{sub.name}</option>
+                      ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="bg-slate-50 rounded-xl p-3">
+                <p className="text-xs text-slate-500">
+                  <strong className="text-slate-600">{transferItems.size} item{transferItems.size !== 1 ? "s" : ""}</strong> will be moved.
+                  This updates Firestore and syncs automatically with the POS app.
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setTransferModalOpen(false)}
+                  disabled={transferring}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleTransfer}
+                  disabled={transferring || !transferCategoryId}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {transferring ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Transferring…
+                    </>
+                  ) : (
+                    <>
+                      <ArrowRightLeft size={14} />
+                      Transfer
+                    </>
                   )}
                 </button>
               </div>
