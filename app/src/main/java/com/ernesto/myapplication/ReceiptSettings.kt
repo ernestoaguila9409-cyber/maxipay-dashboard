@@ -283,3 +283,40 @@ data class ReceiptSettings(
         }
     }
 }
+
+/**
+ * Wraps plain text to [maxChars] per line for thermal preview / print (same rules as web dashboard).
+ * Respects existing newlines, then word-wraps; breaks long tokens without spaces.
+ */
+fun wrapThermalText(text: String, maxChars: Int): List<String> {
+    if (maxChars < 1) return listOf(text)
+    val lines = mutableListOf<String>()
+    val paragraphs = text.replace("\r\n", "\n").split("\n")
+    for (para in paragraphs) {
+        if (para.isEmpty()) {
+            lines.add("")
+            continue
+        }
+        var remaining = para
+        while (remaining.isNotEmpty()) {
+            if (remaining.length <= maxChars) {
+                lines.add(remaining)
+                break
+            }
+            val chunk = remaining.take(maxChars)
+            val lastSpace = chunk.lastIndexOf(' ')
+            if (lastSpace > 0) {
+                lines.add(chunk.take(lastSpace).trimEnd())
+                remaining = remaining.drop(lastSpace + 1).trimStart()
+            } else {
+                lines.add(chunk)
+                remaining = remaining.drop(maxChars)
+            }
+        }
+    }
+    return lines
+}
+
+/** Longest single line length (each user newline counts as its own line). */
+fun maxPhysicalLineLength(text: String): Int =
+    text.replace("\r\n", "\n").lines().maxOfOrNull { it.length } ?: 0

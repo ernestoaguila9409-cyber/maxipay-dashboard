@@ -149,8 +149,12 @@ class TransactionAdapter(
     }
 
     private fun bindOrderNumber(holder: VH, sale: Transaction) {
-        if (sale.orderNumber > 0L) {
-            holder.txtOrderNumber.text = "Order #${sale.orderNumber}"
+        val parts = mutableListOf<String>()
+        if (sale.orderNumber > 0L) parts.add("Order #${sale.orderNumber}")
+        if (sale.appTransactionNumber > 0L) parts.add("Txn #${sale.appTransactionNumber}")
+
+        if (parts.isNotEmpty()) {
+            holder.txtOrderNumber.text = parts.joinToString(" \u2022 ")
             holder.txtOrderNumber.visibility = View.VISIBLE
         } else {
             holder.txtOrderNumber.visibility = View.GONE
@@ -166,6 +170,10 @@ class TransactionAdapter(
     }
 
     private fun bindTxnNumber(holder: VH, sale: Transaction) {
+        if (sale.appTransactionNumber > 0L) {
+            holder.txtTxnNumber.visibility = View.GONE
+            return
+        }
         val txnNum = sale.payments.firstOrNull()?.transactionNumber?.takeIf { it.isNotBlank() }
             ?: sale.transactionNumber.takeIf { it.isNotBlank() }
 

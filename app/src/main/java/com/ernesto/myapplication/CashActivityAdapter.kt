@@ -15,7 +15,9 @@ data class CashActivityItem(
     val type: String,
     val amountDueCents: Long,
     val tenderedCents: Long,
-    val changeCents: Long
+    val changeCents: Long,
+    val note: String = "",
+    val userId: String = ""
 )
 
 class CashActivityAdapter : RecyclerView.Adapter<CashActivityAdapter.ViewHolder>() {
@@ -77,6 +79,13 @@ class CashActivityAdapter : RecyclerView.Adapter<CashActivityAdapter.ViewHolder>
             if (item.tenderedCents > 0L && (item.type == "SALE" || item.type == "CAPTURE")) {
                 txtTenderDetails.text =
                     "Tendered: ${centsToDisplay(item.tenderedCents)} | Change: ${centsToDisplay(item.changeCents)}"
+                txtTenderDetails.visibility = View.VISIBLE
+            } else if ((item.type == "CASH_ADD" || item.type == "PAID_OUT") &&
+                (item.note.isNotBlank() || item.userId.isNotBlank())) {
+                val parts = mutableListOf<String>()
+                if (item.userId.isNotBlank()) parts.add("By: ${item.userId}")
+                if (item.note.isNotBlank()) parts.add(item.note)
+                txtTenderDetails.text = parts.joinToString(" | ")
                 txtTenderDetails.visibility = View.VISIBLE
             } else {
                 txtTenderDetails.visibility = View.GONE

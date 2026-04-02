@@ -57,4 +57,9 @@
         vestibulum. Fusce dictum libero quis erat maximus, vitae volutpat diam dignissim.
     </string>
 
+    <!-- Receipt Settings: thermal line width hints (matches LINE_WIDTH / LINE_WIDTH_WIDE) -->
+    <string name="receipt_line_ok_business">About %1$d characters per line on the printer (Business name font: %2$s). Preview shows how text wraps.</string>
+    <string name="receipt_line_ok_address">About %1$d characters per line on the printer (Address font: %2$s). Preview shows how text wraps.</string>
+    <string name="receipt_line_over">Longest line is %1$d characters — will wrap to multiple lines (max ~%2$d per line at %3$s font).</string>
+
 </resources>

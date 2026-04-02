@@ -232,28 +232,30 @@ class OrderItemsAdapter(
         val raw = doc.get("modifiers") as? List<*> ?: return null
         if (raw.isEmpty()) return null
 
-        val lines = raw.mapNotNull { item ->
+        val lines = mutableListOf<String>()
+        fun appendModifier(item: Any?, indent: String = "") {
             when (item) {
                 is Map<*, *> -> {
                     val action = item["action"]?.toString() ?: "ADD"
                     val modName = item["name"]?.toString()
                         ?: item["first"]?.toString()
-                        ?: return@mapNotNull null
+                        ?: return
 
-                    if (action == "REMOVE") {
-                        "• No $modName"
-                    } else {
-                        "• $modName"
-                    }
+                    lines.add(
+                        if (action == "REMOVE") "${indent}\u2022 No $modName"
+                        else "${indent}\u2022 $modName"
+                    )
+                    val children = item["children"] as? List<*>
+                    children?.forEach { child -> appendModifier(child, "$indent    \u21B3 ") }
                 }
                 is List<*> -> {
-                    if (item.isEmpty()) return@mapNotNull null
-                    val modName = item[0]?.toString() ?: return@mapNotNull null
-                    "• $modName"
+                    if (item.isEmpty()) return
+                    val modName = item[0]?.toString() ?: return
+                    lines.add("${indent}\u2022 $modName")
                 }
-                else -> null
             }
         }
+        raw.forEach { appendModifier(it) }
 
         if (lines.isEmpty()) return null
         return lines.joinToString("\n")

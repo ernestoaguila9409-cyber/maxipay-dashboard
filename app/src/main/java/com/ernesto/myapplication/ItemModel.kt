@@ -1,5 +1,15 @@
 package com.ernesto.myapplication
 
+data class Pricing(
+    val pos: Double? = null,
+    val online: Double? = null
+)
+
+data class Channels(
+    val pos: Boolean? = true,
+    val online: Boolean? = false
+)
+
 data class ItemModel(
     val id: String,
     val name: String,
@@ -14,8 +24,18 @@ data class ItemModel(
     val barcode: String? = null,
     val isScheduled: Boolean = false,
     val scheduleIds: List<String> = emptyList(),
-    val menuId: String? = null
-)
+    val menuId: String? = null,
+    val pricing: Pricing? = null,
+    val menuIds: List<String>? = null,
+    val channels: Channels? = null,
+    val subcategoryId: String = ""
+) {
+    fun getPrice(channel: String): Double = when (channel) {
+        "pos" -> pricing?.pos ?: price
+        "online" -> pricing?.online ?: pricing?.pos ?: price
+        else -> price
+    }
+}
 
 data class CategoryModel(
     val id: String = "",
@@ -24,4 +44,11 @@ data class CategoryModel(
     val normalizedName: String? = null,
     val availableOrderTypes: List<String> = listOf(),
     val scheduleIds: List<String> = listOf()
+)
+
+data class SubcategoryModel(
+    val id: String = "",
+    val name: String = "",
+    val categoryId: String = "",
+    val order: Int = 0
 )

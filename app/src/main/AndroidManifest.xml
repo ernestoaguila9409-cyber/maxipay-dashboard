@@ -164,6 +164,9 @@
             android:name=".TipConfigActivity"
             android:exported="false"
             android:parentActivityName=".ConfigurationActivity" />
+        <activity
+            android:name=".TipAdjustmentActivity"
+            android:exported="false" />
 
         <activity
             android:name=".TipActivity"
@@ -201,6 +204,10 @@
             android:exported="false"
             android:parentActivityName=".MainActivity" />
         <activity android:name=".AssignModifierToItemActivity" />
+        <activity android:name=".SelectModifiersActivity"
+            android:exported="false" />
+        <activity android:name=".SelectTaxesActivity"
+            android:exported="false" />
 
         <activity
             android:name=".InventoryConfigActivity"

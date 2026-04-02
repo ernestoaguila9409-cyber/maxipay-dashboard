@@ -15,10 +15,12 @@ import com.google.firebase.firestore.FirebaseFirestore
 
 class CategoryAdapter(
     private val categories: List<CategoryModel>,
+    private val subcategories: List<SubcategoryModel> = emptyList(),
     private val onCategoryClick: (String) -> Unit,
+    private val onSubcategoryClick: ((String, String) -> Unit)? = null,
     private val context: Context,
     private val onDataChanged: () -> Unit
-) : RecyclerView.Adapter<CategoryAdapter.CategoryViewHolder>() {
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private val db = FirebaseFirestore.getInstance()
     private var selectedPosition: Int = RecyclerView.NO_POSITION
@@ -31,6 +33,24 @@ class CategoryAdapter(
             "TO_GO" to "TO GO",
             "DINE_IN" to "DINE IN"
         )
+
+        private const val VIEW_TYPE_CATEGORY = 0
+        private const val VIEW_TYPE_SUBCATEGORY = 1
+    }
+
+    sealed class ListRow {
+        data class CategoryRow(val category: CategoryModel) : ListRow()
+        data class SubcategoryRow(val sub: SubcategoryModel) : ListRow()
+    }
+
+    private val rows: List<ListRow> = buildList {
+        for (cat in categories) {
+            add(ListRow.CategoryRow(cat))
+            val catSubs = subcategories.filter { it.categoryId == cat.id }.sortedBy { it.order }
+            for (sub in catSubs) {
+                add(ListRow.SubcategoryRow(sub))
+            }
+        }
     }
 
     inner class CategoryViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -39,14 +59,31 @@ class CategoryAdapter(
         val root: View = view.findViewById(R.id.categoryRoot)
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CategoryViewHolder {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_category, parent, false)
-        return CategoryViewHolder(view)
+    inner class SubcategoryViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val nameText: TextView = view.findViewById(R.id.txtCategoryName)
+        val indicator: View = view.findViewById(R.id.selectedIndicator)
+        val root: View = view.findViewById(R.id.categoryRoot)
     }
 
-    override fun onBindViewHolder(holder: CategoryViewHolder, position: Int) {
-        val category = categories[position]
+    override fun getItemViewType(position: Int) = when (rows[position]) {
+        is ListRow.CategoryRow -> VIEW_TYPE_CATEGORY
+        is ListRow.SubcategoryRow -> VIEW_TYPE_SUBCATEGORY
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        val view = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_category, parent, false)
+        return if (viewType == VIEW_TYPE_CATEGORY) CategoryViewHolder(view) else SubcategoryViewHolder(view)
+    }
+
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        when (val row = rows[position]) {
+            is ListRow.CategoryRow -> bindCategory(holder as CategoryViewHolder, row.category, position)
+            is ListRow.SubcategoryRow -> bindSubcategory(holder as SubcategoryViewHolder, row.sub, position)
+        }
+    }
+
+    private fun bindCategory(holder: CategoryViewHolder, category: CategoryModel, position: Int) {
         val isSelected = position == selectedPosition
 
         holder.nameText.text = category.name
@@ -58,6 +95,10 @@ class CategoryAdapter(
         holder.indicator.visibility = if (isSelected) View.VISIBLE else View.GONE
         holder.root.setBackgroundResource(
             if (isSelected) R.drawable.bg_category_selected else R.drawable.bg_category_default
+        )
+        holder.root.setPadding(
+            holder.root.paddingLeft, holder.root.paddingTop,
+            holder.root.paddingRight, holder.root.paddingBottom
         )
 
         holder.itemView.setOnClickListener {
@@ -74,7 +115,32 @@ class CategoryAdapter(
         }
     }
 
-    override fun getItemCount(): Int = categories.size
+    private fun bindSubcategory(holder: SubcategoryViewHolder, sub: SubcategoryModel, position: Int) {
+        val isSelected = position == selectedPosition
+
+        holder.nameText.text = sub.name
+        holder.nameText.textSize = 13f
+        holder.nameText.setTypeface(null, if (isSelected) Typeface.BOLD else Typeface.NORMAL)
+        holder.nameText.setTextColor(
+            if (isSelected) 0xFF6366F1.toInt() else 0xFF64748B.toInt()
+        )
+
+        holder.indicator.visibility = if (isSelected) View.VISIBLE else View.GONE
+        holder.root.setBackgroundResource(
+            if (isSelected) R.drawable.bg_category_selected else R.drawable.bg_category_default
+        )
+        holder.root.setPadding(48, holder.root.paddingTop, holder.root.paddingRight, holder.root.paddingBottom)
+
+        holder.itemView.setOnClickListener {
+            val prev = selectedPosition
+            selectedPosition = holder.adapterPosition
+            if (prev != RecyclerView.NO_POSITION) notifyItemChanged(prev)
+            notifyItemChanged(selectedPosition)
+            onSubcategoryClick?.invoke(sub.categoryId, sub.id)
+        }
+    }
+
+    override fun getItemCount(): Int = rows.size
 
     private fun showCategoryOptions(category: CategoryModel) {
         val options = arrayOf("Edit", "Delete")

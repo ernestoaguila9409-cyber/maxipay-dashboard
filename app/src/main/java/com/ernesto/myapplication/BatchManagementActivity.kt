@@ -12,6 +12,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
@@ -102,8 +103,9 @@ class BatchManagementActivity : AppCompatActivity() {
                 openTransactionCount = settleable
                 hasOpenPreAuths = preAuthCount > 0
 
+                val displayTotal = if (openTotal < 0.005) 0.0 else openTotal
                 val label = StringBuilder()
-                label.append(String.format(Locale.US, "Open Transactions: %d | Total: $%.2f", settleable, openTotal))
+                label.append(String.format(Locale.US, "Open Transactions: %d | Total: $%.2f", settleable, displayTotal))
                 if (preAuthCount > 0) {
                     label.append(String.format(Locale.US, "\nOpen Pre-Auths: %d (capture or void before closing)", preAuthCount))
                 }
@@ -174,6 +176,46 @@ class BatchManagementActivity : AppCompatActivity() {
             return
         }
 
+        // Receipt tip mode: warn if card sales have not had tips finalized (Add Tip / confirm $0.00).
+        if (TipConfig.isTipsEnabled(this) && !TipConfig.isTipOnCustomerScreen(this)) {
+            db.collection("Transactions")
+                .whereEqualTo("settled", false)
+                .whereEqualTo("voided", false)
+                .get()
+                .addOnSuccessListener { snapshots ->
+                    val untipped = countUnsettledReceiptTipTransactions(snapshots)
+                    if (untipped > 0) {
+                        AlertDialog.Builder(this)
+                            .setTitle("Tips not finalized")
+                            .setMessage(
+                                "You have $untipped card transaction(s) where the tip has not been added or confirmed on the transaction yet (including \$0.00). Use Tip adjustment to finalize, or close the batch anyway."
+                            )
+                            .setNegativeButton("Cancel", null)
+                            .setNeutralButton("Tip adjustment") { _, _ ->
+                                startActivity(Intent(this, TipAdjustmentActivity::class.java))
+                            }
+                            .setPositiveButton("Close anyway") { _, _ ->
+                                showCloseBatchConfirmDialog()
+                            }
+                            .show()
+                    } else {
+                        showCloseBatchConfirmDialog()
+                    }
+                }
+                .addOnFailureListener { e ->
+                    Toast.makeText(
+                        this,
+                        "Could not verify tips: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            return
+        }
+
+        showCloseBatchConfirmDialog()
+    }
+
+    private fun showCloseBatchConfirmDialog() {
         AlertDialog.Builder(this)
             .setTitle("Close Batch")
             .setMessage("Are you sure you want to close the open batch?")
@@ -182,6 +224,48 @@ class BatchManagementActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /**
+     * Same eligibility as [TipAdjustmentActivity]: open SALE/CAPTURE with credit/debit payment
+     * and a gateway reference for tip adjust.
+     */
+    private fun isTipAdjustableCardTransaction(doc: DocumentSnapshot): Boolean {
+        val type = doc.getString("type") ?: "SALE"
+        if (type != "SALE" && type != "CAPTURE") return false
+        val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
+        val hasCard = payments.any { p ->
+            val m = p as? Map<*, *> ?: return@any false
+            val pt = (m["paymentType"] as? String) ?: ""
+            val status = (m["status"] as? String) ?: ""
+            (pt.equals("Credit", true) || pt.equals("Debit", true)) &&
+                !status.equals("VOIDED", true)
+        }
+        if (!hasCard) return false
+        var gatewayRefId = ""
+        for (p in payments) {
+            val m = p as? Map<*, *> ?: continue
+            val pt = (m["paymentType"] as? String) ?: ""
+            val st = (m["status"] as? String) ?: ""
+            if ((pt.equals("Credit", true) || pt.equals("Debit", true)) &&
+                !st.equals("VOIDED", true)
+            ) {
+                gatewayRefId = (m["referenceId"] as? String) ?: ""
+                break
+            }
+        }
+        return gatewayRefId.isNotBlank()
+    }
+
+    /** Card transactions that still need tip entry or confirmation (tipAdjusted is false). */
+    private fun countUnsettledReceiptTipTransactions(snapshots: QuerySnapshot): Int {
+        var n = 0
+        for (doc in snapshots.documents) {
+            if (!isTipAdjustableCardTransaction(doc)) continue
+            val tipAdjusted = doc.getBoolean("tipAdjusted") ?: false
+            if (!tipAdjusted) n++
+        }
+        return n
     }
 
     private fun sendSettleRequest() {
@@ -303,7 +387,8 @@ class BatchManagementActivity : AppCompatActivity() {
                         "count" to 0,
                         "closed" to false,
                         "createdAt" to Date(),
-                        "type" to "OPEN"
+                        "type" to "OPEN",
+                        "transactionCounter" to 0
                     )
                     db.collection("Batches").document(newBatchId).set(batchData)
                         .addOnSuccessListener { settleOpenBatch(newBatchId) }
@@ -333,6 +418,7 @@ class BatchManagementActivity : AppCompatActivity() {
 
                 val batchWrite = db.batch()
                 var totalSales = 0.0
+                var totalTipsCents = 0L
                 var count = 0
 
                 for (tx in transactions) {
@@ -340,6 +426,11 @@ class BatchManagementActivity : AppCompatActivity() {
                     if (net != 0.0) {
                         totalSales += net
                         count++
+                    }
+
+                    val type = tx.getString("type") ?: "SALE"
+                    if (type == "SALE" || type == "CAPTURE") {
+                        totalTipsCents += tx.getLong("tipAmountInCents") ?: 0L
                     }
 
                     batchWrite.update(
@@ -357,6 +448,7 @@ class BatchManagementActivity : AppCompatActivity() {
                         "closed" to true,
                         "closedAt" to Date(),
                         "totalSales" to totalSales,
+                        "totalTipsInCents" to totalTipsCents,
                         "transactionCount" to count,
                         "type" to "SETTLEMENT"
                     )
@@ -364,6 +456,20 @@ class BatchManagementActivity : AppCompatActivity() {
 
                 withContext(Dispatchers.IO) {
                     batchWrite.commit().await()
+                }
+
+                val newBatchId = "BATCH_${System.currentTimeMillis()}"
+                val newBatchData = hashMapOf(
+                    "batchId" to newBatchId,
+                    "total" to 0.0,
+                    "count" to 0,
+                    "closed" to false,
+                    "createdAt" to Date(),
+                    "type" to "OPEN",
+                    "transactionCounter" to 0
+                )
+                withContext(Dispatchers.IO) {
+                    db.collection("Batches").document(newBatchId).set(newBatchData).await()
                 }
 
                 setSettlingState(false)

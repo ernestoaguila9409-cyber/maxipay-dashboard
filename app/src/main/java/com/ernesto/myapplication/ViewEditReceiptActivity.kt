@@ -35,6 +35,8 @@ class ViewEditReceiptActivity : AppCompatActivity() {
 
     private lateinit var etBusinessName: EditText
     private lateinit var etAddress: EditText
+    private lateinit var tvBizNameLineHint: TextView
+    private lateinit var tvAddressLineHint: TextView
     private lateinit var switchShowServer: SwitchCompat
     private lateinit var switchShowDateTime: SwitchCompat
     private lateinit var switchShowLogo: SwitchCompat
@@ -116,6 +118,8 @@ class ViewEditReceiptActivity : AppCompatActivity() {
     private fun bindViews() {
         etBusinessName = findViewById(R.id.etBusinessName)
         etAddress = findViewById(R.id.etAddress)
+        tvBizNameLineHint = findViewById(R.id.tvBizNameLineHint)
+        tvAddressLineHint = findViewById(R.id.tvAddressLineHint)
         switchShowServer = findViewById(R.id.switchShowServer)
         switchShowDateTime = findViewById(R.id.switchShowDateTime)
         switchShowLogo = findViewById(R.id.switchShowLogo)
@@ -336,20 +340,24 @@ class ViewEditReceiptActivity : AppCompatActivity() {
             if (isBold) Typeface.BOLD else Typeface.NORMAL
         )
 
-        tvBusinessName.text = settings.businessName
+        val bizChars = ReceiptSettings.lineWidthForSize(settings.fontSizeBizName)
+        val addrChars = ReceiptSettings.lineWidthForSize(settings.fontSizeAddress)
+        tvBusinessName.text = wrapThermalText(settings.businessName, bizChars).joinToString("\n")
         tvBusinessName.setTypeface(null, bold(settings.boldBizName))
         tvBusinessName.textSize = bizNameSp + 4f
 
-        tvAddress.text = settings.addressText
+        tvAddress.text = wrapThermalText(settings.addressText, addrChars).joinToString("\n")
         tvAddress.setTypeface(null, bold(settings.boldAddress))
         tvAddress.textSize = addrSp
 
         if (settings.showEmail && settings.email.isNotBlank()) {
-            tvEmail.text = settings.email
+            tvEmail.text = wrapThermalText(settings.email.trim(), LINE_WIDTH).joinToString("\n")
             tvEmail.visibility = View.VISIBLE
         } else {
             tvEmail.visibility = View.GONE
         }
+
+        updateLineLimitHints(bizChars, addrChars)
 
         tvReceiptTitle.setTypeface(null, bold(settings.boldOrderInfo))
         tvReceiptTitle.textSize = orderSp + 2f
@@ -404,6 +412,49 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         tvFooter.text = "Thank you for dining with us!"
         tvFooter.setTypeface(null, bold(settings.boldFooter))
         tvFooter.textSize = footerSp
+    }
+
+    private fun updateLineLimitHints(bizChars: Int, addrChars: Int) {
+        val gray = 0xFF888888.toInt()
+        val warn = 0xFFE65100.toInt()
+
+        val bizMax = maxPhysicalLineLength(settings.businessName)
+        val bizIdx = settings.fontSizeBizName.coerceIn(0, ReceiptSettings.FONT_SIZE_LABELS.lastIndex)
+        val bizLabel = ReceiptSettings.FONT_SIZE_LABELS[bizIdx]
+        tvBizNameLineHint.setTextColor(if (bizMax > bizChars) warn else gray)
+        tvBizNameLineHint.text = if (bizMax > bizChars) {
+            getString(
+                R.string.receipt_line_over,
+                bizMax,
+                bizChars,
+                bizLabel
+            )
+        } else {
+            getString(
+                R.string.receipt_line_ok_business,
+                bizChars,
+                bizLabel
+            )
+        }
+
+        val addrMax = maxPhysicalLineLength(settings.addressText)
+        val addrIdx = settings.fontSizeAddress.coerceIn(0, ReceiptSettings.FONT_SIZE_LABELS.lastIndex)
+        val addrLabel = ReceiptSettings.FONT_SIZE_LABELS[addrIdx]
+        tvAddressLineHint.setTextColor(if (addrMax > addrChars) warn else gray)
+        tvAddressLineHint.text = if (addrMax > addrChars) {
+            getString(
+                R.string.receipt_line_over,
+                addrMax,
+                addrChars,
+                addrLabel
+            )
+        } else {
+            getString(
+                R.string.receipt_line_ok_address,
+                addrChars,
+                addrLabel
+            )
+        }
     }
 
     private fun printTestReceipt() {

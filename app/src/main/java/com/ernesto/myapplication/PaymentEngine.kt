@@ -74,6 +74,15 @@ class PaymentEngine(private val db: FirebaseFirestore) {
 
             if (saleId == null) {
 
+                var appTxnNumber = 0L
+                if (batchId.isNotBlank()) {
+                    val batchRef = db.collection("Batches").document(batchId)
+                    val batchSnap = transaction.get(batchRef)
+                    val currentCounter = batchSnap.getLong("transactionCounter") ?: 0L
+                    appTxnNumber = currentCounter + 1
+                    transaction.update(batchRef, "transactionCounter", appTxnNumber)
+                }
+
                 val saleData = mutableMapOf<String, Any>(
                     "orderId" to orderId,
                     "batchId" to batchId,
@@ -86,6 +95,7 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                     "settled" to false
                 )
                 if (orderNumber > 0L) saleData["orderNumber"] = orderNumber
+                if (appTxnNumber > 0L) saleData["appTransactionNumber"] = appTxnNumber
                 transaction.set(saleRef, saleData)
 
                 val orderUpdates = mutableMapOf<String, Any>("saleTransactionId" to saleRef.id)

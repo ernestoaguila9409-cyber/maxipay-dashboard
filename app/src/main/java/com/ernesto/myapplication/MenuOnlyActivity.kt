@@ -1,6 +1,8 @@
 package com.ernesto.myapplication
 
+import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.Editable
 import android.text.InputType
@@ -8,10 +10,13 @@ import android.text.TextWatcher
 import android.view.View
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -26,6 +31,8 @@ class MenuOnlyActivity : AppCompatActivity() {
     private lateinit var itemRecycler: RecyclerView
     private lateinit var editSearch: EditText
     private lateinit var txtItemCount: TextView
+    private lateinit var subcategoryChipsScroll: HorizontalScrollView
+    private lateinit var subcategoryChipsRow: LinearLayout
 
     private val db = FirebaseFirestore.getInstance()
     private var selectedCategoryId: String? = null
@@ -35,16 +42,48 @@ class MenuOnlyActivity : AppCompatActivity() {
     private var currentAdapter: ItemAdapter? = null
     private var activeScheduleIds: Set<String> = emptySet()
     private var categoryAvailabilityMap: Map<String, List<String>> = emptyMap()
+    private var allSubcategories: List<SubcategoryModel> = emptyList()
+    private var selectedSubcategoryId: String? = null
+
+    // Pending Add-Item form state (survives selection-screen round-trips)
+    private var pendingName: String = ""
+    private var pendingPrice: String = ""
+    private var pendingStock: String = ""
+    private var pendingSubId: String = ""
+    private var pendingModifierIds: ArrayList<String> = arrayListOf()
+    private var pendingTaxIds: ArrayList<String> = arrayListOf()
+    private var pendingUseCategoryAvail: Boolean = true
+    private var pendingOrderTypes: List<String> = emptyList()
+    private var addItemDialogOpen: Boolean = false
+
+    private lateinit var modifierLauncher: ActivityResultLauncher<Intent>
+    private lateinit var taxLauncher: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_menu_only)
         supportActionBar?.hide()
 
+        modifierLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                pendingModifierIds = result.data?.getStringArrayListExtra("SELECTED_IDS") ?: arrayListOf()
+            }
+            if (addItemDialogOpen) showAddItemDialog()
+        }
+
+        taxLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                pendingTaxIds = result.data?.getStringArrayListExtra("SELECTED_IDS") ?: arrayListOf()
+            }
+            if (addItemDialogOpen) showAddItemDialog()
+        }
+
         categoryRecycler = findViewById(R.id.categoryRecycler)
         itemRecycler = findViewById(R.id.itemRecycler)
         editSearch = findViewById(R.id.editSearch)
         txtItemCount = findViewById(R.id.txtItemCount)
+        subcategoryChipsScroll = findViewById(R.id.subcategoryChipsScroll)
+        subcategoryChipsRow = findViewById(R.id.subcategoryChipsRow)
 
         categoryRecycler.layoutManager = LinearLayoutManager(this)
         itemRecycler.layoutManager = LinearLayoutManager(this)
@@ -66,9 +105,11 @@ class MenuOnlyActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 val query = s?.toString()?.trim() ?: ""
                 if (query.isNotEmpty()) {
+                    subcategoryChipsScroll.visibility = View.GONE
                     loadAllItemsForSearch(query)
                 } else {
                     if (selectedCategoryId != null) {
+                        buildSubcategoryChips(selectedCategoryId!!)
                         loadItems(selectedCategoryId!!)
                     } else {
                         showEmptyState()
@@ -138,70 +179,161 @@ class MenuOnlyActivity : AppCompatActivity() {
     }
 
     // =========================================================
+    // LOAD SUBCATEGORIES
+    // =========================================================
+
+    private fun loadSubcategories(onComplete: () -> Unit) {
+        db.collection("subcategories")
+            .get()
+            .addOnSuccessListener { snap ->
+                allSubcategories = snap.documents.mapNotNull { doc ->
+                    val name = doc.getString("name") ?: return@mapNotNull null
+                    SubcategoryModel(
+                        id = doc.id,
+                        name = name,
+                        categoryId = doc.getString("categoryId") ?: "",
+                        order = (doc.getLong("order") ?: 0L).toInt()
+                    )
+                }.sortedBy { it.order }
+                onComplete()
+            }
+            .addOnFailureListener {
+                allSubcategories = emptyList()
+                onComplete()
+            }
+    }
+
+    // =========================================================
     // LOAD CATEGORIES
     // =========================================================
 
     private fun loadCategories() {
-        db.collection("Categories")
-            .get()
-            .addOnSuccessListener { documents ->
-                val categoryList = mutableListOf<CategoryModel>()
+        loadSubcategories {
+            db.collection("Categories")
+                .get()
+                .addOnSuccessListener { documents ->
+                    val categoryList = mutableListOf<CategoryModel>()
 
-                for (doc in documents) {
-                    val name = doc.getString("name") ?: continue
-                    @Suppress("UNCHECKED_CAST")
-                    val availableOrderTypes =
-                        (doc.get("availableOrderTypes") as? List<String>) ?: emptyList()
-                    @Suppress("UNCHECKED_CAST")
-                    val scheduleIds =
-                        (doc.get("scheduleIds") as? List<String>) ?: emptyList()
+                    for (doc in documents) {
+                        val name = doc.getString("name") ?: continue
+                        @Suppress("UNCHECKED_CAST")
+                        val availableOrderTypes =
+                            (doc.get("availableOrderTypes") as? List<String>) ?: emptyList()
+                        @Suppress("UNCHECKED_CAST")
+                        val scheduleIds =
+                            (doc.get("scheduleIds") as? List<String>) ?: emptyList()
 
-                    if (scheduleIds.isNotEmpty()) {
-                        if (activeScheduleIds.isEmpty() || scheduleIds.none { it in activeScheduleIds }) {
-                            continue
+                        if (scheduleIds.isNotEmpty()) {
+                            if (activeScheduleIds.isEmpty() || scheduleIds.none { it in activeScheduleIds }) {
+                                continue
+                            }
                         }
+
+                        categoryList.add(
+                            CategoryModel(
+                                id = doc.id,
+                                name = name,
+                                normalizedName = doc.getString("normalizedName"),
+                                availableOrderTypes = availableOrderTypes,
+                                scheduleIds = scheduleIds
+                            )
+                        )
                     }
 
-                    categoryList.add(
-                        CategoryModel(
-                            id = doc.id,
-                            name = name,
-                            normalizedName = doc.getString("normalizedName"),
-                            availableOrderTypes = availableOrderTypes,
-                            scheduleIds = scheduleIds
+                    categoryList.sortBy { it.name.lowercase() }
+
+                    categoryAvailabilityMap = categoryList.associate { it.id to it.availableOrderTypes }
+
+                    categoryRecycler.adapter =
+                        CategoryAdapter(
+                            categories = categoryList,
+                            subcategories = emptyList(),
+                            onCategoryClick = { categoryId ->
+                                selectedCategoryId = categoryId
+                                selectedSubcategoryId = null
+                                val cat = categoryList.find { it.id == categoryId }
+                                selectedCategoryAvailability =
+                                    cat?.availableOrderTypes ?: emptyList()
+                                selectedCategoryScheduled =
+                                    cat?.scheduleIds?.isNotEmpty() == true
+                                editSearch.setText("")
+                                buildSubcategoryChips(categoryId)
+                                loadItems(categoryId)
+                            },
+                            context = this,
+                            onDataChanged = {
+                                loadCategories()
+                            }
                         )
-                    )
+
+                    if (selectedCategoryId != null) {
+                        buildSubcategoryChips(selectedCategoryId!!)
+                        loadItems(selectedCategoryId!!)
+                    } else if (editSearch.text.toString().trim().isEmpty()) {
+                        showEmptyState()
+                    }
                 }
+        }
+    }
 
-                categoryList.sortBy { it.name.lowercase() }
+    // =========================================================
+    // SUBCATEGORY CHIPS
+    // =========================================================
 
-                categoryAvailabilityMap = categoryList.associate { it.id to it.availableOrderTypes }
+    private fun buildSubcategoryChips(categoryId: String) {
+        subcategoryChipsRow.removeAllViews()
+        val subs = allSubcategories.filter { it.categoryId == categoryId }.sortedBy { it.order }
 
-                categoryRecycler.adapter =
-                    CategoryAdapter(
-                        categories = categoryList,
-                        onCategoryClick = { categoryId ->
-                            selectedCategoryId = categoryId
-                            val cat = categoryList.find { it.id == categoryId }
-                            selectedCategoryAvailability =
-                                cat?.availableOrderTypes ?: emptyList()
-                            selectedCategoryScheduled =
-                                cat?.scheduleIds?.isNotEmpty() == true
-                            editSearch.setText("")
-                            loadItems(categoryId)
-                        },
-                        context = this,
-                        onDataChanged = {
-                            loadCategories()
-                        }
-                    )
+        if (subs.isEmpty()) {
+            subcategoryChipsScroll.visibility = View.GONE
+            return
+        }
 
-                if (selectedCategoryId != null) {
-                    loadItems(selectedCategoryId!!)
-                } else if (editSearch.text.toString().trim().isEmpty()) {
-                    showEmptyState()
+        subcategoryChipsScroll.visibility = View.VISIBLE
+
+        fun chipBackground(active: Boolean): GradientDrawable {
+            return GradientDrawable().apply {
+                cornerRadius = 50f
+                if (active) {
+                    setColor(Color.parseColor("#6366F1"))
+                } else {
+                    setColor(Color.parseColor("#F1F5F9"))
+                    setStroke(2, Color.parseColor("#E2E8F0"))
                 }
             }
+        }
+
+        fun addChip(label: String, active: Boolean, onClick: () -> Unit) {
+            val tv = TextView(this).apply {
+                text = label
+                textSize = 13f
+                setTextColor(if (active) Color.WHITE else Color.parseColor("#334155"))
+                background = chipBackground(active)
+                setPadding(36, 16, 36, 16)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onClick() }
+            }
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = 12 }
+            subcategoryChipsRow.addView(tv, lp)
+        }
+
+        addChip("All", selectedSubcategoryId == null) {
+            selectedSubcategoryId = null
+            buildSubcategoryChips(categoryId)
+            loadItems(categoryId)
+        }
+
+        for (sub in subs) {
+            addChip(sub.name, selectedSubcategoryId == sub.id) {
+                selectedSubcategoryId = sub.id
+                buildSubcategoryChips(categoryId)
+                loadItems(categoryId)
+            }
+        }
     }
 
     // =========================================================
@@ -220,6 +352,23 @@ class MenuOnlyActivity : AppCompatActivity() {
                     if (!name.lowercase().contains(q)) continue
 
                     @Suppress("UNCHECKED_CAST")
+                    val pricingRaw = doc.get("pricing") as? Map<String, Any>
+                    val pricingObj = if (pricingRaw != null) Pricing(
+                        pos = (pricingRaw["pos"] as? Number)?.toDouble(),
+                        online = (pricingRaw["online"] as? Number)?.toDouble()
+                    ) else null
+
+                    @Suppress("UNCHECKED_CAST")
+                    val channelsRaw = doc.get("channels") as? Map<String, Any>
+                    val channelsObj = if (channelsRaw != null) Channels(
+                        pos = channelsRaw["pos"] as? Boolean ?: true,
+                        online = channelsRaw["online"] as? Boolean ?: false
+                    ) else null
+
+                    @Suppress("UNCHECKED_CAST")
+                    val menuIdsRaw = doc.get("menuIds") as? List<String>
+
+                    @Suppress("UNCHECKED_CAST")
                     val pricesRaw = doc.get("prices") as? Map<String, Any>
                     val pricesMap = pricesRaw?.mapValues {
                         (it.value as? Number)?.toDouble() ?: 0.0
@@ -227,7 +376,8 @@ class MenuOnlyActivity : AppCompatActivity() {
                     val legacyPrice = doc.getDouble("price")
                     val effectivePrices = if (pricesMap.isNotEmpty()) pricesMap
                         else mapOf("default" to (legacyPrice ?: 0.0))
-                    val displayPrice = effectivePrices.values.firstOrNull() ?: 0.0
+                    val displayPrice = pricingObj?.pos
+                        ?: effectivePrices.values.firstOrNull() ?: 0.0
 
                     val stock = doc.getLong("stock") ?: 0L
                     @Suppress("UNCHECKED_CAST")
@@ -246,7 +396,12 @@ class MenuOnlyActivity : AppCompatActivity() {
                             categoryId = doc.getString("categoryId") ?: "",
                             availableOrderTypes = availableOrderTypes,
                             isScheduled = isScheduled,
-                            scheduleIds = scheduleIds
+                            scheduleIds = scheduleIds,
+                            menuId = doc.getString("menuId"),
+                            pricing = pricingObj,
+                            menuIds = menuIdsRaw,
+                            channels = channelsObj,
+                            subcategoryId = doc.getString("subcategoryId") ?: ""
                         )
                     )
                 }
@@ -259,6 +414,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                     itemList = itemList,
                     categoryAvailabilityMap = categoryAvailabilityMap,
                     stockCountingEnabled = stockCountingEnabled,
+                    subcategories = allSubcategories,
                     refresh = { loadAllItemsForSearch(query) }
                 )
                 currentAdapter = adapter
@@ -268,6 +424,7 @@ class MenuOnlyActivity : AppCompatActivity() {
 
     private fun showEmptyState() {
         txtItemCount.text = "Select a category or search for an item"
+        subcategoryChipsScroll.visibility = View.GONE
         currentAdapter = null
         itemRecycler.adapter = null
     }
@@ -281,6 +438,27 @@ class MenuOnlyActivity : AppCompatActivity() {
 
                 for (doc in documents) {
                     val name = doc.getString("name") ?: continue
+
+                    val subcategoryId = doc.getString("subcategoryId") ?: ""
+                    if (selectedSubcategoryId != null && subcategoryId != selectedSubcategoryId) continue
+
+                    @Suppress("UNCHECKED_CAST")
+                    val pricingRaw = doc.get("pricing") as? Map<String, Any>
+                    val pricingObj = if (pricingRaw != null) Pricing(
+                        pos = (pricingRaw["pos"] as? Number)?.toDouble(),
+                        online = (pricingRaw["online"] as? Number)?.toDouble()
+                    ) else null
+
+                    @Suppress("UNCHECKED_CAST")
+                    val channelsRaw = doc.get("channels") as? Map<String, Any>
+                    val channelsObj = if (channelsRaw != null) Channels(
+                        pos = channelsRaw["pos"] as? Boolean ?: true,
+                        online = channelsRaw["online"] as? Boolean ?: false
+                    ) else null
+
+                    @Suppress("UNCHECKED_CAST")
+                    val menuIdsRaw = doc.get("menuIds") as? List<String>
+
                     @Suppress("UNCHECKED_CAST")
                     val pricesRaw = doc.get("prices") as? Map<String, Any>
                     val pricesMap = pricesRaw?.mapValues {
@@ -289,7 +467,8 @@ class MenuOnlyActivity : AppCompatActivity() {
                     val legacyPrice = doc.getDouble("price")
                     val effectivePrices = if (pricesMap.isNotEmpty()) pricesMap
                         else mapOf("default" to (legacyPrice ?: 0.0))
-                    val displayPrice = effectivePrices.values.firstOrNull() ?: 0.0
+                    val displayPrice = pricingObj?.pos
+                        ?: effectivePrices.values.firstOrNull() ?: 0.0
 
                     val stock = doc.getLong("stock") ?: 0L
                     @Suppress("UNCHECKED_CAST")
@@ -310,7 +489,12 @@ class MenuOnlyActivity : AppCompatActivity() {
                             categoryId = doc.getString("categoryId") ?: "",
                             availableOrderTypes = availableOrderTypes,
                             isScheduled = isScheduled,
-                            scheduleIds = scheduleIds
+                            scheduleIds = scheduleIds,
+                            menuId = doc.getString("menuId"),
+                            pricing = pricingObj,
+                            menuIds = menuIdsRaw,
+                            channels = channelsObj,
+                            subcategoryId = subcategoryId
                         )
                     )
                 }
@@ -325,6 +509,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                     itemList = itemList,
                     categoryAvailabilityMap = categoryAvailabilityMap,
                     stockCountingEnabled = stockCountingEnabled,
+                    subcategories = allSubcategories,
                     refresh = { loadItems(categoryId) }
                 )
                 currentAdapter = adapter
@@ -486,20 +671,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     // =========================================================
 
     private fun showAddItemDialog() {
-        db.collection("menus").get()
-            .addOnSuccessListener { menuDocs ->
-                val menus = menuDocs.mapNotNull { doc ->
-                    val name = doc.getString("name") ?: return@mapNotNull null
-                    val isActive = doc.getBoolean("isActive") ?: true
-                    if (!isActive) return@mapNotNull null
-                    Pair(doc.id, name)
-                }.sortedBy { it.second }
-                buildAddItemDialog(menus)
-            }
-            .addOnFailureListener { buildAddItemDialog(emptyList()) }
-    }
-
-    private fun buildAddItemDialog(menus: List<Pair<String, String>>) {
+        addItemDialogOpen = true
         val layout = LinearLayout(this)
         layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(40, 40, 40, 40)
@@ -518,52 +690,130 @@ class MenuOnlyActivity : AppCompatActivity() {
             return tv
         }
 
-        val nameInput = EditText(this)
-        nameInput.hint = "Item name"
-        layout.addView(nameInput)
-
-        val priceInputs = mutableMapOf<String, EditText>()
-        if (menus.isEmpty()) {
-            val input = EditText(this)
-            input.hint = "Price"
-            input.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            layout.addView(input)
-            priceInputs["default"] = input
-        } else {
-            layout.addView(createSmallLabel("Prices per Menu"))
-            for ((menuId, menuName) in menus) {
-                layout.addView(createSmallLabel("$menuName Price"))
-                val input = EditText(this)
-                input.hint = "0.00"
-                input.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-                layout.addView(input)
-                priceInputs[menuId] = input
-            }
+        fun createDivider(): View {
+            val d = View(this)
+            d.setBackgroundColor(Color.LTGRAY)
+            d.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 2
+            ).apply { topMargin = 24; bottomMargin = 16 }
+            return d
         }
 
-        val stockInput = EditText(this)
-        stockInput.hint = "Stock"
-        stockInput.inputType = InputType.TYPE_CLASS_NUMBER
+        fun createOptionRow(label: String, count: Int, onClick: () -> Unit): View {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(8, 28, 8, 28)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onClick() }
+            }
+            val labelTv = TextView(this).apply {
+                text = label
+                textSize = 15f
+                setTextColor(Color.parseColor("#1E293B"))
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            row.addView(labelTv)
+            if (count > 0) {
+                val badge = TextView(this).apply {
+                    text = "$count selected"
+                    textSize = 12f
+                    setTextColor(Color.parseColor("#6366F1"))
+                    setPadding(16, 4, 16, 4)
+                    background = GradientDrawable().apply {
+                        cornerRadius = 20f
+                        setColor(Color.parseColor("#EEF2FF"))
+                    }
+                }
+                row.addView(badge)
+            }
+            val arrow = TextView(this).apply {
+                text = "›"
+                textSize = 20f
+                setTextColor(Color.parseColor("#94A3B8"))
+                setPadding(16, 0, 0, 0)
+            }
+            row.addView(arrow)
+            return row
+        }
+
+        val nameInput = EditText(this).apply {
+            hint = "Item name"
+            setText(pendingName)
+        }
+        layout.addView(nameInput)
+
+        val priceInput = EditText(this).apply {
+            hint = "Price"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(pendingPrice)
+        }
+        layout.addView(priceInput)
+
+        val stockInput = EditText(this).apply {
+            hint = "Stock"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(pendingStock)
+        }
         if (stockCountingEnabled) {
             layout.addView(stockInput)
         }
 
-        val divider = android.view.View(this)
-        divider.setBackgroundColor(Color.LTGRAY)
-        divider.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 2
-        ).apply { topMargin = 24; bottomMargin = 16 }
-        layout.addView(divider)
+        val catSubs = allSubcategories.filter { it.categoryId == selectedCategoryId }
+        var selectedSubId = pendingSubId
+        if (catSubs.isNotEmpty()) {
+            layout.addView(createSmallLabel("Subcategory"))
+            val subSpinner = android.widget.Spinner(this)
+            val subNames = listOf("None") + catSubs.map { it.name }
+            subSpinner.adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, subNames)
+            val preIndex = if (pendingSubId.isNotEmpty()) {
+                val idx = catSubs.indexOfFirst { it.id == pendingSubId }
+                if (idx >= 0) idx + 1 else 0
+            } else 0
+            subSpinner.setSelection(preIndex)
+            subSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, pos: Int, id: Long) {
+                    selectedSubId = if (pos == 0) "" else catSubs[pos - 1].id
+                }
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            }
+            layout.addView(subSpinner)
+        }
+
+        layout.addView(createDivider())
+
+        layout.addView(createOptionRow("Assign Modifiers", pendingModifierIds.size) {
+            pendingName = nameInput.text.toString()
+            pendingPrice = priceInput.text.toString()
+            pendingStock = stockInput.text.toString()
+            pendingSubId = selectedSubId
+            val intent = Intent(this, SelectModifiersActivity::class.java)
+            intent.putStringArrayListExtra("SELECTED_IDS", pendingModifierIds)
+            modifierLauncher.launch(intent)
+        })
+
+        layout.addView(createOptionRow("Assign Taxes", pendingTaxIds.size) {
+            pendingName = nameInput.text.toString()
+            pendingPrice = priceInput.text.toString()
+            pendingStock = stockInput.text.toString()
+            pendingSubId = selectedSubId
+            val intent = Intent(this, SelectTaxesActivity::class.java)
+            intent.putStringArrayListExtra("SELECTED_IDS", pendingTaxIds)
+            taxLauncher.launch(intent)
+        })
+
+        layout.addView(createDivider())
 
         val useCategorySwitch = Switch(this)
         useCategorySwitch.text = "Use Category Availability"
-        useCategorySwitch.isChecked = true
+        useCategorySwitch.isChecked = pendingUseCategoryAvail
         layout.addView(useCategorySwitch)
 
         val checkBoxContainer = LinearLayout(this)
         checkBoxContainer.orientation = LinearLayout.VERTICAL
         checkBoxContainer.setPadding(0, 16, 0, 0)
-        checkBoxContainer.visibility = android.view.View.GONE
+        checkBoxContainer.visibility = if (pendingUseCategoryAvail) View.GONE else View.VISIBLE
 
         val availLabel = TextView(this)
         availLabel.text = "Custom Availability"
@@ -580,7 +830,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                 "DINE_IN" -> "DINE IN"
                 else -> orderType
             }
-            cb.isChecked = true
+            cb.isChecked = pendingOrderTypes.isEmpty() || pendingOrderTypes.contains(orderType)
             checkBoxContainer.addView(cb)
             checkBoxes[orderType] = cb
         }
@@ -588,20 +838,19 @@ class MenuOnlyActivity : AppCompatActivity() {
         layout.addView(checkBoxContainer)
 
         useCategorySwitch.setOnCheckedChangeListener { _, isChecked ->
-            checkBoxContainer.visibility =
-                if (isChecked) android.view.View.GONE else android.view.View.VISIBLE
+            checkBoxContainer.visibility = if (isChecked) View.GONE else View.VISIBLE
         }
+
+        val scrollView = android.widget.ScrollView(this)
+        scrollView.addView(layout)
 
         AlertDialog.Builder(this)
             .setTitle("Add Item")
-            .setView(layout)
+            .setView(scrollView)
             .setPositiveButton("Add") { _, _ ->
+                addItemDialogOpen = false
                 val name = nameInput.text.toString().trim()
-                val prices = mutableMapOf<String, Double>()
-                for ((key, input) in priceInputs) {
-                    val v = input.text.toString().toDoubleOrNull()
-                    if (v != null && v >= 0) prices[key] = v
-                }
+                val price = priceInput.text.toString().toDoubleOrNull()
                 val stock = if (stockCountingEnabled)
                     stockInput.text.toString().toLongOrNull() ?: 0L
                 else
@@ -611,8 +860,8 @@ class MenuOnlyActivity : AppCompatActivity() {
                     Toast.makeText(this, "Please enter item name", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                if (prices.isEmpty()) {
-                    Toast.makeText(this, "Enter at least one price", Toast.LENGTH_SHORT).show()
+                if (price == null || price < 0) {
+                    Toast.makeText(this, "Enter a valid price", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
                 if (selectedCategoryId == null) {
@@ -620,13 +869,16 @@ class MenuOnlyActivity : AppCompatActivity() {
                     return@setPositiveButton
                 }
 
-                val defaultPrice = prices.values.first()
                 val item = hashMapOf<String, Any>(
                     "name" to name,
-                    "prices" to prices,
-                    "price" to defaultPrice,
+                    "price" to price,
+                    "pricing" to hashMapOf("pos" to price),
+                    "channels" to hashMapOf("pos" to true),
                     "stock" to stock,
                     "categoryId" to selectedCategoryId!!,
+                    "subcategoryId" to selectedSubId,
+                    "taxIds" to pendingTaxIds.toList(),
+                    "modifierGroupIds" to pendingModifierIds.toList(),
                     "isScheduled" to false,
                     "scheduleIds" to emptyList<String>()
                 )
@@ -639,12 +891,43 @@ class MenuOnlyActivity : AppCompatActivity() {
 
                 db.collection("MenuItems")
                     .add(item)
-                    .addOnSuccessListener {
+                    .addOnSuccessListener { docRef ->
+                        if (pendingModifierIds.isNotEmpty()) {
+                            val batch = db.batch()
+                            pendingModifierIds.forEachIndexed { index, groupId ->
+                                val linkRef = db.collection("ItemModifierGroups").document()
+                                batch.set(linkRef, hashMapOf(
+                                    "itemId" to docRef.id,
+                                    "groupId" to groupId,
+                                    "displayOrder" to index + 1
+                                ))
+                            }
+                            batch.commit()
+                        }
+                        clearPendingForm()
                         loadItems(selectedCategoryId!!)
                         Toast.makeText(this, "$name added", Toast.LENGTH_SHORT).show()
                     }
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton("Cancel") { _, _ ->
+                addItemDialogOpen = false
+                clearPendingForm()
+            }
+            .setOnCancelListener {
+                addItemDialogOpen = false
+                clearPendingForm()
+            }
             .show()
+    }
+
+    private fun clearPendingForm() {
+        pendingName = ""
+        pendingPrice = ""
+        pendingStock = ""
+        pendingSubId = ""
+        pendingModifierIds = arrayListOf()
+        pendingTaxIds = arrayListOf()
+        pendingUseCategoryAvail = true
+        pendingOrderTypes = emptyList()
     }
 }

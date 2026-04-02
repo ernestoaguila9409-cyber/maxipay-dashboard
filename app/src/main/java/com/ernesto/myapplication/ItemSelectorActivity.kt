@@ -30,6 +30,7 @@ class ItemSelectorActivity : AppCompatActivity() {
 
     private val allItems = mutableListOf<MenuItemData>()
     private val categories = mutableMapOf<String, String>()
+    private val subcategoryNames = mutableMapOf<String, String>()
     private val selectedIds = mutableSetOf<String>()
     private val adapter = SelectorAdapter()
     private var searchQuery = ""
@@ -38,7 +39,8 @@ class ItemSelectorActivity : AppCompatActivity() {
         val id: String,
         val name: String,
         val price: Double,
-        val categoryId: String
+        val categoryId: String,
+        val subcategoryId: String = ""
     )
 
     sealed class ListItem {
@@ -93,7 +95,15 @@ class ItemSelectorActivity : AppCompatActivity() {
                     val name = doc.getString("name") ?: return@forEach
                     categories[doc.id] = name
                 }
-                loadItems()
+                db.collection("subcategories").get()
+                    .addOnSuccessListener { subSnap ->
+                        subSnap.documents.forEach { doc ->
+                            val name = doc.getString("name") ?: return@forEach
+                            subcategoryNames[doc.id] = name
+                        }
+                        loadItems()
+                    }
+                    .addOnFailureListener { loadItems() }
             }
             .addOnFailureListener {
                 loadItems()
@@ -106,9 +116,16 @@ class ItemSelectorActivity : AppCompatActivity() {
                 allItems.clear()
                 snap.documents.forEach { doc ->
                     val name = doc.getString("name") ?: return@forEach
-                    val price = doc.getDouble("price") ?: doc.getLong("price")?.toDouble() ?: 0.0
+                    @Suppress("UNCHECKED_CAST")
+                    val pricingRaw = doc.get("pricing") as? Map<String, Any>
+                    val pricingPos = (pricingRaw?.get("pos") as? Number)?.toDouble()
+                    val price = pricingPos
+                        ?: doc.getDouble("price")
+                        ?: doc.getLong("price")?.toDouble()
+                        ?: 0.0
                     val catId = doc.getString("categoryId") ?: ""
-                    allItems.add(MenuItemData(doc.id, name, price, catId))
+                    val subId = doc.getString("subcategoryId") ?: ""
+                    allItems.add(MenuItemData(doc.id, name, price, catId, subId))
                 }
                 allItems.sortBy { it.name.lowercase(Locale.US) }
                 rebuildList()
@@ -135,8 +152,32 @@ class ItemSelectorActivity : AppCompatActivity() {
         val list = mutableListOf<ListItem>()
         for ((catName, items) in grouped.entries.sortedBy { it.key }) {
             list.add(ListItem.Header(catName, items.size))
-            for (item in items) {
-                list.add(ListItem.Row(item.id, item.name, item.price, item.id in selectedIds))
+
+            val hasSubcategories = items.any { it.subcategoryId.isNotEmpty() }
+            if (hasSubcategories) {
+                val subGrouped = linkedMapOf<String, MutableList<MenuItemData>>()
+                val noSub = mutableListOf<MenuItemData>()
+                for (item in items) {
+                    if (item.subcategoryId.isNotEmpty()) {
+                        val subName = subcategoryNames[item.subcategoryId] ?: "Other"
+                        subGrouped.getOrPut(subName) { mutableListOf() }.add(item)
+                    } else {
+                        noSub.add(item)
+                    }
+                }
+                for (item in noSub) {
+                    list.add(ListItem.Row(item.id, item.name, item.price, item.id in selectedIds))
+                }
+                for ((subName, subItems) in subGrouped.entries.sortedBy { it.key }) {
+                    list.add(ListItem.Header("  $subName", subItems.size))
+                    for (item in subItems) {
+                        list.add(ListItem.Row(item.id, item.name, item.price, item.id in selectedIds))
+                    }
+                }
+            } else {
+                for (item in items) {
+                    list.add(ListItem.Row(item.id, item.name, item.price, item.id in selectedIds))
+                }
             }
         }
 

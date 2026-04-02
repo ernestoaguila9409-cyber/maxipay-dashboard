@@ -345,15 +345,20 @@ class PaymentActivity : AppCompatActivity() {
                     )
 
                     val mods = doc.get("modifiers") as? List<*> ?: emptyList<Any>()
-                    for (m in mods) {
-                        val map = m as? Map<*, *> ?: continue
-                        val action = map["action"]?.toString() ?: "ADD"
-                        val modName = map["name"]?.toString()
-                            ?: map["first"]?.toString()
-                            ?: continue
-                        val label = if (action == "REMOVE") "• No $modName" else "• $modName"
-                        container.addView(makeSummaryRow(label, "", 11f, 0xBBFFFFFF.toInt()))
+                    fun addModRows(items: List<*>, indent: String = "") {
+                        for (m in items) {
+                            val map = m as? Map<*, *> ?: continue
+                            val action = map["action"]?.toString() ?: "ADD"
+                            val modName = map["name"]?.toString()
+                                ?: map["first"]?.toString()
+                                ?: continue
+                            val label = if (action == "REMOVE") "${indent}\u2022 No $modName" else "${indent}\u2022 $modName"
+                            container.addView(makeSummaryRow(label, "", 11f, 0xBBFFFFFF.toInt()))
+                            val children = map["children"] as? List<*>
+                            if (children != null) addModRows(children, "$indent    \u21B3 ")
+                        }
                     }
+                    addModRows(mods)
 
                     val lineDiscounts = orderAppliedDiscounts.filter { ad ->
                         (ad["lineKey"]?.toString()?.trim().orEmpty()) == lineKey
@@ -443,12 +448,19 @@ class PaymentActivity : AppCompatActivity() {
                     val n = doc.getString("name") ?: doc.getString("itemName") ?: "Item"
                     val q = (doc.getLong("qty") ?: doc.getLong("quantity") ?: 1L).toInt()
                     val lt = doc.getLong("lineTotalInCents") ?: 0L
-                    val ms = (doc.get("modifiers") as? List<*> ?: emptyList<Any>()).mapNotNull { m ->
-                        val map = m as? Map<*, *> ?: return@mapNotNull null
-                        val action = map["action"]?.toString() ?: "ADD"
-                        val modName = map["name"]?.toString() ?: map["first"]?.toString() ?: return@mapNotNull null
-                        if (action == "REMOVE") "No $modName" else modName
+                    fun flattenModNames(items: List<*>, prefix: String = ""): List<String> {
+                        val result = mutableListOf<String>()
+                        for (m in items) {
+                            val map = m as? Map<*, *> ?: continue
+                            val action = map["action"]?.toString() ?: "ADD"
+                            val modName = map["name"]?.toString() ?: map["first"]?.toString() ?: continue
+                            result.add(if (action == "REMOVE") "${prefix}No $modName" else "$prefix$modName")
+                            val children = map["children"] as? List<*>
+                            if (children != null) result.addAll(flattenModNames(children, "$prefix  \u21B3 "))
+                        }
+                        return result
                     }
+                    val ms = flattenModNames(doc.get("modifiers") as? List<*> ?: emptyList<Any>())
                     CustomerOrderLine(n, q, ms, lt)
                 }
 
@@ -930,6 +942,8 @@ class PaymentActivity : AppCompatActivity() {
             cashTenderedInCents = tenderedCents,
             cashChangeInCents = changeCents,
             onSuccess = { remainingInCents ->
+
+                CashDrawerManager.openCashDrawerIfCash(this, paymentType)
 
                 runOnUiThread {
 

@@ -56,6 +56,7 @@ class MenuActivity : AppCompatActivity() {
     private lateinit var txtTotal: TextView
     private lateinit var btnCheckout: Button
     private var selectedGuest: Int = 0
+    private var suppressModifierCallbacks = false
 
     private var totalAmount = 0.0
     private var allTaxes = mutableListOf<TaxItem>()
@@ -86,6 +87,8 @@ class MenuActivity : AppCompatActivity() {
     private var currentBatchId: String? = null
     private var stockCountingEnabled: Boolean = true
     private var activeScheduleIds: Set<String> = emptySet()
+    private var allSubcategories: List<SubcategoryModel> = emptyList()
+    private var currentSubcategoryId: String? = null
 
     private val paymentLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -522,6 +525,27 @@ class MenuActivity : AppCompatActivity() {
 
     private val categoryAvailabilityMap = mutableMapOf<String, List<String>>()
 
+    private fun loadSubcategories(onComplete: () -> Unit) {
+        db.collection("subcategories")
+            .get()
+            .addOnSuccessListener { snap ->
+                allSubcategories = snap.documents.mapNotNull { doc ->
+                    val name = doc.getString("name") ?: return@mapNotNull null
+                    SubcategoryModel(
+                        id = doc.id,
+                        name = name,
+                        categoryId = doc.getString("categoryId") ?: "",
+                        order = (doc.getLong("order") ?: 0L).toInt()
+                    )
+                }.sortedBy { it.order }
+                onComplete()
+            }
+            .addOnFailureListener {
+                allSubcategories = emptyList()
+                onComplete()
+            }
+    }
+
     private fun loadCategories() {
         categoryContainer.removeAllViews()
 
@@ -557,7 +581,10 @@ class MenuActivity : AppCompatActivity() {
                     button.text = name
                     button.setBackgroundColor(Color.parseColor("#E8E8E8"))
                     button.setTextColor(Color.DKGRAY)
-                    button.setOnClickListener { loadItems(categoryId) }
+                    button.setOnClickListener {
+                        currentSubcategoryId = null
+                        loadItems(categoryId)
+                    }
 
                     val params = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
@@ -568,7 +595,71 @@ class MenuActivity : AppCompatActivity() {
 
                     categoryContainer.addView(button)
                 }
+
+                loadSubcategories {}
             }
+    }
+
+    private fun buildSubcategoryChips(categoryId: String) {
+        val subs = allSubcategories.filter { it.categoryId == categoryId }
+        if (subs.isEmpty()) return
+
+        val scrollView = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 8) }
+        }
+
+        val chipRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 4, 0, 4)
+        }
+
+        val allBtn = Button(this).apply {
+            text = "All"
+            textSize = 12f
+            isAllCaps = false
+            setBackgroundColor(
+                if (currentSubcategoryId == null) Color.parseColor("#6A4FB3") else Color.parseColor("#E0E0E0")
+            )
+            setTextColor(if (currentSubcategoryId == null) Color.WHITE else Color.DKGRAY)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 8, 0) }
+            setOnClickListener {
+                currentSubcategoryId = null
+                loadItems(categoryId)
+            }
+        }
+        chipRow.addView(allBtn)
+
+        for (sub in subs) {
+            val isActive = currentSubcategoryId == sub.id
+            val btn = Button(this).apply {
+                text = sub.name
+                textSize = 12f
+                isAllCaps = false
+                setBackgroundColor(
+                    if (isActive) Color.parseColor("#6A4FB3") else Color.parseColor("#E0E0E0")
+                )
+                setTextColor(if (isActive) Color.WHITE else Color.DKGRAY)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(0, 0, 8, 0) }
+                setOnClickListener {
+                    currentSubcategoryId = sub.id
+                    loadItems(categoryId)
+                }
+            }
+            chipRow.addView(btn)
+        }
+
+        scrollView.addView(chipRow)
+        itemContainer.addView(scrollView)
     }
 
     private fun loadItems(categoryId: String) {
@@ -577,6 +668,8 @@ class MenuActivity : AppCompatActivity() {
         itemContainer.removeAllViews()
 
         val catAvailability = categoryAvailabilityMap[categoryId] ?: emptyList()
+
+        buildSubcategoryChips(categoryId)
 
         db.collection("MenuItems")
             .whereEqualTo("categoryId", categoryId)
@@ -601,16 +694,28 @@ class MenuActivity : AppCompatActivity() {
 
                     seen.add(itemId)
 
+                    val subcategoryId = doc.getString("subcategoryId") ?: ""
+                    if (currentSubcategoryId != null && subcategoryId != currentSubcategoryId) continue
+
                     val name = doc.getString("name") ?: continue
+
+                    @Suppress("UNCHECKED_CAST")
+                    val channelsRaw = doc.get("channels") as? Map<String, Any>
+                    val channelPos = (channelsRaw?.get("pos") as? Boolean) ?: true
+                    if (!channelPos) continue
+
+                    @Suppress("UNCHECKED_CAST")
+                    val pricingRaw = doc.get("pricing") as? Map<String, Any>
+                    val pricingPos = (pricingRaw?.get("pos") as? Number)?.toDouble()
+
                     @Suppress("UNCHECKED_CAST")
                     val pricesRaw = doc.get("prices") as? Map<String, Any>
                     val pricesMap = pricesRaw?.mapValues {
                         (it.value as? Number)?.toDouble() ?: 0.0
                     } ?: emptyMap()
-                    val price = if (pricesMap.isNotEmpty())
-                        pricesMap.values.first()
-                    else
-                        doc.getDouble("price") ?: 0.0
+                    val price = pricingPos
+                        ?: if (pricesMap.isNotEmpty()) pricesMap.values.first()
+                        else doc.getDouble("price") ?: 0.0
                     val stock = doc.getLong("stock") ?: 0L
                     val itemTaxMode = doc.getString("taxMode") ?: "INHERIT"
                     @Suppress("UNCHECKED_CAST")
@@ -699,6 +804,14 @@ class MenuActivity : AppCompatActivity() {
             }
     }
 
+    private data class SelectedOption(
+        val optionId: String,
+        val optionName: String,
+        val price: Double,
+        val action: String,
+        val triggersModifierGroupIds: List<String> = emptyList()
+    )
+
     private fun showModifierDialog(
         itemId: String,
         name: String,
@@ -713,104 +826,169 @@ class MenuActivity : AppCompatActivity() {
             return
         }
 
-        val selectedModifiers = mutableListOf<OrderModifier>()
-        val selectedCountPerGroup = mutableMapOf<String, Int>()
-        val requiredGroups = mutableSetOf<String>()
-
         val orderIndex = groupIds.withIndex().associate { it.value to it.index }
-        val fetchedGroups = mutableListOf<GroupInfo>()
+        val allGroupInfos = mutableMapOf<String, GroupInfo>()
+        val triggeredGroupIds = mutableSetOf<String>()
         var pending = groupIds.size
 
-        for (groupId in groupIds) {
-            db.collection("ModifierGroups")
-                .document(groupId)
-                .get()
-                .addOnSuccessListener { groupDoc ->
-                    val groupName = groupDoc.getString("name") ?: ""
-                    val isRequired = groupDoc.getBoolean("required") ?: false
-                    val maxSelection = groupDoc.getLong("maxSelection")?.toInt() ?: 1
-                    val groupType = groupDoc.getString("groupType") ?: "ADD"
+        fun parseOptions(raw: List<Map<String, Any>>?): List<ModifierOptionEntry> {
+            return raw?.mapNotNull { map ->
+                val oN = map["name"]?.toString() ?: return@mapNotNull null
+                val oP = (map["price"] as? Number)?.toDouble() ?: 0.0
+                val oId = map["id"]?.toString() ?: ""
+                @Suppress("UNCHECKED_CAST")
+                val triggers = (map["triggersModifierGroupIds"] as? List<String>) ?: emptyList()
+                ModifierOptionEntry(oId, oN, oP, triggers)
+            } ?: emptyList()
+        }
 
-                    @Suppress("UNCHECKED_CAST")
-                    val embeddedOptions = (groupDoc.get("options") as? List<Map<String, Any>>)
-                        ?.mapNotNull { map ->
-                            val optName = map["name"]?.toString() ?: return@mapNotNull null
-                            val optPrice = (map["price"] as? Number)?.toDouble() ?: 0.0
-                            val optId = map["id"]?.toString() ?: ""
-                            ModifierOptionEntry(optId, optName, optPrice)
-                        } ?: emptyList()
-
-                    if (groupName.isNotEmpty()) {
-                        synchronized(fetchedGroups) {
-                            fetchedGroups.add(GroupInfo(groupId, groupName, isRequired, maxSelection, groupType, embeddedOptions))
+        fun fetchTriggeredGroups(callback: () -> Unit) {
+            val additional = triggeredGroupIds.filter { it !in allGroupInfos }.toSet()
+            if (additional.isEmpty()) { callback(); return }
+            var p = additional.size
+            for (id in additional) {
+                db.collection("ModifierGroups").document(id).get()
+                    .addOnSuccessListener { doc ->
+                        val gName = doc.getString("name") ?: ""
+                        val isReq = doc.getBoolean("required") ?: false
+                        val maxSel = doc.getLong("maxSelection")?.toInt() ?: 1
+                        val gType = doc.getString("groupType") ?: "ADD"
+                        @Suppress("UNCHECKED_CAST")
+                        val opts = parseOptions(doc.get("options") as? List<Map<String, Any>>)
+                        if (gName.isNotEmpty()) {
+                            allGroupInfos[id] = GroupInfo(id, gName, isReq, maxSel, gType, opts)
+                            opts.forEach { triggeredGroupIds.addAll(it.triggersModifierGroupIds) }
                         }
-                        if (isRequired) requiredGroups.add(groupId)
+                        p--
+                        if (p == 0) fetchTriggeredGroups(callback)
+                    }
+                    .addOnFailureListener { p--; if (p == 0) fetchTriggeredGroups(callback) }
+            }
+        }
+
+        for (groupId in groupIds) {
+            db.collection("ModifierGroups").document(groupId).get()
+                .addOnSuccessListener { groupDoc ->
+                    val gName = groupDoc.getString("name") ?: ""
+                    val isReq = groupDoc.getBoolean("required") ?: false
+                    val maxSel = groupDoc.getLong("maxSelection")?.toInt() ?: 1
+                    val gType = groupDoc.getString("groupType") ?: "ADD"
+                    @Suppress("UNCHECKED_CAST")
+                    val opts = parseOptions(groupDoc.get("options") as? List<Map<String, Any>>)
+                    if (gName.isNotEmpty()) {
+                        allGroupInfos[groupId] = GroupInfo(groupId, gName, isReq, maxSel, gType, opts)
+                        opts.forEach { triggeredGroupIds.addAll(it.triggersModifierGroupIds) }
                     }
                     pending--
                     if (pending == 0) {
-                        val sorted = fetchedGroups.sortedWith(
-                            compareBy<GroupInfo> { !it.isRequired }.thenBy { orderIndex[it.groupId] ?: 0 }
-                        )
-                        buildAndShowModifierDialog(
-                            itemId, name, basePrice, stock,
-                            sorted, requiredGroups, selectedModifiers, selectedCountPerGroup,
-                            taxMode, taxIds
-                        )
+                        fetchTriggeredGroups {
+                            buildNestedModifierDialog(
+                                itemId, name, basePrice, stock,
+                                allGroupInfos, orderIndex, triggeredGroupIds,
+                                taxMode, taxIds
+                            )
+                        }
+                    }
+                }
+                .addOnFailureListener {
+                    pending--
+                    if (pending == 0) {
+                        fetchTriggeredGroups {
+                            buildNestedModifierDialog(
+                                itemId, name, basePrice, stock,
+                                allGroupInfos, orderIndex, triggeredGroupIds,
+                                taxMode, taxIds
+                            )
+                        }
                     }
                 }
         }
     }
 
-    private fun buildAndShowModifierDialog(
+    private fun buildNestedModifierDialog(
         itemId: String,
         name: String,
         basePrice: Double,
         stock: Long,
-        sortedGroups: List<GroupInfo>,
-        requiredGroups: Set<String>,
-        selectedModifiers: MutableList<OrderModifier>,
-        selectedCountPerGroup: MutableMap<String, Int>,
-        taxMode: String = "INHERIT",
-        taxIds: List<String> = emptyList()
+        allGroupInfos: Map<String, GroupInfo>,
+        orderIndex: Map<String, Int>,
+        triggeredGroupIds: Set<String>,
+        taxMode: String,
+        taxIds: List<String>
     ) {
-        val mainLayout = LinearLayout(this)
-        mainLayout.orientation = LinearLayout.VERTICAL
-        mainLayout.setPadding(40, 40, 40, 40)
+        val selectedOptionsPerGroup = mutableMapOf<String, MutableList<SelectedOption>>()
+        val groupContainers = mutableMapOf<String, LinearLayout>()
+        val visibleGroupIds = mutableSetOf<String>()
+        val radioGroupPreviousTriggers = mutableMapOf<String, List<String>>()
 
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Select Options")
-            .setView(mainLayout)
-            .setPositiveButton("Add to Cart", null)
-            .setNegativeButton("Cancel", null)
-            .create()
+        val topLevelGroupIds = orderIndex.keys.filter { it !in triggeredGroupIds }
+        val topLevelGroups = topLevelGroupIds
+            .mapNotNull { allGroupInfos[it] }
+            .sortedWith(
+                compareBy<GroupInfo> { !it.isRequired }
+                    .thenBy { orderIndex[it.groupId] ?: 0 }
+            )
+        topLevelGroups.forEach { visibleGroupIds.add(it.groupId) }
 
-        dialog.setOnShowListener {
-            val addButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-            addButton.setOnClickListener {
-                for (requiredGroup in requiredGroups) {
-                    if ((selectedCountPerGroup[requiredGroup] ?: 0) == 0) {
-                        Toast.makeText(this, "Please select required options.", Toast.LENGTH_SHORT).show()
-                        return@setOnClickListener
+        val mainLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 40, 40, 40)
+        }
+
+        fun hideTriggeredGroups(triggerIds: List<String>) {
+            for (tid in triggerIds) {
+                if (tid !in visibleGroupIds) continue
+                val sels = selectedOptionsPerGroup[tid]?.toList() ?: emptyList()
+                for (sel in sels) {
+                    if (sel.triggersModifierGroupIds.isNotEmpty()) {
+                        hideTriggeredGroups(sel.triggersModifierGroupIds)
                     }
                 }
-                addToCart(itemId, name, basePrice, stock, selectedModifiers, taxMode, taxIds)
-                dialog.dismiss()
+                visibleGroupIds.remove(tid)
+                selectedOptionsPerGroup.remove(tid)
+                radioGroupPreviousTriggers.remove(tid)
+                suppressModifierCallbacks = true
+                resetGroupSelectionUI(groupContainers[tid])
+                suppressModifierCallbacks = false
+                groupContainers[tid]?.visibility = View.GONE
             }
         }
 
-        for (group in sortedGroups) {
-            val (groupId, groupName, isRequired, maxSelection, groupType, embeddedOptions) = group
-            val isRemoveGroup = groupType == "REMOVE"
+        fun showTriggeredGroups(triggerIds: List<String>) {
+            for (tid in triggerIds) {
+                if (tid in visibleGroupIds) continue
+                visibleGroupIds.add(tid)
+                groupContainers[tid]?.visibility = View.VISIBLE
+            }
+        }
 
-            val groupContainer = LinearLayout(this)
-            groupContainer.orientation = LinearLayout.VERTICAL
-            groupContainer.setPadding(0, 40, 0, 40)
+        fun createGroupSection(group: GroupInfo, isTriggered: Boolean): LinearLayout {
+            val isRemoveGroup = group.groupType == "REMOVE"
 
-            val title = TextView(this)
-            title.text = if (isRemoveGroup) "REMOVE INGREDIENTS" else groupName
-            title.textSize = 18f
-            title.setTypeface(null, Typeface.BOLD)
-            if (isRemoveGroup) title.setTextColor(Color.parseColor("#D32F2F"))
+            val container = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(
+                    if (isTriggered) 60 else 0,
+                    if (isTriggered) 16 else 40,
+                    0,
+                    if (isTriggered) 16 else 40
+                )
+                if (isTriggered) visibility = View.GONE
+            }
+
+            val title = TextView(this).apply {
+                text = when {
+                    isTriggered -> "\u2192 ${group.groupName}"
+                    isRemoveGroup -> "REMOVE INGREDIENTS"
+                    else -> group.groupName
+                }
+                textSize = if (isTriggered) 16f else 18f
+                setTypeface(null, Typeface.BOLD)
+                when {
+                    isRemoveGroup -> setTextColor(Color.parseColor("#D32F2F"))
+                    isTriggered -> setTextColor(Color.parseColor("#6366F1"))
+                }
+            }
 
             val subtitle = TextView(this)
             if (isRemoveGroup) {
@@ -818,10 +996,10 @@ class MenuActivity : AppCompatActivity() {
                 subtitle.setTextColor(Color.GRAY)
             } else {
                 val subtitleFull =
-                    if (isRequired) "Required • Select up to $maxSelection"
-                    else "Optional • Select up to $maxSelection"
+                    if (group.isRequired) "Required \u2022 Select up to ${group.maxSelection}"
+                    else "Optional \u2022 Select up to ${group.maxSelection}"
                 val spannable = SpannableString(subtitleFull)
-                if (isRequired) {
+                if (group.isRequired) {
                     spannable.setSpan(StyleSpan(Typeface.BOLD), 0, 8, 0)
                     spannable.setSpan(RelativeSizeSpan(1.25f), 0, 8, 0)
                     spannable.setSpan(ForegroundColorSpan(Color.parseColor("#1A1A1A")), 0, 8, 0)
@@ -833,96 +1011,196 @@ class MenuActivity : AppCompatActivity() {
             }
             subtitle.setPadding(0, 8, 0, 16)
 
-            groupContainer.addView(title)
-            groupContainer.addView(subtitle)
+            val divider = View(this).apply {
+                setBackgroundColor(if (isRemoveGroup) Color.parseColor("#D32F2F") else Color.LTGRAY)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 2
+                )
+            }
 
-            val divider = View(this)
-            divider.setBackgroundColor(if (isRemoveGroup) Color.parseColor("#D32F2F") else Color.LTGRAY)
-            divider.layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                2
-            )
-            groupContainer.addView(divider)
+            container.addView(title)
+            container.addView(subtitle)
+            container.addView(divider)
 
-            mainLayout.addView(groupContainer)
-
-            if (embeddedOptions.isNotEmpty()) {
-                renderModifierOptions(embeddedOptions, isRemoveGroup, maxSelection, groupId,
-                    groupContainer, selectedModifiers, selectedCountPerGroup)
+            if (group.options.isNotEmpty()) {
+                renderNestedOptions(
+                    group.options, group, container, selectedOptionsPerGroup,
+                    radioGroupPreviousTriggers,
+                    { showTriggeredGroups(it) },
+                    { hideTriggeredGroups(it) }
+                )
             } else {
                 db.collection("ModifierOptions")
-                    .whereEqualTo("groupId", groupId)
+                    .whereEqualTo("groupId", group.groupId)
                     .get()
-                    .addOnSuccessListener { optionDocs ->
-                        val legacyOptions = optionDocs.mapNotNull { doc ->
-                            val optName = doc.getString("name") ?: return@mapNotNull null
-                            val optPrice = doc.getDouble("price") ?: 0.0
-                            ModifierOptionEntry(doc.id, optName, optPrice)
+                    .addOnSuccessListener { docs ->
+                        val legacyOpts = docs.mapNotNull { doc ->
+                            val oN = doc.getString("name") ?: return@mapNotNull null
+                            val oP = doc.getDouble("price") ?: 0.0
+                            ModifierOptionEntry(doc.id, oN, oP)
                         }
-                        renderModifierOptions(legacyOptions, isRemoveGroup, maxSelection, groupId,
-                            groupContainer, selectedModifiers, selectedCountPerGroup)
+                        renderNestedOptions(
+                            legacyOpts, group, container, selectedOptionsPerGroup,
+                            radioGroupPreviousTriggers,
+                            { showTriggeredGroups(it) },
+                            { hideTriggeredGroups(it) }
+                        )
                     }
+            }
+
+            return container
+        }
+
+        for (group in topLevelGroups) {
+            val container = createGroupSection(group, false)
+            groupContainers[group.groupId] = container
+            mainLayout.addView(container)
+
+            for (opt in group.options) {
+                for (tid in opt.triggersModifierGroupIds) {
+                    if (tid !in groupContainers) {
+                        val tGroup = allGroupInfos[tid] ?: continue
+                        val tContainer = createGroupSection(tGroup, true)
+                        groupContainers[tid] = tContainer
+                        mainLayout.addView(tContainer)
+                        for (tOpt in tGroup.options) {
+                            for (tid2 in tOpt.triggersModifierGroupIds) {
+                                if (tid2 !in groupContainers) {
+                                    val tGroup2 = allGroupInfos[tid2] ?: continue
+                                    val tContainer2 = createGroupSection(tGroup2, true)
+                                    groupContainers[tid2] = tContainer2
+                                    mainLayout.addView(tContainer2)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for ((gId, gInfo) in allGroupInfos) {
+            if (gId !in groupContainers) {
+                val container = createGroupSection(gInfo, true)
+                groupContainers[gId] = container
+                mainLayout.addView(container)
+            }
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Select Options")
+            .setView(ScrollView(this).apply { addView(mainLayout) })
+            .setPositiveButton("Add to Cart", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+            val addButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            addButton.setOnClickListener {
+                for ((gId, gInfo) in allGroupInfos) {
+                    if (gId !in visibleGroupIds) continue
+                    if (!gInfo.isRequired) continue
+                    val count = selectedOptionsPerGroup[gId]?.size ?: 0
+                    if (count == 0) {
+                        Toast.makeText(
+                            this,
+                            "Please select required option for ${gInfo.groupName}.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        return@setOnClickListener
+                    }
+                }
+
+                val modifiers = buildOrderModifiers(
+                    topLevelGroupIds, allGroupInfos,
+                    selectedOptionsPerGroup, visibleGroupIds
+                )
+                addToCart(itemId, name, basePrice, stock, modifiers, taxMode, taxIds)
+                dialog.dismiss()
             }
         }
 
         dialog.show()
     }
 
-    private fun renderModifierOptions(
+    private fun resetGroupSelectionUI(container: LinearLayout?) {
+        container ?: return
+        for (i in 0 until container.childCount) {
+            when (val child = container.getChildAt(i)) {
+                is CheckBox -> child.isChecked = false
+                is RadioGroup -> child.clearCheck()
+                is LinearLayout -> resetGroupSelectionUI(child)
+            }
+        }
+    }
+
+    private fun renderNestedOptions(
         options: List<ModifierOptionEntry>,
-        isRemoveGroup: Boolean,
-        maxSelection: Int,
-        groupId: String,
+        group: GroupInfo,
         groupContainer: LinearLayout,
-        selectedModifiers: MutableList<OrderModifier>,
-        selectedCountPerGroup: MutableMap<String, Int>
+        selectedOptionsPerGroup: MutableMap<String, MutableList<SelectedOption>>,
+        radioGroupPreviousTriggers: MutableMap<String, List<String>>,
+        onTriggersActivated: (List<String>) -> Unit,
+        onTriggersDeactivated: (List<String>) -> Unit
     ) {
+        val groupId = group.groupId
+        val isRemoveGroup = group.groupType == "REMOVE"
+        val maxSelection = group.maxSelection
+
         if (isRemoveGroup) {
             for (opt in options) {
-                val checkBox = CheckBox(this)
-                checkBox.text = opt.name
-                checkBox.setTextColor(Color.parseColor("#D32F2F"))
+                val checkBox = CheckBox(this).apply {
+                    text = opt.name
+                    setTextColor(Color.parseColor("#D32F2F"))
+                }
                 groupContainer.addView(checkBox)
 
                 checkBox.setOnCheckedChangeListener { _, isChecked ->
+                    if (suppressModifierCallbacks) return@setOnCheckedChangeListener
+                    val sels = selectedOptionsPerGroup.getOrPut(groupId) { mutableListOf() }
                     if (isChecked) {
-                        selectedModifiers.add(OrderModifier(opt.name, "REMOVE", 0.0))
+                        sels.add(SelectedOption(opt.id, opt.name, 0.0, "REMOVE", opt.triggersModifierGroupIds))
+                        if (opt.triggersModifierGroupIds.isNotEmpty()) onTriggersActivated(opt.triggersModifierGroupIds)
                     } else {
-                        selectedModifiers.removeAll { it.name == opt.name && it.action == "REMOVE" }
+                        sels.removeAll { it.optionId == opt.id }
+                        if (opt.triggersModifierGroupIds.isNotEmpty()) onTriggersDeactivated(opt.triggersModifierGroupIds)
                     }
                 }
             }
         } else if (maxSelection == 1) {
-            val radioGroup = RadioGroup(this)
-            radioGroup.orientation = RadioGroup.VERTICAL
+            val radioGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
             groupContainer.addView(radioGroup)
 
-            val groupOptionNames = options.map { it.name }.toSet()
-
             for (opt in options) {
-                val radioButton = RadioButton(this)
-                radioButton.text = "${opt.name} +$${String.format(Locale.US, "%.2f", opt.price)}"
+                val radioButton = RadioButton(this).apply {
+                    text = "${opt.name} +$${String.format(Locale.US, "%.2f", opt.price)}"
+                }
                 radioGroup.addView(radioButton)
 
                 radioButton.setOnClickListener {
-                    selectedModifiers.removeAll { it.action == "ADD" && it.name in groupOptionNames }
-                    selectedModifiers.add(OrderModifier(opt.name, "ADD", opt.price))
-                    selectedCountPerGroup[groupId] = 1
+                    if (suppressModifierCallbacks) return@setOnClickListener
+                    val prev = radioGroupPreviousTriggers[groupId] ?: emptyList()
+                    if (prev.isNotEmpty()) onTriggersDeactivated(prev)
+
+                    val sels = selectedOptionsPerGroup.getOrPut(groupId) { mutableListOf() }
+                    sels.clear()
+                    sels.add(SelectedOption(opt.id, opt.name, opt.price, "ADD", opt.triggersModifierGroupIds))
+
+                    radioGroupPreviousTriggers[groupId] = opt.triggersModifierGroupIds
+                    if (opt.triggersModifierGroupIds.isNotEmpty()) onTriggersActivated(opt.triggersModifierGroupIds)
                 }
             }
         } else {
-            selectedCountPerGroup[groupId] = 0
-
             for (opt in options) {
-                val checkBox = CheckBox(this)
-                checkBox.text = "${opt.name} +$${String.format(Locale.US, "%.2f", opt.price)}"
+                val checkBox = CheckBox(this).apply {
+                    text = "${opt.name} +$${String.format(Locale.US, "%.2f", opt.price)}"
+                }
                 groupContainer.addView(checkBox)
 
                 checkBox.setOnCheckedChangeListener { _, isChecked ->
-                    var count = selectedCountPerGroup[groupId] ?: 0
-
+                    if (suppressModifierCallbacks) return@setOnCheckedChangeListener
+                    val sels = selectedOptionsPerGroup.getOrPut(groupId) { mutableListOf() }
                     if (isChecked) {
-                        if (count >= maxSelection) {
+                        if (sels.size >= maxSelection) {
                             checkBox.isChecked = false
                             Toast.makeText(
                                 this,
@@ -931,17 +1209,76 @@ class MenuActivity : AppCompatActivity() {
                             ).show()
                             return@setOnCheckedChangeListener
                         }
-                        selectedModifiers.add(OrderModifier(opt.name, "ADD", opt.price))
-                        count++
+                        sels.add(SelectedOption(opt.id, opt.name, opt.price, "ADD", opt.triggersModifierGroupIds))
+                        if (opt.triggersModifierGroupIds.isNotEmpty()) onTriggersActivated(opt.triggersModifierGroupIds)
                     } else {
-                        selectedModifiers.removeAll { it.name == opt.name && it.action == "ADD" && it.price == opt.price }
-                        count--
+                        sels.removeAll { it.optionId == opt.id }
+                        if (opt.triggersModifierGroupIds.isNotEmpty()) onTriggersDeactivated(opt.triggersModifierGroupIds)
                     }
-
-                    selectedCountPerGroup[groupId] = count
                 }
             }
         }
+    }
+
+    private fun buildOrderModifiers(
+        topLevelGroupIds: List<String>,
+        allGroupInfos: Map<String, GroupInfo>,
+        selectedOptionsPerGroup: Map<String, List<SelectedOption>>,
+        visibleGroupIds: Set<String>
+    ): List<OrderModifier> {
+        val result = mutableListOf<OrderModifier>()
+        for (gId in topLevelGroupIds) {
+            val group = allGroupInfos[gId] ?: continue
+            val selections = selectedOptionsPerGroup[gId] ?: continue
+            for (sel in selections) {
+                val children = buildChildModifiers(
+                    sel.triggersModifierGroupIds, allGroupInfos,
+                    selectedOptionsPerGroup, visibleGroupIds
+                )
+                result.add(
+                    OrderModifier(
+                        name = sel.optionName,
+                        action = sel.action,
+                        price = sel.price,
+                        groupId = gId,
+                        groupName = group.groupName,
+                        children = children
+                    )
+                )
+            }
+        }
+        return result
+    }
+
+    private fun buildChildModifiers(
+        triggerIds: List<String>,
+        allGroupInfos: Map<String, GroupInfo>,
+        selectedOptionsPerGroup: Map<String, List<SelectedOption>>,
+        visibleGroupIds: Set<String>
+    ): List<OrderModifier> {
+        val children = mutableListOf<OrderModifier>()
+        for (tid in triggerIds) {
+            if (tid !in visibleGroupIds) continue
+            val tGroup = allGroupInfos[tid] ?: continue
+            val tSels = selectedOptionsPerGroup[tid] ?: continue
+            for (tSel in tSels) {
+                val grandchildren = buildChildModifiers(
+                    tSel.triggersModifierGroupIds, allGroupInfos,
+                    selectedOptionsPerGroup, visibleGroupIds
+                )
+                children.add(
+                    OrderModifier(
+                        name = tSel.optionName,
+                        action = tSel.action,
+                        price = tSel.price,
+                        groupId = tid,
+                        groupName = tGroup.groupName,
+                        children = grandchildren
+                    )
+                )
+            }
+        }
+        return children
     }
 
     private data class GroupInfo(
@@ -1389,9 +1726,13 @@ class MenuActivity : AppCompatActivity() {
         }
 
         val lines = cartMap.entries.map { (_, item) ->
-            val modStrings = item.modifiers.map { mod ->
-                if (mod.action == "REMOVE") "• No ${mod.name}" else "• ${mod.name}"
+            fun flattenModStrings(mods: List<OrderModifier>, prefix: String = ""): List<String> {
+                return mods.flatMap { mod ->
+                    val label = if (mod.action == "REMOVE") "${prefix}• No ${mod.name}" else "${prefix}• ${mod.name}"
+                    listOf(label) + if (mod.children.isNotEmpty()) flattenModStrings(mod.children, "$prefix    ") else emptyList()
+                }
             }
+            val modStrings = flattenModStrings(item.modifiers)
             val unitPrice = item.basePrice + item.modifiers
                 .filter { it.action == "ADD" }
                 .sumOf { it.price }
@@ -1484,19 +1825,25 @@ class MenuActivity : AppCompatActivity() {
 
         val modifiersTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
 
-        for (modifier in item.modifiers) {
-            val line = TextView(this).apply {
-                textSize = 12f
-                setTextColor(Color.parseColor("#666666"))
-                if (modifier.action == "REMOVE") {
-                    text = "• No ${modifier.name}"
-                    setTextColor(Color.parseColor("#C62828"))
-                } else {
-                    text = "• ${modifier.name}"
+        fun addModifierViews(modifiers: List<OrderModifier>, indent: String = "") {
+            for (modifier in modifiers) {
+                val line = TextView(this).apply {
+                    textSize = 12f
+                    setTextColor(Color.parseColor("#666666"))
+                    if (modifier.action == "REMOVE") {
+                        text = "${indent}• No ${modifier.name}"
+                        setTextColor(Color.parseColor("#C62828"))
+                    } else {
+                        text = "${indent}• ${modifier.name}"
+                    }
+                }
+                itemLayout.addView(line)
+                if (modifier.children.isNotEmpty()) {
+                    addModifierViews(modifier.children, "$indent    ")
                 }
             }
-            itemLayout.addView(line)
         }
+        addModifierViews(item.modifiers)
 
         val unitPrice = item.basePrice + modifiersTotal
         val lineTotal = unitPrice * item.quantity
@@ -1807,8 +2154,13 @@ class MenuActivity : AppCompatActivity() {
     // FIRESTORE ORDER / ITEMS
     // ----------------------------
     private fun cartKey(itemId: String, modifiers: List<OrderModifier>, guest: Int = 0): String {
-        val sorted = modifiers.sortedBy { "${it.action}|${it.name}|${it.price}" }
-        val modsKey = sorted.joinToString("|") { "${it.action}:${it.name}:${it.price}" }
+        fun modKey(mods: List<OrderModifier>): String {
+            return mods.sortedBy { "${it.action}|${it.name}|${it.price}" }.joinToString("|") { mod ->
+                val childPart = if (mod.children.isNotEmpty()) "[${modKey(mod.children)}]" else ""
+                "${mod.action}:${mod.name}:${mod.price}$childPart"
+            }
+        }
+        val modsKey = modKey(modifiers)
         val guestPart = if (guest > 0) "__G${guest}" else ""
         return "${itemId}__${modsKey}${guestPart}"
     }
@@ -2035,9 +2387,17 @@ class MenuActivity : AppCompatActivity() {
             )
             if (batchId.isNotBlank()) txData["batchId"] = batchId
 
-            db.runBatch { batch ->
-                batch.set(txRef, txData)
-                batch.update(orderRef, orderUpdates)
+            db.runTransaction { firestoreTxn ->
+                if (batchId.isNotBlank()) {
+                    val batchRef = db.collection("Batches").document(batchId)
+                    val batchSnap = firestoreTxn.get(batchRef)
+                    val counter = batchSnap.getLong("transactionCounter") ?: 0L
+                    val next = counter + 1
+                    firestoreTxn.update(batchRef, "transactionCounter", next)
+                    txData["appTransactionNumber"] = next
+                }
+                firestoreTxn.set(txRef, txData)
+                firestoreTxn.update(orderRef, orderUpdates)
             }.addOnSuccessListener {
                 hideCaptureLoading()
                 val afterCapture = {

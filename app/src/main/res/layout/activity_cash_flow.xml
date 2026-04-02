@@ -53,6 +53,21 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- Open Cash Drawer Button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnOpenCashDrawer"
+            style="@style/Widget.MaterialComponents.Button"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginBottom="12dp"
+            android:text="Open Cash Drawer"
+            android:textAllCaps="false"
+            android:textSize="15sp"
+            app:cornerRadius="10dp"
+            app:icon="@android:drawable/ic_lock_lock"
+            app:iconGravity="textStart"
+            app:iconPadding="8dp" />
+
         <!-- Batch Closed Success Banner (hidden by default) -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/bannerBatchClosed"

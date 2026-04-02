@@ -19,7 +19,8 @@ data class ModifierOptionDisplay(
     val id: String,
     val name: String,
     val price: Double,
-    val isRemove: Boolean
+    val isRemove: Boolean,
+    val triggersModifierGroupIds: List<String> = emptyList()
 )
 
 class ModifierOptionAdapter(
@@ -112,6 +113,27 @@ class ModifierOptionAdapter(
     }
 
     private fun showEditOptionDialog(option: ModifierOptionDisplay) {
+        db.collection("ModifierGroups").get()
+            .addOnSuccessListener { snap ->
+                val otherGroups = snap.documents.mapNotNull { doc ->
+                    val gName = doc.getString("name") ?: return@mapNotNull null
+                    if (doc.id == groupId) return@mapNotNull null
+                    val required = doc.getBoolean("required") ?: false
+                    val maxSel = doc.getLong("maxSelection")?.toInt() ?: 1
+                    @Suppress("UNCHECKED_CAST")
+                    val optCount = (doc.get("options") as? List<*>)?.size ?: 0
+                    Triple(doc.id, gName,
+                        "${if (required) "Required" else "Optional"} · 1–$maxSel sel · $optCount opt")
+                }.sortedBy { it.second }
+                buildEditOptionDialog(option, otherGroups)
+            }
+            .addOnFailureListener { buildEditOptionDialog(option, emptyList()) }
+    }
+
+    private fun buildEditOptionDialog(
+        option: ModifierOptionDisplay,
+        otherGroups: List<Triple<String, String, String>>
+    ) {
         val layout = LinearLayout(context)
         layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(40, 20, 40, 10)
@@ -130,6 +152,34 @@ class ModifierOptionAdapter(
             layout.addView(priceInput)
         }
 
+        val triggerCheckboxes = mutableMapOf<String, android.widget.CheckBox>()
+        if (otherGroups.isNotEmpty()) {
+            val triggerLabel = TextView(context).apply {
+                text = "Triggers Modifier Groups"
+                textSize = 14f
+                setPadding(0, 32, 0, 4)
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            }
+            val triggerHint = TextView(context).apply {
+                text = "When this option is selected, these groups become required choices."
+                textSize = 12f
+                setTextColor(android.graphics.Color.GRAY)
+                setPadding(0, 0, 0, 16)
+            }
+            layout.addView(triggerLabel)
+            layout.addView(triggerHint)
+
+            for ((gId, gName, gInfo) in otherGroups) {
+                val cb = android.widget.CheckBox(context).apply {
+                    text = "$gName  $gInfo"
+                    textSize = 14f
+                    isChecked = option.triggersModifierGroupIds.contains(gId)
+                }
+                triggerCheckboxes[gId] = cb
+                layout.addView(cb)
+            }
+        }
+
         AlertDialog.Builder(context)
             .setTitle("Edit Option")
             .setView(layout)
@@ -137,6 +187,7 @@ class ModifierOptionAdapter(
                 val newName = nameInput.text.toString().trim()
                 val newPrice = if (option.isRemove) 0.0
                     else priceInput.text.toString().toDoubleOrNull() ?: 0.0
+                val selectedTriggers = triggerCheckboxes.filter { it.value.isChecked }.keys.toList()
 
                 if (newName.isNotEmpty()) {
                     if (useEmbeddedOptions && groupId != null) {
@@ -146,11 +197,22 @@ class ModifierOptionAdapter(
                                 val rawOptions = doc.get("options") as? List<Map<String, Any>> ?: emptyList()
                                 val updated = rawOptions.map { opt ->
                                     if ((opt["id"] as? String) == option.id) {
-                                        mutableMapOf<String, Any>(
+                                        val map = mutableMapOf<String, Any>(
                                             "id" to option.id,
                                             "name" to newName,
                                             "price" to newPrice
                                         )
+                                        if (selectedTriggers.isNotEmpty()) {
+                                            map["triggersModifierGroupIds"] = selectedTriggers
+                                        }
+                                        @Suppress("UNCHECKED_CAST")
+                                        val existingTriggers = (opt["triggersModifierGroupIds"] as? List<String>)
+                                        if (selectedTriggers.isEmpty() && existingTriggers.isNullOrEmpty()) {
+                                            // no change needed
+                                        } else if (selectedTriggers.isEmpty()) {
+                                            map["triggersModifierGroupIds"] = emptyList<String>()
+                                        }
+                                        map
                                     } else {
                                         opt
                                     }
@@ -163,9 +225,15 @@ class ModifierOptionAdapter(
                                     }
                             }
                     } else {
+                        val updates = mutableMapOf<String, Any>(
+                            "name" to newName, "price" to newPrice
+                        )
+                        if (selectedTriggers.isNotEmpty()) {
+                            updates["triggersModifierGroupIds"] = selectedTriggers
+                        }
                         db.collection("ModifierOptions")
                             .document(option.id)
-                            .update(mapOf("name" to newName, "price" to newPrice))
+                            .update(updates)
                             .addOnSuccessListener {
                                 Toast.makeText(context, "Updated", Toast.LENGTH_SHORT).show()
                                 refresh()

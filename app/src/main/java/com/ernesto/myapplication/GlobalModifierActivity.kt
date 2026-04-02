@@ -147,11 +147,13 @@ class GlobalModifierActivity : AppCompatActivity() {
 
                 if (rawEmbedded.isNotEmpty()) {
                     val optionList = rawEmbedded.mapIndexed { i, opt ->
+                        @Suppress("UNCHECKED_CAST")
                         ModifierOptionDisplay(
                             id = (opt["id"] as? String) ?: "opt_$i",
                             name = (opt["name"] as? String) ?: "",
                             price = (opt["price"] as? Number)?.toDouble() ?: 0.0,
-                            isRemove = isRemove
+                            isRemove = isRemove,
+                            triggersModifierGroupIds = (opt["triggersModifierGroupIds"] as? List<String>) ?: emptyList()
                         )
                     }.sortedBy { it.name.lowercase() }
 
@@ -260,7 +262,27 @@ class GlobalModifierActivity : AppCompatActivity() {
 
     private fun showAddOptionDialog() {
         val group = selectedGroup ?: return
+        db.collection("ModifierGroups").get()
+            .addOnSuccessListener { snap ->
+                val otherGroups = snap.documents.mapNotNull { doc ->
+                    val gName = doc.getString("name") ?: return@mapNotNull null
+                    if (doc.id == group.id) return@mapNotNull null
+                    val required = doc.getBoolean("required") ?: false
+                    val maxSel = doc.getLong("maxSelection")?.toInt() ?: 1
+                    @Suppress("UNCHECKED_CAST")
+                    val optCount = (doc.get("options") as? List<*>)?.size ?: 0
+                    Triple(doc.id, gName,
+                        "${if (required) "Required" else "Optional"} · 1–$maxSel sel · $optCount opt")
+                }.sortedBy { it.second }
+                buildAddOptionDialog(group, otherGroups)
+            }
+            .addOnFailureListener { buildAddOptionDialog(group, emptyList()) }
+    }
 
+    private fun buildAddOptionDialog(
+        group: ModifierGroupModel,
+        otherGroups: List<Triple<String, String, String>>
+    ) {
         val layout = LinearLayout(this)
         layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(40, 20, 40, 10)
@@ -277,6 +299,33 @@ class GlobalModifierActivity : AppCompatActivity() {
             layout.addView(priceInput)
         }
 
+        val triggerCheckboxes = mutableMapOf<String, CheckBox>()
+        if (otherGroups.isNotEmpty()) {
+            val triggerLabel = android.widget.TextView(this).apply {
+                text = "Triggers Modifier Groups"
+                textSize = 14f
+                setPadding(0, 32, 0, 4)
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            }
+            val triggerHint = android.widget.TextView(this).apply {
+                text = "When this option is selected, these groups become required choices."
+                textSize = 12f
+                setTextColor(android.graphics.Color.GRAY)
+                setPadding(0, 0, 0, 16)
+            }
+            layout.addView(triggerLabel)
+            layout.addView(triggerHint)
+
+            for ((gId, gName, gInfo) in otherGroups) {
+                val cb = CheckBox(this).apply {
+                    text = "$gName  $gInfo"
+                    textSize = 14f
+                }
+                triggerCheckboxes[gId] = cb
+                layout.addView(cb)
+            }
+        }
+
         AlertDialog.Builder(this)
             .setTitle("Add Option")
             .setView(layout)
@@ -284,14 +333,18 @@ class GlobalModifierActivity : AppCompatActivity() {
                 val name = nameInput.text.toString().trim()
                 val price = if (group.groupType == "REMOVE") 0.0
                     else priceInput.text.toString().toDoubleOrNull() ?: 0.0
+                val selectedTriggers = triggerCheckboxes.filter { it.value.isChecked }.keys.toList()
 
                 if (name.isNotEmpty()) {
                     val optId = "opt_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(5)}"
-                    val option = hashMapOf(
+                    val option = hashMapOf<String, Any>(
                         "id" to optId,
                         "name" to name,
                         "price" to price
                     )
+                    if (selectedTriggers.isNotEmpty()) {
+                        option["triggersModifierGroupIds"] = selectedTriggers
+                    }
 
                     db.collection("ModifierGroups")
                         .document(group.id)

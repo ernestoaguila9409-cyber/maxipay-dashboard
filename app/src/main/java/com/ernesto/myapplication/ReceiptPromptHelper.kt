@@ -168,10 +168,7 @@ object ReceiptPromptHelper {
         val lwt = ReceiptSettings.lineWidthForSize(rs.fontSizeTotals)
         val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
 
-        segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
-        for (line in rs.addressText.split("\n")) {
-            segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
-        }
+        EscPosPrinter.appendHeaderSegments(segs, rs, includeEmail = false)
         segs += EscPosPrinter.Segment("")
         segs += EscPosPrinter.Segment("REFUND RECEIPT", bold = true, fontSize = 2, centered = true)
         segs += EscPosPrinter.Segment("")
@@ -338,10 +335,7 @@ object ReceiptPromptHelper {
         val lwt = ReceiptSettings.lineWidthForSize(rs.fontSizeTotals)
         val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
 
-        segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
-        for (line in rs.addressText.split("\n")) {
-            segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
-        }
+        EscPosPrinter.appendHeaderSegments(segs, rs, includeEmail = false)
         segs += EscPosPrinter.Segment("")
         segs += EscPosPrinter.Segment("VOID RECEIPT", bold = true, fontSize = 2, centered = true)
         segs += EscPosPrinter.Segment("")
@@ -379,17 +373,23 @@ object ReceiptPromptHelper {
                 segs += EscPosPrinter.Segment(itemLabel, bold = rs.boldItems, fontSize = rs.fontSizeItems)
             }
             val mods = doc.get("modifiers") as? List<Map<String, Any>> ?: emptyList()
-            for (mod in mods) {
-                val modName = mod["name"]?.toString() ?: continue
-                val modAction = mod["action"]?.toString() ?: "ADD"
-                val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
-                val modCents = kotlin.math.round(modPrice * 100).toLong()
-                when {
-                    modAction == "REMOVE" -> segs += EscPosPrinter.Segment("  NO $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
-                    modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
-                    else -> segs += EscPosPrinter.Segment("  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+            fun addModSegs(items: List<Map<String, Any>>, indent: String = "") {
+                for (mod in items) {
+                    val modName = mod["name"]?.toString() ?: continue
+                    val modAction = mod["action"]?.toString() ?: "ADD"
+                    val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
+                    val modCents = kotlin.math.round(modPrice * 100).toLong()
+                    when {
+                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("${indent}  NO $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("${indent}  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        else -> segs += EscPosPrinter.Segment("${indent}  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                    }
+                    @Suppress("UNCHECKED_CAST")
+                    val children = mod["children"] as? List<Map<String, Any>>
+                    if (children != null) addModSegs(children, "$indent    ")
                 }
             }
+            addModSegs(mods)
         }
         segs += EscPosPrinter.Segment("-".repeat(lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
         segs += EscPosPrinter.Segment("")
@@ -470,10 +470,7 @@ object ReceiptPromptHelper {
                 val segs = mutableListOf<EscPosPrinter.Segment>()
                 val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
 
-                segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
-                for (line in rs.addressText.split("\n")) {
-                    segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
-                }
+                EscPosPrinter.appendHeaderSegments(segs, rs, includeEmail = false)
                 segs += EscPosPrinter.Segment("")
                 segs += EscPosPrinter.Segment("$label RECEIPT", bold = true, fontSize = 2, centered = true)
                 segs += EscPosPrinter.Segment("")

@@ -1,5 +1,7 @@
 package com.ernesto.myapplication
 
+import android.content.Context
+
 data class DashboardModule(
     val key: String = "",
     val label: String = "",
@@ -44,5 +46,25 @@ data class DashboardModule(
             DashboardModule("reports", "REPORTS", "ic_reports", "purple", 11),
             DashboardModule("cash_flow", "CASH FLOW", "ic_cash", "purple", 12)
         )
+
+        /**
+         * Appends a Tips tile when tips are enabled and collection is on the printed receipt
+         * (not the customer-facing tip screen). Opens [TipConfigActivity] from the dashboard.
+         */
+        fun mergeTipDashboardTile(context: Context, modules: List<DashboardModule>): List<DashboardModule> {
+            val filtered = modules.filter { it.key != "tips" }
+            val showTipsTile =
+                TipConfig.isTipsEnabled(context) && !TipConfig.isTipOnCustomerScreen(context)
+            if (!showTipsTile) return filtered
+            val maxPos = filtered.maxOfOrNull { it.position } ?: -1
+            val tipMod = DashboardModule(
+                key = "tips",
+                label = "TIPS",
+                iconName = "ic_percent",
+                colorKey = "orange",
+                position = maxPos + 1
+            )
+            return (filtered + tipMod).sortedBy { it.position }
+        }
     }
 }

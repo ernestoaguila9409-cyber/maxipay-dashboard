@@ -107,6 +107,24 @@ class OrderEngine(private val db: FirebaseFirestore) {
             .addOnFailureListener { e -> onFailure(e) }
     }
 
+    private fun flattenModifiers(mods: List<OrderModifier>): List<OrderModifier> {
+        return mods.flatMap { listOf(it) + flattenModifiers(it.children) }
+    }
+
+    private fun serializeModifier(mod: OrderModifier): HashMap<String, Any> {
+        val map = hashMapOf<String, Any>(
+            "name" to mod.name,
+            "action" to mod.action,
+            "price" to mod.price
+        )
+        if (mod.groupId.isNotEmpty()) map["groupId"] = mod.groupId
+        if (mod.groupName.isNotEmpty()) map["groupName"] = mod.groupName
+        if (mod.children.isNotEmpty()) {
+            map["children"] = mod.children.map { serializeModifier(it) }
+        }
+        return map
+    }
+
     /** Save/replace an item line doc (Orders/{orderId}/items/{lineKey}). Does NOT recompute totals. */
     fun upsertLineItem(
         orderId: String,
@@ -116,8 +134,9 @@ class OrderEngine(private val db: FirebaseFirestore) {
         onSuccess: () -> Unit,
         onFailure: (Exception) -> Unit
     ) {
+        val allModifiers = flattenModifiers(input.modifiers)
         val modifiersTotalInCents =
-            input.modifiers.filter { it.action == "ADD" }.sumOf { (it.price * 100).toLong() }
+            allModifiers.filter { it.action == "ADD" }.sumOf { (it.price * 100).toLong() }
 
         val basePriceInCents = (input.basePrice * 100).toLong()
 
@@ -125,13 +144,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
 
         val lineTotalInCents = unitPriceInCents * input.quantity
 
-        val modifierMaps = input.modifiers.map { mod ->
-            hashMapOf(
-                "name" to mod.name,
-                "action" to mod.action,
-                "price" to mod.price
-            )
-        }
+        val modifierMaps = input.modifiers.map { mod -> serializeModifier(mod) }
 
         val itemMap = hashMapOf<String, Any>(
             "itemId" to input.itemId,

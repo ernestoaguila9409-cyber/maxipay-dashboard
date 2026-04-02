@@ -504,9 +504,18 @@ class BarTabsActivity : AppCompatActivity() {
                     "updatedAt" to Date()
                 )
 
-                db.runBatch { batch ->
-                    batch.set(txRef, txData)
-                    batch.update(db.collection("Orders").document(orderId), orderUpdates)
+                val batchIdForTxn = currentBatchId
+                db.runTransaction { firestoreTxn ->
+                    if (batchIdForTxn.isNotBlank()) {
+                        val batchRef = db.collection("Batches").document(batchIdForTxn)
+                        val batchSnap = firestoreTxn.get(batchRef)
+                        val counter = batchSnap.getLong("transactionCounter") ?: 0L
+                        val next = counter + 1
+                        firestoreTxn.update(batchRef, "transactionCounter", next)
+                        txData["appTransactionNumber"] = next
+                    }
+                    firestoreTxn.set(txRef, txData)
+                    firestoreTxn.update(db.collection("Orders").document(orderId), orderUpdates)
                 }.addOnSuccessListener {
                     runOnUiThread {
                         hidePreAuthLoading()

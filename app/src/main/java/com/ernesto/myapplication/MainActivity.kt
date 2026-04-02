@@ -95,14 +95,18 @@ class MainActivity : AppCompatActivity() {
             db,
             onUpdate = { modules ->
                 if (!isDestroyed) {
-                    dashboardAdapter.setModules(modules)
+                    dashboardAdapter.setModules(
+                        DashboardModule.mergeTipDashboardTile(this, modules)
+                    )
                     updatePageIndicator(dashboardPager.currentItem)
                     applyOrderTypeVisibility()
                 }
             },
             onCacheThenServer = { serverModules ->
                 if (!isDestroyed && serverModules.isNotEmpty()) {
-                    dashboardAdapter.setModules(serverModules)
+                    dashboardAdapter.setModules(
+                        DashboardModule.mergeTipDashboardTile(this, serverModules)
+                    )
                     updatePageIndicator(dashboardPager.currentItem)
                 }
             }
@@ -178,6 +182,7 @@ class MainActivity : AppCompatActivity() {
             }
             "reports" -> startActivity(Intent(this, ReportsActivity::class.java))
             "cash_flow" -> startActivity(Intent(this, CashFlowActivity::class.java))
+            "tips" -> startActivity(Intent(this, TipAdjustmentActivity::class.java))
         }
     }
 
@@ -192,7 +197,9 @@ class MainActivity : AppCompatActivity() {
     private fun refreshDashboardFromServer() {
         DashboardConfigManager.loadFromServer(db) { modules ->
             if (!isDestroyed && modules.isNotEmpty()) {
-                dashboardAdapter.setModules(modules)
+                dashboardAdapter.setModules(
+                    DashboardModule.mergeTipDashboardTile(this, modules)
+                )
                 updatePageIndicator(dashboardPager.currentItem)
             }
         }
@@ -217,7 +224,8 @@ class MainActivity : AppCompatActivity() {
                         "count" to 0,
                         "closed" to false,
                         "createdAt" to java.util.Date(),
-                        "type" to "OPEN"
+                        "type" to "OPEN",
+                        "transactionCounter" to 0
                     )
                     db.collection("Batches")
                         .document(newBatchId)
@@ -271,40 +279,44 @@ class MainActivity : AppCompatActivity() {
                         if (voided) continue
 
                         val type = doc.getString("type") ?: "SALE"
+                        if (type == "PRE_AUTH") continue
 
                         if (type == "SALE" || type == "CAPTURE") {
-                            val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
-                            var totalCents = 0L
-
-                            for (p in payments) {
-                                val map = p as? Map<*, *> ?: continue
-                                val status = (map["status"] as? String) ?: ""
-                                if (status.equals("VOIDED", ignoreCase = true)) continue
-                                val amountInCents = (map["amountInCents"] as? Number)?.toLong() ?: 0L
-                                totalCents += amountInCents
-                            }
-
-                            if (totalCents > 0L) {
-                                total += totalCents / 100.0
-                                count++
+                            // Prefer totalPaidInCents — includes tips after Tip Adjustment / Order Detail flows;
+                            // payment line amounts are not updated when tips are added.
+                            val totalPaidInCentsField = doc.getLong("totalPaidInCents")
+                            if (totalPaidInCentsField != null) {
+                                total += totalPaidInCentsField / 100.0
                             } else {
-                                val amount = doc.getDouble("amount")
-                                    ?: doc.getDouble("totalPaid")
-                                    ?: 0.0
-                                if (amount > 0.0) {
+                                val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
+                                var totalCents = 0L
+
+                                for (p in payments) {
+                                    val map = p as? Map<*, *> ?: continue
+                                    val status = (map["status"] as? String) ?: ""
+                                    if (status.equals("VOIDED", ignoreCase = true)) continue
+                                    val amountInCents = (map["amountInCents"] as? Number)?.toLong() ?: 0L
+                                    totalCents += amountInCents
+                                }
+
+                                if (totalCents > 0L) {
+                                    total += totalCents / 100.0
+                                } else {
+                                    val amount = doc.getDouble("amount")
+                                        ?: doc.getDouble("totalPaid")
+                                        ?: 0.0
                                     total += amount
-                                    count++
                                 }
                             }
                         } else if (type == "REFUND") {
                             val amount = doc.getDouble("amount") ?: 0.0
-                            if (amount > 0.0) {
-                                total -= amount
-                            }
+                            total -= amount
                         }
+
+                        count++
                     }
 
-                    val finalTotal = total
+                    val finalTotal = if (total < 0.005) 0.0 else total
                     val finalCount = count
                     runOnUiThread {
                         if (!isDestroyed) {

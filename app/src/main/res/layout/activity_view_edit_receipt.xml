@@ -46,6 +46,14 @@
                 android:padding="10dp"
                 android:background="@android:color/white"
                 android:layout_marginTop="4dp"
+                android:layout_marginBottom="4dp"/>
+
+            <TextView
+                android:id="@+id/tvBizNameLineHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textColor="#888888"
                 android:layout_marginBottom="12dp"/>
 
             <!-- Address -->
@@ -69,6 +77,14 @@
                 android:background="@android:color/white"
                 android:gravity="top"
                 android:layout_marginTop="4dp"
+                android:layout_marginBottom="4dp"/>
+
+            <TextView
+                android:id="@+id/tvAddressLineHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textColor="#888888"
                 android:layout_marginBottom="16dp"/>
 
             <!-- Divider -->

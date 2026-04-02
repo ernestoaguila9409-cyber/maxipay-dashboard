@@ -22,6 +22,7 @@ class ItemAdapter(
     private val itemList: List<ItemModel>,
     private val categoryAvailabilityMap: Map<String, List<String>> = emptyMap(),
     private val stockCountingEnabled: Boolean = true,
+    private val subcategories: List<SubcategoryModel> = emptyList(),
     private val refresh: () -> Unit
 ) : RecyclerView.Adapter<ItemAdapter.ViewHolder>() {
 
@@ -65,7 +66,7 @@ class ItemAdapter(
         val item = filteredList[position]
 
         holder.txtItemName.text = item.name
-        holder.txtItemPrice.text = "$${String.format("%.2f", item.price)}"
+        holder.txtItemPrice.text = "$${String.format("%.2f", item.getPrice("pos"))}"
 
         if (stockCountingEnabled) {
             holder.txtItemStock.visibility = View.VISIBLE
@@ -224,6 +225,24 @@ class ItemAdapter(
             layout.addView(stockInput)
         }
 
+        val itemSubs = subcategories.filter { it.categoryId == item.categoryId }
+        var selectedSubId = item.subcategoryId
+        if (itemSubs.isNotEmpty()) {
+            layout.addView(createLabel("Subcategory"))
+            val subSpinner = android.widget.Spinner(context)
+            val subNames = listOf("None") + itemSubs.map { it.name }
+            subSpinner.adapter = android.widget.ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, subNames)
+            val currentIdx = itemSubs.indexOfFirst { it.id == item.subcategoryId }
+            subSpinner.setSelection(if (currentIdx >= 0) currentIdx + 1 else 0)
+            subSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, pos: Int, id: Long) {
+                    selectedSubId = if (pos == 0) "" else itemSubs[pos - 1].id
+                }
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            }
+            layout.addView(subSpinner)
+        }
+
         val divider = View(context)
         divider.setBackgroundColor(Color.LTGRAY)
         divider.layoutParams = LinearLayout.LayoutParams(
@@ -303,6 +322,8 @@ class ItemAdapter(
                         updates["availableOrderTypes"] =
                             checkBoxes.filter { it.value.isChecked }.keys.toList()
                     }
+
+                    updates["subcategoryId"] = selectedSubId
 
                     db.collection("MenuItems")
                         .document(item.id)

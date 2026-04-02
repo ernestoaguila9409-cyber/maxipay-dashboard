@@ -61,5 +61,8 @@ data class Transaction(
     /** Tip amount in cents; set after TipAdjust API call. */
     val tipAmountInCents: Long = 0L,
     /** True after at least one successful tip adjustment. */
-    val tipAdjusted: Boolean = false
+    val tipAdjusted: Boolean = false,
+
+    /** App-level sequential transaction number, unique within a batch. */
+    val appTransactionNumber: Long = 0L
 )

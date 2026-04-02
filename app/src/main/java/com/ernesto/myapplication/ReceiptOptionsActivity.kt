@@ -245,8 +245,6 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         val rs = ReceiptSettings.load(this)
         val segs = mutableListOf<EscPosPrinter.Segment>()
 
-        val bn = rs.boldBizName;      val fn = rs.fontSizeBizName
-        val ba = rs.boldAddress;      val fa = rs.fontSizeAddress
         val bo = rs.boldOrderInfo;    val fo = rs.fontSizeOrderInfo
         val bi = rs.boldItems;        val fi = rs.fontSizeItems
         val bt = rs.boldTotals;       val ft = rs.fontSizeTotals
@@ -257,22 +255,14 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         val lwt = ReceiptSettings.lineWidthForSize(ft)
         val lwg = ReceiptSettings.lineWidthForSize(fg)
 
-        fun bizName(text: String) { segs += EscPosPrinter.Segment(text, bold = bn, fontSize = fn, centered = true) }
-        fun address(text: String) { segs += EscPosPrinter.Segment(text, bold = ba, fontSize = fa, centered = true) }
         fun orderInfo(text: String) { segs += EscPosPrinter.Segment(text, bold = bo, fontSize = fo, centered = true) }
         fun item(text: String) { segs += EscPosPrinter.Segment(text, bold = bi, fontSize = fi) }
         fun total(text: String) { segs += EscPosPrinter.Segment(text, bold = bt, fontSize = ft) }
         fun grand(text: String) { segs += EscPosPrinter.Segment(text, bold = bg, fontSize = fg) }
         fun footer(text: String) { segs += EscPosPrinter.Segment(text, bold = bf, fontSize = ff, centered = true) }
 
-        // ── Business Name ──
-        bizName(rs.businessName)
-
-        // ── Address ──
-        for (line in rs.addressText.split("\n")) address(line)
-        if (rs.showEmail && rs.email.isNotBlank()) {
-            segs += EscPosPrinter.Segment(rs.email, bold = ba, fontSize = 0, centered = true)
-        }
+        // ── Business header (wrapped to thermal width) ──
+        EscPosPrinter.appendHeaderSegments(segs, rs)
         segs += EscPosPrinter.Segment("")
 
         // ── Order Info (includes RECEIPT label) ──
@@ -322,19 +312,25 @@ class ReceiptOptionsActivity : AppCompatActivity() {
 
             @Suppress("UNCHECKED_CAST")
             val mods = doc.get("modifiers") as? List<Map<String, Any>> ?: emptyList()
-            for (mod in mods) {
-                val modName = mod["name"]?.toString() ?: continue
-                val modAction = mod["action"]?.toString() ?: "ADD"
-                val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
-                val modCents = kotlin.math.round(modPrice * 100).toLong()
-                if (modAction == "REMOVE") {
-                    item("  NO $modName")
-                } else if (modCents > 0) {
-                    item(formatLine("  + $modName", MoneyUtils.centsToDisplay(modCents), lwi))
-                } else {
-                    item("  + $modName")
+            fun addModItems(items: List<Map<String, Any>>, indent: String = "") {
+                for (mod in items) {
+                    val modName = mod["name"]?.toString() ?: continue
+                    val modAction = mod["action"]?.toString() ?: "ADD"
+                    val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
+                    val modCents = kotlin.math.round(modPrice * 100).toLong()
+                    if (modAction == "REMOVE") {
+                        item("${indent}  NO $modName")
+                    } else if (modCents > 0) {
+                        item(formatLine("${indent}  + $modName", MoneyUtils.centsToDisplay(modCents), lwi))
+                    } else {
+                        item("${indent}  + $modName")
+                    }
+                    @Suppress("UNCHECKED_CAST")
+                    val children = mod["children"] as? List<Map<String, Any>>
+                    if (children != null) addModItems(children, "$indent    ")
                 }
             }
+            addModItems(mods)
         }
         item("-".repeat(lwi))
         segs += EscPosPrinter.Segment("")

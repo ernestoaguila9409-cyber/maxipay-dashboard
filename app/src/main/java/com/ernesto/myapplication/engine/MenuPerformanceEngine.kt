@@ -223,16 +223,22 @@ class MenuPerformanceEngine(private val db: FirebaseFirestore) {
                                 val itemName = itemDoc.getString("name")
                                     ?: itemDoc.getString("itemName") ?: "Unknown"
 
-                                for (mod in mods) {
-                                    val modName = (mod["name"] as? String)?.takeIf { it.isNotBlank() } ?: continue
-                                    val action = (mod["action"] as? String) ?: "ADD"
-                                    val pricePer = (mod["price"] as? Number)?.toDouble() ?: 0.0
-                                    val extraCents = Math.round(pricePer * qty * 100)
+                                fun countMods(items: List<Map<String, Any>>) {
+                                    for (mod in items) {
+                                        val modName = (mod["name"] as? String)?.takeIf { it.isNotBlank() } ?: continue
+                                        val action = (mod["action"] as? String) ?: "ADD"
+                                        val pricePer = (mod["price"] as? Number)?.toDouble() ?: 0.0
+                                        val extraCents = Math.round(pricePer * qty * 100)
 
-                                    val key = Triple(itemName, modName, action)
-                                    val cur = byModifier[key] ?: (0L to 0)
-                                    byModifier[key] = (cur.first + extraCents) to (cur.second + qty)
+                                        val key = Triple(itemName, modName, action)
+                                        val cur = byModifier[key] ?: (0L to 0)
+                                        byModifier[key] = (cur.first + extraCents) to (cur.second + qty)
+                                        @Suppress("UNCHECKED_CAST")
+                                        val children = mod["children"] as? List<Map<String, Any>>
+                                        if (children != null) countMods(children)
+                                    }
                                 }
+                                countMods(mods)
                             }
                             if (--pending == 0) {
                                 val result = byModifier.map { (key, value) ->

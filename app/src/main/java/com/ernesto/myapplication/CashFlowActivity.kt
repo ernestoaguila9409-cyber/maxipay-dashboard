@@ -107,6 +107,10 @@ class CashFlowActivity : AppCompatActivity() {
 
         findViewById<ImageButton>(R.id.btnBack).setOnClickListener { finish() }
 
+        findViewById<MaterialButton>(R.id.btnOpenCashDrawer).setOnClickListener {
+            CashDrawerManager.showManualOpenDialog(this, currentBatchId)
+        }
+
         txtDate = findViewById(R.id.txtDate)
         txtDate.text = dateFmt.format(Date())
 
@@ -596,7 +600,9 @@ class CashFlowActivity : AppCompatActivity() {
                             type = type,
                             amountDueCents = (amount * 100).toLong(),
                             tenderedCents = 0L,
-                            changeCents = 0L
+                            changeCents = 0L,
+                            note = doc.getString("note") ?: "",
+                            userId = doc.getString("userId") ?: ""
                         )
                     )
                 }
@@ -610,7 +616,9 @@ class CashFlowActivity : AppCompatActivity() {
                             type = type,
                             amountDueCents = (amount * 100).toLong(),
                             tenderedCents = 0L,
-                            changeCents = 0L
+                            changeCents = 0L,
+                            note = doc.getString("note") ?: "",
+                            userId = doc.getString("userId") ?: ""
                         )
                     )
                 }

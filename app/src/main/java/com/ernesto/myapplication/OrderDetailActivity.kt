@@ -1842,13 +1842,7 @@ class OrderDetailActivity : AppCompatActivity() {
         val lwt = ReceiptSettings.lineWidthForSize(rs.fontSizeTotals)
         val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
 
-        segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
-        for (line in rs.addressText.split("\n")) {
-            segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
-        }
-        if (rs.showEmail && rs.email.isNotBlank()) {
-            segs += EscPosPrinter.Segment(rs.email, bold = rs.boldAddress, fontSize = 0, centered = true)
-        }
+        EscPosPrinter.appendHeaderSegments(segs, rs)
         segs += EscPosPrinter.Segment("")
         segs += EscPosPrinter.Segment("RECEIPT", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         segs += EscPosPrinter.Segment("", fontSize = rs.fontSizeOrderInfo, centered = true)
@@ -1885,17 +1879,23 @@ class OrderDetailActivity : AppCompatActivity() {
                 segs += EscPosPrinter.Segment(itemLabel, bold = rs.boldItems, fontSize = rs.fontSizeItems)
             }
             val mods = doc.get("modifiers") as? List<Map<String, Any>> ?: emptyList()
-            for (mod in mods) {
-                val modName = mod["name"]?.toString() ?: continue
-                val modAction = mod["action"]?.toString() ?: "ADD"
-                val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
-                val modCents = kotlin.math.round(modPrice * 100).toLong()
-                when {
-                    modAction == "REMOVE" -> segs += EscPosPrinter.Segment("  NO $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
-                    modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
-                    else -> segs += EscPosPrinter.Segment("  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+            fun addModSegs(items: List<Map<String, Any>>, indent: String = "") {
+                for (mod in items) {
+                    val modName = mod["name"]?.toString() ?: continue
+                    val modAction = mod["action"]?.toString() ?: "ADD"
+                    val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
+                    val modCents = kotlin.math.round(modPrice * 100).toLong()
+                    when {
+                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("${indent}  NO $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("${indent}  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        else -> segs += EscPosPrinter.Segment("${indent}  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                    }
+                    @Suppress("UNCHECKED_CAST")
+                    val children = mod["children"] as? List<Map<String, Any>>
+                    if (children != null) addModSegs(children, "$indent    ")
                 }
             }
+            addModSegs(mods)
             val lineKey = doc.id
             val itemDiscounts = appliedDiscounts.filter { ad ->
                 val lk = ad["lineKey"]?.toString()?.trim().orEmpty()
@@ -2039,10 +2039,7 @@ class OrderDetailActivity : AppCompatActivity() {
         val lwt = ReceiptSettings.lineWidthForSize(rs.fontSizeTotals)
         val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
 
-        segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
-        for (line in rs.addressText.split("\n")) {
-            segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
-        }
+        EscPosPrinter.appendHeaderSegments(segs, rs, includeEmail = false)
         segs += EscPosPrinter.Segment("")
         segs += EscPosPrinter.Segment("REFUND RECEIPT", bold = true, fontSize = 2, centered = true)
         segs += EscPosPrinter.Segment("")
@@ -2205,10 +2202,7 @@ class OrderDetailActivity : AppCompatActivity() {
         val segs = mutableListOf<EscPosPrinter.Segment>()
         val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
 
-        segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
-        for (line in rs.addressText.split("\n")) {
-            segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
-        }
+        EscPosPrinter.appendHeaderSegments(segs, rs, includeEmail = false)
         segs += EscPosPrinter.Segment("")
         segs += EscPosPrinter.Segment("REFUND RECEIPT", bold = true, fontSize = 2, centered = true)
         segs += EscPosPrinter.Segment("")
@@ -2272,10 +2266,7 @@ class OrderDetailActivity : AppCompatActivity() {
         val lwt = ReceiptSettings.lineWidthForSize(rs.fontSizeTotals)
         val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
 
-        segs += EscPosPrinter.Segment(rs.businessName, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
-        for (line in rs.addressText.split("\n")) {
-            segs += EscPosPrinter.Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
-        }
+        EscPosPrinter.appendHeaderSegments(segs, rs, includeEmail = false)
         segs += EscPosPrinter.Segment("")
         segs += EscPosPrinter.Segment("VOID RECEIPT", bold = true, fontSize = 2, centered = true)
         segs += EscPosPrinter.Segment("")
@@ -2313,17 +2304,23 @@ class OrderDetailActivity : AppCompatActivity() {
                 segs += EscPosPrinter.Segment(itemLabel, bold = rs.boldItems, fontSize = rs.fontSizeItems)
             }
             val mods = doc.get("modifiers") as? List<Map<String, Any>> ?: emptyList()
-            for (mod in mods) {
-                val modName = mod["name"]?.toString() ?: continue
-                val modAction = mod["action"]?.toString() ?: "ADD"
-                val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
-                val modCents = kotlin.math.round(modPrice * 100).toLong()
-                when {
-                    modAction == "REMOVE" -> segs += EscPosPrinter.Segment("  NO $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
-                    modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
-                    else -> segs += EscPosPrinter.Segment("  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+            fun addModSegs(items: List<Map<String, Any>>, indent: String = "") {
+                for (mod in items) {
+                    val modName = mod["name"]?.toString() ?: continue
+                    val modAction = mod["action"]?.toString() ?: "ADD"
+                    val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
+                    val modCents = kotlin.math.round(modPrice * 100).toLong()
+                    when {
+                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("${indent}  NO $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("${indent}  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        else -> segs += EscPosPrinter.Segment("${indent}  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                    }
+                    @Suppress("UNCHECKED_CAST")
+                    val children = mod["children"] as? List<Map<String, Any>>
+                    if (children != null) addModSegs(children, "$indent    ")
                 }
             }
+            addModSegs(mods)
         }
         segs += EscPosPrinter.Segment("-".repeat(lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
         segs += EscPosPrinter.Segment("")
@@ -2446,24 +2443,31 @@ class OrderDetailActivity : AppCompatActivity() {
                         val batchRef = db.collection("Batches").document(openBatchId)
 
                         val orderNumber = orderDoc.getLong("orderNumber") ?: 0L
-                        val refundDocData = buildMap<String, Any> {
-                            put("orderId", orderId)
-                            put("orderNumber", orderNumber)
-                            put("type", "REFUND")
-                            put("amount", amountInCents / 100.0)
-                            put("amountInCents", amountInCents)
-                            put("originalReferenceId", originalTransactionId)
-                            put("createdAt", Date())
-                            put("batchId", openBatchId)
-                            put("voided", false)
-                            put("settled", false)
-                            put("refundedBy", employeeName)
-                            put("paymentType", paymentType)
-                            refundedItemName?.takeIf { it.isNotBlank() }?.let { put("refundedItemName", it) }
-                            refundedLineKey?.takeIf { it.isNotBlank() }?.let { put("refundedLineKey", it) }
-                        }
-                        db.collection("Transactions").document(newRefundTxRef.id).set(refundDocData)
-                            .addOnSuccessListener {
+                        val refundDocData = mutableMapOf<String, Any>(
+                            "orderId" to orderId,
+                            "orderNumber" to orderNumber,
+                            "type" to "REFUND",
+                            "amount" to amountInCents / 100.0,
+                            "amountInCents" to amountInCents,
+                            "originalReferenceId" to originalTransactionId,
+                            "createdAt" to Date(),
+                            "batchId" to openBatchId,
+                            "voided" to false,
+                            "settled" to false,
+                            "refundedBy" to employeeName,
+                            "paymentType" to paymentType
+                        )
+                        refundedItemName?.takeIf { it.isNotBlank() }?.let { refundDocData["refundedItemName"] = it }
+                        refundedLineKey?.takeIf { it.isNotBlank() }?.let { refundDocData["refundedLineKey"] = it }
+
+                        db.runTransaction { firestoreTxn ->
+                            val batchSnap2 = firestoreTxn.get(batchRef)
+                            val counter = batchSnap2.getLong("transactionCounter") ?: 0L
+                            val next = counter + 1
+                            firestoreTxn.update(batchRef, "transactionCounter", next)
+                            refundDocData["appTransactionNumber"] = next
+                            firestoreTxn.set(newRefundTxRef, refundDocData)
+                        }.addOnSuccessListener {
                                 val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
                                 val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
                                 val newTotalRefunded = currentRefunded + amountInCents

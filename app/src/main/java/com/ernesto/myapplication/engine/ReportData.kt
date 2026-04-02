@@ -240,16 +240,18 @@ object ReportBuilder {
 
         if (items.isNotEmpty()) {
             val rows = mutableListOf<ReportRow>()
-            for (r in items) {
-                rows += ReportRow(r.itemName, "${r.quantitySold} sold  ${fmtCents(r.totalRevenueCents)}")
+            val top3 = items.sortedByDescending { it.quantitySold }.take(3)
+            for ((index, r) in top3.withIndex()) {
+                val medal = when (index) { 0 -> "#1  "; 1 -> "#2  "; 2 -> "#3  "; else -> "" }
+                rows += ReportRow("$medal${r.itemName}", "${r.quantitySold} sold  ${fmtCents(r.totalRevenueCents)}", isBold = index == 0)
             }
             rows += divider()
             rows += total(
-                "Total",
+                "Total (all items)",
                 "${items.sumOf { it.quantitySold }} sold  ${fmtCents(items.sumOf { it.totalRevenueCents })}",
                 "#2E7D32"
             )
-            sections += ReportSection("Item Sales", rows)
+            sections += ReportSection("Top Selling Items", rows)
         }
 
         if (categories.isNotEmpty()) {

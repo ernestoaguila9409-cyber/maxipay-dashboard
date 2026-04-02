@@ -57,6 +57,61 @@ object EscPosPrinter {
         val centered: Boolean = false
     )
 
+    /**
+     * Business name, address, and optional email — each wrapped to thermal line width
+     * (same as Receipt Settings preview and [wrapThermalText]).
+     */
+    fun appendHeaderSegments(
+        segs: MutableList<Segment>,
+        rs: ReceiptSettings,
+        includeEmail: Boolean = true
+    ) {
+        val bizW = ReceiptSettings.lineWidthForSize(rs.fontSizeBizName)
+        for (line in wrapThermalText(rs.businessName, bizW)) {
+            segs += Segment(line, bold = rs.boldBizName, fontSize = rs.fontSizeBizName, centered = true)
+        }
+        val addrW = ReceiptSettings.lineWidthForSize(rs.fontSizeAddress)
+        for (line in wrapThermalText(rs.addressText, addrW)) {
+            segs += Segment(line, bold = rs.boldAddress, fontSize = rs.fontSizeAddress, centered = true)
+        }
+        if (includeEmail && rs.showEmail && rs.email.isNotBlank()) {
+            for (line in wrapThermalText(rs.email.trim(), LINE_WIDTH)) {
+                segs += Segment(line, bold = rs.boldAddress, fontSize = 0, centered = true)
+            }
+        }
+    }
+
+    // ── Cash drawer ────────────────────────────────────────────────
+
+    private val DRAWER_KICK = byteArrayOf(0x1B, 0x70, 0x00, 0x19, 0xFA.toByte())
+
+    @SuppressLint("MissingPermission")
+    fun openCashDrawer(context: Context) {
+        Log.d(TAG, "Opening cash drawer via Bluetooth printer")
+        Thread {
+            var socket: BluetoothSocket? = null
+            try {
+                val adapter = BluetoothAdapter.getDefaultAdapter()
+                if (adapter == null || !adapter.isEnabled) {
+                    Log.w(TAG, "Bluetooth not available")
+                    return@Thread
+                }
+                val device = adapter.getRemoteDevice(LANDI_BT_ADDRESS)
+                socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+                socket.connect()
+                socket.outputStream.apply {
+                    write(DRAWER_KICK)
+                    flush()
+                }
+                Log.d(TAG, "Cash drawer opened successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to open cash drawer: ${e.message}", e)
+            } finally {
+                try { socket?.close() } catch (_: Exception) {}
+            }
+        }.start()
+    }
+
     // ── Public API ────────────────────────────────────────────────
 
     @SuppressLint("MissingPermission")
@@ -131,8 +186,6 @@ object EscPosPrinter {
         val rs = settings
         val segs = mutableListOf<Segment>()
 
-        val bn = rs.boldBizName;      val fn = rs.fontSizeBizName
-        val ba = rs.boldAddress;      val fa = rs.fontSizeAddress
         val bo = rs.boldOrderInfo;    val fo = rs.fontSizeOrderInfo
         val bi = rs.boldItems;        val fi = rs.fontSizeItems
         val bt = rs.boldTotals;       val ft = rs.fontSizeTotals
@@ -143,15 +196,7 @@ object EscPosPrinter {
         val lwt = ReceiptSettings.lineWidthForSize(ft)
         val lwg = ReceiptSettings.lineWidthForSize(fg)
 
-        segs += Segment(rs.businessName, bold = bn, fontSize = fn, centered = true)
-
-        for (line in rs.addressText.split("\n")) {
-            segs += Segment(line, bold = ba, fontSize = fa, centered = true)
-        }
-
-        if (rs.showEmail && rs.email.isNotBlank()) {
-            segs += Segment(rs.email, bold = ba, fontSize = 0, centered = true)
-        }
+        appendHeaderSegments(segs, rs)
 
         segs += Segment("")
 
