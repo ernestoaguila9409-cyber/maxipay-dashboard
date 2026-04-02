@@ -606,7 +606,7 @@ export default function MenuPage() {
     const menuPrices: Record<string, string> = {};
     for (const m of menuEntities) {
       menuIdSel[m.id] = item.menuIds.includes(m.id);
-      if (item.menuIds.includes(m.id) && item.prices[m.id] != null) {
+      if (item.prices[m.id] != null) {
         menuPrices[m.id] = item.prices[m.id].toFixed(2);
       }
     }
@@ -639,14 +639,18 @@ export default function MenuPage() {
   const handleSave = async () => {
     if (!editTarget) return;
 
-    const posPrice = parseFloat(editPosPrice);
-    if (isNaN(posPrice) || posPrice < 0) return;
-
-    const prices: Record<string, number> = { default: posPrice };
+    const prices: Record<string, number> = {};
     for (const [menuId, val] of Object.entries(editMenuPrices)) {
       const num = parseFloat(val);
       if (!isNaN(num) && num >= 0) prices[menuId] = num;
     }
+
+    const parsedPos = parseFloat(editPosPrice);
+    const firstMenuPrice = Object.values(prices)[0];
+    const posPrice = (!isNaN(parsedPos) && parsedPos >= 0) ? parsedPos : (firstMenuPrice ?? -1);
+    if (posPrice < 0) return;
+
+    prices.default = posPrice;
     const price = posPrice;
 
     const update: Record<string, unknown> = { prices, price };
@@ -656,9 +660,10 @@ export default function MenuPage() {
       online: posPrice,
     };
 
-    const selectedMenuIds = Object.entries(editMenuIds)
-      .filter(([, v]) => v)
-      .map(([k]) => k);
+    const scheduledMenuIds = editScheduledMenus.map((m) => m.id);
+    const selectedMenuIds = editCategoryHasSchedule
+      ? scheduledMenuIds
+      : Object.entries(editMenuIds).filter(([, v]) => v).map(([k]) => k);
     update.menuIds = selectedMenuIds;
     if (selectedMenuIds.length > 0) {
       update.menuId = selectedMenuIds[0];
@@ -817,14 +822,18 @@ export default function MenuPage() {
     const name = addName.trim();
     if (!name) return;
 
-    const posPrice = parseFloat(addPosPrice);
-    if (isNaN(posPrice) || posPrice < 0) return;
-
-    const prices: Record<string, number> = { default: posPrice };
+    const prices: Record<string, number> = {};
     for (const [menuId, val] of Object.entries(addMenuPrices)) {
       const num = parseFloat(val);
       if (!isNaN(num) && num >= 0) prices[menuId] = num;
     }
+
+    const parsedPos = parseFloat(addPosPrice);
+    const firstMenuPrice = Object.values(prices)[0];
+    const posPrice = (!isNaN(parsedPos) && parsedPos >= 0) ? parsedPos : (firstMenuPrice ?? -1);
+    if (posPrice < 0) return;
+
+    prices.default = posPrice;
     const price = posPrice;
 
     const stock = stockCountingEnabled ? parseInt(addStock, 10) : 9999;
@@ -949,9 +958,15 @@ export default function MenuPage() {
 
   const addSelectedCategory = categories.find((c) => c.id === addCategoryId);
   const addCategoryHasSchedule = (addSelectedCategory?.scheduleIds.length ?? 0) > 0;
+  const addScheduledMenus = addCategoryHasSchedule
+    ? menuEntities.filter((m) => m.isActive && m.scheduleIds.some((sid) => addSelectedCategory!.scheduleIds.includes(sid)))
+    : [];
 
   const editSelectedCategory = editTarget ? categories.find((c) => c.id === editTarget.categoryId) : null;
   const editCategoryHasSchedule = (editSelectedCategory?.scheduleIds.length ?? 0) > 0;
+  const editScheduledMenus = editCategoryHasSchedule
+    ? menuEntities.filter((m) => m.isActive && m.scheduleIds.some((sid) => editSelectedCategory!.scheduleIds.includes(sid)))
+    : [];
 
   return (
     <>
@@ -2000,6 +2015,16 @@ export default function MenuPage() {
                       const cat = categories.find((c) => c.id === catId);
                       if (cat && cat.scheduleIds.length > 0) {
                         setAddMenuId("");
+                        const matching: Record<string, boolean> = {};
+                        for (const m of menuEntities) {
+                          if (m.isActive && m.scheduleIds.some((sid) => cat.scheduleIds.includes(sid))) {
+                            matching[m.id] = true;
+                          }
+                        }
+                        setAddMenuIds(matching);
+                      } else {
+                        setAddMenuIds({});
+                        setAddMenuPrices({});
                       }
                     }}
                     className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
@@ -2014,12 +2039,36 @@ export default function MenuPage() {
                 </div>
 
                 {addCategoryHasSchedule && (
-                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
-                    <Clock size={14} className="text-blue-500 shrink-0" />
-                    <p className="text-xs text-blue-600">
-                      This category is scheduled ({addSelectedCategory!.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}). Items will follow the category&apos;s schedule automatically.
-                    </p>
-                  </div>
+                  <>
+                    <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
+                      <Clock size={14} className="text-blue-500 shrink-0" />
+                      <p className="text-xs text-blue-600">
+                        This category is scheduled ({addSelectedCategory!.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}). Items will follow the category&apos;s schedule automatically.
+                      </p>
+                    </div>
+                    {addScheduledMenus.length > 0 && (
+                      <div className="flex flex-col gap-3">
+                        {addScheduledMenus.map((m) => (
+                          <div key={m.id}>
+                            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                              {m.name} Price ($)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={addMenuPrices[m.id] ?? ""}
+                              onChange={(e) =>
+                                setAddMenuPrices((prev) => ({ ...prev, [m.id]: e.target.value }))
+                              }
+                              placeholder="0.00"
+                              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {!addCategoryHasSchedule && menuEntities.length > 0 && (
@@ -2281,12 +2330,35 @@ export default function MenuPage() {
 
               <div className="space-y-4">
                 {editCategoryHasSchedule ? (
-                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
-                    <Clock size={14} className="text-blue-500 shrink-0" />
-                    <p className="text-xs text-blue-600">
-                      This category is scheduled ({editSelectedCategory!.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}). Items follow the category&apos;s schedule automatically.
-                    </p>
-                  </div>
+                  <>
+                    <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
+                      <Clock size={14} className="text-blue-500 shrink-0" />
+                      <p className="text-xs text-blue-600">
+                        This category is scheduled ({editSelectedCategory!.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}). Items follow the category&apos;s schedule automatically.
+                      </p>
+                    </div>
+                    {editScheduledMenus.length > 0 && (
+                      <div className="flex flex-col gap-3">
+                        {editScheduledMenus.map((m) => (
+                          <div key={m.id}>
+                            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                              {m.name} Price ($)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={editMenuPrices[m.id] ?? ""}
+                              onChange={(e) =>
+                                setEditMenuPrices((prev) => ({ ...prev, [m.id]: e.target.value }))
+                              }
+                              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 ) : menuEntities.length > 0 ? (
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">
