@@ -461,12 +461,14 @@ export async function importMenuToFirestore(
       batch.set(ref, {
         name: group.name,
         required: false,
+        minSelection: 0,
         maxSelection: group.options.length || 1,
         groupType: "ADD",
         options: group.options.map((opt) => ({
           id: opt.id,
           name: opt.name,
           price: opt.price,
+          triggersModifierGroupIds: [],
         })),
       });
       log("info", `Created modifier group "${group.name}" (${group.id}) with ${group.options.length} options`);
@@ -612,11 +614,15 @@ export interface ScannedModifierOptionRow {
   id: string;
   name: string;
   price: number;
+  triggersModifierGroupNames: string[];
 }
 
 export interface ScannedModifierGroupRow {
   id: string;
   name: string;
+  required: boolean;
+  minSelection: number;
+  maxSelection: number;
   options: ScannedModifierOptionRow[];
 }
 
@@ -667,7 +673,10 @@ export function prepareScannedMenuForFirestore(rows: ScannedMenuCategoryRow[]) {
   const modifierGroupDocs: Array<{
     clientId: string;
     name: string;
-    options: Array<{ clientId: string; name: string; price: number }>;
+    required: boolean;
+    minSelection: number;
+    maxSelection: number;
+    options: Array<{ clientId: string; name: string; price: number; triggersModifierGroupNames: string[] }>;
   }> = [];
 
   const seenModifierGroups = new Map<string, string>();
@@ -692,12 +701,16 @@ export function prepareScannedMenuForFirestore(rows: ScannedMenuCategoryRow[]) {
         modifierGroupDocs.push({
           clientId: mg.id,
           name: mgName,
+          required: mg.required ?? false,
+          minSelection: mg.minSelection ?? (mg.required ? 1 : 0),
+          maxSelection: mg.maxSelection ?? 1,
           options: mg.options
             .filter((o) => o.name.trim())
             .map((o) => ({
               clientId: o.id,
               name: o.name.trim(),
               price: Math.max(0, o.price),
+              triggersModifierGroupNames: o.triggersModifierGroupNames ?? [],
             })),
         });
       }
@@ -835,26 +848,57 @@ export async function importScannedMenuToFirestore(
   batch = writeBatch(db);
   count = 0;
 
-  // 3 ─ Modifier groups
+  // 3 ─ Modifier groups (first pass: create docs and collect name→ID map)
   onProgress?.({ stage: "Creating modifier groups…", current: 2, total: 4 });
   let newModifierGroups = 0;
   let totalModifierOptions = 0;
+
+  const mgNameToFirestoreId = new Map<string, string>();
   for (const mg of prepared.modifierGroupDocs) {
     const ref = doc(collection(db, "ModifierGroups"));
     batch.set(ref, {
       name: mg.name,
-      required: false,
-      maxSelection: mg.options.length || 1,
+      required: mg.required,
+      minSelection: mg.minSelection,
+      maxSelection: mg.maxSelection,
       groupType: "ADD",
       options: mg.options.map((opt) => ({
         id: opt.clientId,
         name: opt.name,
         price: opt.price,
+        triggersModifierGroupIds: [],
       })),
     });
     mgClientToFirestore.set(mg.clientId, ref.id);
+    mgNameToFirestoreId.set(mg.name.toLowerCase(), ref.id);
     newModifierGroups++;
     totalModifierOptions += mg.options.length;
+    count++;
+    await commitIfNeeded();
+  }
+  if (count > 0) await batch.commit();
+  batch = writeBatch(db);
+  count = 0;
+
+  // 3b ─ Second pass: resolve triggersModifierGroupNames → triggersModifierGroupIds
+  for (const mg of prepared.modifierGroupDocs) {
+    const firestoreId = mgClientToFirestore.get(mg.clientId);
+    if (!firestoreId) continue;
+    const needsUpdate = mg.options.some((o) => o.triggersModifierGroupNames.length > 0);
+    if (!needsUpdate) continue;
+    const resolvedOptions = mg.options.map((opt) => {
+      const triggerIds = opt.triggersModifierGroupNames
+        .map((n) => mgNameToFirestoreId.get(n.toLowerCase()))
+        .filter((id): id is string => !!id);
+      return {
+        id: opt.clientId,
+        name: opt.name,
+        price: opt.price,
+        triggersModifierGroupIds: triggerIds,
+      };
+    });
+    const ref = doc(db, "ModifierGroups", firestoreId);
+    batch.update(ref, { options: resolvedOptions });
     count++;
     await commitIfNeeded();
   }

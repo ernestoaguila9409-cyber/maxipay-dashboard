@@ -886,7 +886,23 @@ export default function MenuPage() {
     if (!deleteCategoryTarget) return;
     setDeletingCategory(true);
     try {
-      await deleteDoc(doc(db, "Categories", deleteCategoryTarget.id));
+      const batch = writeBatch(db);
+
+      batch.delete(doc(db, "Categories", deleteCategoryTarget.id));
+
+      const itemSnap = await getDocs(
+        query(collection(db, "MenuItems"), where("categoryId", "==", deleteCategoryTarget.id))
+      );
+      itemSnap.forEach((d) => batch.delete(d.ref));
+
+      const subSnap = await getDocs(
+        query(collection(db, "subcategories"), where("categoryId", "==", deleteCategoryTarget.id))
+      );
+      subSnap.forEach((d) => batch.delete(d.ref));
+
+      await batch.commit();
+
+      if (activeCategory === deleteCategoryTarget.id) setActiveCategory(null);
       setDeleteCategoryTarget(null);
     } catch (err) {
       console.error("Failed to delete category:", err);
@@ -2128,8 +2144,7 @@ export default function MenuPage() {
                           {deleteCategoryTarget.name}
                         </strong>{" "}
                         contains <strong>{itemCount} item{itemCount !== 1 ? "s" : ""}</strong>.
-                        They will become uncategorized. Are you sure you want to delete this
-                        category?
+                        All items and subcategories will be permanently deleted. Are you sure?
                       </>
                     ) : (
                       <>

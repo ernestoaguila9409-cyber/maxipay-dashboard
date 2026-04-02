@@ -69,6 +69,7 @@ export default function ModifiersPage() {
   const [optionName, setOptionName] = useState("");
   const [optionPrice, setOptionPrice] = useState("");
   const [optionTriggerGroupIds, setOptionTriggerGroupIds] = useState<Set<string>>(new Set());
+  const [optionNameError, setOptionNameError] = useState("");
   const [optionSaving, setOptionSaving] = useState(false);
 
   const [deleteGroupTarget, setDeleteGroupTarget] = useState<ModifierGroup | null>(null);
@@ -84,6 +85,9 @@ export default function ModifiersPage() {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   const [bulkDeleteGroupsConfirm, setBulkDeleteGroupsConfirm] = useState(false);
   const [bulkDeletingGroups, setBulkDeletingGroups] = useState(false);
+
+  const [cleanupRunning, setCleanupRunning] = useState(false);
+  const [cleanupDismissed, setCleanupDismissed] = useState(false);
 
   useEffect(() => {
     selectedGroupIdRef.current = selectedGroup?.id ?? null;
@@ -221,10 +225,28 @@ export default function ModifiersPage() {
 
   // ── Option CRUD (embedded in group document) ──
 
+  const GROUP_LIKE_PATTERN = /^(choice of|pick a|select|choose)\s+/i;
+  const validateOptionName = (raw: string): string => {
+    const name = raw.trim();
+    if (!name) return "";
+    if (name.includes(":") && name.split(":")[1].includes(",")) {
+      return 'This looks like a modifier group (contains ":"). Create it as a separate group instead.';
+    }
+    if (GROUP_LIKE_PATTERN.test(name)) {
+      return 'This looks like a modifier group header. Create it as a separate group instead.';
+    }
+    const commas = (name.match(/,/g) || []).length;
+    if (commas >= 2) {
+      return "Options should be single items. Add each choice as a separate option.";
+    }
+    return "";
+  };
+
   const openAddOption = () => {
     setEditingOption(null);
     setOptionName("");
     setOptionPrice("");
+    setOptionNameError("");
     setOptionTriggerGroupIds(new Set());
     setOptionModalOpen(true);
   };
@@ -233,6 +255,7 @@ export default function ModifiersPage() {
     setEditingOption(o);
     setOptionName(o.name);
     setOptionPrice(o.price.toFixed(2));
+    setOptionNameError("");
     setOptionTriggerGroupIds(new Set(o.triggersModifierGroupIds));
     setOptionModalOpen(true);
   };
@@ -241,6 +264,8 @@ export default function ModifiersPage() {
     if (!selectedGroup) return;
     const name = optionName.trim();
     if (!name) return;
+    const err = validateOptionName(name);
+    if (err) { setOptionNameError(err); return; }
     const price = selectedGroup.groupType === "REMOVE" ? 0 : parseFloat(optionPrice) || 0;
     const triggersModifierGroupIds = Array.from(optionTriggerGroupIds);
 
@@ -389,10 +414,103 @@ export default function ModifiersPage() {
     }
   };
 
+  // ── Detect malformed options that look like groups ──
+  const INLINE_GROUP_RE = /^.+:\s*.+,\s*.+/;
+  const malformedOptions = !cleanupDismissed ? groups.flatMap((g) =>
+    g.options
+      .filter((o) => INLINE_GROUP_RE.test(o.name) || GROUP_LIKE_PATTERN.test(o.name))
+      .map((o) => ({ group: g, option: o }))
+  ) : [];
+
+  const handleCleanup = async () => {
+    if (malformedOptions.length === 0) return;
+    setCleanupRunning(true);
+    try {
+      const batch = writeBatch(db);
+
+      for (const { group, option } of malformedOptions) {
+        const colonIdx = option.name.indexOf(":");
+        let newGroupName: string;
+        let newOptions: { id: string; name: string; price: number; triggersModifierGroupIds: string[] }[];
+
+        if (colonIdx !== -1) {
+          newGroupName = option.name.slice(0, colonIdx).trim();
+          const right = option.name.slice(colonIdx + 1).trim();
+          const parts = right.split(",").map((s) => s.trim()).filter(Boolean);
+          newOptions = parts.map((name) => ({
+            id: `opt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            name,
+            price: 0,
+            triggersModifierGroupIds: [],
+          }));
+        } else {
+          newGroupName = option.name.trim();
+          newOptions = [];
+        }
+
+        const newGroupRef = doc(collection(db, "ModifierGroups"));
+        batch.set(newGroupRef, {
+          name: newGroupName,
+          required: true,
+          minSelection: 1,
+          maxSelection: 1,
+          groupType: "ADD",
+          options: newOptions,
+        });
+
+        const remaining = group.options.filter((o) => o.id !== option.id);
+        batch.update(doc(db, "ModifierGroups", group.id), { options: remaining });
+      }
+
+      await batch.commit();
+      setCleanupDismissed(true);
+    } catch (err) {
+      console.error("Cleanup failed:", err);
+    } finally {
+      setCleanupRunning(false);
+    }
+  };
+
   return (
     <>
       <Header title="Modifiers" />
       <div className="p-6 h-[calc(100vh-64px)] flex flex-col">
+        {/* ── Malformed data cleanup banner ── */}
+        {malformedOptions.length > 0 && !loading && (
+          <div className="mb-4 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-3">
+            <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-amber-800">
+                {malformedOptions.length} option{malformedOptions.length !== 1 ? "s" : ""} look{malformedOptions.length === 1 ? "s" : ""} like modifier groups
+              </p>
+              <p className="text-xs text-amber-600 mt-0.5">
+                {malformedOptions.slice(0, 3).map((m) => `"${m.option.name}"`).join(", ")}
+                {malformedOptions.length > 3 ? ` and ${malformedOptions.length - 3} more` : ""}
+                — these should be separate modifier groups with their own options.
+              </p>
+              <div className="flex items-center gap-2 mt-2">
+                <button
+                  onClick={handleCleanup}
+                  disabled={cleanupRunning}
+                  className="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {cleanupRunning ? (
+                    <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Fixing…</>
+                  ) : (
+                    "Auto-fix: Split into Groups"
+                  )}
+                </button>
+                <button
+                  onClick={() => setCleanupDismissed(true)}
+                  className="px-3 py-1.5 rounded-lg border border-amber-300 text-amber-700 text-xs font-medium hover:bg-amber-100 transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex items-center justify-center flex-1">
             <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin" />
@@ -956,10 +1074,23 @@ export default function ModifiersPage() {
                   <input
                     type="text"
                     value={optionName}
-                    onChange={(e) => setOptionName(e.target.value)}
+                    onChange={(e) => {
+                      setOptionName(e.target.value);
+                      if (optionNameError) setOptionNameError(validateOptionName(e.target.value));
+                    }}
                     placeholder="e.g. Small, Medium, Large"
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                    className={`w-full px-3 py-2.5 rounded-xl border text-sm text-slate-800 focus:outline-none focus:ring-2 ${
+                      optionNameError
+                        ? "border-red-300 focus:border-red-400 focus:ring-red-400/20"
+                        : "border-slate-200 focus:border-blue-400 focus:ring-blue-400/20"
+                    }`}
                   />
+                  {optionNameError && (
+                    <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
+                      <AlertTriangle size={12} />
+                      {optionNameError}
+                    </p>
+                  )}
                 </div>
 
                 {selectedGroup.groupType !== "REMOVE" && (
@@ -1036,7 +1167,7 @@ export default function ModifiersPage() {
                 </button>
                 <button
                   onClick={handleSaveOption}
-                  disabled={optionSaving || !optionName.trim()}
+                  disabled={optionSaving || !optionName.trim() || !!optionNameError}
                   className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {optionSaving ? (

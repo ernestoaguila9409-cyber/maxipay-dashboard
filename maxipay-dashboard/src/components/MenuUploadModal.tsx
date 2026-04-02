@@ -72,11 +72,15 @@ function assignModifiers(
   return mgs.map((mg) => ({
     id: crypto.randomUUID(),
     name: mg.name,
+    required: mg.required ?? false,
+    minSelection: mg.minSelection ?? (mg.required ? 1 : 0),
+    maxSelection: mg.maxSelection ?? 1,
     options: mg.options.map(
       (opt): ScannedModifierOptionRow => ({
         id: crypto.randomUUID(),
         name: opt.name,
         price: opt.price,
+        triggersModifierGroupNames: opt.triggersModifierGroupNames ?? [],
       })
     ),
   }));

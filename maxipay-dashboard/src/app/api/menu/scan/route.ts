@@ -29,8 +29,15 @@ Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
               "modifierGroups": [
                 {
                   "name": "string",
+                  "required": boolean,
+                  "minSelection": number,
+                  "maxSelection": number,
                   "options": [
-                    { "name": "string", "price": number }
+                    {
+                      "name": "string",
+                      "price": number,
+                      "triggersModifierGroupNames": ["string"]
+                    }
                   ]
                 }
               ]
@@ -46,8 +53,15 @@ Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
           "modifierGroups": [
             {
               "name": "string",
+              "required": boolean,
+              "minSelection": number,
+              "maxSelection": number,
               "options": [
-                { "name": "string", "price": number }
+                {
+                  "name": "string",
+                  "price": number,
+                  "triggersModifierGroupNames": ["string"]
+                }
               ]
             }
           ]
@@ -66,12 +80,24 @@ Subcategory detection:
 - Place items under subcategories when applicable.
 - If no subcategories are detected for a category, leave subcategories as an empty array and place items directly in the category items array.
 
-Modifier detection:
-- Identify modifier groups such as: Choose size, Add-ons, Extras, Combo options, Toppings, Sides, Dressings.
-- Identify modifier options such as: Small, Medium, Large, Add Bacon (+2), Extra Cheese (+1).
-- Group related options under the correct modifier group.
-- Extract price differences as numeric values. If no extra price is listed for an option, default to 0.
-- If no modifiers are detected for an item, use an empty array for modifierGroups.
+CRITICAL modifier rules — STRICT separation between groups and options:
+- A "modifier group" is a CONTAINER (e.g. "Add-ons", "Choice of Side", "Choose a Drink", "Toppings").
+- A "modifier option" is a SINGLE selectable item (e.g. "Add Bacon", "Fries", "Coke", "Small").
+- NEVER put a group name as an option. NEVER flatten "Choice of Side: Fries, Onion Rings" into a single option string.
+- Each option name must be a SINGLE item — never a comma-separated list.
+
+Nested / triggered modifiers:
+- When an option triggers additional required choices (e.g. "Make it Combo" triggers "Choice of Side" and "Choice of Drink"):
+  1. "Make it Combo" is an OPTION in its parent group (e.g. "Add-ons") with its upcharge price.
+  2. "Choice of Side" and "Choice of Drink" are SEPARATE modifier groups on the SAME item.
+  3. Set triggersModifierGroupNames on "Make it Combo" to ["Choice of Side", "Choice of Drink"].
+  4. Set required: true, minSelection: 1, maxSelection: 1 on those triggered groups.
+- If an option does NOT trigger other groups, set triggersModifierGroupNames to [].
+
+Modifier group fields:
+- required: true if the customer MUST pick from this group; false for optional add-ons.
+- minSelection: minimum picks required (0 for optional, 1+ for required).
+- maxSelection: maximum picks allowed (1 for single-choice, higher for multi-select).
 
 Price rules:
 - Extract prices as numbers only (no currency symbols).
