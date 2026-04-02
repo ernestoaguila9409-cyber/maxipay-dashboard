@@ -153,6 +153,7 @@ export default function MenuPage() {
   const [addPosPrice, setAddPosPrice] = useState("");
   const [addOnlinePrice, setAddOnlinePrice] = useState("");
   const [addChannelOnline, setAddChannelOnline] = useState(false);
+  const [addMenuPrices, setAddMenuPrices] = useState<Record<string, string>>({});
   const [menuEntities, setMenuEntities] = useState<MenuEntity[]>([]);
 
   const [addCategoryOpen, setAddCategoryOpen] = useState(false);
@@ -183,6 +184,7 @@ export default function MenuPage() {
   const [editPosPrice, setEditPosPrice] = useState("");
   const [editOnlinePrice, setEditOnlinePrice] = useState("");
   const [editChannelOnline, setEditChannelOnline] = useState(false);
+  const [editMenuPrices, setEditMenuPrices] = useState<Record<string, string>>({});
 
   const [selectMode, setSelectMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -601,10 +603,15 @@ export default function MenuPage() {
     setEditChannelOnline(item.channels.online);
 
     const menuIdSel: Record<string, boolean> = {};
+    const menuPrices: Record<string, string> = {};
     for (const m of menuEntities) {
       menuIdSel[m.id] = item.menuIds.includes(m.id);
+      if (item.menuIds.includes(m.id) && item.prices[m.id] != null) {
+        menuPrices[m.id] = item.prices[m.id].toFixed(2);
+      }
     }
     setEditMenuIds(menuIdSel);
+    setEditMenuPrices(menuPrices);
 
     const useCat = item.availableOrderTypes === null;
     setEditUseCategoryTypes(useCat);
@@ -631,23 +638,22 @@ export default function MenuPage() {
 
   const handleSave = async () => {
     if (!editTarget) return;
-    const prices: Record<string, number> = {};
-    for (const [key, val] of Object.entries(editPrices)) {
-      const num = parseFloat(val);
-      if (!isNaN(num) && num >= 0) prices[key] = num;
-    }
-    if (Object.keys(prices).length === 0) return;
-    const price = Object.values(prices)[0];
 
     const posPrice = parseFloat(editPosPrice);
-    const onlinePrice = parseFloat(editOnlinePrice);
     if (isNaN(posPrice) || posPrice < 0) return;
+
+    const prices: Record<string, number> = { default: posPrice };
+    for (const [menuId, val] of Object.entries(editMenuPrices)) {
+      const num = parseFloat(val);
+      if (!isNaN(num) && num >= 0) prices[menuId] = num;
+    }
+    const price = posPrice;
 
     const update: Record<string, unknown> = { prices, price };
 
     update.pricing = {
       pos: posPrice,
-      online: isNaN(onlinePrice) || onlinePrice < 0 ? posPrice : onlinePrice,
+      online: posPrice,
     };
 
     const selectedMenuIds = Object.entries(editMenuIds)
@@ -705,6 +711,7 @@ export default function MenuPage() {
     setAddCategoryId("");
     setAddMenuId("");
     setAddMenuIds({});
+    setAddMenuPrices({});
     setAddPosPrice("");
     setAddOnlinePrice("");
     setAddChannelOnline(false);
@@ -809,21 +816,20 @@ export default function MenuPage() {
   const handleAddItem = async () => {
     const name = addName.trim();
     if (!name) return;
-    const prices: Record<string, number> = {};
-    for (const [key, val] of Object.entries(addPrices)) {
+
+    const posPrice = parseFloat(addPosPrice);
+    if (isNaN(posPrice) || posPrice < 0) return;
+
+    const prices: Record<string, number> = { default: posPrice };
+    for (const [menuId, val] of Object.entries(addMenuPrices)) {
       const num = parseFloat(val);
-      if (!isNaN(num) && num >= 0) prices[key] = num;
+      if (!isNaN(num) && num >= 0) prices[menuId] = num;
     }
-    if (Object.keys(prices).length === 0) return;
-    const price = Object.values(prices)[0];
+    const price = posPrice;
+
     const stock = stockCountingEnabled ? parseInt(addStock, 10) : 9999;
     if (stockCountingEnabled && (isNaN(stock) || stock < 0)) return;
     if (!addCategoryId) return;
-
-    const posPrice = parseFloat(addPosPrice);
-    const onlinePrice = parseFloat(addOnlinePrice);
-    const finalPosPrice = isNaN(posPrice) || posPrice < 0 ? price : posPrice;
-    const finalOnlinePrice = isNaN(onlinePrice) || onlinePrice < 0 ? finalPosPrice : onlinePrice;
 
     const selectedMenuIds = Object.entries(addMenuIds)
       .filter(([, v]) => v)
@@ -839,7 +845,7 @@ export default function MenuPage() {
         categoryId: addCategoryId,
         menuId: addMenuId || (selectedMenuIds.length > 0 ? selectedMenuIds[0] : ""),
         menuIds: selectedMenuIds,
-        pricing: { pos: finalPosPrice, online: finalOnlinePrice },
+        pricing: { pos: posPrice, online: posPrice },
         channels: { pos: true, online: addChannelOnline },
         isScheduled: false,
         scheduleIds: [],
@@ -2007,32 +2013,6 @@ export default function MenuPage() {
                   </select>
                 </div>
 
-                {!addCategoryHasSchedule && menuEntities.length > 0 && (
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Menus
-                    </label>
-                    <p className="text-[10px] text-slate-400 mb-2">
-                      Select one or more menus this item belongs to. Leave all unchecked for POS-only.
-                    </p>
-                    <div className="flex flex-col gap-2 pl-1 max-h-32 overflow-y-auto">
-                      {menuEntities.filter((m) => m.isActive).map((m) => (
-                        <label key={m.id} className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={addMenuIds[m.id] ?? false}
-                            onChange={(e) =>
-                              setAddMenuIds((prev) => ({ ...prev, [m.id]: e.target.checked }))
-                            }
-                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span className="text-sm text-slate-700">{m.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {addCategoryHasSchedule && (
                   <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
                     <Clock size={14} className="text-blue-500 shrink-0" />
@@ -2042,38 +2022,69 @@ export default function MenuPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3">
+                {!addCategoryHasSchedule && menuEntities.length > 0 && (
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                      POS Price ($)
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Menus
                     </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={addPosPrice}
-                      onChange={(e) => {
-                        setAddPosPrice(e.target.value);
-                        setAddPrices((prev) => ({ ...prev, default: e.target.value }));
-                      }}
-                      placeholder="0.00"
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
-                    />
+                    <p className="text-[10px] text-slate-400 mb-2">
+                      Select which menu this item belongs to, then set the price for each menu.
+                    </p>
+                    <div className="flex flex-col gap-3 pl-1 max-h-48 overflow-y-auto">
+                      {menuEntities.filter((m) => m.isActive).map((m) => (
+                        <div key={m.id} className="space-y-1.5">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={addMenuIds[m.id] ?? false}
+                              onChange={(e) => {
+                                setAddMenuIds((prev) => ({ ...prev, [m.id]: e.target.checked }));
+                                if (!e.target.checked) {
+                                  setAddMenuPrices((prev) => {
+                                    const next = { ...prev };
+                                    delete next[m.id];
+                                    return next;
+                                  });
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-sm font-medium text-slate-700">{m.name}</span>
+                          </label>
+                          {(addMenuIds[m.id] ?? false) && (
+                            <div className="ml-6">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={addMenuPrices[m.id] ?? ""}
+                                onChange={(e) =>
+                                  setAddMenuPrices((prev) => ({ ...prev, [m.id]: e.target.value }))
+                                }
+                                placeholder={`${m.name} price`}
+                                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                      Online Price ($)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={addOnlinePrice}
-                      onChange={(e) => setAddOnlinePrice(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
-                    />
-                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    POS Price ($)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={addPosPrice}
+                    onChange={(e) => setAddPosPrice(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                  />
                 </div>
 
                 <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
@@ -2269,36 +2280,75 @@ export default function MenuPage() {
               </div>
 
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                      POS Price ($)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={editPosPrice}
-                      onChange={(e) => {
-                        setEditPosPrice(e.target.value);
-                        setEditPrices((prev) => ({ ...prev, default: e.target.value }));
-                      }}
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
-                    />
+                {editCategoryHasSchedule ? (
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
+                    <Clock size={14} className="text-blue-500 shrink-0" />
+                    <p className="text-xs text-blue-600">
+                      This category is scheduled ({editSelectedCategory!.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}). Items follow the category&apos;s schedule automatically.
+                    </p>
                   </div>
+                ) : menuEntities.length > 0 ? (
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                      Online Price ($)
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Menus
                     </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={editOnlinePrice}
-                      onChange={(e) => setEditOnlinePrice(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
-                    />
+                    <p className="text-[10px] text-slate-400 mb-2">
+                      Select which menu this item belongs to, then set the price for each menu.
+                    </p>
+                    <div className="flex flex-col gap-3 pl-1 max-h-48 overflow-y-auto">
+                      {menuEntities.filter((m) => m.isActive).map((m) => (
+                        <div key={m.id} className="space-y-1.5">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={editMenuIds[m.id] ?? false}
+                              onChange={(e) => {
+                                setEditMenuIds((prev) => ({ ...prev, [m.id]: e.target.checked }));
+                                if (!e.target.checked) {
+                                  setEditMenuPrices((prev) => {
+                                    const next = { ...prev };
+                                    delete next[m.id];
+                                    return next;
+                                  });
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-sm font-medium text-slate-700">{m.name}</span>
+                          </label>
+                          {(editMenuIds[m.id] ?? false) && (
+                            <div className="ml-6">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={editMenuPrices[m.id] ?? ""}
+                                onChange={(e) =>
+                                  setEditMenuPrices((prev) => ({ ...prev, [m.id]: e.target.value }))
+                                }
+                                placeholder={`${m.name} price`}
+                                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
+                ) : null}
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    POS Price ($)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editPosPrice}
+                    onChange={(e) => setEditPosPrice(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                  />
                 </div>
 
                 <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
@@ -2330,40 +2380,6 @@ export default function MenuPage() {
                   />
                 </div>
                 )}
-
-                {/* ── Menus (multi-select) ── */}
-                {editCategoryHasSchedule ? (
-                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
-                    <Clock size={14} className="text-blue-500 shrink-0" />
-                    <p className="text-xs text-blue-600">
-                      This category is scheduled ({editSelectedCategory!.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}). Items follow the category&apos;s schedule automatically.
-                    </p>
-                  </div>
-                ) : menuEntities.length > 0 ? (
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Menus
-                    </label>
-                    <p className="text-[10px] text-slate-400 mb-2">
-                      Select one or more menus this item belongs to. Leave all unchecked for POS-only.
-                    </p>
-                    <div className="flex flex-col gap-2 pl-1 max-h-32 overflow-y-auto">
-                      {menuEntities.filter((m) => m.isActive).map((m) => (
-                        <label key={m.id} className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={editMenuIds[m.id] ?? false}
-                            onChange={(e) =>
-                              setEditMenuIds((prev) => ({ ...prev, [m.id]: e.target.checked }))
-                            }
-                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span className="text-sm text-slate-700">{m.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
 
                 {/* ── Order Types ── */}
                 <div>
