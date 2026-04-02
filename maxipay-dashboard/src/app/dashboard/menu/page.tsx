@@ -543,8 +543,6 @@ export default function MenuPage() {
     return true;
   });
 
-  const visibleCategoryIds = new Set(itemsForMenuType.map((i) => i.categoryId));
-
   const filtered = itemsForMenuType.filter((item) => {
     const q = search.trim().toLowerCase();
     if (q) {
@@ -1398,7 +1396,7 @@ export default function MenuPage() {
                       <span>All Items</span>
                       <span className="text-xs text-slate-400 font-medium tabular-nums bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">{itemsForMenuType.length}</span>
                     </button>
-                    {categories.filter((cat) => !menuTypeFilter || visibleCategoryIds.has(cat.id)).map((cat) => {
+                    {categories.map((cat) => {
                       const catItemCount = itemsForMenuType.filter((i) => i.categoryId === cat.id).length;
                       const catSubs = allSubcategories.filter((s) => s.categoryId === cat.id);
                       return (
@@ -1508,7 +1506,7 @@ export default function MenuPage() {
                 >
                   All
                 </button>
-                {categories.filter((cat) => !menuTypeFilter || visibleCategoryIds.has(cat.id)).map((cat) => (
+                {categories.map((cat) => (
                   <button
                     key={cat.id}
                     onClick={() => setActiveCategory(activeCategory === cat.id ? null : cat.id)}
