@@ -7,17 +7,18 @@ import {
   getDocs,
   query,
   where,
+  orderBy,
   writeBatch,
   updateDoc,
   addDoc,
   deleteDoc,
   onSnapshot,
+  serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import MenuUploadModal from "@/components/MenuUploadModal";
-import Link from "next/link";
 import {
   Search,
   Plus,
@@ -65,6 +66,13 @@ interface MenuEntity {
   scheduleIds: string[];
 }
 
+interface SubcategoryEntry {
+  id: string;
+  name: string;
+  categoryId: string;
+  order: number;
+}
+
 interface ExternalMappings {
   kitchenhub?: string;
   ubereats?: string;
@@ -101,6 +109,7 @@ interface MenuItem {
   scheduleIds: string[];
   categoryScheduled: boolean;
   categoryScheduleIds: string[];
+  subcategoryId: string;
   externalMappings?: ExternalMappings;
 }
 
@@ -188,6 +197,22 @@ export default function MenuPage() {
   const [editChannelOnline, setEditChannelOnline] = useState(false);
   const [editMenuPrices, setEditMenuPrices] = useState<Record<string, string>>({});
 
+  const [allSubcategories, setAllSubcategories] = useState<SubcategoryEntry[]>([]);
+  const [activeSubcategory, setActiveSubcategory] = useState<string | null>(null);
+
+  const [subModalOpen, setSubModalOpen] = useState(false);
+  const [subEditing, setSubEditing] = useState<SubcategoryEntry | null>(null);
+  const [subName, setSubName] = useState("");
+  const [subCategoryId, setSubCategoryId] = useState("");
+  const [subItemSelections, setSubItemSelections] = useState<Record<string, boolean>>({});
+  const [subSaving, setSubSaving] = useState(false);
+
+  const [deleteSubTarget, setDeleteSubTarget] = useState<SubcategoryEntry | null>(null);
+  const [deletingSub, setDeletingSub] = useState(false);
+
+  const [addSubcategoryId, setAddSubcategoryId] = useState("");
+  const [editSubcategoryId, setEditSubcategoryId] = useState("");
+
   const [selectMode, setSelectMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -215,6 +240,7 @@ export default function MenuPage() {
       channels: ChannelAvailability;
       isScheduled: boolean;
       scheduleIds: string[];
+      subcategoryId: string;
       externalMappings: ExternalMappings;
     }[]
   >([]);
@@ -350,6 +376,7 @@ export default function MenuPage() {
             channels: channelsObj,
             isScheduled: data.isScheduled ?? false,
             scheduleIds: Array.isArray(data.scheduleIds) ? data.scheduleIds : [],
+            subcategoryId: data.subcategoryId ?? "",
             externalMappings: data.externalMappings ?? {},
           });
         });
@@ -446,6 +473,24 @@ export default function MenuPage() {
       (err) => console.error("[Menu] menus onSnapshot error:", err.code, err.message)
     );
 
+    const unsubSubcategories = onSnapshot(
+      query(collection(db, "subcategories"), orderBy("order", "asc")),
+      (snap) => {
+        const list: SubcategoryEntry[] = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          list.push({
+            id: d.id,
+            name: data.name ?? "",
+            categoryId: data.categoryId ?? "",
+            order: data.order ?? 0,
+          });
+        });
+        setAllSubcategories(list);
+      },
+      (err) => console.error("[Menu] subcategories onSnapshot error:", err.code, err.message)
+    );
+
     return () => {
       console.log("[Menu] Cleaning up Firestore listeners");
       unsubCats();
@@ -455,6 +500,7 @@ export default function MenuPage() {
       unsubModGroups();
       unsubTaxes();
       unsubMenuEntities();
+      unsubSubcategories();
       bothReady.current = { cats: false, items: false };
     };
   }, [user, subscriptionKey]);
@@ -498,6 +544,7 @@ export default function MenuPage() {
       const words = q.split(/\s+/).filter(Boolean);
       return words.every((w) => name.includes(w));
     }
+    if (activeSubcategory && item.subcategoryId !== activeSubcategory) return false;
     if (activeCategory && item.categoryId !== activeCategory) return false;
     return true;
   });
@@ -603,6 +650,7 @@ export default function MenuPage() {
     setEditPosPrice(item.pricing.pos.toFixed(2));
     setEditOnlinePrice(item.pricing.online.toFixed(2));
     setEditChannelOnline(item.channels.online);
+    setEditSubcategoryId(item.subcategoryId ?? "");
 
     const menuIdSel: Record<string, boolean> = {};
     const menuPrices: Record<string, string> = {};
@@ -676,6 +724,8 @@ export default function MenuPage() {
       online: editChannelOnline,
     };
 
+    update.subcategoryId = editSubcategoryId;
+
     if (stockCountingEnabled) {
       const stock = parseInt(editStock, 10);
       if (isNaN(stock) || stock < 0) return;
@@ -719,6 +769,7 @@ export default function MenuPage() {
     setAddMenuId("");
     setAddMenuIds({});
     setAddMenuPrices({});
+    setAddSubcategoryId("");
     setAddPosPrice("");
     setAddOnlinePrice("");
     setAddChannelOnline(false);
@@ -820,6 +871,88 @@ export default function MenuPage() {
     }
   };
 
+  const openSubEdit = (sub: SubcategoryEntry) => {
+    setSubEditing(sub);
+    setSubName(sub.name);
+    setSubCategoryId(sub.categoryId);
+    const sel: Record<string, boolean> = {};
+    for (const item of items) {
+      if (item.categoryId === sub.categoryId) {
+        sel[item.id] = item.subcategoryId === sub.id;
+      }
+    }
+    setSubItemSelections(sel);
+    setSubModalOpen(true);
+  };
+
+  const handleSaveSubcategory = async () => {
+    const name = subName.trim();
+    if (!name || !subCategoryId) return;
+    setSubSaving(true);
+    try {
+      let subId: string;
+      if (subEditing) {
+        subId = subEditing.id;
+        await updateDoc(doc(db, "subcategories", subId), {
+          name,
+          categoryId: subCategoryId,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const nextOrder = allSubcategories.filter((s) => s.categoryId === subCategoryId).length;
+        const ref = await addDoc(collection(db, "subcategories"), {
+          name,
+          categoryId: subCategoryId,
+          order: nextOrder,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        subId = ref.id;
+      }
+
+      const batch = writeBatch(db);
+      for (const [itemId, checked] of Object.entries(subItemSelections)) {
+        if (checked) {
+          batch.update(doc(db, "MenuItems", itemId), { subcategoryId: subId });
+        } else {
+          const item = items.find((i) => i.id === itemId);
+          if (item && item.subcategoryId === (subEditing?.id ?? subId)) {
+            batch.update(doc(db, "MenuItems", itemId), { subcategoryId: "" });
+          }
+        }
+      }
+      await batch.commit();
+
+      setSubModalOpen(false);
+    } catch (err) {
+      console.error("Failed to save subcategory:", err);
+    } finally {
+      setSubSaving(false);
+    }
+  };
+
+  const handleDeleteSubcategory = async () => {
+    if (!deleteSubTarget) return;
+    setDeletingSub(true);
+    try {
+      const affected = items.filter((i) => i.subcategoryId === deleteSubTarget.id);
+      if (affected.length > 0) {
+        const batch = writeBatch(db);
+        for (const item of affected) {
+          batch.update(doc(db, "MenuItems", item.id), { subcategoryId: "" });
+        }
+        await batch.commit();
+      }
+      await deleteDoc(doc(db, "subcategories", deleteSubTarget.id));
+      setDeleteSubTarget(null);
+      if (activeSubcategory === deleteSubTarget.id) setActiveSubcategory(null);
+    } catch (err) {
+      console.error("Failed to delete subcategory:", err);
+    } finally {
+      setDeletingSub(false);
+    }
+  };
+
   const handleAddItem = async () => {
     const name = addName.trim();
     if (!name) return;
@@ -858,6 +991,7 @@ export default function MenuPage() {
         menuIds: selectedMenuIds,
         pricing: { pos: posPrice, online: posPrice },
         channels: { pos: true, online: addChannelOnline },
+        subcategoryId: addSubcategoryId,
         isScheduled: false,
         scheduleIds: [],
         modifierGroupIds: Object.entries(addModifiers)
@@ -1120,6 +1254,20 @@ export default function MenuPage() {
                   <span className="hidden lg:inline">Category</span>
                 </button>
                 <button
+                  onClick={() => {
+                    setSubEditing(null);
+                    setSubName("");
+                    setSubCategoryId("");
+                    setSubItemSelections({});
+                    setSubModalOpen(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                  title="Add Subcategory"
+                >
+                  <Layers size={14} />
+                  <span className="hidden lg:inline">Subcategory</span>
+                </button>
+                <button
                   onClick={() => { resetAddForm(); setAddOpen(true); }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors"
                 >
@@ -1147,7 +1295,7 @@ export default function MenuPage() {
                   </div>
                   <nav className="flex flex-col max-h-[calc(100vh-12rem)] overflow-y-auto py-1">
                     <button
-                      onClick={() => setActiveCategory(null)}
+                      onClick={() => { setActiveCategory(null); setActiveSubcategory(null); }}
                       className={`w-full flex items-center justify-between px-3 py-2.5 text-sm transition-all duration-150 ${
                         activeCategory === null
                           ? "bg-blue-50 text-blue-700 font-bold border-l-4 border-blue-600"
@@ -1159,55 +1307,95 @@ export default function MenuPage() {
                     </button>
                     {categories.filter((cat) => !menuTypeFilter || visibleCategoryIds.has(cat.id)).map((cat) => {
                       const catItemCount = itemsForMenuType.filter((i) => i.categoryId === cat.id).length;
+                      const catSubs = allSubcategories.filter((s) => s.categoryId === cat.id);
                       return (
-                        <div
-                          key={cat.id}
-                          className={`group/cat flex items-center transition-all duration-150 ${
-                            activeCategory === cat.id
-                              ? "bg-blue-50 border-l-4 border-blue-600"
-                              : "hover:bg-slate-50 border-l-4 border-transparent"
-                          }`}
-                        >
-                          <button
-                            onClick={() => setActiveCategory(activeCategory === cat.id ? null : cat.id)}
-                            className={`flex-1 flex items-center justify-between px-3 py-2.5 text-sm min-w-0 ${
-                              activeCategory === cat.id ? "text-blue-700 font-bold" : "text-slate-600 font-semibold"
+                        <div key={cat.id}>
+                          <div
+                            className={`group/cat flex items-center transition-all duration-150 ${
+                              activeCategory === cat.id && !activeSubcategory
+                                ? "bg-blue-50 border-l-4 border-blue-600"
+                                : "hover:bg-slate-50 border-l-4 border-transparent"
                             }`}
                           >
-                            <span className="flex items-center gap-1.5 min-w-0">
-                              <span className="break-words leading-snug">{cat.name}</span>
-                              {cat.scheduleIds.length > 0 && (
-                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-500 font-bold leading-none shrink-0" title={cat.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}>
-                                  Sched
-                                </span>
-                              )}
-                            </span>
-                            <span className="text-xs text-slate-400 font-medium ml-2 tabular-nums bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">{catItemCount}</span>
-                          </button>
-                          <div className="flex items-center gap-0 pr-1 opacity-0 group-hover/cat:opacity-100 transition-opacity shrink-0">
-                            <Link
-                              href={`/dashboard/menu/subcategories?categoryId=${cat.id}`}
-                              onClick={(e) => e.stopPropagation()}
-                              className="p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                              title="Manage Subcategories"
-                            >
-                              <Layers size={11} />
-                            </Link>
                             <button
-                              onClick={(e) => { e.stopPropagation(); openEditCategory(cat); }}
-                              className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors"
-                              title="Edit category"
+                              onClick={() => { setActiveCategory(activeCategory === cat.id ? null : cat.id); setActiveSubcategory(null); }}
+                              className={`flex-1 flex items-center justify-between px-3 py-2.5 text-sm min-w-0 ${
+                                activeCategory === cat.id && !activeSubcategory ? "text-blue-700 font-bold" : "text-slate-600 font-semibold"
+                              }`}
                             >
-                              <Pencil size={11} />
+                              <span className="flex items-center gap-1.5 min-w-0">
+                                <span className="break-words leading-snug">{cat.name}</span>
+                                {cat.scheduleIds.length > 0 && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-500 font-bold leading-none shrink-0" title={cat.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}>
+                                    Sched
+                                  </span>
+                                )}
+                              </span>
+                              <span className="text-xs text-slate-400 font-medium ml-2 tabular-nums bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">{catItemCount}</span>
                             </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setDeleteCategoryTarget(cat); }}
-                              className="p-1 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                              title="Delete category"
-                            >
-                              <Trash2 size={11} />
-                            </button>
+                            <div className="flex items-center gap-0 pr-1 opacity-0 group-hover/cat:opacity-100 transition-opacity shrink-0">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openEditCategory(cat); }}
+                                className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors"
+                                title="Edit category"
+                              >
+                                <Pencil size={11} />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setDeleteCategoryTarget(cat); }}
+                                className="p-1 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                title="Delete category"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </div>
                           </div>
+                          {catSubs.length > 0 && (
+                            <div className="ml-4 border-l border-slate-200">
+                              {catSubs.map((sub) => {
+                                const subItemCount = itemsForMenuType.filter((i) => i.subcategoryId === sub.id).length;
+                                return (
+                                  <div
+                                    key={sub.id}
+                                    className={`group/sub flex items-center transition-all duration-150 ${
+                                      activeSubcategory === sub.id
+                                        ? "bg-blue-50/60"
+                                        : "hover:bg-slate-50"
+                                    }`}
+                                  >
+                                    <button
+                                      onClick={() => {
+                                        setActiveCategory(cat.id);
+                                        setActiveSubcategory(activeSubcategory === sub.id ? null : sub.id);
+                                      }}
+                                      className={`flex-1 flex items-center justify-between pl-3 pr-2 py-1.5 text-xs min-w-0 ${
+                                        activeSubcategory === sub.id ? "text-blue-600 font-bold" : "text-slate-500 font-medium"
+                                      }`}
+                                    >
+                                      <span className="truncate">{sub.name}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium ml-2 tabular-nums bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">{subItemCount}</span>
+                                    </button>
+                                    <div className="flex items-center gap-0 pr-1 opacity-0 group-hover/sub:opacity-100 transition-opacity shrink-0">
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); openSubEdit(sub); }}
+                                        className="p-0.5 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors"
+                                        title="Manage subcategory"
+                                      >
+                                        <Pencil size={10} />
+                                      </button>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); setDeleteSubTarget(sub); }}
+                                        className="p-0.5 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                        title="Delete subcategory"
+                                      >
+                                        <Trash2 size={10} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1334,7 +1522,11 @@ export default function MenuPage() {
                                     const sIds = item.scheduleIds.length > 0
                                       ? item.scheduleIds
                                       : item.categoryScheduleIds;
-                                    return sIds.map((sid) => (
+                                    const shownMenuIds = item.menuIds.length > 0 ? item.menuIds : (item.menuId ? [item.menuId] : []);
+                                    const coveredScheduleIds = new Set(
+                                      shownMenuIds.flatMap((mid) => menuEntities.find((m) => m.id === mid)?.scheduleIds ?? [])
+                                    );
+                                    return sIds.filter((sid) => !coveredScheduleIds.has(sid)).map((sid) => (
                                       <span key={sid} className="text-[11px] px-2 py-0.5 rounded-md bg-blue-50 text-blue-600 font-semibold truncate max-w-[72px]" title={scheduleMap.get(sid) ?? sid}>
                                         {scheduleMap.get(sid) ?? "Sched"}
                                       </span>
@@ -1494,7 +1686,11 @@ export default function MenuPage() {
                                   const sIds = item.scheduleIds.length > 0
                                     ? item.scheduleIds
                                     : item.categoryScheduleIds;
-                                  return sIds.map((sid) => (
+                                  const shownMenuIds = item.menuIds.length > 0 ? item.menuIds : (item.menuId ? [item.menuId] : []);
+                                  const coveredScheduleIds = new Set(
+                                    shownMenuIds.flatMap((mid) => menuEntities.find((m) => m.id === mid)?.scheduleIds ?? [])
+                                  );
+                                  return sIds.filter((sid) => !coveredScheduleIds.has(sid)).map((sid) => (
                                     <span key={sid} className="text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-600 font-semibold" title={scheduleMap.get(sid) ?? sid}>
                                       {scheduleMap.get(sid) ?? "Scheduled"}
                                     </span>
@@ -2048,6 +2244,24 @@ export default function MenuPage() {
                   </select>
                 </div>
 
+                {addCategoryId && allSubcategories.filter((s) => s.categoryId === addCategoryId).length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      Subcategory
+                    </label>
+                    <select
+                      value={addSubcategoryId}
+                      onChange={(e) => setAddSubcategoryId(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                    >
+                      <option value="">(None)</option>
+                      {allSubcategories.filter((s) => s.categoryId === addCategoryId).map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {addCategoryHasSchedule && (
                   <>
                     <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
@@ -2467,6 +2681,24 @@ export default function MenuPage() {
                 </div>
                 )}
 
+                {editTarget && allSubcategories.filter((s) => s.categoryId === editTarget.categoryId).length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      Subcategory
+                    </label>
+                    <select
+                      value={editSubcategoryId}
+                      onChange={(e) => setEditSubcategoryId(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                    >
+                      <option value="">(None)</option>
+                      {allSubcategories.filter((s) => s.categoryId === editTarget.categoryId).map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {/* ── Order Types ── */}
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -2610,6 +2842,185 @@ export default function MenuPage() {
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ── Add / Edit Subcategory Modal ── */}
+      {subModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => !subSaving && setSubModalOpen(false)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
+            <div className="px-6 py-5 space-y-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-slate-800">
+                  {subEditing ? "Edit Subcategory" : "Add Subcategory"}
+                </h3>
+                <button
+                  onClick={() => !subSaving && setSubModalOpen(false)}
+                  disabled={subSaving}
+                  className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Subcategory Name
+                </label>
+                <input
+                  type="text"
+                  value={subName}
+                  onChange={(e) => setSubName(e.target.value)}
+                  placeholder="e.g. Soda, Burgers, Appetizers"
+                  autoFocus
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Category
+                </label>
+                <select
+                  value={subCategoryId}
+                  onChange={(e) => {
+                    setSubCategoryId(e.target.value);
+                    const sel: Record<string, boolean> = {};
+                    for (const item of items) {
+                      if (item.categoryId === e.target.value) {
+                        sel[item.id] = subEditing ? item.subcategoryId === subEditing.id : false;
+                      }
+                    }
+                    setSubItemSelections(sel);
+                  }}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                >
+                  <option value="">Select a category</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {subCategoryId && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Assign Items
+                  </label>
+                  <p className="text-[10px] text-slate-400 mb-2">
+                    Select items to include in this subcategory.
+                  </p>
+                  {(() => {
+                    const catItems = items.filter((i) => i.categoryId === subCategoryId);
+                    if (catItems.length === 0) {
+                      return (
+                        <p className="text-xs text-slate-400 italic py-2">
+                          No items in this category yet.
+                        </p>
+                      );
+                    }
+                    return (
+                      <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto border border-slate-100 rounded-xl p-2">
+                        {catItems.map((item) => (
+                          <label key={item.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={subItemSelections[item.id] ?? false}
+                              onChange={(e) =>
+                                setSubItemSelections((prev) => ({ ...prev, [item.id]: e.target.checked }))
+                              }
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-sm text-slate-700 truncate">{item.name}</span>
+                            <span className="text-xs text-slate-400 ml-auto tabular-nums">${item.price.toFixed(2)}</span>
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex gap-3">
+              <button
+                onClick={() => setSubModalOpen(false)}
+                disabled={subSaving}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveSubcategory}
+                disabled={subSaving || !subName.trim() || !subCategoryId}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {subSaving ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Saving…
+                  </>
+                ) : subEditing ? (
+                  "Save Changes"
+                ) : (
+                  "Add Subcategory"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Subcategory Confirmation ── */}
+      {deleteSubTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => !deletingSub && setDeleteSubTarget(null)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 overflow-hidden">
+            <div className="px-6 py-5 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                  <AlertTriangle size={20} className="text-red-500" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-800">
+                    Delete Subcategory
+                  </h3>
+                  <p className="text-sm text-slate-500 mt-0.5">
+                    Are you sure you want to delete <strong>{deleteSubTarget.name}</strong>? Items in this subcategory will be unassigned.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex gap-3">
+              <button
+                onClick={() => setDeleteSubTarget(null)}
+                disabled={deletingSub}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteSubcategory}
+                disabled={deletingSub}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {deletingSub ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Deleting…
+                  </>
+                ) : (
+                  "Delete"
+                )}
+              </button>
             </div>
           </div>
         </div>
