@@ -539,13 +539,7 @@ export default function MenuPage() {
       return false;
     if (menuTypeFilter && menuTypeFilter !== "POS") {
       const allItemMenuIds = item.menuIds.length > 0 ? item.menuIds : (item.menuId ? [item.menuId] : []);
-      if (allItemMenuIds.includes(menuTypeFilter)) return true;
-      const menuEntity = menuEntities.find((m) => m.id === menuTypeFilter);
-      if (!menuEntity) return false;
-      const menuSchedIds = new Set(menuEntity.scheduleIds);
-      const itemSchedIds = item.scheduleIds.length > 0 ? item.scheduleIds : item.categoryScheduleIds;
-      if (itemSchedIds.some((sid) => menuSchedIds.has(sid))) return true;
-      return false;
+      return allItemMenuIds.includes(menuTypeFilter);
     }
     return true;
   });
