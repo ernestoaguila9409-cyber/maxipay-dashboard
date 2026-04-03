@@ -1445,7 +1445,14 @@ export default function MenuPage() {
                     </button>
                     {categories.filter((cat) => {
                       if (!menuTypeFilter) return true;
-                      return itemsForMenuType.some((i) => i.categoryId === cat.id);
+                      if (itemsForMenuType.some((i) => i.categoryId === cat.id)) return true;
+                      if (menuTypeFilter === "POS") return false;
+                      const menuEntity = menuEntities.find((m) => m.id === menuTypeFilter);
+                      if (!menuEntity || menuEntity.scheduleIds.length === 0 || cat.scheduleIds.length === 0) {
+                        return false;
+                      }
+                      const menuSched = new Set(menuEntity.scheduleIds);
+                      return cat.scheduleIds.some((sid) => menuSched.has(sid));
                     }).map((cat) => {
                       const catItemCount = itemsForMenuType.filter((i) => i.categoryId === cat.id).length;
                       const catSubs = allSubcategories.filter((s) => s.categoryId === cat.id);
