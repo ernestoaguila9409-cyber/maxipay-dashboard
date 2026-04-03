@@ -1414,7 +1414,10 @@ export default function MenuPage() {
                       <span>All Items</span>
                       <span className="text-xs text-slate-400 font-medium tabular-nums bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">{itemsForMenuType.length}</span>
                     </button>
-                    {categories.map((cat) => {
+                    {categories.filter((cat) => {
+                      if (!menuTypeFilter || menuTypeFilter === "POS") return true;
+                      return itemsForMenuType.some((i) => i.categoryId === cat.id);
+                    }).map((cat) => {
                       const catItemCount = itemsForMenuType.filter((i) => i.categoryId === cat.id).length;
                       const catSubs = allSubcategories.filter((s) => s.categoryId === cat.id);
                       return (
