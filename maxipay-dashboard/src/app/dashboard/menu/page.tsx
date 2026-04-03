@@ -1061,9 +1061,12 @@ export default function MenuPage() {
     if (stockCountingEnabled && (isNaN(stock) || stock < 0)) return;
     if (!addCategoryId) return;
 
-    const selectedMenuIds = Object.entries(addMenuIds)
-      .filter(([, v]) => v)
-      .map(([k]) => k);
+    const scheduledMenuIds = addCatHasSchedule
+      ? menuEntities.filter((m) => m.isActive && m.scheduleIds.some((sid) => (addCat?.scheduleIds ?? []).includes(sid))).map((m) => m.id)
+      : [];
+    const selectedMenuIds = addCatHasSchedule
+      ? scheduledMenuIds
+      : Object.entries(addMenuIds).filter(([, v]) => v).map(([k]) => k);
 
     setAddSaving(true);
     try {
@@ -1073,13 +1076,13 @@ export default function MenuPage() {
         price,
         stock,
         categoryId: addCategoryId,
-        menuId: addMenuId || (selectedMenuIds.length > 0 ? selectedMenuIds[0] : ""),
+        menuId: selectedMenuIds.length > 0 ? selectedMenuIds[0] : "",
         menuIds: selectedMenuIds,
         pricing: { pos: posPrice, online: posPrice },
         channels: { pos: true, online: false },
         subcategoryId: addSubcategoryId,
-        isScheduled: false,
-        scheduleIds: [],
+        isScheduled: addCatHasSchedule,
+        scheduleIds: addCatHasSchedule ? (addCat?.scheduleIds ?? []) : [],
         modifierGroupIds: Object.entries(addModifiers)
           .filter(([, v]) => v)
           .map(([k]) => k),
