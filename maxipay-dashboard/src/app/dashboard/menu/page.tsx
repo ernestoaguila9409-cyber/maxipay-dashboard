@@ -167,7 +167,6 @@ export default function MenuPage() {
   const [addMenuIds, setAddMenuIds] = useState<Record<string, boolean>>({});
   const [addPosPrice, setAddPosPrice] = useState("");
   const [addOnlinePrice, setAddOnlinePrice] = useState("");
-  const [addChannelOnline, setAddChannelOnline] = useState(false);
   const [addMenuPrices, setAddMenuPrices] = useState<Record<string, string>>({});
   const [menuEntities, setMenuEntities] = useState<MenuEntity[]>([]);
 
@@ -830,7 +829,6 @@ export default function MenuPage() {
     setAddSubcategoryId("");
     setAddPosPrice("");
     setAddOnlinePrice("");
-    setAddChannelOnline(false);
     setAddUseCategoryTypes(true);
     setAddOrderTypes(Object.fromEntries(ALL_ORDER_TYPES.map((t) => [t, true])));
     setAddModifiers({});
@@ -1064,7 +1062,7 @@ export default function MenuPage() {
         menuId: addMenuId || (selectedMenuIds.length > 0 ? selectedMenuIds[0] : ""),
         menuIds: selectedMenuIds,
         pricing: { pos: posPrice, online: posPrice },
-        channels: { pos: true, online: addChannelOnline },
+        channels: { pos: true, online: false },
         subcategoryId: addSubcategoryId,
         isScheduled: false,
         scheduleIds: [],
@@ -2583,20 +2581,6 @@ export default function MenuPage() {
                     />
                   </div>
                 )}
-
-                <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
-                  <div>
-                    <p className="text-sm font-medium text-slate-700">Available Online</p>
-                    <p className="text-xs text-slate-400">Enable for upcoming online ordering</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setAddChannelOnline(!addChannelOnline)}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${addChannelOnline ? "bg-blue-500" : "bg-slate-200"}`}
-                  >
-                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${addChannelOnline ? "right-0.5" : "left-0.5"}`} />
-                  </button>
-                </div>
 
                 {stockCountingEnabled && (
                   <div>
