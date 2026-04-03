@@ -166,6 +166,7 @@ export default function MenuPage() {
   const [addMenuId, setAddMenuId] = useState("");
   const [addMenuIds, setAddMenuIds] = useState<Record<string, boolean>>({});
   const [addPosPrice, setAddPosPrice] = useState("");
+  const [addPosSelected, setAddPosSelected] = useState(true);
   const [addOnlinePrice, setAddOnlinePrice] = useState("");
   const [addMenuPrices, setAddMenuPrices] = useState<Record<string, string>>({});
   const [menuEntities, setMenuEntities] = useState<MenuEntity[]>([]);
@@ -828,6 +829,7 @@ export default function MenuPage() {
     setAddMenuPrices({});
     setAddSubcategoryId("");
     setAddPosPrice("");
+    setAddPosSelected(true);
     setAddOnlinePrice("");
     setAddUseCategoryTypes(true);
     setAddOrderTypes(Object.fromEntries(ALL_ORDER_TYPES.map((t) => [t, true])));
@@ -1029,15 +1031,27 @@ export default function MenuPage() {
     const name = addName.trim();
     if (!name) return;
 
+    const addCat = categories.find((c) => c.id === addCategoryId);
+    const addCatHasSchedule = (addCat?.scheduleIds.length ?? 0) > 0;
+
     const prices: Record<string, number> = {};
     for (const [menuId, val] of Object.entries(addMenuPrices)) {
+      if (!addMenuIds[menuId]) continue;
       const num = parseFloat(val);
       if (!isNaN(num) && num >= 0) prices[menuId] = num;
     }
 
     const parsedPos = parseFloat(addPosPrice);
     const firstMenuPrice = Object.values(prices)[0];
-    const posPrice = (!isNaN(parsedPos) && parsedPos >= 0) ? parsedPos : (firstMenuPrice ?? -1);
+    let posPrice: number;
+    if (addCatHasSchedule) {
+      posPrice = (!isNaN(parsedPos) && parsedPos >= 0) ? parsedPos : (firstMenuPrice ?? -1);
+    } else {
+      if (!addPosSelected && !Object.entries(addMenuIds).some(([, v]) => v)) return;
+      posPrice = addPosSelected
+        ? ((!isNaN(parsedPos) && parsedPos >= 0) ? parsedPos : (firstMenuPrice ?? -1))
+        : (firstMenuPrice ?? -1);
+    }
     if (posPrice < 0) return;
 
     prices.default = posPrice;
@@ -2451,6 +2465,7 @@ export default function MenuPage() {
                       } else {
                         setAddMenuIds({});
                         setAddMenuPrices({});
+                        setAddPosSelected(true);
                       }
                     }}
                     className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
@@ -2515,7 +2530,7 @@ export default function MenuPage() {
                   </>
                 )}
 
-                {!addCategoryHasSchedule && menuEntities.length > 0 && (
+                {!addCategoryHasSchedule && (
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">
                       Menus
@@ -2524,6 +2539,35 @@ export default function MenuPage() {
                       Select which menu this item belongs to, then set the price for each menu.
                     </p>
                     <div className="flex flex-col gap-3 pl-1 max-h-48 overflow-y-auto">
+                      <div className="space-y-1.5">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={addPosSelected}
+                            onChange={(e) => {
+                              const on = e.target.checked;
+                              setAddPosSelected(on);
+                              if (!on) setAddPosPrice("");
+                            }}
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm font-medium text-slate-700">POS</span>
+                        </label>
+                        {addPosSelected && (
+                          <div className="ml-6">
+                            <label className="block text-xs text-slate-500 mb-1">POS Price ($)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={addPosPrice}
+                              onChange={(e) => setAddPosPrice(e.target.value)}
+                              placeholder="0.00"
+                              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                            />
+                          </div>
+                        )}
+                      </div>
                       {menuEntities.filter((m) => m.isActive).map((m) => (
                         <div key={m.id} className="space-y-1.5">
                           <label className="flex items-center gap-2 cursor-pointer">
@@ -2562,23 +2606,6 @@ export default function MenuPage() {
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
-
-                {!addCategoryHasSchedule && (
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                      POS Price ($)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={addPosPrice}
-                      onChange={(e) => setAddPosPrice(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
-                    />
                   </div>
                 )}
 
