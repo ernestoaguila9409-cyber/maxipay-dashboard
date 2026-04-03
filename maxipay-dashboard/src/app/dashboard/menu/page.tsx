@@ -539,7 +539,15 @@ export default function MenuPage() {
       return false;
     if (menuTypeFilter && menuTypeFilter !== "POS") {
       const allItemMenuIds = item.menuIds.length > 0 ? item.menuIds : (item.menuId ? [item.menuId] : []);
-      return allItemMenuIds.includes(menuTypeFilter);
+      if (allItemMenuIds.includes(menuTypeFilter)) return true;
+      const menuEntity = menuEntities.find((m) => m.id === menuTypeFilter);
+      if (!menuEntity) return false;
+      // Items with no menuIds (legacy / bad saves) still belong on a menu if the category shares that menu's schedules
+      if (allItemMenuIds.length === 0 && item.categoryScheduleIds.length > 0) {
+        const menuSchedIds = new Set(menuEntity.scheduleIds);
+        if (item.categoryScheduleIds.some((sid) => menuSchedIds.has(sid))) return true;
+      }
+      return false;
     }
     return true;
   });
@@ -1062,11 +1070,17 @@ export default function MenuPage() {
     if (!addCategoryId) return;
 
     const scheduledMenuIds = addCatHasSchedule
-      ? menuEntities.filter((m) => m.isActive && m.scheduleIds.some((sid) => (addCat?.scheduleIds ?? []).includes(sid))).map((m) => m.id)
+      ? menuEntities
+          .filter((m) => m.scheduleIds.some((sid) => (addCat?.scheduleIds ?? []).includes(sid)))
+          .map((m) => m.id)
       : [];
-    const selectedMenuIds = addCatHasSchedule
-      ? scheduledMenuIds
-      : Object.entries(addMenuIds).filter(([, v]) => v).map(([k]) => k);
+    const fromCheckboxes = Object.entries(addMenuIds)
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    let selectedMenuIds = addCatHasSchedule ? scheduledMenuIds : fromCheckboxes;
+    if (addCatHasSchedule && selectedMenuIds.length === 0 && fromCheckboxes.length > 0) {
+      selectedMenuIds = fromCheckboxes;
+    }
 
     setAddSaving(true);
     try {
@@ -1185,13 +1199,13 @@ export default function MenuPage() {
   const addSelectedCategory = categories.find((c) => c.id === addCategoryId);
   const addCategoryHasSchedule = (addSelectedCategory?.scheduleIds.length ?? 0) > 0;
   const addScheduledMenus = addCategoryHasSchedule
-    ? menuEntities.filter((m) => m.isActive && m.scheduleIds.some((sid) => addSelectedCategory!.scheduleIds.includes(sid)))
+    ? menuEntities.filter((m) => m.scheduleIds.some((sid) => addSelectedCategory!.scheduleIds.includes(sid)))
     : [];
 
   const editSelectedCategory = editTarget ? categories.find((c) => c.id === editTarget.categoryId) : null;
   const editCategoryHasSchedule = (editSelectedCategory?.scheduleIds.length ?? 0) > 0;
   const editScheduledMenus = editCategoryHasSchedule
-    ? menuEntities.filter((m) => m.isActive && m.scheduleIds.some((sid) => editSelectedCategory!.scheduleIds.includes(sid)))
+    ? menuEntities.filter((m) => m.scheduleIds.some((sid) => editSelectedCategory!.scheduleIds.includes(sid)))
     : [];
 
   return (
@@ -2460,7 +2474,7 @@ export default function MenuPage() {
                         setAddMenuId("");
                         const matching: Record<string, boolean> = {};
                         for (const m of menuEntities) {
-                          if (m.isActive && m.scheduleIds.some((sid) => cat.scheduleIds.includes(sid))) {
+                          if (m.scheduleIds.some((sid) => cat.scheduleIds.includes(sid))) {
                             matching[m.id] = true;
                           }
                         }
