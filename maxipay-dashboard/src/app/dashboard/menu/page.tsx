@@ -224,10 +224,12 @@ export default function MenuPage() {
 
   const [transferMode, setTransferMode] = useState(false);
   const [transferItems, setTransferItems] = useState<Set<string>>(new Set());
+  const [transferCategories, setTransferCategories] = useState<Set<string>>(new Set());
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [transferCategoryId, setTransferCategoryId] = useState("");
   const [transferSubcategoryId, setTransferSubcategoryId] = useState("");
   const [transferring, setTransferring] = useState(false);
+  const [transferError, setTransferError] = useState("");
   const [viewMode, setViewMode] = useState<"compact" | "card">("compact");
   const [menuTypeFilter, setMenuTypeFilter] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
@@ -631,6 +633,15 @@ export default function MenuPage() {
     });
   };
 
+  const toggleTransferCategory = (categoryId: string) => {
+    setTransferCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(categoryId)) next.delete(categoryId);
+      else next.add(categoryId);
+      return next;
+    });
+  };
+
   const toggleTransferAll = () => {
     if (transferItems.size === filtered.length) {
       setTransferItems(new Set());
@@ -642,32 +653,123 @@ export default function MenuPage() {
   const exitTransferMode = () => {
     setTransferMode(false);
     setTransferItems(new Set());
+    setTransferCategories(new Set());
   };
 
   const openTransferModal = () => {
-    if (transferItems.size === 0) return;
+    if (transferItems.size === 0 && transferCategories.size === 0) return;
     setTransferCategoryId("");
     setTransferSubcategoryId("");
+    setTransferError("");
     setTransferModalOpen(true);
   };
 
+  /** Align item menu/schedule fields with a target category (POS vs scheduled menus). */
+  const buildScheduleFieldsForTargetCategory = (targetCat: Category) => {
+    const addCatHasSchedule = (targetCat.scheduleIds?.length ?? 0) > 0;
+    if (addCatHasSchedule) {
+      const scheduledMenuIds = menuEntities
+        .filter((m) => m.scheduleIds.some((sid) => targetCat.scheduleIds.includes(sid)))
+        .map((m) => m.id);
+      return {
+        isScheduled: true,
+        scheduleIds: targetCat.scheduleIds,
+        menuIds: scheduledMenuIds,
+        menuId: scheduledMenuIds.length > 0 ? scheduledMenuIds[0] : "",
+      };
+    }
+    return {
+      isScheduled: false,
+      scheduleIds: [] as string[],
+      menuIds: [] as string[],
+      menuId: "",
+    };
+  };
+
   const handleTransfer = async () => {
-    if (transferItems.size === 0 || !transferCategoryId) return;
+    if (!transferCategoryId) return;
+    if (transferItems.size === 0 && transferCategories.size === 0) return;
+
+    if (transferCategories.has(transferCategoryId)) {
+      setTransferError("Target cannot be one of the categories you are transferring.");
+      return;
+    }
+
+    const targetCat = categories.find((c) => c.id === transferCategoryId);
+    if (!targetCat) return;
+
+    const scheduleFields = buildScheduleFieldsForTargetCategory(targetCat);
+    setTransferError("");
     setTransferring(true);
+    const CHUNK = 400;
+
     try {
-      const batch = writeBatch(db);
-      for (const id of transferItems) {
-        const ref = doc(db, "MenuItems", id);
-        batch.update(ref, {
+      let orderOffset = allSubcategories.filter((s) => s.categoryId === transferCategoryId).length;
+
+      for (const sourceCatId of transferCategories) {
+        if (sourceCatId === transferCategoryId) continue;
+        const sourceCat = categories.find((c) => c.id === sourceCatId);
+        if (!sourceCat) continue;
+
+        const itemsInSource = items.filter((i) => i.categoryId === sourceCatId);
+        const oldSubs = allSubcategories.filter((s) => s.categoryId === sourceCatId);
+
+        const newSubRef = await addDoc(collection(db, "subcategories"), {
+          name: sourceCat.name,
+          categoryId: transferCategoryId,
+          order: orderOffset,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        orderOffset += 1;
+
+        const itemPayload = {
+          categoryId: transferCategoryId,
+          subcategoryId: newSubRef.id,
+          ...scheduleFields,
+        };
+
+        for (let i = 0; i < itemsInSource.length; i += CHUNK) {
+          const batch = writeBatch(db);
+          for (const it of itemsInSource.slice(i, i + CHUNK)) {
+            batch.update(doc(db, "MenuItems", it.id), itemPayload);
+          }
+          await batch.commit();
+        }
+
+        for (let i = 0; i < oldSubs.length; i += CHUNK) {
+          const batch = writeBatch(db);
+          for (const sub of oldSubs.slice(i, i + CHUNK)) {
+            batch.delete(doc(db, "subcategories", sub.id));
+          }
+          await batch.commit();
+        }
+
+        await deleteDoc(doc(db, "Categories", sourceCatId));
+        if (activeCategory === sourceCatId) setActiveCategory(null);
+        if (oldSubs.some((s) => s.id === activeSubcategory)) setActiveSubcategory(null);
+      }
+
+      const transferItemIds = Array.from(transferItems);
+      if (transferItemIds.length > 0) {
+        const itemPayload = {
           categoryId: transferCategoryId,
           subcategoryId: transferSubcategoryId || "",
-        });
+          ...scheduleFields,
+        };
+        for (let i = 0; i < transferItemIds.length; i += CHUNK) {
+          const batch = writeBatch(db);
+          for (const id of transferItemIds.slice(i, i + CHUNK)) {
+            batch.update(doc(db, "MenuItems", id), itemPayload);
+          }
+          await batch.commit();
+        }
       }
-      await batch.commit();
+
       setTransferModalOpen(false);
       exitTransferMode();
     } catch (err) {
-      console.error("Failed to transfer items:", err);
+      console.error("Failed to transfer:", err);
     } finally {
       setTransferring(false);
     }
@@ -1325,11 +1427,14 @@ export default function MenuPage() {
                 </button>
                 <button
                   onClick={openTransferModal}
-                  disabled={transferItems.size === 0}
+                  disabled={transferItems.size === 0 && transferCategories.size === 0}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <ArrowRightLeft size={14} />
-                  Transfer{transferItems.size > 0 ? ` (${transferItems.size})` : ""}
+                  Transfer
+                  {transferItems.size + transferCategories.size > 0
+                    ? ` (${transferItems.size + transferCategories.size})`
+                    : ""}
                 </button>
                 <button
                   onClick={exitTransferMode}
@@ -1398,9 +1503,9 @@ export default function MenuPage() {
                 </button>
                 <button
                   onClick={() => setTransferMode(true)}
-                  disabled={items.length === 0}
+                  disabled={items.length === 0 && categories.length < 2}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Transfer items to another category"
+                  title="Transfer items or whole categories to another category"
                 >
                   <ArrowRightLeft size={14} />
                   <span className="hidden lg:inline">Transfer</span>
@@ -1465,6 +1570,19 @@ export default function MenuPage() {
                                 : "hover:bg-slate-50 border-l-4 border-transparent"
                             }`}
                           >
+                            {transferMode && (
+                              <label
+                                className="pl-2 pr-0 flex items-center shrink-0 cursor-pointer"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={transferCategories.has(cat.id)}
+                                  onChange={() => toggleTransferCategory(cat.id)}
+                                  className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                              </label>
+                            )}
                             <button
                               onClick={() => { setActiveCategory(activeCategory === cat.id ? null : cat.id); setActiveSubcategory(null); }}
                               className={`flex-1 flex items-center justify-between px-3 py-2.5 text-sm min-w-0 ${
@@ -1564,15 +1682,30 @@ export default function MenuPage() {
                   All
                 </button>
                 {categories.map((cat) => (
-                  <button
+                  <div
                     key={cat.id}
-                    onClick={() => setActiveCategory(activeCategory === cat.id ? null : cat.id)}
-                    className={`shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                    className={`shrink-0 flex items-center gap-1.5 rounded-lg ${
                       activeCategory === cat.id ? "bg-blue-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600"
                     }`}
                   >
-                    {cat.name}
-                  </button>
+                    {transferMode && (
+                      <input
+                        type="checkbox"
+                        checked={transferCategories.has(cat.id)}
+                        onChange={() => toggleTransferCategory(cat.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="ml-2 w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                    )}
+                    <button
+                      onClick={() => setActiveCategory(activeCategory === cat.id ? null : cat.id)}
+                      className={`shrink-0 px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                        activeCategory === cat.id ? "text-white" : "text-slate-600"
+                      }`}
+                    >
+                      {cat.name}
+                    </button>
+                  </div>
                 ))}
               </div>
             )}
@@ -2269,7 +2402,7 @@ export default function MenuPage() {
         </div>
       )}
 
-      {/* ── Transfer items modal ── */}
+      {/* ── Transfer items / categories modal ── */}
       {transferModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
@@ -2285,9 +2418,17 @@ export default function MenuPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-slate-800">
-                      Transfer {transferItems.size} Item{transferItems.size !== 1 ? "s" : ""}
+                      {transferCategories.size > 0 && transferItems.size > 0
+                        ? `Transfer ${transferCategories.size} categor${transferCategories.size !== 1 ? "ies" : "y"} & ${transferItems.size} item${transferItems.size !== 1 ? "s" : ""}`
+                        : transferCategories.size > 0
+                          ? `Transfer ${transferCategories.size} categor${transferCategories.size !== 1 ? "ies" : "y"}`
+                          : `Transfer ${transferItems.size} item${transferItems.size !== 1 ? "s" : ""}`}
                     </h3>
-                    <p className="text-xs text-slate-400">Move to another category or subcategory</p>
+                    <p className="text-xs text-slate-400">
+                      {transferCategories.size > 0
+                        ? "Each selected category becomes a subcategory under the target, with all items inside."
+                        : "Move to another category or subcategory"}
+                    </p>
                   </div>
                 </div>
                 <button
@@ -2308,17 +2449,27 @@ export default function MenuPage() {
                   onChange={(e) => {
                     setTransferCategoryId(e.target.value);
                     setTransferSubcategoryId("");
+                    setTransferError("");
                   }}
                   className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                 >
                   <option value="">Select a category…</option>
-                  {categories.map((cat) => (
-                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                  ))}
+                  {categories
+                    .filter((cat) => !transferCategories.has(cat.id))
+                    .map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
                 </select>
+                {transferError && (
+                  <p className="text-xs text-red-600 mt-1">{transferError}</p>
+                )}
               </div>
 
-              {transferCategoryId && allSubcategories.filter((s) => s.categoryId === transferCategoryId).length > 0 && (
+              {transferItems.size > 0 &&
+                transferCategoryId &&
+                allSubcategories.filter((s) => s.categoryId === transferCategoryId).length > 0 && (
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                     Target Subcategory <span className="text-slate-400 font-normal">(optional)</span>
@@ -2338,10 +2489,27 @@ export default function MenuPage() {
                 </div>
               )}
 
-              <div className="bg-slate-50 rounded-xl p-3">
-                <p className="text-xs text-slate-500">
-                  <strong className="text-slate-600">{transferItems.size} item{transferItems.size !== 1 ? "s" : ""}</strong> will be moved.
-                  This updates Firestore and syncs automatically with the POS app.
+              <div className="bg-slate-50 rounded-xl p-3 space-y-2">
+                {transferCategories.size > 0 && (
+                  <p className="text-xs text-slate-500">
+                    <strong className="text-slate-600">
+                      {transferCategories.size} top-level categor{transferCategories.size !== 1 ? "ies" : "y"}
+                    </strong>{" "}
+                    will become subcategories under the target (old sub-groups under those categories are removed; all items stay in the new subcategory named like the former category).
+                    Items inherit the target&apos;s scheduled menus when the target uses schedules (e.g. POS-only → Brunch).
+                  </p>
+                )}
+                {transferItems.size > 0 && (
+                  <p className="text-xs text-slate-500">
+                    <strong className="text-slate-600">
+                      {transferItems.size} item{transferItems.size !== 1 ? "s" : ""}
+                    </strong>{" "}
+                    will be moved{transferCategories.size > 0 ? " (after category transfers)" : ""}.
+                    Menu and schedule settings will match the target category.
+                  </p>
+                )}
+                <p className="text-xs text-slate-400">
+                  Updates Firestore and syncs automatically with the POS app.
                 </p>
               </div>
 
