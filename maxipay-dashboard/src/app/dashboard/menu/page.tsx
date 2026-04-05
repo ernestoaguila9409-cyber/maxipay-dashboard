@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  arrayUnion,
   collection,
+  deleteField,
   doc,
   getDocs,
   query,
@@ -14,6 +16,7 @@ import {
   deleteDoc,
   onSnapshot,
   serverTimestamp,
+  setDoc,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
@@ -40,6 +43,7 @@ import {
   ArrowRightLeft,
   ChevronDown,
   ListFilter,
+  Printer,
 } from "lucide-react";
 import type * as XLSXType from "xlsx";
 
@@ -135,6 +139,8 @@ interface MenuItem {
   subcategoryId: string;
   subcategoryByCategoryId?: Record<string, string>;
   externalMappings?: ExternalMappings;
+  /** Kitchen routing label; must match a label on a kitchen printer (POS). */
+  printerLabel?: string;
 }
 
 function placementCategoryIds(item: Pick<MenuItem, "categoryId" | "categoryIds">): string[] {
@@ -299,6 +305,10 @@ export default function MenuPage() {
   const [addModifiersExpanded, setAddModifiersExpanded] = useState(false);
   const [addTaxesExpanded, setAddTaxesExpanded] = useState(false);
   const [stockCountingEnabled, setStockCountingEnabled] = useState(true);
+  /** Synced with POS: Settings/kitchenRoutingLabels.labels */
+  const [kitchenRoutingLabels, setKitchenRoutingLabels] = useState<string[]>([]);
+  const [addPrinterLabel, setAddPrinterLabel] = useState("");
+  const [editPrinterLabel, setEditPrinterLabel] = useState("");
 
   const [addMenuId, setAddMenuId] = useState("");
   const [addMenuIds, setAddMenuIds] = useState<Record<string, boolean>>({});
@@ -357,8 +367,8 @@ export default function MenuPage() {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   /** Multi-category filter: check categories/subs in the sidebar to show their items together. */
   const [categoryFilterMode, setCategoryFilterMode] = useState(false);
-  const [filterCategoryIds, setFilterCategoryIds] = useState<Set<string>>(new Set());
-  const [filterSubcategoryIds, setFilterSubcategoryIds] = useState<Set<string>>(new Set());
+  const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([]);
+  const [filterSubcategoryIds, setFilterSubcategoryIds] = useState<string[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
 
@@ -554,6 +564,10 @@ export default function MenuPage() {
             subcategoryId: data.subcategoryId ?? "",
             subcategoryByCategoryId,
             externalMappings: data.externalMappings ?? {},
+            printerLabel:
+              typeof data.printerLabel === "string" && data.printerLabel.trim()
+                ? data.printerLabel.trim()
+                : undefined,
           });
         });
         itemSnap.current = list;
@@ -671,6 +685,21 @@ export default function MenuPage() {
       (err) => console.error("[Menu] subcategories onSnapshot error:", err.code, err.message)
     );
 
+    const unsubKitchenLabels = onSnapshot(
+      doc(db, "Settings", "kitchenRoutingLabels"),
+      (snap) => {
+        const data = snap.data();
+        const raw = data?.labels;
+        const list = Array.isArray(raw)
+          ? raw.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0)
+          : [];
+        list.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+        setKitchenRoutingLabels(list);
+      },
+      (err) =>
+        console.error("[Menu] kitchenRoutingLabels onSnapshot error:", err.code, err.message)
+    );
+
     return () => {
       console.log("[Menu] Cleaning up Firestore listeners");
       unsubCats();
@@ -681,6 +710,7 @@ export default function MenuPage() {
       unsubTaxes();
       unsubMenuEntities();
       unsubSubcategories();
+      unsubKitchenLabels();
       bothReady.current = { cats: false, items: false };
     };
   }, [user, subscriptionKey]);
@@ -727,12 +757,12 @@ export default function MenuPage() {
       return words.every((w) => name.includes(w));
     }
     if (categoryFilterMode) {
-      const cats = filterCategoryIds.size > 0;
-      const subs = filterSubcategoryIds.size > 0;
+      const cats = filterCategoryIds.length > 0;
+      const subs = filterSubcategoryIds.length > 0;
       if (!cats && !subs) return true;
-      const matchCat = cats && filterCategoryIds.has(item.viewCategoryId);
+      const matchCat = cats && filterCategoryIds.includes(item.viewCategoryId);
       const matchSub =
-        subs && item.viewSubcategoryId && filterSubcategoryIds.has(item.viewSubcategoryId);
+        subs && item.viewSubcategoryId && filterSubcategoryIds.includes(item.viewSubcategoryId);
       if (cats && subs) {
         if (!matchCat && !matchSub) return false;
       } else if (cats) {
@@ -835,57 +865,53 @@ export default function MenuPage() {
 
   const exitCategoryFilterMode = () => {
     setCategoryFilterMode(false);
-    setFilterCategoryIds(new Set());
-    setFilterSubcategoryIds(new Set());
+    setFilterCategoryIds([]);
+    setFilterSubcategoryIds([]);
   };
 
   const enterCategoryFilterMode = () => {
     setActiveCategory(null);
     setActiveSubcategory(null);
-    setFilterCategoryIds(new Set());
-    setFilterSubcategoryIds(new Set());
+    setFilterCategoryIds([]);
+    setFilterSubcategoryIds([]);
     setCategoryFilterMode(true);
   };
 
   const toggleFilterCategory = (categoryId: string) => {
-    setFilterCategoryIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(categoryId)) next.delete(categoryId);
-      else next.add(categoryId);
-      return next;
-    });
+    setFilterCategoryIds((prev) =>
+      prev.includes(categoryId) ? prev.filter((id) => id !== categoryId) : [...prev, categoryId]
+    );
   };
 
   const toggleFilterSubcategory = (subcategoryId: string) => {
-    setFilterSubcategoryIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(subcategoryId)) next.delete(subcategoryId);
-      else next.add(subcategoryId);
-      return next;
-    });
+    setFilterSubcategoryIds((prev) =>
+      prev.includes(subcategoryId)
+        ? prev.filter((id) => id !== subcategoryId)
+        : [...prev, subcategoryId]
+    );
   };
 
   const toggleFilterSelectAllCategories = () => {
-    const ids = categoriesVisibleForMenu.map((c) => c.id);
+    const ids = [...new Set(categoriesVisibleForMenu.map((c) => c.id))];
+    if (ids.length === 0) return;
+    setFilterSubcategoryIds([]);
     setFilterCategoryIds((prev) => {
-      if (ids.length > 0 && ids.every((id) => prev.has(id))) {
-        return new Set();
-      }
-      return new Set(ids);
+      const allSelected = ids.every((id) => prev.includes(id));
+      return allSelected ? [] : [...ids];
     });
   };
 
   const clearCategoryFilters = () => {
-    setFilterCategoryIds(new Set());
-    setFilterSubcategoryIds(new Set());
+    setFilterCategoryIds([]);
+    setFilterSubcategoryIds([]);
   };
 
   const resetCategoryNavForMenuTarget = () => {
     setActiveCategory(null);
     setActiveSubcategory(null);
     if (categoryFilterMode) {
-      setFilterCategoryIds(new Set());
-      setFilterSubcategoryIds(new Set());
+      setFilterCategoryIds([]);
+      setFilterSubcategoryIds([]);
     }
   };
 
@@ -1161,6 +1187,20 @@ export default function MenuPage() {
 
   // ── Edit ──
 
+  async function mergeKitchenLabelToSettings(label: string) {
+    const t = label.trim();
+    if (!t) return;
+    try {
+      await setDoc(
+        doc(db, "Settings", "kitchenRoutingLabels"),
+        { labels: arrayUnion(t) },
+        { merge: true }
+      );
+    } catch (e) {
+      console.error("[Menu] mergeKitchenLabelToSettings:", e);
+    }
+  }
+
   const openEdit = (item: MenuItem) => {
     setEditTarget(item);
     const priceStrings: Record<string, string> = {};
@@ -1218,6 +1258,7 @@ export default function MenuPage() {
       txs[tId] = true;
     }
     setEditTaxes(txs);
+    setEditPrinterLabel(item.printerLabel?.trim() ?? "");
   };
 
   const handleSave = async () => {
@@ -1284,6 +1325,14 @@ export default function MenuPage() {
 
       if (editMenuId) update.menuId = editMenuId;
 
+      const pl = editPrinterLabel.trim();
+      if (pl) {
+        update.printerLabel = pl;
+        await mergeKitchenLabelToSettings(pl);
+      } else {
+        update.printerLabel = deleteField();
+      }
+
       await updateDoc(doc(db, "MenuItems", editTarget.id), update);
     } catch (err) {
       console.error("Failed to update item:", err);
@@ -1313,6 +1362,7 @@ export default function MenuPage() {
     setAddTaxes({});
     setAddModifiersExpanded(false);
     setAddTaxesExpanded(false);
+    setAddPrinterLabel("");
   };
 
   // ── Add Category ──
@@ -1616,6 +1666,12 @@ export default function MenuPage() {
         data.availableOrderTypes = ALL_ORDER_TYPES.filter((t) => addOrderTypes[t]);
       }
 
+      const addPl = addPrinterLabel.trim();
+      if (addPl) {
+        data.printerLabel = addPl;
+        await mergeKitchenLabelToSettings(addPl);
+      }
+
       await addDoc(collection(db, "MenuItems"), data);
 
       resetAddForm();
@@ -1815,14 +1871,14 @@ export default function MenuPage() {
                 >
                   <CheckSquare size={14} />
                   {categoriesVisibleForMenu.length > 0 &&
-                  categoriesVisibleForMenu.every((c) => filterCategoryIds.has(c.id))
+                  categoriesVisibleForMenu.every((c) => filterCategoryIds.includes(c.id))
                     ? "Deselect all categories"
                     : "Select all categories"}
                 </button>
                 <button
                   type="button"
                   onClick={clearCategoryFilters}
-                  disabled={filterCategoryIds.size === 0 && filterSubcategoryIds.size === 0}
+                  disabled={filterCategoryIds.length === 0 && filterSubcategoryIds.length === 0}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Clear
@@ -2015,7 +2071,7 @@ export default function MenuPage() {
                       }}
                       className={`w-full flex items-center justify-between px-3 py-2.5 text-sm transition-all duration-150 ${
                         categoryFilterMode
-                          ? filterCategoryIds.size === 0 && filterSubcategoryIds.size === 0
+                          ? filterCategoryIds.length === 0 && filterSubcategoryIds.length === 0
                             ? "bg-blue-50 text-blue-700 font-bold border-l-4 border-blue-600"
                             : "text-slate-600 font-semibold hover:bg-slate-50 border-l-4 border-transparent"
                           : activeCategory === null
@@ -2034,7 +2090,7 @@ export default function MenuPage() {
                           <div
                             className={`group/cat flex items-center transition-all duration-150 ${
                               categoryFilterMode
-                                ? filterCategoryIds.has(cat.id)
+                                ? filterCategoryIds.includes(cat.id)
                                   ? "bg-blue-50 border-l-4 border-blue-600"
                                   : "hover:bg-slate-50 border-l-4 border-transparent"
                                 : activeCategory === cat.id && !activeSubcategory
@@ -2049,7 +2105,7 @@ export default function MenuPage() {
                               >
                                 <input
                                   type="checkbox"
-                                  checked={filterCategoryIds.has(cat.id)}
+                                  checked={filterCategoryIds.includes(cat.id)}
                                   onChange={() => toggleFilterCategory(cat.id)}
                                   className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                 />
@@ -2079,7 +2135,7 @@ export default function MenuPage() {
                               }}
                               className={`flex-1 flex items-center justify-between px-3 py-2.5 text-sm min-w-0 ${
                                 categoryFilterMode
-                                  ? filterCategoryIds.has(cat.id)
+                                  ? filterCategoryIds.includes(cat.id)
                                     ? "text-blue-700 font-bold"
                                     : "text-slate-600 font-semibold"
                                   : activeCategory === cat.id && !activeSubcategory
@@ -2123,7 +2179,7 @@ export default function MenuPage() {
                                     key={sub.id}
                                     className={`group/sub flex items-center transition-all duration-150 ${
                                       categoryFilterMode
-                                        ? filterSubcategoryIds.has(sub.id)
+                                        ? filterSubcategoryIds.includes(sub.id)
                                           ? "bg-blue-50/60"
                                           : "hover:bg-slate-50"
                                         : activeSubcategory === sub.id
@@ -2138,7 +2194,7 @@ export default function MenuPage() {
                                       >
                                         <input
                                           type="checkbox"
-                                          checked={filterSubcategoryIds.has(sub.id)}
+                                          checked={filterSubcategoryIds.includes(sub.id)}
                                           onChange={() => toggleFilterSubcategory(sub.id)}
                                           className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                         />
@@ -2168,7 +2224,7 @@ export default function MenuPage() {
                                       }}
                                       className={`flex-1 flex items-center justify-between pl-3 pr-2 py-1.5 text-xs min-w-0 ${
                                         categoryFilterMode
-                                          ? filterSubcategoryIds.has(sub.id)
+                                          ? filterSubcategoryIds.includes(sub.id)
                                             ? "text-blue-600 font-bold"
                                             : "text-slate-500 font-medium"
                                           : activeSubcategory === sub.id
@@ -2225,7 +2281,7 @@ export default function MenuPage() {
                     }}
                     className={`shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
                       categoryFilterMode
-                        ? filterCategoryIds.size === 0 && filterSubcategoryIds.size === 0
+                        ? filterCategoryIds.length === 0 && filterSubcategoryIds.length === 0
                           ? "bg-blue-600 text-white shadow-sm"
                           : "bg-white border border-slate-200 text-slate-600"
                         : activeCategory === null
@@ -2236,7 +2292,7 @@ export default function MenuPage() {
                     All
                   </button>
                   {categoriesVisibleForMenu.map((cat) => {
-                    const catOn = categoryFilterMode ? filterCategoryIds.has(cat.id) : activeCategory === cat.id;
+                    const catOn = categoryFilterMode ? filterCategoryIds.includes(cat.id) : activeCategory === cat.id;
                     return (
                       <div
                         key={cat.id}
@@ -2247,7 +2303,7 @@ export default function MenuPage() {
                         {categoryFilterMode && (
                           <input
                             type="checkbox"
-                            checked={filterCategoryIds.has(cat.id)}
+                            checked={filterCategoryIds.includes(cat.id)}
                             onChange={() => toggleFilterCategory(cat.id)}
                             onClick={(e) => e.stopPropagation()}
                             className="ml-2 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
@@ -3508,6 +3564,34 @@ export default function MenuPage() {
                   )}
                 </div>
 
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5">
+                    <Printer size={15} className="text-slate-500" />
+                    Assign label
+                  </label>
+                  <p className="text-[10px] text-slate-400 mb-1.5">
+                    Labels match kitchen printers on the POS. (None) = do not send to kitchen printers.
+                  </p>
+                  <select
+                    value={addPrinterLabel}
+                    onChange={(e) => setAddPrinterLabel(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                  >
+                    <option value="">(None)</option>
+                    {[
+                      ...new Set(
+                        [...kitchenRoutingLabels, addPrinterLabel.trim()].filter(Boolean)
+                      ),
+                    ]
+                      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+                      .map((lbl) => (
+                        <option key={lbl} value={lbl}>
+                          {lbl}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
                 {/* ── Assign Modifiers (collapsible) ── */}
                 {modifierGroups.length > 0 && (() => {
                   const nestedIds = new Set<string>();
@@ -3916,6 +4000,34 @@ export default function MenuPage() {
                       ))}
                     </div>
                   )}
+                </div>
+
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5">
+                    <Printer size={15} className="text-slate-500" />
+                    Assign label
+                  </label>
+                  <p className="text-[10px] text-slate-400 mb-1.5">
+                    Labels match kitchen printers on the POS. (None) clears routing.
+                  </p>
+                  <select
+                    value={editPrinterLabel}
+                    onChange={(e) => setEditPrinterLabel(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                  >
+                    <option value="">(None)</option>
+                    {[
+                      ...new Set(
+                        [...kitchenRoutingLabels, editPrinterLabel.trim()].filter(Boolean)
+                      ),
+                    ]
+                      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+                      .map((lbl) => (
+                        <option key={lbl} value={lbl}>
+                          {lbl}
+                        </option>
+                      ))}
+                  </select>
                 </div>
 
                 {/* ── Assign Modifiers ── */}
