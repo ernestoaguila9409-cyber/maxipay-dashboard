@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import {
   collection,
   query,
@@ -11,6 +10,7 @@ import {
   getDocs,
   Timestamp,
   type DocumentData,
+  type QueryDocumentSnapshot,
   type QuerySnapshot,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
@@ -18,13 +18,12 @@ import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import MetricCard from "@/components/MetricCard";
 import SalesChart, { type HourlySalesPoint } from "@/components/SalesChart";
-import PaymentBreakdown from "@/components/PaymentBreakdown";
-import RecentOrdersGrid from "@/components/RecentOrdersGrid";
+import DashboardFinancesWidget, {
+  type OpenBatchSummary,
+} from "@/components/DashboardFinancesWidget";
 import TopItemsToday from "@/components/TopItemsToday";
-import { type Order } from "@/components/OrdersTable";
 import { buildTopItemsForDashboard, type TopItemRow } from "@/lib/dashboardTopItems";
 import { DollarSign, Receipt, TrendingUp, RotateCcw } from "lucide-react";
-import { mergeOrderSnapshots } from "@/lib/orderDisplayUtils";
 import {
   aggregateDashboardPeriod,
   aggregatePaymentBreakdownFromTransactionIds,
@@ -35,8 +34,7 @@ import {
   startOfLocalDay,
 } from "@/lib/dashboardFinance";
 
-const OPEN_ORDERS_LIMIT = 500;
-/** Orders fetched from Firestore for dashboard (14-day lookback for 7d + compare + top items). */
+/** Orders fetched for dashboard (14-day lookback for 7d + compare + top items). */
 const ORDERS_FETCH_LIMIT = 2500;
 
 type DashboardPeriod = "today" | "yesterday" | "7d";
@@ -88,23 +86,25 @@ function getPeriodRanges(period: DashboardPeriod, now: Date): PeriodRanges {
   };
 }
 
-function filterMergedOrdersForPeriod(
-  orders: Order[],
-  period: DashboardPeriod,
-  primaryStart: Date,
-  primaryEnd: Date
-): Order[] {
-  return orders
-    .filter((o) => {
-      if (period === "today" && String(o.status).toUpperCase() === "OPEN") {
-        return true;
-      }
-      const t = o.createdAt;
-      if (!t) return false;
-      return t >= primaryStart && t <= primaryEnd;
-    })
-    .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0))
-    .slice(0, 15);
+function parseOpenBatchDoc(
+  docSnap: QueryDocumentSnapshot<DocumentData>
+): OpenBatchSummary {
+  const d = docSnap.data();
+  const createdAt =
+    d.createdAt && typeof d.createdAt.toDate === "function"
+      ? d.createdAt.toDate()
+      : null;
+  return {
+    id: docSnap.id,
+    createdAt,
+    transactionCounter: Math.round(
+      typeof d.transactionCounter === "number"
+        ? d.transactionCounter
+        : Number(d.transactionCounter ?? 0)
+    ),
+    total: typeof d.total === "number" ? d.total : Number(d.total ?? 0),
+    count: typeof d.count === "number" ? d.count : Number(d.count ?? 0),
+  };
 }
 
 interface MetricTrends {
@@ -129,7 +129,6 @@ export default function DashboardPage() {
     avgTicket: emptyTrend,
     refunds: emptyTrend,
   });
-  const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [topItems, setTopItems] = useState<TopItemRow[]>([]);
   const [hourlySales, setHourlySales] = useState<HourlySalesPoint[]>([]);
   const [paymentBreakdown, setPaymentBreakdown] = useState({
@@ -137,6 +136,7 @@ export default function DashboardPage() {
     cash: 0,
     other: 0,
   });
+  const [openBatch, setOpenBatch] = useState<OpenBatchSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -174,23 +174,6 @@ export default function DashboardPage() {
               orderBy("createdAt", "desc"),
               limit(800)
             )
-          );
-        }
-
-        let snapshotOpen: QuerySnapshot<DocumentData> | null = null;
-        try {
-          snapshotOpen = await getDocs(
-            query(
-              collection(db, "Orders"),
-              where("status", "==", "OPEN"),
-              orderBy("createdAt", "desc"),
-              limit(OPEN_ORDERS_LIMIT)
-            )
-          );
-        } catch (e) {
-          console.error(
-            "OPEN orders query failed (deploy firestore.indexes.json):",
-            e
           );
         }
 
@@ -238,19 +221,6 @@ export default function DashboardPage() {
           refunds: formatTrendVsPrior(refundsDollars, prevRefunds, phrase),
         });
 
-        const mergedForTable = mergeOrderSnapshots(
-          snapshotRecent,
-          snapshotOpen
-        );
-        setRecentOrders(
-          filterMergedOrdersForPeriod(
-            mergedForTable,
-            period,
-            ranges.primaryStart,
-            ranges.primaryEnd
-          )
-        );
-
         if (ranges.isHourlyChart) {
           setHourlySales(
             buildHourlySalesPoints(
@@ -269,11 +239,24 @@ export default function DashboardPage() {
           );
         }
 
-        const payments = await aggregatePaymentBreakdownFromTransactionIds(
-          current.saleTransactionIds
-        );
+        const [payments, batchesSnap] = await Promise.all([
+          aggregatePaymentBreakdownFromTransactionIds(
+            current.saleTransactionIds
+          ),
+          getDocs(
+            query(
+              collection(db, "Batches"),
+              where("closed", "==", false),
+              limit(1)
+            )
+          ),
+        ]);
+
         if (cancelled) return;
+
         setPaymentBreakdown(payments);
+        const b0 = batchesSnap.docs[0];
+        setOpenBatch(b0 ? parseOpenBatchDoc(b0) : null);
 
         try {
           const top = await buildTopItemsForDashboard(
@@ -316,10 +299,7 @@ export default function DashboardPage() {
         ? "Figures below are for yesterday (local time)."
         : "Figures below are for the last 7 calendar days including today (local time).";
 
-  const chartTitle =
-    period === "7d" ? "Sales by day" : "Sales by hour";
-  const chartEmptyTitle =
-    period === "7d" ? "No sales in this range" : "No sales in this range";
+  const chartTitle = period === "7d" ? "Sales by day" : "Sales by hour";
   const chartEmptyDesc =
     "Try another date range or record sales on the POS — data uses the same Firestore Orders as the app.";
 
@@ -336,12 +316,23 @@ export default function DashboardPage() {
         ? "vs prior day · closed orders only"
         : "vs previous 7 days · closed orders only";
 
-  const recentEmpty =
-    period === "today"
-      ? "No orders yet today"
-      : period === "yesterday"
-        ? "No orders yesterday"
-        : "No orders in the last 7 days";
+  const collectedSubtitle = useMemo(() => {
+    const sum =
+      paymentBreakdown.card + paymentBreakdown.cash + paymentBreakdown.other;
+    const money = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(sum);
+    const when =
+      period === "today"
+        ? "today"
+        : period === "yesterday"
+          ? "yesterday"
+          : "in the last 7 days";
+    return `${money} collected ${when}`;
+  }, [paymentBreakdown, period]);
 
   return (
     <>
@@ -411,7 +402,7 @@ export default function DashboardPage() {
           <SalesChart
             data={hourlySales}
             loading={loading}
-            emptyTitle={chartEmptyTitle}
+            emptyTitle="No sales in this range"
             emptyDescription={chartEmptyDesc}
             xAxisTickInterval={period === "7d" ? 0 : 2}
           />
@@ -424,31 +415,12 @@ export default function DashboardPage() {
           compareSubtitle={topCompareSubtitle}
         />
 
-        <section className="space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <h2 className="text-lg font-semibold text-slate-800">
-              Recent orders
-            </h2>
-            <Link
-              href="/dashboard/orders"
-              className="inline-flex items-center justify-center text-sm font-medium text-blue-600 hover:text-blue-700"
-            >
-              View all orders →
-            </Link>
-          </div>
-          <RecentOrdersGrid
-            orders={recentOrders}
-            loading={loading}
-            emptyMessage={recentEmpty}
-            emptySubMessage="Same Firestore `Orders` as the POS — use filters on the orders page for more history."
-          />
-        </section>
-
         <section>
-          <PaymentBreakdown
+          <DashboardFinancesWidget
             totals={paymentBreakdown}
+            collectedSubtitle={collectedSubtitle}
+            openBatch={openBatch}
             loading={loading}
-            emptyMessage={`No payment breakdown for this range yet — card/cash totals come from linked sale transactions (same data as the POS).`}
           />
         </section>
       </div>
