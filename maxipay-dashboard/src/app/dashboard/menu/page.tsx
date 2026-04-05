@@ -410,6 +410,7 @@ export default function MenuPage() {
       categoryIds?: string[];
       subcategoryByCategoryId?: Record<string, string>;
       externalMappings: ExternalMappings;
+      printerLabel?: string;
     }[]
   >([]);
   const bothReady = useRef({ cats: false, items: false });
