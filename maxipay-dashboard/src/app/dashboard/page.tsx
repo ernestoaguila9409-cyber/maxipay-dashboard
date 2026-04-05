@@ -18,7 +18,10 @@ import Header from "@/components/Header";
 import MetricCard from "@/components/MetricCard";
 import SalesChart, { type HourlySalesPoint } from "@/components/SalesChart";
 import PaymentBreakdown from "@/components/PaymentBreakdown";
-import OrdersTable, { type Order } from "@/components/OrdersTable";
+import RecentOrdersGrid from "@/components/RecentOrdersGrid";
+import TopItemsToday from "@/components/TopItemsToday";
+import { type Order } from "@/components/OrdersTable";
+import { buildTopItemsForDashboard, type TopItemRow } from "@/lib/dashboardTopItems";
 import { DollarSign, Receipt, TrendingUp, RotateCcw } from "lucide-react";
 import { mergeOrderSnapshots } from "@/lib/orderDisplayUtils";
 import {
@@ -40,6 +43,7 @@ export default function DashboardPage() {
   const [avgTicket, setAvgTicket] = useState(0);
   const [refundsToday, setRefundsToday] = useState(0);
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+  const [topItemsToday, setTopItemsToday] = useState<TopItemRow[]>([]);
   const [hourlySales, setHourlySales] = useState<HourlySalesPoint[]>([]);
   const [paymentBreakdown, setPaymentBreakdown] = useState({
     card: 0,
@@ -67,6 +71,24 @@ export default function DashboardPage() {
           now.getFullYear(),
           now.getMonth(),
           now.getDate(),
+          23,
+          59,
+          59,
+          999
+        );
+        const yesterdayStart = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate() - 1,
+          0,
+          0,
+          0,
+          0
+        );
+        const yesterdayEnd = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate() - 1,
           23,
           59,
           59,
@@ -148,6 +170,20 @@ export default function DashboardPage() {
           saleTransactionIds
         );
         setPaymentBreakdown(payments);
+
+        try {
+          const top = await buildTopItemsForDashboard(
+            snapshotRecent,
+            startOfDay,
+            endOfDay,
+            yesterdayStart,
+            yesterdayEnd
+          );
+          setTopItemsToday(top);
+        } catch (e) {
+          console.error("Top items aggregation failed:", e);
+          setTopItemsToday([]);
+        }
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
       } finally {
@@ -236,6 +272,8 @@ export default function DashboardPage() {
           />
         </section>
 
+        <TopItemsToday items={topItemsToday} loading={loading} />
+
         <section className="space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <h2 className="text-lg font-semibold text-slate-800">
@@ -248,7 +286,7 @@ export default function DashboardPage() {
               View all orders →
             </Link>
           </div>
-          <OrdersTable
+          <RecentOrdersGrid
             orders={recentOrders}
             loading={loading}
             emptyMessage="No orders yet today"
