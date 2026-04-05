@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
   doc,
@@ -116,6 +116,8 @@ interface MenuItem {
   prices: Record<string, number>;
   stock: number;
   categoryId: string;
+  /** When set, item appears under each listed category on POS (see subcategoryByCategoryId). */
+  categoryIds?: string[];
   categoryName: string;
   availableOrderTypes: string[] | null;
   effectiveOrderTypes: string[];
@@ -130,7 +132,118 @@ interface MenuItem {
   categoryScheduled: boolean;
   categoryScheduleIds: string[];
   subcategoryId: string;
+  subcategoryByCategoryId?: Record<string, string>;
   externalMappings?: ExternalMappings;
+}
+
+function placementCategoryIds(item: Pick<MenuItem, "categoryId" | "categoryIds">): string[] {
+  if (item.categoryIds && item.categoryIds.length > 0) return item.categoryIds;
+  if (item.categoryId) return [item.categoryId];
+  return [];
+}
+
+/** Row in the menu list with category resolved for the active menu filter. */
+type MenuItemViewRow = MenuItem & {
+  viewCategoryId: string;
+  viewCategoryName: string;
+  viewSubcategoryId: string;
+  viewCategoryScheduled: boolean;
+  viewCategoryScheduleIds: string[];
+};
+
+function viewCategoryIdForMenuFilter(
+  item: Pick<MenuItem, "categoryId" | "categoryIds">,
+  menuTypeFilter: string | null,
+  categories: Category[],
+  menuEntities: MenuEntity[],
+): string {
+  const ids = placementCategoryIds(item);
+  if (ids.length === 0) return item.categoryId;
+  if (!menuTypeFilter || menuTypeFilter === "POS") {
+    if (menuTypeFilter === "POS" && ids.length > 1) {
+      for (const cid of ids) {
+        const c = categories.find((x) => x.id === cid);
+        if (c && c.scheduleIds.length === 0) return cid;
+      }
+    }
+    return item.categoryId;
+  }
+  const menuEntity = menuEntities.find((m) => m.id === menuTypeFilter);
+  if (!menuEntity) return item.categoryId;
+  const menuSched = new Set(menuEntity.scheduleIds);
+  for (const cid of ids) {
+    const c = categories.find((x) => x.id === cid);
+    if (c && c.scheduleIds.length > 0 && c.scheduleIds.some((sid) => menuSched.has(sid))) {
+      return cid;
+    }
+  }
+  return item.categoryId;
+}
+
+function viewSubcategoryIdForCategory(
+  item: Pick<MenuItem, "categoryId" | "subcategoryId" | "subcategoryByCategoryId">,
+  viewCategoryId: string,
+): string {
+  const m = item.subcategoryByCategoryId;
+  if (m && typeof m[viewCategoryId] === "string") return m[viewCategoryId];
+  if (item.categoryId === viewCategoryId) return item.subcategoryId ?? "";
+  return "";
+}
+
+function itemPassesMenuFilter(
+  item: MenuItem,
+  menuTypeFilter: string | null,
+  categories: Category[],
+  menuEntities: MenuEntity[],
+): boolean {
+  if (!menuTypeFilter) return true;
+
+  if (menuTypeFilter === "POS") {
+    const ids = placementCategoryIds(item);
+    if (ids.length > 0) {
+      return ids.some((cid) => {
+        const c = categories.find((x) => x.id === cid);
+        return c && c.scheduleIds.length === 0;
+      });
+    }
+    return !(item.categoryScheduled || item.isScheduled);
+  }
+
+  const allItemMenuIds = item.menuIds.length > 0 ? item.menuIds : (item.menuId ? [item.menuId] : []);
+  if (allItemMenuIds.includes(menuTypeFilter)) return true;
+
+  const menuEntity = menuEntities.find((m) => m.id === menuTypeFilter);
+  if (!menuEntity) return false;
+
+  if (allItemMenuIds.length === 0 && item.categoryScheduleIds.length > 0) {
+    const menuSchedIds = new Set(menuEntity.scheduleIds);
+    if (item.categoryScheduleIds.some((sid) => menuSchedIds.has(sid))) return true;
+  }
+
+  const ids = placementCategoryIds(item);
+  return ids.some((cid) => {
+    const c = categories.find((x) => x.id === cid);
+    return c && c.scheduleIds.length > 0 && c.scheduleIds.some((sid) => menuEntity.scheduleIds.includes(sid));
+  });
+}
+
+function withViewPlacement(
+  item: MenuItem,
+  menuTypeFilter: string | null,
+  categories: Category[],
+  menuEntities: MenuEntity[],
+): MenuItemViewRow {
+  const viewCategoryId = viewCategoryIdForMenuFilter(item, menuTypeFilter, categories, menuEntities);
+  const viewCat = categories.find((c) => c.id === viewCategoryId);
+  const viewSubcategoryId = viewSubcategoryIdForCategory(item, viewCategoryId);
+  return {
+    ...item,
+    viewCategoryId,
+    viewCategoryName: viewCat?.name ?? "Uncategorized",
+    viewSubcategoryId,
+    viewCategoryScheduled: (viewCat?.scheduleIds.length ?? 0) > 0,
+    viewCategoryScheduleIds: viewCat?.scheduleIds ?? [],
+  };
 }
 
 interface ModifierGroup {
@@ -279,6 +392,8 @@ export default function MenuPage() {
       isScheduled: boolean;
       scheduleIds: string[];
       subcategoryId: string;
+      categoryIds?: string[];
+      subcategoryByCategoryId?: Record<string, string>;
       externalMappings: ExternalMappings;
     }[]
   >([]);
@@ -310,6 +425,8 @@ export default function MenuPage() {
           effectiveOrderTypes: effective,
           categoryScheduled: (cat?.scheduleIds.length ?? 0) > 0,
           categoryScheduleIds: cat?.scheduleIds ?? [],
+          categoryIds: raw.categoryIds,
+          subcategoryByCategoryId: raw.subcategoryByCategoryId,
         };
       });
       menuItems.sort((a, b) => a.name.localeCompare(b.name));
@@ -398,6 +515,20 @@ export default function MenuPage() {
             ? rawMenuIds
             : (data.menuId ? [data.menuId as string] : []);
 
+          const rawCategoryIds = Array.isArray(data.categoryIds)
+            ? (data.categoryIds as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0)
+            : undefined;
+
+          let subcategoryByCategoryId: Record<string, string> | undefined;
+          const rawSubMap = data.subcategoryByCategoryId;
+          if (rawSubMap && typeof rawSubMap === "object" && rawSubMap !== null) {
+            const o: Record<string, string> = {};
+            for (const [k, v] of Object.entries(rawSubMap as Record<string, unknown>)) {
+              if (typeof v === "string") o[k] = v;
+            }
+            if (Object.keys(o).length > 0) subcategoryByCategoryId = o;
+          }
+
           list.push({
             id: d.id,
             name: data.name || "Unnamed",
@@ -405,6 +536,7 @@ export default function MenuPage() {
             prices,
             stock: data.stock ?? 0,
             categoryId: data.categoryId ?? "",
+            categoryIds: rawCategoryIds && rawCategoryIds.length > 0 ? rawCategoryIds : undefined,
             availableOrderTypes: Array.isArray(data.availableOrderTypes) ? data.availableOrderTypes : null,
             modifierGroupIds: Array.isArray(data.modifierGroupIds) ? data.modifierGroupIds : [],
             taxIds: Array.isArray(data.taxIds) ? data.taxIds : [],
@@ -415,6 +547,7 @@ export default function MenuPage() {
             isScheduled: data.isScheduled ?? false,
             scheduleIds: Array.isArray(data.scheduleIds) ? data.scheduleIds : [],
             subcategoryId: data.subcategoryId ?? "",
+            subcategoryByCategoryId,
             externalMappings: data.externalMappings ?? {},
           });
         });
@@ -559,25 +692,13 @@ export default function MenuPage() {
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [items.length, loading, user]);
 
-  // ── Filter + group ──
+  // ── Filter + group (per–menu-filter category placement for multi-menu items) ──
 
-  const itemsForMenuType = items.filter((item) => {
-    if (menuTypeFilter === "POS" && (item.categoryScheduled || item.isScheduled))
-      return false;
-    if (menuTypeFilter && menuTypeFilter !== "POS") {
-      const allItemMenuIds = item.menuIds.length > 0 ? item.menuIds : (item.menuId ? [item.menuId] : []);
-      if (allItemMenuIds.includes(menuTypeFilter)) return true;
-      const menuEntity = menuEntities.find((m) => m.id === menuTypeFilter);
-      if (!menuEntity) return false;
-      // Items with no menuIds (legacy / bad saves) still belong on a menu if the category shares that menu's schedules
-      if (allItemMenuIds.length === 0 && item.categoryScheduleIds.length > 0) {
-        const menuSchedIds = new Set(menuEntity.scheduleIds);
-        if (item.categoryScheduleIds.some((sid) => menuSchedIds.has(sid))) return true;
-      }
-      return false;
-    }
-    return true;
-  });
+  const itemsForMenuType = useMemo((): MenuItemViewRow[] => {
+    return items
+      .filter((item) => itemPassesMenuFilter(item, menuTypeFilter, categories, menuEntities))
+      .map((item) => withViewPlacement(item, menuTypeFilter, categories, menuEntities));
+  }, [items, menuTypeFilter, categories, menuEntities]);
 
   const filtered = itemsForMenuType.filter((item) => {
     const q = search.trim().toLowerCase();
@@ -586,14 +707,14 @@ export default function MenuPage() {
       const words = q.split(/\s+/).filter(Boolean);
       return words.every((w) => name.includes(w));
     }
-    if (activeSubcategory && item.subcategoryId !== activeSubcategory) return false;
-    if (activeCategory && item.categoryId !== activeCategory) return false;
+    if (activeSubcategory && item.viewSubcategoryId !== activeSubcategory) return false;
+    if (activeCategory && item.viewCategoryId !== activeCategory) return false;
     return true;
   });
 
-  const grouped = new Map<string, MenuItem[]>();
+  const grouped = new Map<string, MenuItemViewRow[]>();
   for (const item of filtered) {
-    const key = item.categoryName;
+    const key = item.viewCategoryName;
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key)!.push(item);
   }
@@ -1756,7 +1877,7 @@ export default function MenuPage() {
                     </button>
                     {categories.filter((cat) => {
                       if (!menuTypeFilter) return true;
-                      if (itemsForMenuType.some((i) => i.categoryId === cat.id)) return true;
+                      if (itemsForMenuType.some((i) => i.viewCategoryId === cat.id)) return true;
                       if (menuTypeFilter === "POS") return false;
                       const menuEntity = menuEntities.find((m) => m.id === menuTypeFilter);
                       if (!menuEntity || menuEntity.scheduleIds.length === 0 || cat.scheduleIds.length === 0) {
@@ -1765,7 +1886,7 @@ export default function MenuPage() {
                       const menuSched = new Set(menuEntity.scheduleIds);
                       return cat.scheduleIds.some((sid) => menuSched.has(sid));
                     }).map((cat) => {
-                      const catItemCount = itemsForMenuType.filter((i) => i.categoryId === cat.id).length;
+                      const catItemCount = itemsForMenuType.filter((i) => i.viewCategoryId === cat.id).length;
                       const catSubs = allSubcategories.filter((s) => s.categoryId === cat.id);
                       return (
                         <div key={cat.id}>
@@ -1825,7 +1946,7 @@ export default function MenuPage() {
                           {catSubs.length > 0 && (
                             <div className="ml-4 border-l border-slate-200">
                               {catSubs.map((sub) => {
-                                const subItemCount = itemsForMenuType.filter((i) => i.subcategoryId === sub.id).length;
+                                const subItemCount = itemsForMenuType.filter((i) => i.viewSubcategoryId === sub.id).length;
                                 return (
                                   <div
                                     key={sub.id}
@@ -1900,7 +2021,17 @@ export default function MenuPage() {
                 >
                   All
                 </button>
-                {categories.map((cat) => (
+                {categories.filter((cat) => {
+                  if (!menuTypeFilter) return true;
+                  if (itemsForMenuType.some((i) => i.viewCategoryId === cat.id)) return true;
+                  if (menuTypeFilter === "POS") return false;
+                  const menuEntity = menuEntities.find((m) => m.id === menuTypeFilter);
+                  if (!menuEntity || menuEntity.scheduleIds.length === 0 || cat.scheduleIds.length === 0) {
+                    return false;
+                  }
+                  const menuSched = new Set(menuEntity.scheduleIds);
+                  return cat.scheduleIds.some((sid) => menuSched.has(sid));
+                }).map((cat) => (
                   <div
                     key={cat.id}
                     className={`shrink-0 flex items-center gap-1.5 rounded-lg ${
@@ -1999,7 +2130,7 @@ export default function MenuPage() {
                                   ))}
                                 </div>
                                 <div className="w-32 hidden sm:flex items-center justify-center gap-1.5 shrink-0 flex-wrap">
-                                  {!item.categoryScheduled && !item.isScheduled && (
+                                  {!item.viewCategoryScheduled && (
                                     <span className="text-[11px] px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-semibold">
                                       POS
                                     </span>
@@ -2019,7 +2150,9 @@ export default function MenuPage() {
                                     </span>
                                   )}
                                   {(() => {
-                                    const sIds = item.scheduleIds.length > 0
+                                    const sIds = item.viewCategoryScheduleIds.length > 0
+                                      ? item.viewCategoryScheduleIds
+                                      : item.scheduleIds.length > 0
                                       ? item.scheduleIds
                                       : item.categoryScheduleIds;
                                     const shownMenuIds = item.menuIds.length > 0 ? item.menuIds : (item.menuId ? [item.menuId] : []);
@@ -2177,13 +2310,15 @@ export default function MenuPage() {
                                     Online
                                   </span>
                                 )}
-                                {!item.categoryScheduled && !item.isScheduled && (
+                                {!item.viewCategoryScheduled && (
                                   <span className="text-[11px] px-2 py-1 rounded-full bg-emerald-50 text-emerald-600 font-semibold">
                                     POS
                                   </span>
                                 )}
                                 {(() => {
-                                  const sIds = item.scheduleIds.length > 0
+                                  const sIds = item.viewCategoryScheduleIds.length > 0
+                                    ? item.viewCategoryScheduleIds
+                                    : item.scheduleIds.length > 0
                                     ? item.scheduleIds
                                     : item.categoryScheduleIds;
                                   const shownMenuIds = item.menuIds.length > 0 ? item.menuIds : (item.menuId ? [item.menuId] : []);
