@@ -20,6 +20,8 @@ interface SalesChartProps {
   loading?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
+  /** Recharts XAxis `interval` — use `0` to show every tick (e.g. 7-day view). */
+  xAxisTickInterval?: number;
 }
 
 function formatMoney(n: number): string {
@@ -36,6 +38,7 @@ export default function SalesChart({
   loading,
   emptyTitle = "No sales yet today",
   emptyDescription = "Start taking orders to see hourly sales here.",
+  xAxisTickInterval = 2,
 }: SalesChartProps) {
   const total = data.reduce((s, d) => s + d.amount, 0);
   const isEmpty = !loading && total <= 0;
@@ -74,7 +77,7 @@ export default function SalesChart({
               tick={{ fontSize: 11, fill: "#64748b" }}
               tickLine={false}
               axisLine={{ stroke: "#e2e8f0" }}
-              interval={2}
+              interval={xAxisTickInterval}
             />
             <YAxis
               tick={{ fontSize: 11, fill: "#64748b" }}

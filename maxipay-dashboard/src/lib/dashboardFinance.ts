@@ -12,6 +12,112 @@ import type { HourlySalesPoint } from "@/components/SalesChart";
 import type { PaymentBreakdownTotals } from "@/components/PaymentBreakdown";
 import { db } from "@/firebase/firebaseConfig";
 
+/** Start of local calendar day for `base` (00:00:00.000). */
+export function startOfLocalDay(base: Date, dayOffset = 0): Date {
+  const d = new Date(base);
+  d.setDate(d.getDate() + dayOffset);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** End of local calendar day for `base` (23:59:59.999). */
+export function endOfLocalDay(base: Date, dayOffset = 0): Date {
+  const d = new Date(base);
+  d.setDate(d.getDate() + dayOffset);
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+function localDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function enumerateLocalDays(rangeStart: Date, rangeEnd: Date): { key: string; label: string }[] {
+  const out: { key: string; label: string }[] = [];
+  const cur = startOfLocalDay(rangeStart, 0);
+  const last = startOfLocalDay(rangeEnd, 0);
+  while (cur.getTime() <= last.getTime()) {
+    const key = localDateKey(cur);
+    const label = cur.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "numeric",
+      day: "numeric",
+    });
+    out.push({ key, label });
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+export interface DashboardPeriodTotals {
+  totalSalesCents: number;
+  totalRefundsCents: number;
+  orderCount: number;
+  saleTransactionIds: string[];
+}
+
+/**
+ * Same rules as the POS dashboard: orders in [start, end] by `createdAt`, excluding VOIDED;
+ * net sales uses totalPaidInCents if &gt; 0 else totalInCents.
+ */
+export function aggregateDashboardPeriod(
+  snapshot: QuerySnapshot<DocumentData>,
+  start: Date,
+  end: Date
+): DashboardPeriodTotals {
+  let totalSalesCents = 0;
+  let totalRefundsCents = 0;
+  let orderCount = 0;
+  const saleTransactionIds: string[] = [];
+
+  snapshot.forEach((docSnap) => {
+    const data = docSnap.data();
+    const createdAt = data.createdAt?.toDate?.() ?? new Date();
+    if (createdAt < start || createdAt > end) {
+      return;
+    }
+    const status = String(data.status ?? "");
+    if (status === "VOIDED") {
+      return;
+    }
+
+    orderCount += 1;
+    const paid = Number(data.totalPaidInCents ?? 0);
+    const totalIn = Number(data.totalInCents ?? 0);
+    totalSalesCents += paid > 0 ? paid : totalIn;
+    totalRefundsCents += Number(data.totalRefundedInCents ?? 0);
+    const sid = String(data.saleTransactionId ?? "").trim();
+    if (sid) {
+      saleTransactionIds.push(sid);
+    }
+  });
+
+  return {
+    totalSalesCents,
+    totalRefundsCents,
+    orderCount,
+    saleTransactionIds,
+  };
+}
+
+/** Trend line for metric cards, e.g. "+12.3% vs yesterday". */
+export function formatTrendVsPrior(
+  current: number,
+  previous: number,
+  priorPhrase: string
+): string {
+  if (previous <= 0) {
+    return current > 0 ? `New ${priorPhrase}` : `— ${priorPhrase}`;
+  }
+  const pct = ((current - previous) / previous) * 100;
+  const r = Math.round(pct * 10) / 10;
+  const sign = r >= 0 ? "+" : "";
+  return `${sign}${r}% ${priorPhrase}`;
+}
+
 function classifyPaymentType(pt: string): keyof PaymentBreakdownTotals {
   const t = pt.trim();
   if (!t) return "other";
@@ -58,6 +164,42 @@ export function buildHourlySalesPoints(
   return amounts.map((amount, hour) => ({
     amount,
     label: formatHourLabel(hour),
+  }));
+}
+
+/**
+ * One point per local calendar day in [rangeStart, rangeEnd] (inclusive days).
+ */
+export function buildDailySalesPoints(
+  snapshot: QuerySnapshot<DocumentData>,
+  rangeStart: Date,
+  rangeEnd: Date
+): HourlySalesPoint[] {
+  const days = enumerateLocalDays(rangeStart, rangeEnd);
+  const amounts = new Map<string, number>();
+  for (const d of days) {
+    amounts.set(d.key, 0);
+  }
+
+  snapshot.forEach((docSnap) => {
+    const data = docSnap.data();
+    const createdAt = data.createdAt?.toDate?.() ?? new Date();
+    if (String(data.status ?? "") === "VOIDED") {
+      return;
+    }
+    const key = localDateKey(createdAt);
+    if (!amounts.has(key)) {
+      return;
+    }
+    const paid = Number(data.totalPaidInCents ?? 0);
+    const totalIn = Number(data.totalInCents ?? 0);
+    const cents = paid > 0 ? paid : totalIn;
+    amounts.set(key, (amounts.get(key) ?? 0) + cents / 100);
+  });
+
+  return days.map((d) => ({
+    label: d.label,
+    amount: amounts.get(d.key) ?? 0,
   }));
 }
 

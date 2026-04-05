@@ -15,7 +15,7 @@ export interface TopItemRow {
   changePct: number | null;
 }
 
-const MAX_ORDERS_TO_SCAN = 48;
+const DEFAULT_MAX_ORDERS_TO_SCAN = 120;
 const CHUNK = 10;
 const TOP_N = 8;
 
@@ -57,18 +57,19 @@ async function aggregateLineRevenueByItemName(
 }
 
 /**
- * Aggregates line-item revenue from `Orders/{id}/items` for today vs yesterday,
- * using the same recent snapshot as the dashboard (may miss older days if volume is high).
+ * Line-item revenue for `primary` window vs `compare` window (e.g. last 7 days vs prior 7 days).
+ * Uses the same order snapshot as the dashboard (may miss orders if volume exceeds fetch limit).
  */
 export async function buildTopItemsForDashboard(
   snapshot: QuerySnapshot<DocumentData>,
-  todayStart: Date,
-  todayEnd: Date,
-  yesterdayStart: Date,
-  yesterdayEnd: Date
+  primaryStart: Date,
+  primaryEnd: Date,
+  compareStart: Date,
+  compareEnd: Date,
+  maxOrdersToScan: number = DEFAULT_MAX_ORDERS_TO_SCAN
 ): Promise<TopItemRow[]> {
-  const todayIds: string[] = [];
-  const yesterdayIds: string[] = [];
+  const primaryIds: string[] = [];
+  const compareIds: string[] = [];
 
   snapshot.forEach((docSnap) => {
     const data = docSnap.data() as Record<string, unknown>;
@@ -77,35 +78,35 @@ export async function buildTopItemsForDashboard(
     const status = String(data.status ?? "");
     if (!orderQualifiesForTopItems(status)) return;
 
-    if (inRange(createdAt, todayStart, todayEnd)) {
-      todayIds.push(docSnap.id);
-    } else if (inRange(createdAt, yesterdayStart, yesterdayEnd)) {
-      yesterdayIds.push(docSnap.id);
+    if (inRange(createdAt, primaryStart, primaryEnd)) {
+      primaryIds.push(docSnap.id);
+    } else if (inRange(createdAt, compareStart, compareEnd)) {
+      compareIds.push(docSnap.id);
     }
   });
 
-  const todayCapped = todayIds.slice(0, MAX_ORDERS_TO_SCAN);
-  const yesterdayCapped = yesterdayIds.slice(0, MAX_ORDERS_TO_SCAN);
+  const primaryCapped = primaryIds.slice(0, maxOrdersToScan);
+  const compareCapped = compareIds.slice(0, maxOrdersToScan);
 
-  const [todayMap, yesterdayMap] = await Promise.all([
-    aggregateLineRevenueByItemName(todayCapped),
-    aggregateLineRevenueByItemName(yesterdayCapped),
+  const [primaryMap, compareMap] = await Promise.all([
+    aggregateLineRevenueByItemName(primaryCapped),
+    aggregateLineRevenueByItemName(compareCapped),
   ]);
 
-  const sorted = Array.from(todayMap.entries())
+  const sorted = Array.from(primaryMap.entries())
     .filter(([, cents]) => cents > 0)
     .sort((a, b) => b[1] - a[1])
     .slice(0, TOP_N);
 
-  return sorted.map(([name, centsToday]) => {
-    const centsYesterday = yesterdayMap.get(name) ?? 0;
+  return sorted.map(([name, centsPrimary]) => {
+    const centsCompare = compareMap.get(name) ?? 0;
     let changePct: number | null = null;
-    if (centsYesterday > 0) {
-      changePct = ((centsToday - centsYesterday) / centsYesterday) * 100;
+    if (centsCompare > 0) {
+      changePct = ((centsPrimary - centsCompare) / centsCompare) * 100;
     }
     return {
       name,
-      revenue: centsToday / 100,
+      revenue: centsPrimary / 100,
       changePct,
     };
   });

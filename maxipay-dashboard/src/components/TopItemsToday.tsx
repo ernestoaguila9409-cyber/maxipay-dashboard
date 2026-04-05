@@ -7,6 +7,9 @@ import type { TopItemRow } from "@/lib/dashboardTopItems";
 interface TopItemsTodayProps {
   items: TopItemRow[];
   loading?: boolean;
+  sectionTitle?: string;
+  compareSubtitle?: string;
+  emptyHint?: string;
 }
 
 function formatChange(row: TopItemRow): { text: string; className: string } {
@@ -28,13 +31,17 @@ function formatChange(row: TopItemRow): { text: string; className: string } {
   return { text: "—", className: "text-slate-400" };
 }
 
-export default function TopItemsToday({ items, loading }: TopItemsTodayProps) {
+export default function TopItemsToday({
+  items,
+  loading,
+  sectionTitle = "Top items",
+  compareSubtitle = "vs comparison period · closed orders only",
+  emptyHint = "No line-item sales in this range (closed orders only).",
+}: TopItemsTodayProps) {
   if (loading) {
     return (
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-slate-800">
-          Top items today
-        </h2>
+        <h2 className="text-lg font-semibold text-slate-800">{sectionTitle}</h2>
         <div
           className="bg-white rounded-[12px] border border-slate-100 p-8"
           style={{ boxShadow: "0 2px 12px rgba(15, 23, 42, 0.06)" }}
@@ -51,16 +58,12 @@ export default function TopItemsToday({ items, loading }: TopItemsTodayProps) {
   if (items.length === 0) {
     return (
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-slate-800">
-          Top items today
-        </h2>
+        <h2 className="text-lg font-semibold text-slate-800">{sectionTitle}</h2>
         <div
           className="bg-white rounded-[12px] border border-slate-100 p-10 text-center"
           style={{ boxShadow: "0 2px 12px rgba(15, 23, 42, 0.06)" }}
         >
-          <p className="text-slate-400">
-            No line-item sales yet today (closed orders only).
-          </p>
+          <p className="text-slate-400">{emptyHint}</p>
         </div>
       </section>
     );
@@ -69,12 +72,8 @@ export default function TopItemsToday({ items, loading }: TopItemsTodayProps) {
   return (
     <section className="space-y-3">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-1">
-        <h2 className="text-lg font-semibold text-slate-800">
-          Top items today
-        </h2>
-        <p className="text-xs text-slate-400">
-          vs yesterday · from recent orders in range
-        </p>
+        <h2 className="text-lg font-semibold text-slate-800">{sectionTitle}</h2>
+        <p className="text-xs text-slate-400">{compareSubtitle}</p>
       </div>
       <div
         className="bg-white rounded-[12px] border border-slate-100 overflow-hidden"
