@@ -143,6 +143,12 @@ interface MenuItem {
   printerLabel?: string;
 }
 
+/** Firestore MenuItems row held in memory before rebuild() adds category-derived fields. */
+type MenuItemSnapRow = Omit<
+  MenuItem,
+  "categoryName" | "effectiveOrderTypes" | "categoryScheduled" | "categoryScheduleIds"
+>;
+
 function placementCategoryIds(item: Pick<MenuItem, "categoryId" | "categoryIds">): string[] {
   if (item.categoryIds && item.categoryIds.length > 0) return item.categoryIds;
   if (item.categoryId) return [item.categoryId];
@@ -389,30 +395,7 @@ export default function MenuPage() {
   const [subscriptionKey, setSubscriptionKey] = useState(0);
 
   const catSnap = useRef<Map<string, { name: string; availableOrderTypes: string[]; scheduleIds: string[] }>>(new Map());
-  const itemSnap = useRef<
-    {
-      id: string;
-      name: string;
-      price: number;
-      prices: Record<string, number>;
-      stock: number;
-      categoryId: string;
-      availableOrderTypes: string[] | null;
-      modifierGroupIds: string[];
-      taxIds: string[];
-      menuId: string;
-      menuIds: string[];
-      pricing: Pricing;
-      channels: ChannelAvailability;
-      isScheduled: boolean;
-      scheduleIds: string[];
-      subcategoryId: string;
-      categoryIds?: string[];
-      subcategoryByCategoryId?: Record<string, string>;
-      externalMappings: ExternalMappings;
-      printerLabel?: string;
-    }[]
-  >([]);
+  const itemSnap = useRef<MenuItemSnapRow[]>([]);
   const bothReady = useRef({ cats: false, items: false });
 
   useEffect(() => {
@@ -495,7 +478,7 @@ export default function MenuPage() {
       collection(db, "MenuItems"),
       (snap) => {
         console.log("[Menu] MenuItems snapshot → docs:", snap.size);
-        const list: typeof itemSnap.current = [];
+        const list: MenuItemSnapRow[] = [];
         snap.forEach((d) => {
           const data = d.data();
           const rawPrices = (typeof data.prices === "object" && data.prices !== null)
