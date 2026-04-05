@@ -39,6 +39,7 @@ import {
   Layers,
   ArrowRightLeft,
   ChevronDown,
+  ListFilter,
 } from "lucide-react";
 import type * as XLSXType from "xlsx";
 
@@ -354,6 +355,10 @@ export default function MenuPage() {
 
   const [selectMode, setSelectMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  /** Multi-category filter: check categories/subs in the sidebar to show their items together. */
+  const [categoryFilterMode, setCategoryFilterMode] = useState(false);
+  const [filterCategoryIds, setFilterCategoryIds] = useState<Set<string>>(new Set());
+  const [filterSubcategoryIds, setFilterSubcategoryIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
 
@@ -700,12 +705,42 @@ export default function MenuPage() {
       .map((item) => withViewPlacement(item, menuTypeFilter, categories, menuEntities));
   }, [items, menuTypeFilter, categories, menuEntities]);
 
+  const categoriesVisibleForMenu = useMemo(() => {
+    return categories.filter((cat) => {
+      if (!menuTypeFilter) return true;
+      if (itemsForMenuType.some((i) => i.viewCategoryId === cat.id)) return true;
+      if (menuTypeFilter === "POS") return false;
+      const menuEntity = menuEntities.find((m) => m.id === menuTypeFilter);
+      if (!menuEntity || menuEntity.scheduleIds.length === 0 || cat.scheduleIds.length === 0) {
+        return false;
+      }
+      const menuSched = new Set(menuEntity.scheduleIds);
+      return cat.scheduleIds.some((sid) => menuSched.has(sid));
+    });
+  }, [categories, menuTypeFilter, menuEntities, itemsForMenuType]);
+
   const filtered = itemsForMenuType.filter((item) => {
     const q = search.trim().toLowerCase();
     if (q) {
       const name = item.name.toLowerCase();
       const words = q.split(/\s+/).filter(Boolean);
       return words.every((w) => name.includes(w));
+    }
+    if (categoryFilterMode) {
+      const cats = filterCategoryIds.size > 0;
+      const subs = filterSubcategoryIds.size > 0;
+      if (!cats && !subs) return true;
+      const matchCat = cats && filterCategoryIds.has(item.viewCategoryId);
+      const matchSub =
+        subs && item.viewSubcategoryId && filterSubcategoryIds.has(item.viewSubcategoryId);
+      if (cats && subs) {
+        if (!matchCat && !matchSub) return false;
+      } else if (cats) {
+        if (!matchCat) return false;
+      } else if (!matchSub) {
+        return false;
+      }
+      return true;
     }
     if (activeSubcategory && item.viewSubcategoryId !== activeSubcategory) return false;
     if (activeCategory && item.viewCategoryId !== activeCategory) return false;
@@ -796,6 +831,62 @@ export default function MenuPage() {
   const exitSelectMode = () => {
     setSelectMode(false);
     setSelectedItems(new Set());
+  };
+
+  const exitCategoryFilterMode = () => {
+    setCategoryFilterMode(false);
+    setFilterCategoryIds(new Set());
+    setFilterSubcategoryIds(new Set());
+  };
+
+  const enterCategoryFilterMode = () => {
+    setActiveCategory(null);
+    setActiveSubcategory(null);
+    setFilterCategoryIds(new Set());
+    setFilterSubcategoryIds(new Set());
+    setCategoryFilterMode(true);
+  };
+
+  const toggleFilterCategory = (categoryId: string) => {
+    setFilterCategoryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(categoryId)) next.delete(categoryId);
+      else next.add(categoryId);
+      return next;
+    });
+  };
+
+  const toggleFilterSubcategory = (subcategoryId: string) => {
+    setFilterSubcategoryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(subcategoryId)) next.delete(subcategoryId);
+      else next.add(subcategoryId);
+      return next;
+    });
+  };
+
+  const toggleFilterSelectAllCategories = () => {
+    const ids = categoriesVisibleForMenu.map((c) => c.id);
+    setFilterCategoryIds((prev) => {
+      if (ids.length > 0 && ids.every((id) => prev.has(id))) {
+        return new Set();
+      }
+      return new Set(ids);
+    });
+  };
+
+  const clearCategoryFilters = () => {
+    setFilterCategoryIds(new Set());
+    setFilterSubcategoryIds(new Set());
+  };
+
+  const resetCategoryNavForMenuTarget = () => {
+    setActiveCategory(null);
+    setActiveSubcategory(null);
+    if (categoryFilterMode) {
+      setFilterCategoryIds(new Set());
+      setFilterSubcategoryIds(new Set());
+    }
   };
 
   const toggleTransferItem = (id: string) => {
@@ -1653,7 +1744,7 @@ export default function MenuPage() {
             <div className="hidden md:flex items-center gap-1.5">
               <div className="flex items-center bg-slate-100 rounded-lg p-0.5 gap-0.5">
                 <button
-                  onClick={() => { setMenuTypeFilter(null); setActiveCategory(null); }}
+                  onClick={() => { setMenuTypeFilter(null); resetCategoryNavForMenuTarget(); }}
                   className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
                     menuTypeFilter === null ? "bg-white shadow-sm text-slate-700" : "text-slate-400 hover:text-slate-600"
                   }`}
@@ -1661,7 +1752,7 @@ export default function MenuPage() {
                   All
                 </button>
                 <button
-                  onClick={() => { setMenuTypeFilter(menuTypeFilter === "POS" ? null : "POS"); setActiveCategory(null); }}
+                  onClick={() => { setMenuTypeFilter(menuTypeFilter === "POS" ? null : "POS"); resetCategoryNavForMenuTarget(); }}
                   className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
                     menuTypeFilter === "POS" ? "bg-white shadow-sm text-emerald-600" : "text-slate-400 hover:text-slate-600"
                   }`}
@@ -1671,7 +1762,7 @@ export default function MenuPage() {
                 {menuEntities.filter((m) => m.isActive).map((m) => (
                   <button
                     key={m.id}
-                    onClick={() => { setMenuTypeFilter(menuTypeFilter === m.id ? null : m.id); setActiveCategory(null); }}
+                    onClick={() => { setMenuTypeFilter(menuTypeFilter === m.id ? null : m.id); resetCategoryNavForMenuTarget(); }}
                     className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
                       menuTypeFilter === m.id ? "bg-white shadow-sm text-purple-600" : "text-slate-400 hover:text-slate-600"
                     }`}
@@ -1714,7 +1805,38 @@ export default function MenuPage() {
 
             <div className="w-px h-5 bg-slate-200" />
 
-            {selectMode ? (
+            {categoryFilterMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={toggleFilterSelectAllCategories}
+                  disabled={categoriesVisibleForMenu.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <CheckSquare size={14} />
+                  {categoriesVisibleForMenu.length > 0 &&
+                  categoriesVisibleForMenu.every((c) => filterCategoryIds.has(c.id))
+                    ? "Deselect all categories"
+                    : "Select all categories"}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearCategoryFilters}
+                  disabled={filterCategoryIds.size === 0 && filterSubcategoryIds.size === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={exitCategoryFilterMode}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  <X size={14} />
+                  Done
+                </button>
+              </>
+            ) : selectMode ? (
               <>
                 <button
                   onClick={toggleSelectAll}
@@ -1774,8 +1896,18 @@ export default function MenuPage() {
             ) : (
               <>
                 <button
+                  type="button"
+                  onClick={enterCategoryFilterMode}
+                  disabled={categories.length === 0 || selectMode || transferMode}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Select multiple categories to filter items"
+                >
+                  <ListFilter size={14} />
+                  <span className="hidden lg:inline">Filter categories</span>
+                </button>
+                <button
                   onClick={() => setSelectMode(true)}
-                  disabled={items.length === 0}
+                  disabled={items.length === 0 || categoryFilterMode}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Select items"
                 >
@@ -1830,7 +1962,10 @@ export default function MenuPage() {
                 </button>
                 <button
                   onClick={() => setTransferMode(true)}
-                  disabled={items.length === 0 && categories.length < 2 && allSubcategories.length === 0}
+                  disabled={
+                    categoryFilterMode ||
+                    (items.length === 0 && categories.length < 2 && allSubcategories.length === 0)
+                  }
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Transfer items, categories, or promote subcategories to top-level categories"
                 >
@@ -1862,41 +1997,64 @@ export default function MenuPage() {
                 <div className="sticky top-4 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="px-4 py-3 border-b border-slate-100">
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Categories</p>
+                    {categoryFilterMode && (
+                      <p className="text-[11px] text-slate-500 mt-1.5 leading-snug">
+                        Select one or more categories or subcategories. The list shows items from any selection.
+                      </p>
+                    )}
                   </div>
                   <nav className="flex flex-col max-h-[calc(100vh-12rem)] overflow-y-auto py-1">
                     <button
-                      onClick={() => { setActiveCategory(null); setActiveSubcategory(null); }}
+                      type="button"
+                      onClick={() => {
+                        if (categoryFilterMode) clearCategoryFilters();
+                        else {
+                          setActiveCategory(null);
+                          setActiveSubcategory(null);
+                        }
+                      }}
                       className={`w-full flex items-center justify-between px-3 py-2.5 text-sm transition-all duration-150 ${
-                        activeCategory === null
-                          ? "bg-blue-50 text-blue-700 font-bold border-l-4 border-blue-600"
-                          : "text-slate-600 font-semibold hover:bg-slate-50 border-l-4 border-transparent"
+                        categoryFilterMode
+                          ? filterCategoryIds.size === 0 && filterSubcategoryIds.size === 0
+                            ? "bg-blue-50 text-blue-700 font-bold border-l-4 border-blue-600"
+                            : "text-slate-600 font-semibold hover:bg-slate-50 border-l-4 border-transparent"
+                          : activeCategory === null
+                            ? "bg-blue-50 text-blue-700 font-bold border-l-4 border-blue-600"
+                            : "text-slate-600 font-semibold hover:bg-slate-50 border-l-4 border-transparent"
                       }`}
                     >
                       <span>All Items</span>
                       <span className="text-xs text-slate-400 font-medium tabular-nums bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">{itemsForMenuType.length}</span>
                     </button>
-                    {categories.filter((cat) => {
-                      if (!menuTypeFilter) return true;
-                      if (itemsForMenuType.some((i) => i.viewCategoryId === cat.id)) return true;
-                      if (menuTypeFilter === "POS") return false;
-                      const menuEntity = menuEntities.find((m) => m.id === menuTypeFilter);
-                      if (!menuEntity || menuEntity.scheduleIds.length === 0 || cat.scheduleIds.length === 0) {
-                        return false;
-                      }
-                      const menuSched = new Set(menuEntity.scheduleIds);
-                      return cat.scheduleIds.some((sid) => menuSched.has(sid));
-                    }).map((cat) => {
+                    {categoriesVisibleForMenu.map((cat) => {
                       const catItemCount = itemsForMenuType.filter((i) => i.viewCategoryId === cat.id).length;
                       const catSubs = allSubcategories.filter((s) => s.categoryId === cat.id);
                       return (
                         <div key={cat.id}>
                           <div
                             className={`group/cat flex items-center transition-all duration-150 ${
-                              activeCategory === cat.id && !activeSubcategory
-                                ? "bg-blue-50 border-l-4 border-blue-600"
-                                : "hover:bg-slate-50 border-l-4 border-transparent"
+                              categoryFilterMode
+                                ? filterCategoryIds.has(cat.id)
+                                  ? "bg-blue-50 border-l-4 border-blue-600"
+                                  : "hover:bg-slate-50 border-l-4 border-transparent"
+                                : activeCategory === cat.id && !activeSubcategory
+                                  ? "bg-blue-50 border-l-4 border-blue-600"
+                                  : "hover:bg-slate-50 border-l-4 border-transparent"
                             }`}
                           >
+                            {categoryFilterMode && (
+                              <label
+                                className="pl-2 pr-0 flex items-center shrink-0 cursor-pointer"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={filterCategoryIds.has(cat.id)}
+                                  onChange={() => toggleFilterCategory(cat.id)}
+                                  className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                />
+                              </label>
+                            )}
                             {transferMode && (
                               <label
                                 className="pl-2 pr-0 flex items-center shrink-0 cursor-pointer"
@@ -1911,9 +2069,22 @@ export default function MenuPage() {
                               </label>
                             )}
                             <button
-                              onClick={() => { setActiveCategory(activeCategory === cat.id ? null : cat.id); setActiveSubcategory(null); }}
+                              type="button"
+                              onClick={() => {
+                                if (categoryFilterMode) toggleFilterCategory(cat.id);
+                                else {
+                                  setActiveCategory(activeCategory === cat.id ? null : cat.id);
+                                  setActiveSubcategory(null);
+                                }
+                              }}
                               className={`flex-1 flex items-center justify-between px-3 py-2.5 text-sm min-w-0 ${
-                                activeCategory === cat.id && !activeSubcategory ? "text-blue-700 font-bold" : "text-slate-600 font-semibold"
+                                categoryFilterMode
+                                  ? filterCategoryIds.has(cat.id)
+                                    ? "text-blue-700 font-bold"
+                                    : "text-slate-600 font-semibold"
+                                  : activeCategory === cat.id && !activeSubcategory
+                                    ? "text-blue-700 font-bold"
+                                    : "text-slate-600 font-semibold"
                               }`}
                             >
                               <span className="flex items-center gap-1.5 min-w-0">
@@ -1951,11 +2122,28 @@ export default function MenuPage() {
                                   <div
                                     key={sub.id}
                                     className={`group/sub flex items-center transition-all duration-150 ${
-                                      activeSubcategory === sub.id
-                                        ? "bg-blue-50/60"
-                                        : "hover:bg-slate-50"
+                                      categoryFilterMode
+                                        ? filterSubcategoryIds.has(sub.id)
+                                          ? "bg-blue-50/60"
+                                          : "hover:bg-slate-50"
+                                        : activeSubcategory === sub.id
+                                          ? "bg-blue-50/60"
+                                          : "hover:bg-slate-50"
                                     }`}
                                   >
+                                    {categoryFilterMode && (
+                                      <label
+                                        className="pl-1 pr-0 flex items-center shrink-0 cursor-pointer"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={filterSubcategoryIds.has(sub.id)}
+                                          onChange={() => toggleFilterSubcategory(sub.id)}
+                                          className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                        />
+                                      </label>
+                                    )}
                                     {transferMode && (
                                       <label
                                         className="pl-1 pr-0 flex items-center shrink-0 cursor-pointer"
@@ -1970,12 +2158,22 @@ export default function MenuPage() {
                                       </label>
                                     )}
                                     <button
+                                      type="button"
                                       onClick={() => {
-                                        setActiveCategory(cat.id);
-                                        setActiveSubcategory(activeSubcategory === sub.id ? null : sub.id);
+                                        if (categoryFilterMode) toggleFilterSubcategory(sub.id);
+                                        else {
+                                          setActiveCategory(cat.id);
+                                          setActiveSubcategory(activeSubcategory === sub.id ? null : sub.id);
+                                        }
                                       }}
                                       className={`flex-1 flex items-center justify-between pl-3 pr-2 py-1.5 text-xs min-w-0 ${
-                                        activeSubcategory === sub.id ? "text-blue-600 font-bold" : "text-slate-500 font-medium"
+                                        categoryFilterMode
+                                          ? filterSubcategoryIds.has(sub.id)
+                                            ? "text-blue-600 font-bold"
+                                            : "text-slate-500 font-medium"
+                                          : activeSubcategory === sub.id
+                                            ? "text-blue-600 font-bold"
+                                            : "text-slate-500 font-medium"
                                       }`}
                                     >
                                       <span className="truncate">{sub.name}</span>
@@ -2012,51 +2210,75 @@ export default function MenuPage() {
 
             {/* ── Mobile category bar ── */}
             {categories.length > 0 && (
-              <div className="lg:hidden flex gap-2 overflow-x-auto pb-1 -mt-1 mb-1 w-full">
-                <button
-                  onClick={() => setActiveCategory(null)}
-                  className={`shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                    activeCategory === null ? "bg-blue-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600"
-                  }`}
-                >
-                  All
-                </button>
-                {categories.filter((cat) => {
-                  if (!menuTypeFilter) return true;
-                  if (itemsForMenuType.some((i) => i.viewCategoryId === cat.id)) return true;
-                  if (menuTypeFilter === "POS") return false;
-                  const menuEntity = menuEntities.find((m) => m.id === menuTypeFilter);
-                  if (!menuEntity || menuEntity.scheduleIds.length === 0 || cat.scheduleIds.length === 0) {
-                    return false;
-                  }
-                  const menuSched = new Set(menuEntity.scheduleIds);
-                  return cat.scheduleIds.some((sid) => menuSched.has(sid));
-                }).map((cat) => (
-                  <div
-                    key={cat.id}
-                    className={`shrink-0 flex items-center gap-1.5 rounded-lg ${
-                      activeCategory === cat.id ? "bg-blue-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600"
+              <div className="lg:hidden flex flex-col gap-2 pb-1 -mt-1 mb-1 w-full">
+                {categoryFilterMode && (
+                  <p className="text-[11px] text-slate-500 px-0.5 leading-snug">
+                    Tap categories to include them in the filter. Use Done in the toolbar when finished.
+                  </p>
+                )}
+                <div className="flex gap-2 overflow-x-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (categoryFilterMode) clearCategoryFilters();
+                      else setActiveCategory(null);
+                    }}
+                    className={`shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                      categoryFilterMode
+                        ? filterCategoryIds.size === 0 && filterSubcategoryIds.size === 0
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "bg-white border border-slate-200 text-slate-600"
+                        : activeCategory === null
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "bg-white border border-slate-200 text-slate-600"
                     }`}
                   >
-                    {transferMode && (
-                      <input
-                        type="checkbox"
-                        checked={transferCategories.has(cat.id)}
-                        onChange={() => toggleTransferCategory(cat.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="ml-2 w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                    )}
-                    <button
-                      onClick={() => setActiveCategory(activeCategory === cat.id ? null : cat.id)}
-                      className={`shrink-0 px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                        activeCategory === cat.id ? "text-white" : "text-slate-600"
-                      }`}
-                    >
-                      {cat.name}
-                    </button>
-                  </div>
-                ))}
+                    All
+                  </button>
+                  {categoriesVisibleForMenu.map((cat) => {
+                    const catOn = categoryFilterMode ? filterCategoryIds.has(cat.id) : activeCategory === cat.id;
+                    return (
+                      <div
+                        key={cat.id}
+                        className={`shrink-0 flex items-center gap-1.5 rounded-lg ${
+                          catOn ? "bg-blue-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600"
+                        }`}
+                      >
+                        {categoryFilterMode && (
+                          <input
+                            type="checkbox"
+                            checked={filterCategoryIds.has(cat.id)}
+                            onChange={() => toggleFilterCategory(cat.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="ml-2 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                        )}
+                        {transferMode && (
+                          <input
+                            type="checkbox"
+                            checked={transferCategories.has(cat.id)}
+                            onChange={() => toggleTransferCategory(cat.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="ml-2 w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            categoryFilterMode
+                              ? toggleFilterCategory(cat.id)
+                              : setActiveCategory(activeCategory === cat.id ? null : cat.id)
+                          }
+                          className={`shrink-0 px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                            catOn ? "text-white" : "text-slate-600"
+                          }`}
+                        >
+                          {cat.name}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
