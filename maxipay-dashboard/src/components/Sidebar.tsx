@@ -12,6 +12,7 @@ import {
   Receipt,
   Users,
   BarChart3,
+  Printer,
   Settings,
   LayoutGrid,
   LogOut,
@@ -44,6 +45,7 @@ const navItems: NavItem[] = [
     ],
   },
   { label: "Employees", href: "/dashboard/employees", icon: Users },
+  { label: "Printers", href: "/dashboard/printers", icon: Printer },
   { label: "Reports", href: "/dashboard/reports", icon: BarChart3 },
   {
     label: "Settings",
