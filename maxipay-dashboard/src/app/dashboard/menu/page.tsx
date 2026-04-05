@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
   doc,
@@ -585,6 +585,41 @@ export default function MenuPage() {
       setSelectedItem(null);
     }
   }, [filtered, selectedItem?.id]);
+
+  /** Categories that belong to at least one of the menus selected in the add-item form (POS = unscheduled). */
+  const addFilteredCategories = useMemo(() => {
+    const selectedScheduledMenuIds = Object.entries(addMenuIds)
+      .filter(([, v]) => v)
+      .map(([id]) => id);
+
+    if (!addPosSelected && selectedScheduledMenuIds.length === 0) {
+      return [];
+    }
+
+    return categories.filter((cat) => {
+      const isPosCategory = cat.scheduleIds.length === 0;
+      let matches = false;
+      if (addPosSelected && isPosCategory) matches = true;
+      if (selectedScheduledMenuIds.length > 0 && cat.scheduleIds.length > 0) {
+        const overlaps = selectedScheduledMenuIds.some((mid) => {
+          const m = menuEntities.find((e) => e.id === mid && e.isActive);
+          if (!m) return false;
+          return m.scheduleIds.some((sid) => cat.scheduleIds.includes(sid));
+        });
+        if (overlaps) matches = true;
+      }
+      return matches;
+    });
+  }, [categories, menuEntities, addPosSelected, addMenuIds]);
+
+  useEffect(() => {
+    if (!addOpen) return;
+    const allowed = new Set(addFilteredCategories.map((c) => c.id));
+    if (addCategoryId && !allowed.has(addCategoryId)) {
+      setAddCategoryId("");
+      setAddSubcategoryId("");
+    }
+  }, [addOpen, addCategoryId, addFilteredCategories]);
   const sortedGroups = Array.from(grouped.entries()).sort(([a], [b]) => {
     if (a === "Uncategorized") return 1;
     if (b === "Uncategorized") return -1;
@@ -2823,11 +2858,93 @@ export default function MenuPage() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Menus
+                  </label>
+                  <p className="text-[10px] text-slate-400 mb-2">
+                    Choose where this item appears first. Categories below are limited to those for POS (always-on) and/or the timed menus you select.
+                  </p>
+                  <div className="flex flex-col gap-3 pl-1 max-h-48 overflow-y-auto">
+                    <div className="space-y-1.5">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={addPosSelected}
+                          onChange={(e) => {
+                            const on = e.target.checked;
+                            setAddPosSelected(on);
+                            if (!on) setAddPosPrice("");
+                          }}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-slate-700">POS</span>
+                      </label>
+                      {addPosSelected && (
+                        <div className="ml-6">
+                          <label className="block text-xs text-slate-500 mb-1">POS Price ($)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={addPosPrice}
+                            onChange={(e) => setAddPosPrice(e.target.value)}
+                            placeholder="0.00"
+                            className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    {menuEntities.filter((m) => m.isActive).map((m) => (
+                      <div key={m.id} className="space-y-1.5">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={addMenuIds[m.id] ?? false}
+                            onChange={(e) => {
+                              setAddMenuIds((prev) => ({ ...prev, [m.id]: e.target.checked }));
+                              if (!e.target.checked) {
+                                setAddMenuPrices((prev) => {
+                                  const next = { ...prev };
+                                  delete next[m.id];
+                                  return next;
+                                });
+                              }
+                            }}
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm font-medium text-slate-700">{m.name}</span>
+                        </label>
+                        {(addMenuIds[m.id] ?? false) && (
+                          <div className="ml-6">
+                            <label className="block text-xs text-slate-500 mb-1">{m.name} price ($)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={addMenuPrices[m.id] ?? ""}
+                              onChange={(e) =>
+                                setAddMenuPrices((prev) => ({ ...prev, [m.id]: e.target.value }))
+                              }
+                              placeholder="0.00"
+                              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">
                     Category
                   </label>
+                  <p className="text-[10px] text-slate-400 mb-1.5">
+                    Only categories linked to your menu selection are listed (POS categories when POS is checked; Brunch, Dinner, etc. when those menus are checked).
+                  </p>
                   <select
                     value={addCategoryId}
+                    disabled={addFilteredCategories.length === 0}
                     onChange={(e) => {
                       const catId = e.target.value;
                       setAddCategoryId(catId);
@@ -2841,18 +2958,23 @@ export default function MenuPage() {
                           }
                         }
                         setAddMenuIds(matching);
-                      } else {
+                      } else if (cat && cat.scheduleIds.length === 0) {
                         setAddMenuIds({});
                         setAddMenuPrices({});
                         setAddPosSelected(true);
                       }
                     }}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white disabled:bg-slate-50 disabled:text-slate-400"
                   >
-                    <option value="">Select a category</option>
-                    {categories.map((cat) => (
+                    <option value="">
+                      {addFilteredCategories.length === 0
+                        ? "Select at least one menu above"
+                        : "Select a category"}
+                    </option>
+                    {addFilteredCategories.map((cat) => (
                       <option key={cat.id} value={cat.id}>
                         {cat.name}
+                        {cat.scheduleIds.length > 0 ? " (scheduled)" : ""}
                       </option>
                     ))}
                   </select>
@@ -2877,114 +2999,11 @@ export default function MenuPage() {
                 )}
 
                 {addCategoryHasSchedule && (
-                  <>
-                    <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
-                      <Clock size={14} className="text-blue-500 shrink-0" />
-                      <p className="text-xs text-blue-600">
-                        This category is scheduled ({addSelectedCategory!.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}). Items will follow the category&apos;s schedule automatically.
-                      </p>
-                    </div>
-                    {addScheduledMenus.length > 0 && (
-                      <div className="flex flex-col gap-3">
-                        {addScheduledMenus.map((m) => (
-                          <div key={m.id}>
-                            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                              {m.name} Price ($)
-                            </label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={addMenuPrices[m.id] ?? ""}
-                              onChange={(e) =>
-                                setAddMenuPrices((prev) => ({ ...prev, [m.id]: e.target.value }))
-                              }
-                              placeholder="0.00"
-                              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {!addCategoryHasSchedule && (
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Menus
-                    </label>
-                    <p className="text-[10px] text-slate-400 mb-2">
-                      Select which menu this item belongs to, then set the price for each menu.
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
+                    <Clock size={14} className="text-blue-500 shrink-0" />
+                    <p className="text-xs text-blue-600">
+                      This category is scheduled ({addSelectedCategory!.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}). Items will follow the category&apos;s schedule automatically. Use the menu prices you entered above for each timed menu.
                     </p>
-                    <div className="flex flex-col gap-3 pl-1 max-h-48 overflow-y-auto">
-                      <div className="space-y-1.5">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={addPosSelected}
-                            onChange={(e) => {
-                              const on = e.target.checked;
-                              setAddPosSelected(on);
-                              if (!on) setAddPosPrice("");
-                            }}
-                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span className="text-sm font-medium text-slate-700">POS</span>
-                        </label>
-                        {addPosSelected && (
-                          <div className="ml-6">
-                            <label className="block text-xs text-slate-500 mb-1">POS Price ($)</label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={addPosPrice}
-                              onChange={(e) => setAddPosPrice(e.target.value)}
-                              placeholder="0.00"
-                              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
-                            />
-                          </div>
-                        )}
-                      </div>
-                      {menuEntities.filter((m) => m.isActive).map((m) => (
-                        <div key={m.id} className="space-y-1.5">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={addMenuIds[m.id] ?? false}
-                              onChange={(e) => {
-                                setAddMenuIds((prev) => ({ ...prev, [m.id]: e.target.checked }));
-                                if (!e.target.checked) {
-                                  setAddMenuPrices((prev) => {
-                                    const next = { ...prev };
-                                    delete next[m.id];
-                                    return next;
-                                  });
-                                }
-                              }}
-                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className="text-sm font-medium text-slate-700">{m.name}</span>
-                          </label>
-                          {(addMenuIds[m.id] ?? false) && (
-                            <div className="ml-6">
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={addMenuPrices[m.id] ?? ""}
-                                onChange={(e) =>
-                                  setAddMenuPrices((prev) => ({ ...prev, [m.id]: e.target.value }))
-                                }
-                                placeholder={`${m.name} price`}
-                                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
-                              />
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
                   </div>
                 )}
 
@@ -3222,7 +3241,14 @@ export default function MenuPage() {
                 </button>
                 <button
                   onClick={handleAddItem}
-                  disabled={addSaving || !addName.trim() || !addCategoryId || (!addPosPrice && Object.values(addMenuPrices).every((v) => !v)) || (stockCountingEnabled && !addStock)}
+                  disabled={
+                    addSaving ||
+                    !addName.trim() ||
+                    (!addPosSelected && !Object.values(addMenuIds).some(Boolean)) ||
+                    !addCategoryId ||
+                    (!addPosPrice && Object.values(addMenuPrices).every((v) => !v)) ||
+                    (stockCountingEnabled && !addStock)
+                  }
                   className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {addSaving ? (
