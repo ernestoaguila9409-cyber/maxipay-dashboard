@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   collection,
   doc,
@@ -49,6 +49,9 @@ const ORDER_TYPE_LABELS: Record<string, string> = {
   BAR_TAB: "BAR",
 };
 
+/** Add-item form: POS placement key (not a Firestore `menus` doc id). */
+const ADD_ITEM_POS_TARGET = "POS";
+
 interface Schedule {
   id: string;
   name: string;
@@ -66,6 +69,21 @@ interface MenuEntity {
   name: string;
   isActive: boolean;
   scheduleIds: string[];
+}
+
+function categoriesForMenuTarget(
+  targetKey: string,
+  cats: Category[],
+  menuEntities: MenuEntity[],
+): Category[] {
+  if (targetKey === ADD_ITEM_POS_TARGET) {
+    return cats.filter((c) => c.scheduleIds.length === 0);
+  }
+  const m = menuEntities.find((e) => e.id === targetKey && e.isActive);
+  if (!m) return [];
+  return cats.filter(
+    (c) => c.scheduleIds.length > 0 && m.scheduleIds.some((sid) => c.scheduleIds.includes(sid)),
+  );
 }
 
 interface SubcategoryEntry {
@@ -154,7 +172,9 @@ export default function MenuPage() {
   const [addName, setAddName] = useState("");
   const [addPrices, setAddPrices] = useState<Record<string, string>>({});
   const [addStock, setAddStock] = useState("");
-  const [addCategoryId, setAddCategoryId] = useState("");
+  /** Per menu target (POS or `menus` doc id): selected category and subcategory. */
+  const [addPlacementCategory, setAddPlacementCategory] = useState<Record<string, string>>({});
+  const [addPlacementSubcategory, setAddPlacementSubcategory] = useState<Record<string, string>>({});
   const [addUseCategoryTypes, setAddUseCategoryTypes] = useState(true);
   const [addOrderTypes, setAddOrderTypes] = useState<Record<string, boolean>>(
     () => Object.fromEntries(ALL_ORDER_TYPES.map((t) => [t, true]))
@@ -217,7 +237,6 @@ export default function MenuPage() {
   const [deleteSubTarget, setDeleteSubTarget] = useState<SubcategoryEntry | null>(null);
   const [deletingSub, setDeletingSub] = useState(false);
 
-  const [addSubcategoryId, setAddSubcategoryId] = useState("");
   const [editSubcategoryId, setEditSubcategoryId] = useState("");
 
   const [selectMode, setSelectMode] = useState(false);
@@ -586,40 +605,33 @@ export default function MenuPage() {
     }
   }, [filtered, selectedItem?.id]);
 
-  /** Categories that belong to at least one of the menus selected in the add-item form (POS = unscheduled). */
-  const addFilteredCategories = useMemo(() => {
-    const selectedScheduledMenuIds = Object.entries(addMenuIds)
-      .filter(([, v]) => v)
-      .map(([id]) => id);
-
-    if (!addPosSelected && selectedScheduledMenuIds.length === 0) {
-      return [];
-    }
-
-    return categories.filter((cat) => {
-      const isPosCategory = cat.scheduleIds.length === 0;
-      let matches = false;
-      if (addPosSelected && isPosCategory) matches = true;
-      if (selectedScheduledMenuIds.length > 0 && cat.scheduleIds.length > 0) {
-        const overlaps = selectedScheduledMenuIds.some((mid) => {
-          const m = menuEntities.find((e) => e.id === mid && e.isActive);
-          if (!m) return false;
-          return m.scheduleIds.some((sid) => cat.scheduleIds.includes(sid));
-        });
-        if (overlaps) matches = true;
-      }
-      return matches;
-    });
-  }, [categories, menuEntities, addPosSelected, addMenuIds]);
-
   useEffect(() => {
     if (!addOpen) return;
-    const allowed = new Set(addFilteredCategories.map((c) => c.id));
-    if (addCategoryId && !allowed.has(addCategoryId)) {
-      setAddCategoryId("");
-      setAddSubcategoryId("");
+    const targets = new Set<string>();
+    if (addPosSelected) targets.add(ADD_ITEM_POS_TARGET);
+    for (const m of menuEntities) {
+      if (m.isActive && addMenuIds[m.id]) targets.add(m.id);
     }
-  }, [addOpen, addCategoryId, addFilteredCategories]);
+    setAddPlacementCategory((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        if (!targets.has(k)) delete next[k];
+        else {
+          const allowed = new Set(categoriesForMenuTarget(k, categories, menuEntities).map((c) => c.id));
+          if (next[k] && !allowed.has(next[k])) delete next[k];
+        }
+      }
+      return next;
+    });
+    setAddPlacementSubcategory((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        if (!targets.has(k)) delete next[k];
+      }
+      return next;
+    });
+  }, [addOpen, addPosSelected, addMenuIds, categories, menuEntities]);
+
   const sortedGroups = Array.from(grouped.entries()).sort(([a], [b]) => {
     if (a === "Uncategorized") return 1;
     if (b === "Uncategorized") return -1;
@@ -1075,11 +1087,11 @@ export default function MenuPage() {
     setAddName("");
     setAddPrices({});
     setAddStock("");
-    setAddCategoryId("");
+    setAddPlacementCategory({});
+    setAddPlacementSubcategory({});
     setAddMenuId("");
     setAddMenuIds({});
     setAddMenuPrices({});
-    setAddSubcategoryId("");
     setAddPosPrice("");
     setAddPosSelected(true);
     setAddOnlinePrice("");
@@ -1285,8 +1297,38 @@ export default function MenuPage() {
     const name = addName.trim();
     if (!name) return;
 
-    const addCat = categories.find((c) => c.id === addCategoryId);
-    const addCatHasSchedule = (addCat?.scheduleIds.length ?? 0) > 0;
+    const addTargets: string[] = [];
+    if (addPosSelected) addTargets.push(ADD_ITEM_POS_TARGET);
+    for (const m of menuEntities.filter((x) => x.isActive)) {
+      if (addMenuIds[m.id]) addTargets.push(m.id);
+    }
+    if (addTargets.length === 0) return;
+    for (const t of addTargets) {
+      if (!addPlacementCategory[t]) return;
+    }
+
+    const categoryIdsUnique = [...new Set(addTargets.map((t) => addPlacementCategory[t]))];
+    const subcategoryByCategoryId: Record<string, string> = {};
+    for (const t of addTargets) {
+      const cid = addPlacementCategory[t];
+      const sub = (addPlacementSubcategory[t] ?? "").trim();
+      if (subcategoryByCategoryId[cid] === undefined) {
+        subcategoryByCategoryId[cid] = sub;
+      } else if (sub.length > 0) {
+        subcategoryByCategoryId[cid] = sub;
+      }
+    }
+
+    const legacyCategoryId =
+      addPosSelected && addPlacementCategory[ADD_ITEM_POS_TARGET]
+        ? addPlacementCategory[ADD_ITEM_POS_TARGET]
+        : categoryIdsUnique[0] ?? "";
+    const legacySubcategoryId = subcategoryByCategoryId[legacyCategoryId] ?? "";
+
+    const placedCats = categoryIdsUnique
+      .map((id) => categories.find((c) => c.id === id))
+      .filter((c): c is Category => c != null);
+    const anyScheduled = placedCats.some((c) => c.scheduleIds.length > 0);
 
     const prices: Record<string, number> = {};
     for (const [menuId, val] of Object.entries(addMenuPrices)) {
@@ -1298,7 +1340,7 @@ export default function MenuPage() {
     const parsedPos = parseFloat(addPosPrice);
     const firstMenuPrice = Object.values(prices)[0];
     let posPrice: number;
-    if (addCatHasSchedule) {
+    if (anyScheduled) {
       posPrice = (!isNaN(parsedPos) && parsedPos >= 0) ? parsedPos : (firstMenuPrice ?? -1);
     } else {
       if (!addPosSelected && !Object.entries(addMenuIds).some(([, v]) => v)) return;
@@ -1313,20 +1355,24 @@ export default function MenuPage() {
 
     const stock = stockCountingEnabled ? parseInt(addStock, 10) : 9999;
     if (stockCountingEnabled && (isNaN(stock) || stock < 0)) return;
-    if (!addCategoryId) return;
 
-    const scheduledMenuIds = addCatHasSchedule
-      ? menuEntities
-          .filter((m) => m.scheduleIds.some((sid) => (addCat?.scheduleIds ?? []).includes(sid)))
-          .map((m) => m.id)
-      : [];
+    const scheduledMenuIdsSet = new Set<string>();
+    for (const c of placedCats) {
+      if (c.scheduleIds.length === 0) continue;
+      for (const m of menuEntities) {
+        if (m.scheduleIds.some((sid) => c.scheduleIds.includes(sid))) scheduledMenuIdsSet.add(m.id);
+      }
+    }
+    const scheduledMenuIds = Array.from(scheduledMenuIdsSet);
     const fromCheckboxes = Object.entries(addMenuIds)
       .filter(([, v]) => v)
       .map(([k]) => k);
-    let selectedMenuIds = addCatHasSchedule ? scheduledMenuIds : fromCheckboxes;
-    if (addCatHasSchedule && selectedMenuIds.length === 0 && fromCheckboxes.length > 0) {
+    let selectedMenuIds = anyScheduled ? scheduledMenuIds : fromCheckboxes;
+    if (anyScheduled && selectedMenuIds.length === 0 && fromCheckboxes.length > 0) {
       selectedMenuIds = fromCheckboxes;
     }
+
+    const unionScheduleIds = [...new Set(placedCats.flatMap((c) => c.scheduleIds))];
 
     setAddSaving(true);
     try {
@@ -1335,14 +1381,16 @@ export default function MenuPage() {
         prices,
         price,
         stock,
-        categoryId: addCategoryId,
+        categoryId: legacyCategoryId,
+        categoryIds: categoryIdsUnique,
+        subcategoryByCategoryId,
         menuId: selectedMenuIds.length > 0 ? selectedMenuIds[0] : "",
         menuIds: selectedMenuIds,
         pricing: { pos: posPrice, online: posPrice },
         channels: { pos: true, online: false },
-        subcategoryId: addSubcategoryId,
-        isScheduled: addCatHasSchedule,
-        scheduleIds: addCatHasSchedule ? (addCat?.scheduleIds ?? []) : [],
+        subcategoryId: legacySubcategoryId,
+        isScheduled: anyScheduled,
+        scheduleIds: anyScheduled ? unionScheduleIds : [],
         modifierGroupIds: Object.entries(addModifiers)
           .filter(([, v]) => v)
           .map(([k]) => k),
@@ -1442,11 +1490,21 @@ export default function MenuPage() {
   const menuEntityMap = new Map(menuEntities.map((m) => [m.id, m.name]));
   const scheduleMap = new Map(allSchedules.map((s) => [s.id, s.name]));
 
-  const addSelectedCategory = categories.find((c) => c.id === addCategoryId);
-  const addCategoryHasSchedule = (addSelectedCategory?.scheduleIds.length ?? 0) > 0;
-  const addScheduledMenus = addCategoryHasSchedule
-    ? menuEntities.filter((m) => m.scheduleIds.some((sid) => addSelectedCategory!.scheduleIds.includes(sid)))
-    : [];
+  const addMenuTargetsOrdered: string[] = [];
+  if (addPosSelected) addMenuTargetsOrdered.push(ADD_ITEM_POS_TARGET);
+  for (const m of menuEntities.filter((x) => x.isActive)) {
+    if (addMenuIds[m.id]) addMenuTargetsOrdered.push(m.id);
+  }
+  const addPlacedCategoriesList = addMenuTargetsOrdered
+    .map((t) => categories.find((c) => c.id === addPlacementCategory[t]))
+    .filter((c): c is Category => c != null);
+  const addCategoryHasSchedule = addPlacedCategoriesList.some((c) => c.scheduleIds.length > 0);
+  const addScheduleBannerNames = [...new Set(addPlacedCategoriesList.flatMap((c) => c.scheduleIds))]
+    .map((id) => scheduleMap.get(id) ?? id)
+    .join(", ");
+  const addAllPlacementsFilled =
+    addMenuTargetsOrdered.length > 0 &&
+    addMenuTargetsOrdered.every((t) => !!addPlacementCategory[t]);
 
   const editSelectedCategory = editTarget ? categories.find((c) => c.id === editTarget.categoryId) : null;
   const editCategoryHasSchedule = (editSelectedCategory?.scheduleIds.length ?? 0) > 0;
@@ -2935,74 +2993,101 @@ export default function MenuPage() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                    Category
-                  </label>
-                  <p className="text-[10px] text-slate-400 mb-1.5">
-                    Only categories linked to your menu selection are listed (POS categories when POS is checked; Brunch, Dinner, etc. when those menus are checked).
-                  </p>
-                  <select
-                    value={addCategoryId}
-                    disabled={addFilteredCategories.length === 0}
-                    onChange={(e) => {
-                      const catId = e.target.value;
-                      setAddCategoryId(catId);
-                      const cat = categories.find((c) => c.id === catId);
-                      if (cat && cat.scheduleIds.length > 0) {
-                        setAddMenuId("");
-                        const matching: Record<string, boolean> = {};
-                        for (const m of menuEntities) {
-                          if (m.scheduleIds.some((sid) => cat.scheduleIds.includes(sid))) {
-                            matching[m.id] = true;
-                          }
-                        }
-                        setAddMenuIds(matching);
-                      } else if (cat && cat.scheduleIds.length === 0) {
-                        setAddMenuIds({});
-                        setAddMenuPrices({});
-                        setAddPosSelected(true);
-                      }
-                    }}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white disabled:bg-slate-50 disabled:text-slate-400"
-                  >
-                    <option value="">
-                      {addFilteredCategories.length === 0
-                        ? "Select at least one menu above"
-                        : "Select a category"}
-                    </option>
-                    {addFilteredCategories.map((cat) => (
-                      <option key={cat.id} value={cat.id}>
-                        {cat.name}
-                        {cat.scheduleIds.length > 0 ? " (scheduled)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {addCategoryId && allSubcategories.filter((s) => s.categoryId === addCategoryId).length > 0 && (
+                <div className="space-y-3">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                      Subcategory
+                      Categories by menu
                     </label>
-                    <select
-                      value={addSubcategoryId}
-                      onChange={(e) => setAddSubcategoryId(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
-                    >
-                      <option value="">(None)</option>
-                      {allSubcategories.filter((s) => s.categoryId === addCategoryId).map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
+                    <p className="text-[10px] text-slate-400 mb-1.5">
+                      Pick a category (and subcategory if needed) for each menu you selected above. POS only shows always-on categories; each timed menu only shows its own scheduled categories.
+                    </p>
                   </div>
-                )}
+                  {addMenuTargetsOrdered.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic">Select at least one menu above to choose categories.</p>
+                  ) : (
+                    addMenuTargetsOrdered.map((targetKey) => {
+                      const targetLabel =
+                        targetKey === ADD_ITEM_POS_TARGET
+                          ? "POS"
+                          : menuEntityMap.get(targetKey) ?? "Menu";
+                      const catOptions = categoriesForMenuTarget(targetKey, categories, menuEntities);
+                      const selCat = addPlacementCategory[targetKey] ?? "";
+                      const subs = selCat
+                        ? allSubcategories.filter((s) => s.categoryId === selCat)
+                        : [];
+                      return (
+                        <div
+                          key={targetKey}
+                          className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-2.5"
+                        >
+                          <p className="text-xs font-semibold text-slate-700">{targetLabel}</p>
+                          <div>
+                            <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                              Category
+                            </label>
+                            <select
+                              value={selCat}
+                              disabled={catOptions.length === 0}
+                              onChange={(e) => {
+                                const catId = e.target.value;
+                                setAddPlacementCategory((prev) => ({ ...prev, [targetKey]: catId }));
+                                setAddPlacementSubcategory((prev) => ({ ...prev, [targetKey]: "" }));
+                                const cat = categories.find((c) => c.id === catId);
+                                if (cat && cat.scheduleIds.length > 0 && targetKey !== ADD_ITEM_POS_TARGET) {
+                                  setAddMenuIds((prev) => ({ ...prev, [targetKey]: true }));
+                                }
+                                if (cat && cat.scheduleIds.length === 0 && targetKey === ADD_ITEM_POS_TARGET) {
+                                  setAddPosSelected(true);
+                                }
+                              }}
+                              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                            >
+                              <option value="">
+                                {catOptions.length === 0 ? "No categories for this menu" : "Select category"}
+                              </option>
+                              {catOptions.map((cat) => (
+                                <option key={cat.id} value={cat.id}>
+                                  {cat.name}
+                                  {cat.scheduleIds.length > 0 ? " (scheduled)" : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          {selCat && subs.length > 0 && (
+                            <div>
+                              <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                                Subcategory
+                              </label>
+                              <select
+                                value={addPlacementSubcategory[targetKey] ?? ""}
+                                onChange={(e) =>
+                                  setAddPlacementSubcategory((prev) => ({
+                                    ...prev,
+                                    [targetKey]: e.target.value,
+                                  }))
+                                }
+                                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                              >
+                                <option value="">(None)</option>
+                                {subs.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
 
-                {addCategoryHasSchedule && (
+                {addCategoryHasSchedule && addScheduleBannerNames.length > 0 && (
                   <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
                     <Clock size={14} className="text-blue-500 shrink-0" />
                     <p className="text-xs text-blue-600">
-                      This category is scheduled ({addSelectedCategory!.scheduleIds.map((id) => scheduleMap.get(id) ?? id).join(", ")}). Items will follow the category&apos;s schedule automatically. Use the menu prices you entered above for each timed menu.
+                      At least one placement uses a scheduled category ({addScheduleBannerNames}). Items follow those schedules automatically. Use the menu prices you entered above for each timed menu.
                     </p>
                   </div>
                 )}
@@ -3245,7 +3330,7 @@ export default function MenuPage() {
                     addSaving ||
                     !addName.trim() ||
                     (!addPosSelected && !Object.values(addMenuIds).some(Boolean)) ||
-                    !addCategoryId ||
+                    !addAllPlacementsFilled ||
                     (!addPosPrice && Object.values(addMenuPrices).every((v) => !v)) ||
                     (stockCountingEnabled && !addStock)
                   }
