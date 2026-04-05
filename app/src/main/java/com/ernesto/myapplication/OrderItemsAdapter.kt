@@ -218,14 +218,9 @@ class OrderItemsAdapter(
             val lk = ad["lineKey"]?.toString()?.trim().orEmpty()
             lk == lineKey
         }
-        val orderLevel = appliedDiscounts.filter { ad ->
-            val lk = ad["lineKey"]?.toString()?.trim().orEmpty()
-            val scope = ad["applyScope"]?.toString()?.trim()?.lowercase() ?: ""
-            lk.isEmpty() && (scope == "order" || scope == "manual")
-        }
-        val all = itemLevel + orderLevel
-        if (all.isEmpty()) return null
-        return all.joinToString("\n") { DiscountDisplay.formatBulletFromFirestoreMap(it) }
+        // Order- / manual-scope discounts (empty lineKey) belong in the summary under Subtotal only.
+        if (itemLevel.isEmpty()) return null
+        return itemLevel.joinToString("\n") { DiscountDisplay.formatBulletFromFirestoreMap(it) }
     }
 
     private fun buildModifiersText(doc: DocumentSnapshot): String? {

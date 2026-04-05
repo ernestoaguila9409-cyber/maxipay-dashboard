@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-sdk tools:overrideLibrary="com.starmicronics.stario10" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
@@ -178,6 +180,17 @@
             android:name=".ReportsActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity" />
+        <activity
+            android:name=".PrintersActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
+        <activity
+            android:name=".PrinterListActivity"
+            android:exported="false"
+            android:parentActivityName=".PrintersActivity" />
+        <activity
+            android:name=".AddPrinterActivity"
+            android:exported="false" />
         <activity
             android:name=".ReportPreviewActivity"
             android:exported="false"

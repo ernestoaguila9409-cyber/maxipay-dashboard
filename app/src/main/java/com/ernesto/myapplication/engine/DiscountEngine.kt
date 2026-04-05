@@ -166,8 +166,15 @@ class DiscountEngine(private val db: FirebaseFirestore) {
         }
     }
 
+    private fun sumModifierPrices(modifiers: List<com.ernesto.myapplication.OrderModifier>): Double {
+        return modifiers.sumOf { mod ->
+            val selfPrice = if (mod.action == "ADD") mod.price else 0.0
+            selfPrice + sumModifierPrices(mod.children)
+        }
+    }
+
     private fun computeLineTotal(cartItem: CartItem): Long {
-        val modTotal = cartItem.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+        val modTotal = sumModifierPrices(cartItem.modifiers)
         val unitPriceCents = ((cartItem.basePrice + modTotal) * 100).toLong()
         return unitPriceCents * cartItem.quantity
     }

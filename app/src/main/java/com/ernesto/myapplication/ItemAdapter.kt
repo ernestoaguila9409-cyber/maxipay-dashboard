@@ -240,6 +240,10 @@ class ItemAdapter(
                 }
                 override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
             }
+            subSpinner.setOnTouchListener { _, _ ->
+                InventoryPriceKeypad.clearPriceFocusForSpinner(priceInputs.values)
+                false
+            }
             layout.addView(subSpinner)
         }
 
@@ -281,17 +285,28 @@ class ItemAdapter(
             }
             checkBoxContainer.addView(cb)
             checkBoxes[orderType] = cb
+            cb.setOnTouchListener { _, _ ->
+                InventoryPriceKeypad.clearPriceFocusForSpinner(priceInputs.values)
+                false
+            }
         }
 
         layout.addView(checkBoxContainer)
 
         useCategorySwitch.setOnCheckedChangeListener { _, isChecked ->
             checkBoxContainer.visibility = if (isChecked) View.GONE else View.VISIBLE
+            InventoryPriceKeypad.clearPriceFocusForSpinner(priceInputs.values)
         }
+
+        val dialogRoot = InventoryPriceKeypad.wrapFormWithDecimalKeypad(
+            context,
+            layout,
+            priceInputs.values
+        )
 
         AlertDialog.Builder(context)
             .setTitle("Edit Item")
-            .setView(layout)
+            .setView(dialogRoot)
             .setPositiveButton("Save") { _, _ ->
                 val newName = nameInput.text.toString().trim()
                 val newPrices = mutableMapOf<String, Double>()

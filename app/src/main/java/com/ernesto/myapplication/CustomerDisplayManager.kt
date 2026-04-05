@@ -322,4 +322,14 @@ object CustomerDisplayManager {
     }
 
     fun getState(): DisplayState = currentState
+
+    /** True when a secondary customer presentation is showing (email/receipt flows can use it). */
+    fun hasCustomerDisplayAttached(): Boolean {
+        val p = presentation ?: return false
+        return try {
+            p.isShowing
+        } catch (_: Exception) {
+            false
+        }
+    }
 }

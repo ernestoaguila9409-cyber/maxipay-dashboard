@@ -1,5 +1,6 @@
 package com.ernesto.myapplication.engine
 
+import com.ernesto.myapplication.BarTabSeatHelper
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.*
@@ -24,6 +25,8 @@ class PaymentEngine(private val db: FirebaseFirestore) {
 
         cashTenderedInCents: Long = 0L,
         cashChangeInCents: Long = 0L,
+
+        splitReceipt: Map<String, Any>? = null,
 
         onSuccess: (Long) -> Unit,
         onFailure: (Exception) -> Unit
@@ -72,6 +75,10 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                 paymentEntry["cashChangeInCents"] = cashChangeInCents
             }
 
+            if (splitReceipt != null && splitReceipt.isNotEmpty()) {
+                paymentEntry["splitReceipt"] = splitReceipt
+            }
+
             if (saleId == null) {
 
                 var appTxnNumber = 0L
@@ -115,13 +122,23 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                 )
             }
 
+            val newStatus = if (newRemaining <= 0L) "CLOSED" else "OPEN"
             val orderUpdates = mutableMapOf<String, Any>(
                 "totalPaidInCents" to newPaid,
                 "remainingInCents" to newRemaining,
-                "status" to if (newRemaining <= 0L) "CLOSED" else "OPEN"
+                "status" to newStatus
             )
             if (batchId.isNotBlank()) orderUpdates["batchId"] = batchId
             transaction.update(orderRef, orderUpdates)
+
+            if (newStatus == "CLOSED" && orderSnap.getString("orderType") == "BAR_TAB") {
+                for (tid in BarTabSeatHelper.seatTableIdsFromOrder(orderSnap)) {
+                    transaction.update(
+                        db.collection("Tables").document(tid),
+                        mapOf("currentOrderId" to FieldValue.delete())
+                    )
+                }
+            }
 
             newRemaining
 

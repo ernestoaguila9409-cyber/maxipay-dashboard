@@ -427,6 +427,108 @@ function wrapEmail(bodyContent) {
 }
 
 // ---------------------------------------------------------------------------
+// Split receipt email (matches app SplitReceiptPayload / SplitReceiptRenderer)
+// ---------------------------------------------------------------------------
+
+function centsToDisplayFromSplit(c) {
+  const n = Number(c);
+  if (Number.isNaN(n)) return "0.00";
+  return (n / 100).toFixed(2);
+}
+
+function isEvenSplitShareLineEmail(line) {
+  const orig = line.originalLineTotalInCents;
+  return orig != null && Number(orig) > 0 &&
+    line.splitIndex != null && line.totalSplits != null;
+}
+
+function validateSplitReceiptPayload(sr) {
+  if (!sr || typeof sr !== "object") return false;
+  if (sr.splitIndex == null || sr.totalSplits == null) return false;
+  if (Number(sr.totalSplits) < 2) return false;
+  const gl = sr.guestLabel != null ? String(sr.guestLabel).trim() : "";
+  if (!gl) return false;
+  return true;
+}
+
+function splitReceiptItemsAndTotalsHtml(sr, tipConfig) {
+  const note = (sr.sharedItemsNote != null ? String(sr.sharedItemsNote) : "").trim();
+  let itemRows = "";
+  if (note) {
+    itemRows = `<tr><td colspan="2" style="padding:8px 0;font-size:14px;color:#333;">${escapeHtml(note)}</td></tr>`;
+  } else {
+    const items = Array.isArray(sr.items) ? sr.items : [];
+    items.forEach((line) => {
+      const share = Number(line.lineTotalInCents) || 0;
+      if (isEvenSplitShareLineEmail(line)) {
+        const label = (line.originalItemName || line.name || "Item").toString();
+        const si = line.splitIndex;
+        const ts = line.totalSplits;
+        itemRows += `<tr><td style="padding:6px 0;">${escapeHtml(`${label} (${si}/${ts} share)`)}</td>` +
+          `<td style="padding:6px 0;text-align:right;">$${centsToDisplayFromSplit(share)}</td></tr>`;
+        const o = Number(line.originalLineTotalInCents) || 0;
+        itemRows += `<tr><td colspan="2" style="padding:2px 0 8px 12px;font-size:13px;color:#666;">` +
+          `Line total $${centsToDisplayFromSplit(o)}</td></tr>`;
+      } else {
+        const name = (line.name || "Item").toString();
+        const qty = Number(line.quantity) || 1;
+        const lbl = qty > 1 ? `${qty}x ${name}` : name;
+        itemRows += `<tr><td style="padding:6px 0;">${escapeHtml(lbl)}</td>` +
+          `<td style="padding:6px 0;text-align:right;">$${centsToDisplayFromSplit(share)}</td></tr>`;
+      }
+    });
+  }
+
+  const subtotal = Number(sr.subtotalInCents) || 0;
+  const discount = Number(sr.discountInCents) || 0;
+  const tax = Number(sr.taxInCents) || 0;
+  const tip = Number(sr.tipInCents) || 0;
+  const total = Number(sr.totalInCents) || 0;
+  const taxLines = Array.isArray(sr.taxLines) ? sr.taxLines : [];
+  const method = (sr.paymentMethod != null ? String(sr.paymentMethod) : "");
+
+  let tot = `
+    <table style="width:100%;font-size:14px;color:#333;" cellpadding="0" cellspacing="0">
+      <tr><td style="padding:4px 0;">Subtotal</td><td style="padding:4px 0;text-align:right;">$${centsToDisplayFromSplit(subtotal)}</td></tr>`;
+  if (discount > 0) {
+    tot += `<tr><td style="padding:4px 0;">Discount</td><td style="padding:4px 0;text-align:right;">-$${centsToDisplayFromSplit(discount)}</td></tr>`;
+  }
+  if (taxLines.length > 0) {
+    taxLines.forEach((tl) => {
+      const lab = (tl && tl.label != null) ? String(tl.label) : "Tax";
+      const amt = tl && tl.amountInCents != null ? Number(tl.amountInCents) : 0;
+      if (amt > 0) {
+        tot += `<tr><td style="padding:4px 0;">${escapeHtml(lab)}</td><td style="padding:4px 0;text-align:right;">$${centsToDisplayFromSplit(amt)}</td></tr>`;
+      }
+    });
+  } else if (tax > 0) {
+    tot += `<tr><td style="padding:4px 0;">Tax</td><td style="padding:4px 0;text-align:right;">$${centsToDisplayFromSplit(tax)}</td></tr>`;
+  }
+  if (shouldIncludeTipLineOnPrintedReceipt(tipConfig, tip) && tip > 0) {
+    tot += `<tr><td style="padding:4px 0;">Tip</td><td style="padding:4px 0;text-align:right;">$${centsToDisplayFromSplit(tip)}</td></tr>`;
+  }
+  tot += `</table>
+    <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
+    <table style="width:100%;" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="padding:8px 0;font-weight:bold;font-size:20px;color:#222;">TOTAL</td>
+        <td style="padding:8px 0;text-align:right;font-weight:bold;font-size:20px;color:#222;">$${centsToDisplayFromSplit(total)}</td>
+      </tr>
+    </table>
+    <div style="text-align:center;margin-top:16px;font-size:14px;color:#444;">
+      <strong>Payment:</strong> ${escapeHtml(method)}
+    </div>`;
+
+  const guestHead = (sr.guestLabel != null ? String(sr.guestLabel) : "").trim();
+  return `
+    <div style="text-align:center;margin:8px 0 12px 0;font-size:15px;font-weight:bold;color:#5E4085;">${escapeHtml(guestHead)}</div>
+    <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
+    <table style="width:100%;font-size:14px;color:#333;" cellpadding="0" cellspacing="0"><tbody>${itemRows}</tbody></table>
+    <hr style="border:none;border-top:1px solid #ddd;margin:16px 0;">
+    ${tot}`;
+}
+
+// ---------------------------------------------------------------------------
 // Data helpers
 // ---------------------------------------------------------------------------
 
@@ -574,7 +676,7 @@ function receiptTitleHtml(title) {
 // ---------------------------------------------------------------------------
 
 exports.sendReceiptEmail = onCall(async (request) => {
-  const { email, orderId } = request.data || {};
+  const { email, orderId, splitReceipt } = request.data || {};
 
   if (!email || !orderId) {
     return { success: false, error: "Email and orderId are required." };
@@ -603,6 +705,36 @@ exports.sendReceiptEmail = onCall(async (request) => {
   }
 
   const order = orderDoc.data();
+
+  /** Per-guest split receipt: SendGrid HTML (no client share sheet). */
+  if (validateSplitReceiptPayload(splitReceipt)) {
+    const tipConfig = await fetchTipConfig(db);
+    const body =
+      brandedHeader(biz) +
+      receiptTitleHtml("RECEIPT (SPLIT)") +
+      orderMetaSection(order) +
+      splitReceiptItemsAndTotalsHtml(splitReceipt, tipConfig) +
+      footerHtml();
+    const html = wrapEmail(body);
+    const gl = String(splitReceipt.guestLabel).trim();
+    try {
+      await sendGridMail({
+        to: email,
+        from: fromEmail,
+        subject: `Receipt - Order #${order.orderNumber || orderId} — ${gl}`,
+        html,
+      });
+      logger.info("Split receipt sent", { to: email, orderId, guestLabel: gl });
+      return { success: true };
+    } catch (error) {
+      logger.error("SendGrid error (split receipt):", error.message);
+      if (error.response) {
+        logger.error("SendGrid response:", JSON.stringify(error.response.body));
+      }
+      return { success: false, error: sendGridErrorForClient(error) };
+    }
+  }
+
   const totalInCents = order.totalInCents ?? 0;
   const tipAmountInCents = order.tipAmountInCents ?? 0;
   const taxBreakdown = order.taxBreakdown ?? [];

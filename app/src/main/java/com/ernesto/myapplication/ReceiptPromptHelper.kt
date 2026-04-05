@@ -4,8 +4,6 @@ import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
-import android.text.InputType
-import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
@@ -510,27 +508,14 @@ object ReceiptPromptHelper {
         transactionId: String,
         onDismiss: (() -> Unit)?
     ) {
-        val input = EditText(activity).apply {
-            hint = "Enter email address"
-            inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-            setPadding(48, 32, 48, 32)
-        }
-
-        AlertDialog.Builder(activity)
-            .setTitle("Email Receipt")
-            .setView(input)
-            .setPositiveButton("Send") { _, _ ->
-                val email = input.text.toString().trim()
-                if (email.isEmpty()) {
-                    Toast.makeText(activity, "Please enter an email", Toast.LENGTH_SHORT).show()
-                    onDismiss?.invoke()
-                    return@setPositiveButton
-                }
-                sendReceipt(activity, type, email, orderId, transactionId, onDismiss)
-            }
-            .setNegativeButton("Cancel") { _, _ -> onDismiss?.invoke() }
-            .setCancelable(false)
-            .show()
+        ReceiptEmailKeypadDialog.show(
+            activity,
+            title = "Email Receipt",
+            hint = "Enter email address",
+            cancelable = false,
+            onSend = { email -> sendReceipt(activity, type, email, orderId, transactionId, onDismiss) },
+            onCancel = { onDismiss?.invoke() }
+        )
     }
 
     private fun sendReceipt(

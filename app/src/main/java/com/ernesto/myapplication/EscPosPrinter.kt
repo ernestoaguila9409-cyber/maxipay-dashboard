@@ -13,6 +13,8 @@ import android.widget.Toast
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.OutputStream
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -180,6 +182,59 @@ object EscPosPrinter {
     fun printTestReceipt(context: Context, settings: ReceiptSettings) {
         val segs = buildTestSegments(settings)
         print(context, segs, settings)
+    }
+
+    /**
+     * Sends a short ESC/POS test page to a printer on the LAN (raw TCP, usually port 9100).
+     * [kitchenPrinter]: skip thermal cut and use line feeds (better for impact/kitchen printers).
+     */
+    fun printLanTestPrint(
+        context: Context,
+        ipAddress: String,
+        port: Int = 9100,
+        kitchenPrinter: Boolean,
+    ) {
+        Log.d(TAG, "LAN test print → $ipAddress:$port kitchen=$kitchenPrinter")
+        Thread {
+            var socket: Socket? = null
+            try {
+                socket = Socket()
+                socket.connect(InetSocketAddress(ipAddress, port), 8_000)
+                socket.soTimeout = 10_000
+                val out = socket.outputStream
+                out.write(INIT)
+                out.write(ALIGN_CENTER)
+                out.write(BOLD_ON)
+                out.printLine("TEST PRINT")
+                out.write(BOLD_OFF)
+                out.write(ALIGN_LEFT)
+                out.printLine("")
+                val ts = SimpleDateFormat("MM/dd/yyyy HH:mm:ss", Locale.US).format(Date())
+                out.printLine(ts)
+                out.printLine("IP: $ipAddress")
+                out.printLine("MaxiPay printer test")
+                out.printLine("")
+                repeat(4) { out.write(LF) }
+                if (kitchenPrinter) {
+                    out.write(byteArrayOf(0x1B, 0x64, 8))
+                } else {
+                    out.write(CUT)
+                }
+                out.flush()
+                uiToast(context, context.getString(R.string.printer_test_sent))
+            } catch (e: Exception) {
+                Log.e(TAG, "LAN test print failed: ${e.message}", e)
+                uiToast(
+                    context,
+                    context.getString(R.string.printer_test_failed, e.message ?: ""),
+                )
+            } finally {
+                try {
+                    socket?.close()
+                } catch (_: Exception) {
+                }
+            }
+        }.start()
     }
 
     fun buildTestSegments(settings: ReceiptSettings): List<Segment> {

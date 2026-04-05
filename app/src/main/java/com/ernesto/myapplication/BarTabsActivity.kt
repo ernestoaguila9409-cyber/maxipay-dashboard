@@ -1,11 +1,13 @@
 package com.ernesto.myapplication
 
 import android.content.Intent
-import android.graphics.Color
 import android.os.Bundle
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.EditText
@@ -15,11 +17,15 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.ernesto.myapplication.engine.PaymentService
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.util.Date
 import java.util.UUID
 
@@ -29,6 +35,8 @@ class BarTabsActivity : AppCompatActivity() {
 
     private lateinit var recyclerBarTabs: RecyclerView
     private lateinit var txtEmptyState: TextView
+    private lateinit var barMultiSeatActions: View
+    private lateinit var btnOpenTabSelected: MaterialButton
     private lateinit var adapter: BarTabsAdapter
 
     private var orderListener: ListenerRegistration? = null
@@ -37,7 +45,11 @@ class BarTabsActivity : AppCompatActivity() {
     private var employeeName: String = ""
 
     private val barSeats = mutableListOf<BarSeatInfo>()
-    private val openOrders = mutableMapOf<String, OpenBarOrder>()
+    /** Open bar-tab order info keyed by bar seat [Tables] document id. */
+    private val openOrdersByTableId = mutableMapOf<String, OpenBarOrder>()
+
+    private var selectionMode = false
+    private val selectedTableIds = linkedSetOf<String>()
 
     private data class BarSeatInfo(
         val tableId: String,
@@ -50,7 +62,10 @@ class BarTabsActivity : AppCompatActivity() {
         val customerName: String?,
         val totalInCents: Long,
         val cardLast4: String,
-        val cardBrand: String
+        val cardBrand: String,
+        val orderNumber: Long,
+        val seatCount: Int,
+        val displayTableName: String,
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,19 +77,90 @@ class BarTabsActivity : AppCompatActivity() {
 
         recyclerBarTabs = findViewById(R.id.recyclerBarTabs)
         txtEmptyState = findViewById(R.id.txtEmptyState)
+        barMultiSeatActions = findViewById(R.id.barMultiSeatActions)
+        btnOpenTabSelected = findViewById(R.id.btnOpenTabSelected)
 
-        adapter = BarTabsAdapter { seat ->
-            if (seat.isOccupied && seat.orderId != null) {
-                openBarOrder(seat.orderId, seat.seatName)
-            } else {
-                showSeatOrderDialog(seat)
+        findViewById<MaterialButton>(R.id.btnCancelSelection).setOnClickListener {
+            exitSelectionMode()
+        }
+        btnOpenTabSelected.setOnClickListener {
+            val seats = selectedSeatsAsBarSeats()
+            if (seats.isNotEmpty()) {
+                showSeatOrderDialog(seats)
             }
         }
+
+        adapter = BarTabsAdapter(
+            onSeatClick = { seat -> handleSeatClick(seat) },
+            onSeatLongPress = { seat -> handleSeatLongPress(seat) },
+        )
 
         recyclerBarTabs.layoutManager = LinearLayoutManager(this)
         recyclerBarTabs.adapter = adapter
 
         loadBarSeats()
+    }
+
+    private fun handleSeatLongPress(seat: BarSeat) {
+        if (seat.isOccupied) return
+        selectionMode = true
+        selectedTableIds.clear()
+        selectedTableIds.add(seat.tableId)
+        barMultiSeatActions.visibility = View.VISIBLE
+        updateOpenTabButtonLabel()
+        refreshList()
+    }
+
+    private fun handleSeatClick(seat: BarSeat) {
+        if (seat.isOccupied && seat.orderId != null) {
+            exitSelectionMode()
+            openBarOrder(seat.orderId, seat.tabDisplayName ?: seat.seatName)
+            return
+        }
+        if (selectionMode) {
+            if (selectedTableIds.contains(seat.tableId)) {
+                selectedTableIds.remove(seat.tableId)
+            } else {
+                selectedTableIds.add(seat.tableId)
+            }
+            if (selectedTableIds.isEmpty()) {
+                exitSelectionMode()
+            } else {
+                updateOpenTabButtonLabel()
+                refreshList()
+            }
+            return
+        }
+        showSeatOrderDialog(listOf(seat))
+    }
+
+    private fun exitSelectionMode() {
+        selectionMode = false
+        selectedTableIds.clear()
+        barMultiSeatActions.visibility = View.GONE
+        refreshList()
+    }
+
+    private fun updateOpenTabButtonLabel() {
+        val n = selectedTableIds.size
+        btnOpenTabSelected.text = if (n >= 2) {
+            "Open tab ($n seats)"
+        } else {
+            "Open tab"
+        }
+    }
+
+    private fun selectedSeatsAsBarSeats(): List<BarSeat> {
+        val byId = barSeats.associateBy { it.tableId }
+        return selectedTableIds.mapNotNull { tid ->
+            val info = byId[tid] ?: return@mapNotNull null
+            BarSeat(
+                tableId = info.tableId,
+                seatName = info.name,
+                maxSeats = info.maxSeats,
+                isOccupied = false,
+            )
+        }
     }
 
     override fun onStart() {
@@ -134,16 +220,33 @@ class BarTabsActivity : AppCompatActivity() {
                 if (err != null) return@addSnapshotListener
                 if (snap == null) return@addSnapshotListener
 
-                openOrders.clear()
+                openOrdersByTableId.clear()
                 for (doc in snap.documents) {
-                    val seatName = doc.getString("seatName") ?: continue
-                    openOrders[seatName] = OpenBarOrder(
+                    var tableIds = BarTabSeatHelper.seatTableIdsFromOrder(doc)
+                    if (tableIds.isEmpty()) {
+                        val legacyName = doc.getString("seatName") ?: continue
+                        val match = barSeats.filter { it.name == legacyName }.map { it.tableId }
+                        if (match.isEmpty()) continue
+                        tableIds = match
+                    }
+                    val displayName = doc.getString("tableName")
+                        ?: doc.getString("seatName")
+                        ?: tableIds.mapNotNull { tid -> barSeats.find { it.tableId == tid }?.name }
+                            .joinToString(", ")
+                    val seatCount = tableIds.size.coerceAtLeast(1)
+                    val obo = OpenBarOrder(
                         orderId = doc.id,
                         customerName = doc.getString("customerName"),
                         totalInCents = doc.getLong("totalInCents") ?: 0L,
                         cardLast4 = doc.getString("cardLast4") ?: "",
-                        cardBrand = doc.getString("cardBrand") ?: ""
+                        cardBrand = doc.getString("cardBrand") ?: "",
+                        orderNumber = doc.getLong("orderNumber") ?: 0L,
+                        seatCount = seatCount,
+                        displayTableName = displayName,
                     )
+                    for (tid in tableIds) {
+                        openOrdersByTableId[tid] = obo
+                    }
                 }
                 refreshList()
             }
@@ -151,7 +254,7 @@ class BarTabsActivity : AppCompatActivity() {
 
     private fun refreshList() {
         val seatList = barSeats.map { seatInfo ->
-            val order = openOrders[seatInfo.name]
+            val order = openOrdersByTableId[seatInfo.tableId]
             BarSeat(
                 tableId = seatInfo.tableId,
                 seatName = seatInfo.name,
@@ -161,7 +264,11 @@ class BarTabsActivity : AppCompatActivity() {
                 customerName = order?.customerName,
                 totalInCents = order?.totalInCents ?: 0L,
                 cardLast4 = order?.cardLast4 ?: "",
-                cardBrand = order?.cardBrand ?: ""
+                cardBrand = order?.cardBrand ?: "",
+                orderNumber = order?.orderNumber ?: 0L,
+                isMultiSeatTab = order != null && order.seatCount > 1,
+                isSelected = selectionMode && selectedTableIds.contains(seatInfo.tableId),
+                tabDisplayName = order?.displayTableName,
             )
         }
         adapter.submit(seatList)
@@ -176,17 +283,67 @@ class BarTabsActivity : AppCompatActivity() {
         override fun toString(): String = name
     }
 
-    private fun showSeatOrderDialog(seat: BarSeat) {
-        val dialogView = LayoutInflater.from(this)
-            .inflate(R.layout.dialog_bar_seat_order, null)
+    private fun showSeatOrderDialog(seats: List<BarSeat>) {
+        if (seats.isEmpty()) return
+        val formRoot = LayoutInflater.from(this)
+            .inflate(R.layout.dialog_bar_seat_order, null) as LinearLayout
 
-        val txtSeatName = dialogView.findViewById<TextView>(R.id.txtSeatName)
+        val density = resources.displayMetrics.density
+        val brandColor = ContextCompat.getColor(this, R.color.brand_primary)
+        val textColor = ContextCompat.getColor(this, R.color.pos_primary_text)
+
+        val actionBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val h = (12 * density).toInt()
+            val v = (10 * density).toInt()
+            setPadding(h, v, h, v)
+            setBackgroundColor(ContextCompat.getColor(this@BarTabsActivity, R.color.white))
+            elevation = 4 * density
+        }
+
+        val btnSkip = MaterialButton(
+            this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle
+        ).apply {
+            text = "Skip"
+            setTextColor(brandColor)
+            strokeWidth = 0
+        }
+        val btnCancel = MaterialButton(
+            this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle
+        ).apply {
+            text = "Cancel"
+            setTextColor(textColor)
+            strokeWidth = 0
+        }
+        val btnStartTab = MaterialButton(
+            this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle
+        ).apply {
+            text = "Start Tab"
+            setTextColor(brandColor)
+            strokeWidth = 0
+        }
+
+        actionBar.addView(btnSkip)
+        actionBar.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 0, 1f)
+        })
+        actionBar.addView(btnCancel)
+        actionBar.addView(btnStartTab)
+
+        val dialogView = BarSeatOrderKeypad.wrapFormWithKeypads(this, formRoot, actionBar)
+
         val etSearchCustomer = dialogView.findViewById<AutoCompleteTextView>(R.id.etSearchCustomer)
         val etCustomerName = dialogView.findViewById<EditText>(R.id.etCustomerName)
         val etCustomerPhone = dialogView.findViewById<EditText>(R.id.etCustomerPhone)
         val etCustomerEmail = dialogView.findViewById<EditText>(R.id.etCustomerEmail)
 
-        txtSeatName.text = seat.seatName
+        val selectionHighlight = ContextCompat.getColor(this, R.color.brand_primary_highlight)
+        listOf(etSearchCustomer, etCustomerName, etCustomerPhone, etCustomerEmail).forEach {
+            it.highlightColor = selectionHighlight
+        }
+
+        val titleNames = seats.joinToString(", ") { it.seatName }
 
         var selectedCustomerId: String? = null
 
@@ -204,8 +361,8 @@ class BarTabsActivity : AppCompatActivity() {
                     if (customer.phone.isNotBlank()) append("  •  ${customer.phone}")
                 }
                 view.text = display
-                view.setTextColor(Color.BLACK)
-                view.textSize = 14f
+                view.setTextColor(ContextCompat.getColor(this@BarTabsActivity, R.color.pos_primary_text))
+                view.textSize = 16f
                 view.setPadding(48, 24, 48, 24)
                 return view
             }
@@ -251,29 +408,46 @@ class BarTabsActivity : AppCompatActivity() {
                 customerAdapter.notifyDataSetChanged()
             }
 
-        AlertDialog.Builder(this)
-            .setTitle(seat.seatName)
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(if (seats.size > 1) "Open tab ($titleNames)" else seats.first().seatName)
             .setView(dialogView)
-            .setPositiveButton("Start Tab") { _, _ ->
-                val name = etCustomerName.text.toString().trim()
-                val phone = etCustomerPhone.text.toString().trim()
-                val email = etCustomerEmail.text.toString().trim()
-                showOpenBarTabDialog(seat, selectedCustomerId, name, phone, email)
+            .create()
+
+        btnSkip.setOnClickListener {
+            dialog.dismiss()
+            showOpenBarTabDialog(seats, null, "", "", "")
+        }
+        btnCancel.setOnClickListener {
+            dialog.dismiss()
+        }
+        btnStartTab.setOnClickListener {
+            dialog.dismiss()
+            val name = etCustomerName.text.toString().trim()
+            val phone = etCustomerPhone.text.toString().trim()
+            val email = etCustomerEmail.text.toString().trim()
+            showOpenBarTabDialog(seats, selectedCustomerId, name, phone, email)
+        }
+
+        dialog.setOnShowListener {
+            dialog.window?.apply {
+                setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                setGravity(Gravity.BOTTOM)
+                setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
             }
-            .setNeutralButton("Skip") { _, _ ->
-                showOpenBarTabDialog(seat, null, "", "", "")
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+            getSystemService(InputMethodManager::class.java)
+                .hideSoftInputFromWindow(dialogView.windowToken, 0)
+        }
+        dialog.show()
     }
 
     private fun showOpenBarTabDialog(
-        seat: BarSeat,
+        seats: List<BarSeat>,
         customerId: String?,
         customerName: String,
         customerPhone: String,
         customerEmail: String
     ) {
+        if (seats.isEmpty()) return
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_open_bar_tab, null)
 
         val txtCustomerName = dialogView.findViewById<TextView>(R.id.txtCustomerName)
@@ -282,7 +456,7 @@ class BarTabsActivity : AppCompatActivity() {
         val btnCashTab = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnCashTab)
 
         txtCustomerName.text = if (customerName.isNotBlank()) customerName else "No name"
-        txtSeatName.text = seat.seatName
+        txtSeatName.text = seats.joinToString(", ") { it.seatName }
 
         val dialog = AlertDialog.Builder(this)
             .setTitle("Open Bar Tab")
@@ -292,12 +466,12 @@ class BarTabsActivity : AppCompatActivity() {
 
         btnPreauthCard.setOnClickListener {
             dialog.dismiss()
-            createBarTabOrderWithPreauth(seat, customerId, customerName, customerPhone, customerEmail)
+            createBarTabOrderWithPreauth(seats, customerId, customerName, customerPhone, customerEmail)
         }
 
         btnCashTab.setOnClickListener {
             dialog.dismiss()
-            createBarTabOrderCash(seat, customerId, customerName, customerPhone, customerEmail)
+            createBarTabOrderCash(seats, customerId, customerName, customerPhone, customerEmail)
         }
 
         dialog.show()
@@ -307,41 +481,43 @@ class BarTabsActivity : AppCompatActivity() {
     private var preAuthDialog: AlertDialog? = null
 
     private fun createBarTabOrderWithPreauth(
-        seat: BarSeat,
+        seats: List<BarSeat>,
         customerId: String?,
         customerName: String,
         customerPhone: String,
         customerEmail: String
     ) {
+        if (seats.isEmpty()) return
         showPreAuthLoading("Creating tab…")
         if (customerId != null) {
-            buildAndSaveBarTabOrder(seat, customerId, customerName, customerPhone, customerEmail, usePreauth = true)
+            buildAndSaveBarTabOrder(seats, customerId, customerName, customerPhone, customerEmail, usePreauth = true)
         } else if (customerName.isNotBlank()) {
-            resolveCustomerIdAndCreateOrder(seat, customerName, customerPhone, customerEmail, usePreauth = true)
+            resolveCustomerIdAndCreateOrder(seats, customerName, customerPhone, customerEmail, usePreauth = true)
         } else {
-            buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, usePreauth = true)
+            buildAndSaveBarTabOrder(seats, null, customerName, customerPhone, customerEmail, usePreauth = true)
         }
     }
 
     private fun createBarTabOrderCash(
-        seat: BarSeat,
+        seats: List<BarSeat>,
         customerId: String?,
         customerName: String,
         customerPhone: String,
         customerEmail: String
     ) {
+        if (seats.isEmpty()) return
         showPreAuthLoading("Creating tab…")
         if (customerId != null) {
-            buildAndSaveBarTabOrder(seat, customerId, customerName, customerPhone, customerEmail, usePreauth = false)
+            buildAndSaveBarTabOrder(seats, customerId, customerName, customerPhone, customerEmail, usePreauth = false)
         } else if (customerName.isNotBlank()) {
-            resolveCustomerIdAndCreateOrder(seat, customerName, customerPhone, customerEmail, usePreauth = false)
+            resolveCustomerIdAndCreateOrder(seats, customerName, customerPhone, customerEmail, usePreauth = false)
         } else {
-            buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, usePreauth = false)
+            buildAndSaveBarTabOrder(seats, null, customerName, customerPhone, customerEmail, usePreauth = false)
         }
     }
 
     private fun resolveCustomerIdAndCreateOrder(
-        seat: BarSeat,
+        seats: List<BarSeat>,
         customerName: String,
         customerPhone: String,
         customerEmail: String,
@@ -354,7 +530,7 @@ class BarTabsActivity : AppCompatActivity() {
             .addOnSuccessListener { snap ->
                 val resolvedId = snap.documents.firstOrNull()?.id
                 if (resolvedId != null) {
-                    buildAndSaveBarTabOrder(seat, resolvedId, customerName, customerPhone, customerEmail, usePreauth)
+                    buildAndSaveBarTabOrder(seats, resolvedId, customerName, customerPhone, customerEmail, usePreauth)
                 } else {
                     db.collection("Customers")
                         .get()
@@ -369,29 +545,33 @@ class BarTabsActivity : AppCompatActivity() {
                                     break
                                 }
                             }
-                            buildAndSaveBarTabOrder(seat, foundId, customerName, customerPhone, customerEmail, usePreauth)
+                            buildAndSaveBarTabOrder(seats, foundId, customerName, customerPhone, customerEmail, usePreauth)
                         }
                         .addOnFailureListener {
-                            buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, usePreauth)
+                            buildAndSaveBarTabOrder(seats, null, customerName, customerPhone, customerEmail, usePreauth)
                         }
                 }
             }
             .addOnFailureListener {
-                buildAndSaveBarTabOrder(seat, null, customerName, customerPhone, customerEmail, usePreauth)
+                buildAndSaveBarTabOrder(seats, null, customerName, customerPhone, customerEmail, usePreauth)
             }
     }
 
     private fun buildAndSaveBarTabOrder(
-        seat: BarSeat,
+        seats: List<BarSeat>,
         customerId: String?,
         customerName: String,
         customerPhone: String,
         customerEmail: String,
         usePreauth: Boolean
     ) {
+        if (seats.isEmpty()) return
+        val combinedName = seats.joinToString(", ") { it.seatName }
+        val seatIds = seats.map { it.tableId }
         OrderNumberGenerator.nextOrderNumber(
             onSuccess = { orderNumber ->
                 runOnUiThread {
+                    val orderRef = db.collection("Orders").document()
                     val orderMap = hashMapOf<String, Any>(
                         "orderNumber" to orderNumber,
                         "employeeName" to employeeName,
@@ -402,9 +582,12 @@ class BarTabsActivity : AppCompatActivity() {
                         "totalPaidInCents" to 0L,
                         "remainingInCents" to 0L,
                         "orderType" to "BAR_TAB",
-                        "seatName" to seat.seatName,
+                        "seatIds" to seatIds,
+                        "seatName" to combinedName,
+                        "tableName" to combinedName,
+                        "tableId" to seats.first().tableId,
                         "area" to "Bar",
-                        "guestCount" to 1
+                        "guestCount" to seats.size
                     )
 
                     if (!customerId.isNullOrBlank()) orderMap["customerId"] = customerId
@@ -420,24 +603,30 @@ class BarTabsActivity : AppCompatActivity() {
                         orderMap["paymentStatus"] = "OPEN"
                     }
 
-                    db.collection("Orders")
-                        .add(orderMap)
-                        .addOnSuccessListener { doc ->
-                            if (usePreauth) {
-                                runPreAuth(doc.id, seat.seatName)
-                            } else {
-                                hidePreAuthLoading()
-                                openBarOrder(doc.id, seat.seatName)
-                            }
+                    db.runTransaction { t ->
+                        t.set(orderRef, orderMap)
+                        for (tid in seatIds) {
+                            t.update(
+                                db.collection("Tables").document(tid),
+                                mapOf("currentOrderId" to orderRef.id)
+                            )
                         }
-                        .addOnFailureListener { e ->
+                    }.addOnSuccessListener {
+                        exitSelectionMode()
+                        if (usePreauth) {
+                            runPreAuth(orderRef.id, combinedName)
+                        } else {
                             hidePreAuthLoading()
-                            Toast.makeText(
-                                this,
-                                "Failed to create tab: ${e.message}",
-                                Toast.LENGTH_LONG
-                            ).show()
+                            openBarOrder(orderRef.id, combinedName)
                         }
+                    }.addOnFailureListener { e ->
+                        hidePreAuthLoading()
+                        Toast.makeText(
+                            this,
+                            "Failed to create tab: ${e.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
             },
             onFailure = { e ->
@@ -562,7 +751,20 @@ class BarTabsActivity : AppCompatActivity() {
                     .addOnFailureListener { openBarOrder(orderId, seatName) }
             }
             .setNegativeButton("Cancel") { _, _ ->
-                db.collection("Orders").document(orderId).delete()
+                val orderRef = db.collection("Orders").document(orderId)
+                orderRef.get().addOnSuccessListener { snap ->
+                    val batch = db.batch()
+                    batch.delete(orderRef)
+                    for (tid in BarTabSeatHelper.seatTableIdsFromOrder(snap)) {
+                        batch.update(
+                            db.collection("Tables").document(tid),
+                            mapOf("currentOrderId" to FieldValue.delete())
+                        )
+                    }
+                    batch.commit()
+                }.addOnFailureListener {
+                    orderRef.delete()
+                }
             }
             .setCancelable(false)
             .show()

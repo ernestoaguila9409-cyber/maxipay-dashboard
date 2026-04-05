@@ -62,18 +62,39 @@
             android:layout_marginTop="2dp"
             android:textColor="#777777"/>
 
-        <TextView
-            android:id="@+id/txtOrderType"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:id="@+id/orderTypeBadgesRow"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="13sp"
-            android:textStyle="bold"
+            android:orientation="horizontal"
             android:layout_marginTop="6dp"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
-            android:paddingTop="3dp"
-            android:paddingBottom="3dp"
-            android:visibility="gone"/>
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/txtOrderType"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp"
+                android:visibility="gone"/>
+
+            <TextView
+                android:id="@+id/txtSplitBanner"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:layout_marginStart="8dp"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp"
+                android:visibility="gone"/>
+        </LinearLayout>
 
         <TextView
             android:id="@+id/txtRefundHistory"
@@ -158,6 +179,15 @@
                         android:textSize="14sp"
                         android:textColor="#555555"/>
                 </LinearLayout>
+
+                <!-- Order-level discounts (below Subtotal, above Taxes) -->
+                <LinearLayout
+                    android:id="@+id/discountSummaryContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone"
+                    android:layout_marginTop="4dp"/>
 
                 <!-- Tax breakdown -->
                 <LinearLayout

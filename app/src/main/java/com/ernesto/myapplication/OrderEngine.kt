@@ -249,7 +249,13 @@ class OrderEngine(private val db: FirebaseFirestore) {
                 val lineInfos = mutableListOf<LineInfo>()
 
                 for (doc in itemsSnap.documents) {
-                    val lineTotal = doc.getLong("lineTotalInCents") ?: 0L
+                    val basePriceInCents = doc.getLong("basePriceInCents") ?: 0L
+                    val modifiersTotalInCents = doc.getLong("modifiersTotalInCents") ?: 0L
+                    val qty = (doc.getLong("quantity") ?: doc.getLong("qty") ?: 1L)
+                    val recomputedLineTotal = (basePriceInCents + modifiersTotalInCents) * qty
+
+                    val lineTotal = if (recomputedLineTotal > 0) recomputedLineTotal
+                        else doc.getLong("lineTotalInCents") ?: 0L
                     subtotalInCents += lineTotal
                     val mode = doc.getString("taxMode") ?: "INHERIT"
                     @Suppress("UNCHECKED_CAST")

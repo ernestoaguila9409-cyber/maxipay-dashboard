@@ -36,6 +36,8 @@ import androidx.core.content.ContextCompat
 import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.ernesto.myapplication.engine.PaymentService
+import com.ernesto.myapplication.engine.SplitReceiptPayload
+import com.ernesto.myapplication.engine.SplitReceiptReprintHelper
 import com.google.firebase.Timestamp
 import java.text.SimpleDateFormat
 
@@ -56,8 +58,13 @@ class TransactionActivity : AppCompatActivity() {
 
     private enum class ReceiptContentType { ORIGINAL, REFUND, VOID }
 
-    private var pendingPrintTransaction: Transaction? = null
-    private var pendingPrintContentType: ReceiptContentType? = null
+    private sealed class OriginalPrintSplitChoice {
+        object CombinedReceipt : OriginalPrintSplitChoice()
+        data class PersonReceipt(val payload: SplitReceiptPayload) : OriginalPrintSplitChoice()
+    }
+
+    private var originalPrintSplitChoice: OriginalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+    private var pendingBluetoothPrintAction: (() -> Unit)? = null
 
     private var typeFilter: String = "ALL" // ALL, VOID, REFUND, CASH, CREDIT_DEBIT
     private var dateFromMillis: Long? = null
@@ -600,31 +607,73 @@ class TransactionActivity : AppCompatActivity() {
             return
         }
         when (contentType) {
-            ReceiptContentType.ORIGINAL -> showTypedEmailDialog(orderId, "sendReceiptEmail", "")
+            ReceiptContentType.ORIGINAL -> beginOriginalEmailFlow(transaction)
             ReceiptContentType.REFUND -> showTypedEmailDialog(orderId, "sendRefundReceiptEmail", transaction.referenceId)
             ReceiptContentType.VOID -> showTypedEmailDialog(orderId, "sendVoidReceiptEmail", transaction.referenceId)
         }
     }
 
-    private fun showTypedEmailDialog(orderId: String, cloudFunction: String, transactionId: String) {
-        val input = EditText(this).apply {
-            hint = "Enter email address"
-            inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-            setPadding(48, 32, 48, 32)
+    @Suppress("UNCHECKED_CAST")
+    private fun beginOriginalEmailFlow(transaction: Transaction) {
+        val orderId = transaction.orderId
+        val txId = transaction.referenceId.trim().takeIf { it.isNotEmpty() }
+        if (txId == null) {
+            showTypedEmailDialog(orderId, "sendReceiptEmail", "")
+            return
         }
-        AlertDialog.Builder(this)
-            .setTitle("\u2709\uFE0F  Email Receipt")
-            .setView(input)
-            .setPositiveButton("Send") { _, _ ->
-                val email = input.text.toString().trim()
-                if (email.isEmpty()) {
-                    Toast.makeText(this, "Please enter an email", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
+        db.collection("Transactions").document(txId).get()
+            .addOnSuccessListener { txDoc ->
+                val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                val splitPayloads = SplitReceiptReprintHelper.payloadsOrderedBySplitIndex(payments)
+                if (splitPayloads == null) {
+                    showTypedEmailDialog(orderId, "sendReceiptEmail", "")
+                } else {
+                    showSplitReceiptEmailChooser(transaction, splitPayloads)
                 }
-                sendTypedReceiptEmail(email, orderId, cloudFunction, transactionId)
             }
-            .setNegativeButton("Cancel", null)
+            .addOnFailureListener {
+                showTypedEmailDialog(orderId, "sendReceiptEmail", "")
+            }
+    }
+
+    private fun showSplitReceiptEmailChooser(transaction: Transaction, payloads: List<SplitReceiptPayload>) {
+        val orderId = transaction.orderId
+        val labels = payloads.map { "Person ${it.splitIndex}" }.toMutableList()
+        labels.add("All in one (full receipt)")
+        labels.add("Cancel")
+        AlertDialog.Builder(this)
+            .setTitle("Email which receipt?")
+            .setItems(labels.toTypedArray()) { _, which ->
+                when {
+                    which == labels.lastIndex -> Unit
+                    which == payloads.size -> showTypedEmailDialog(orderId, "sendReceiptEmail", "")
+                    else -> showSplitReceiptEmailEntryDialog(orderId, payloads[which])
+                }
+            }
             .show()
+    }
+
+    private fun showSplitReceiptEmailEntryDialog(orderId: String, payload: SplitReceiptPayload) {
+        ReceiptEmailKeypadDialog.show(
+            this,
+            title = "Email receipt",
+            message = "Enter the email address for this guest's receipt.",
+            hint = "customer@email.com",
+            onSend = { email -> launchSplitReceiptEmailIntent(orderId, email, payload) }
+        )
+    }
+
+    private fun launchSplitReceiptEmailIntent(orderId: String, email: String, payload: SplitReceiptPayload) {
+        SplitReceiptEmailSender.send(this, email, orderId, payload)
+    }
+
+    private fun showTypedEmailDialog(orderId: String, cloudFunction: String, transactionId: String) {
+        ReceiptEmailKeypadDialog.show(
+            this,
+            title = "\u2709\uFE0F  Email Receipt",
+            hint = "Enter email address",
+            onSend = { email -> sendTypedReceiptEmail(email, orderId, cloudFunction, transactionId) }
+        )
     }
 
     private fun sendTypedReceiptEmail(email: String, orderId: String, cloudFunction: String, transactionId: String) {
@@ -652,33 +701,115 @@ class TransactionActivity : AppCompatActivity() {
 
     // ── Print Receipt ────────────────────────────────────────────
 
-    private fun handlePrintReceipt(transaction: Transaction, contentType: ReceiptContentType) {
-        if (transaction.orderId.isBlank()) {
-            Toast.makeText(this, "No order linked to this transaction.", Toast.LENGTH_SHORT).show()
-            return
-        }
+    private fun runAfterBluetoothPermission(block: () -> Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
                 != PackageManager.PERMISSION_GRANTED
             ) {
-                pendingPrintTransaction = transaction
-                pendingPrintContentType = contentType
+                pendingBluetoothPrintAction = block
                 ActivityCompat.requestPermissions(
                     this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BT_CONNECT
                 )
                 return
             }
         }
-        executePrint(transaction, contentType)
+        block()
+    }
+
+    private fun handlePrintReceipt(transaction: Transaction, contentType: ReceiptContentType) {
+        if (transaction.orderId.isBlank()) {
+            Toast.makeText(this, "No order linked to this transaction.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (contentType != ReceiptContentType.ORIGINAL) {
+            originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+            runAfterBluetoothPermission { executePrint(transaction, contentType) }
+            return
+        }
+        beginOriginalPrintFlow(transaction)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun beginOriginalPrintFlow(transaction: Transaction) {
+        val txId = transaction.referenceId.trim().takeIf { it.isNotEmpty() }
+        if (txId == null) {
+            originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+            runAfterBluetoothPermission { executePrint(transaction, ReceiptContentType.ORIGINAL) }
+            return
+        }
+        db.collection("Transactions").document(txId).get()
+            .addOnSuccessListener { txDoc ->
+                val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                val splitPayloads = SplitReceiptReprintHelper.payloadsOrderedBySplitIndex(payments)
+                if (splitPayloads == null) {
+                    originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+                    runAfterBluetoothPermission { executePrint(transaction, ReceiptContentType.ORIGINAL) }
+                } else {
+                    showSplitReceiptReprintChooser(transaction, splitPayloads)
+                }
+            }
+            .addOnFailureListener {
+                originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+                runAfterBluetoothPermission { executePrint(transaction, ReceiptContentType.ORIGINAL) }
+            }
+    }
+
+    private fun showSplitReceiptReprintChooser(transaction: Transaction, payloads: List<SplitReceiptPayload>) {
+        val labels = payloads.map { "Person ${it.splitIndex}" }.toMutableList()
+        labels.add("All in one (full receipt)")
+        labels.add("Cancel")
+        AlertDialog.Builder(this)
+            .setTitle("Print which receipt?")
+            .setItems(labels.toTypedArray()) { _, which ->
+                when {
+                    which == labels.lastIndex -> Unit
+                    which == payloads.size -> {
+                        originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+                        runAfterBluetoothPermission { executePrint(transaction, ReceiptContentType.ORIGINAL) }
+                    }
+                    else -> {
+                        originalPrintSplitChoice = OriginalPrintSplitChoice.PersonReceipt(payloads[which])
+                        runAfterBluetoothPermission { executePrint(transaction, ReceiptContentType.ORIGINAL) }
+                    }
+                }
+            }
+            .show()
     }
 
     private fun executePrint(transaction: Transaction, contentType: ReceiptContentType) {
         Toast.makeText(this, "Preparing receipt\u2026", Toast.LENGTH_SHORT).show()
         when (contentType) {
-            ReceiptContentType.ORIGINAL -> printOriginalReceipt(transaction.orderId, transaction.referenceId)
+            ReceiptContentType.ORIGINAL -> {
+                when (val choice = originalPrintSplitChoice) {
+                    is OriginalPrintSplitChoice.PersonReceipt ->
+                        printOriginalSplitReceipt(transaction.orderId, choice.payload)
+                    is OriginalPrintSplitChoice.CombinedReceipt ->
+                        printOriginalReceipt(transaction.orderId, transaction.referenceId)
+                }
+                originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+            }
             ReceiptContentType.REFUND -> printRefundVoidReceipt(transaction, "REFUND")
             ReceiptContentType.VOID -> printRefundVoidReceipt(transaction, "VOID")
         }
+    }
+
+    private fun printOriginalSplitReceipt(orderId: String, payload: SplitReceiptPayload) {
+        db.collection("Orders").document(orderId).get()
+            .addOnSuccessListener { orderDoc ->
+                if (!orderDoc.exists()) {
+                    Toast.makeText(this, "Order not found", Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+                val rs = ReceiptSettings.load(this)
+                EscPosPrinter.print(
+                    this,
+                    SplitReceiptRenderer.buildEscPosSegments(this, orderDoc, payload),
+                    rs
+                )
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to load order", Toast.LENGTH_SHORT).show()
+            }
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -2010,25 +2141,12 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun showEmailReceiptDialog(orderId: String) {
-        val input = EditText(this).apply {
-            hint = "Enter email address"
-            inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-            setPadding(48, 32, 48, 32)
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Email Receipt")
-            .setView(input)
-            .setPositiveButton("Send") { _, _ ->
-                val email = input.text.toString().trim()
-                if (email.isEmpty()) {
-                    Toast.makeText(this, "Please enter an email", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-                sendReceiptEmail(email, orderId)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        ReceiptEmailKeypadDialog.show(
+            this,
+            title = "Email Receipt",
+            hint = "Enter email address",
+            onSend = { email -> sendReceiptEmail(email, orderId) }
+        )
     }
 
     private fun sendReceiptEmail(email: String, orderId: String) {
@@ -2055,12 +2173,10 @@ class TransactionActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_BT_CONNECT) {
-            val tx = pendingPrintTransaction
-            val ct = pendingPrintContentType
-            pendingPrintTransaction = null
-            pendingPrintContentType = null
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED && tx != null && ct != null) {
-                executePrint(tx, ct)
+            val block = pendingBluetoothPrintAction
+            pendingBluetoothPrintAction = null
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                block?.invoke()
             } else {
                 Toast.makeText(this, "Bluetooth permission required for printing", Toast.LENGTH_LONG).show()
             }

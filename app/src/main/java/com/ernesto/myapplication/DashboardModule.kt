@@ -44,8 +44,28 @@ data class DashboardModule(
             DashboardModule("modifiers", "MODIFIERS", "ic_modifiers", "purple", 9),
             DashboardModule("inventory", "INVENTORY", "ic_inventory", "purple", 10),
             DashboardModule("reports", "REPORTS", "ic_reports", "purple", 11),
-            DashboardModule("cash_flow", "CASH FLOW", "ic_cash", "purple", 12)
+            DashboardModule("printers", "PRINTERS", "ic_printer", "purple", 12),
+            DashboardModule("cash_flow", "CASH FLOW", "ic_cash", "purple", 13)
         )
+
+        /**
+         * Ensures the PRINTERS tile exists when the saved Firestore layout predates it.
+         * Inserts it right after REPORTS when possible; otherwise appends. Re-indexes positions.
+         */
+        fun mergePrintersDashboardTile(modules: List<DashboardModule>): List<DashboardModule> {
+            if (modules.any { it.key == "printers" }) {
+                return modules.sortedBy { it.position }
+            }
+            val printerDef = getDefaults().find { it.key == "printers" } ?: return modules.sortedBy { it.position }
+            val sorted = modules.sortedBy { it.position }.toMutableList()
+            val reportsIdx = sorted.indexOfFirst { it.key == "reports" }
+            if (reportsIdx >= 0) {
+                sorted.add(reportsIdx + 1, printerDef)
+            } else {
+                sorted.add(printerDef)
+            }
+            return sorted.mapIndexed { index, m -> m.copy(position = index) }
+        }
 
         /**
          * Appends a Tips tile when tips are enabled and collection is on the printed receipt

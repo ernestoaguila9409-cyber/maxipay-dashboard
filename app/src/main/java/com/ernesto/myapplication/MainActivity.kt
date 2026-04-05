@@ -96,7 +96,10 @@ class MainActivity : AppCompatActivity() {
             onUpdate = { modules ->
                 if (!isDestroyed) {
                     dashboardAdapter.setModules(
-                        DashboardModule.mergeTipDashboardTile(this, modules)
+                        DashboardModule.mergeTipDashboardTile(
+                            this,
+                            DashboardModule.mergePrintersDashboardTile(modules)
+                        )
                     )
                     updatePageIndicator(dashboardPager.currentItem)
                     applyOrderTypeVisibility()
@@ -105,7 +108,10 @@ class MainActivity : AppCompatActivity() {
             onCacheThenServer = { serverModules ->
                 if (!isDestroyed && serverModules.isNotEmpty()) {
                     dashboardAdapter.setModules(
-                        DashboardModule.mergeTipDashboardTile(this, serverModules)
+                        DashboardModule.mergeTipDashboardTile(
+                            this,
+                            DashboardModule.mergePrintersDashboardTile(serverModules)
+                        )
                     )
                     updatePageIndicator(dashboardPager.currentItem)
                 }
@@ -181,6 +187,7 @@ class MainActivity : AppCompatActivity() {
                 startActivity(i)
             }
             "reports" -> startActivity(Intent(this, ReportsActivity::class.java))
+            "printers" -> startActivity(Intent(this, PrintersActivity::class.java))
             "cash_flow" -> startActivity(Intent(this, CashFlowActivity::class.java))
             "tips" -> startActivity(Intent(this, TipAdjustmentActivity::class.java))
         }
@@ -198,7 +205,10 @@ class MainActivity : AppCompatActivity() {
         DashboardConfigManager.loadFromServer(db) { modules ->
             if (!isDestroyed && modules.isNotEmpty()) {
                 dashboardAdapter.setModules(
-                    DashboardModule.mergeTipDashboardTile(this, modules)
+                    DashboardModule.mergeTipDashboardTile(
+                        this,
+                        DashboardModule.mergePrintersDashboardTile(modules)
+                    )
                 )
                 updatePageIndicator(dashboardPager.currentItem)
             }

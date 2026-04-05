@@ -2,4 +2,12 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- POS / bar tab brand (accent, controls, focused inputs) -->
+    <color name="brand_primary">#5E4085</color>
+    <color name="pos_primary_text">#1C1B1F</color>
+    <color name="pos_secondary_text">#757575</color>
+    <color name="box_stroke_resting">#79747E</color>
+    <!-- Light brand tint for text selection highlight -->
+    <color name="brand_primary_highlight">#335E4085</color>
 </resources>

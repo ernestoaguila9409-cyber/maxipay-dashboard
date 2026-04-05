@@ -1,18 +1,25 @@
 package com.ernesto.myapplication
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.text.InputType
 import android.os.*
 import android.view.View
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Source
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.math.BigDecimal
@@ -22,11 +29,24 @@ import java.util.concurrent.TimeUnit
 import java.util.Locale
 import com.ernesto.myapplication.engine.DiscountEngine
 import com.ernesto.myapplication.engine.PaymentEngine
+import com.ernesto.myapplication.engine.SplitReceiptCalculator
+import com.ernesto.myapplication.engine.SplitReceiptPayload
 import android.util.Log
 import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
 
 class PaymentActivity : AppCompatActivity() {
+
+    companion object {
+        private const val REQ_BT_SPLIT_RECEIPT = 1003
+    }
+
+    private data class SplitShareInfo(
+        val guestIndex: Int,
+        val guestLabel: String,
+        val lineKeys: List<String>,
+        val amountCents: Long
+    )
 
     private var isMixMode = false
 
@@ -58,7 +78,21 @@ class PaymentActivity : AppCompatActivity() {
 
     private var splitPayAmount = -1.0
     private var splitTotalCount = 0
-    private var splitPaymentsDone = 0
+    private var splitPaymentsCompleted = 0
+    private var splitShareInfos: List<SplitShareInfo>? = null
+    private var pendingSplitReceiptPayload: SplitReceiptPayload? = null
+
+    private data class PendingSplitPrint(
+        val oid: String,
+        val payload: SplitReceiptPayload,
+        val remainingInCents: Long
+    )
+
+    private var pendingSplitPrint: PendingSplitPrint? = null
+
+    private var splitReceiptChoiceDialog: AlertDialog? = null
+    private var activeSplitReceiptPayload: SplitReceiptPayload? = null
+    private var activeSplitReceiptRemainingInCents: Long = 0L
 
     private val db = FirebaseFirestore.getInstance()
     private lateinit var paymentEngine: PaymentEngine
@@ -363,12 +397,8 @@ class PaymentActivity : AppCompatActivity() {
                     val lineDiscounts = orderAppliedDiscounts.filter { ad ->
                         (ad["lineKey"]?.toString()?.trim().orEmpty()) == lineKey
                     }
-                    val orderDiscounts = orderAppliedDiscounts.filter { ad ->
-                        val lk = ad["lineKey"]?.toString()?.trim().orEmpty()
-                        val scope = ad["applyScope"]?.toString()?.trim()?.lowercase() ?: ""
-                        lk.isEmpty() && (scope == "order" || scope == "manual")
-                    }
-                    for (ad in lineDiscounts + orderDiscounts) {
+                    // Order- / manual-scope discounts (empty lineKey) show only under Subtotal, not repeated per line.
+                    for (ad in lineDiscounts) {
                         container.addView(
                             makeSummaryRow(
                                 DiscountDisplay.formatBulletFromFirestoreMap(ad),
@@ -590,19 +620,78 @@ class PaymentActivity : AppCompatActivity() {
 
     private fun showSplitPayShareDialogIfNeeded() {
         val amount = intent.getDoubleExtra("SPLIT_PAY_AMOUNT", -1.0)
-        if (amount <= 0) return
-        intent.removeExtra("SPLIT_PAY_AMOUNT")
-        val totalCount = intent.getIntExtra("SPLIT_TOTAL_COUNT", 0)
-        intent.removeExtra("SPLIT_TOTAL_COUNT")
+        val sharesJson = intent.getStringExtra("SPLIT_SHARES_JSON")
+        if (amount <= 0 && sharesJson.isNullOrBlank()) return
 
-        splitPayAmount = amount
-        splitTotalCount = totalCount.coerceAtLeast(1)
-        splitPaymentsDone = 0
-        showSplitPayShareDialog(amount, 1)
+        intent.removeExtra("SPLIT_MODE")
+
+        if (!sharesJson.isNullOrBlank()) {
+            splitShareInfos = parseSplitSharesJson(sharesJson)
+            splitTotalCount = splitShareInfos?.size?.coerceAtLeast(1) ?: 1
+            splitPayAmount = -1.0
+            intent.removeExtra("SPLIT_SHARES_JSON")
+            intent.removeExtra("SPLIT_PAY_AMOUNT")
+            intent.removeExtra("SPLIT_TOTAL_COUNT")
+        } else {
+            splitShareInfos = null
+            intent.removeExtra("SPLIT_PAY_AMOUNT")
+            val totalCount = intent.getIntExtra("SPLIT_TOTAL_COUNT", 0)
+            intent.removeExtra("SPLIT_TOTAL_COUNT")
+            splitPayAmount = amount
+            splitTotalCount = totalCount.coerceAtLeast(1)
+        }
+
+        splitPaymentsCompleted = 0
+        showSplitPayShareDialog(computeCurrentSplitAmountDollars(), splitPaymentsCompleted + 1)
+    }
+
+    private fun parseSplitSharesJson(json: String): List<SplitShareInfo> {
+        val arr = JSONArray(json)
+        val out = mutableListOf<SplitShareInfo>()
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val guestIndex = o.getInt("guestIndex")
+            val label = o.getString("guestLabel")
+            val keysJson = o.getJSONArray("lineKeys")
+            val keys = mutableListOf<String>()
+            for (j in 0 until keysJson.length()) {
+                keys.add(keysJson.getString(j))
+            }
+            val cents = o.getLong("amountCents")
+            out.add(SplitShareInfo(guestIndex, label, keys, cents))
+        }
+        return out
+    }
+
+    private fun isSplitPayMode(): Boolean {
+        return !splitShareInfos.isNullOrEmpty() ||
+            (splitPayAmount > 0 && splitTotalCount > 0)
+    }
+
+    private fun clearSplitState() {
+        splitPayAmount = -1.0
+        splitTotalCount = 0
+        splitPaymentsCompleted = 0
+        splitShareInfos = null
+    }
+
+    private fun computeCurrentSplitAmountDollars(): Double {
+        val rem = roundMoney(remainingBalance)
+        val remCents = MoneyUtils.dollarsToCents(rem)
+        val infos = splitShareInfos
+        if (!infos.isNullOrEmpty()) {
+            val idx = splitPaymentsCompleted.coerceIn(0, infos.size - 1)
+            val want = infos[idx].amountCents
+            return MoneyUtils.centsToDouble(minOf(want, remCents))
+        }
+        val nextShare = splitPaymentsCompleted + 1
+        val isLast = nextShare == splitTotalCount
+        return if (isLast) rem else minOf(splitPayAmount, rem)
     }
 
     private fun showSplitPayShareDialog(amount: Double, shareNumber: Int) {
-        val title = if (splitTotalCount > 1) "Pay your share ($shareNumber of $splitTotalCount)" else "Pay your share"
+        val total = splitShareInfos?.size ?: splitTotalCount
+        val title = if (total > 1) "Pay your share ($shareNumber of $total)" else "Pay your share"
         showSplitPayShareDialogWithTitle(amount, title)
     }
 
@@ -637,24 +726,473 @@ class PaymentActivity : AppCompatActivity() {
     }
 
     private fun scheduleNextSplitDialogIfNeeded() {
-        if (remainingBalance <= 0 || splitPayAmount <= 0) {
-            splitPayAmount = -1.0
-            splitTotalCount = 0
-            splitPaymentsDone = 0
+        if (remainingBalance <= 0 || !isSplitPayMode()) {
+            clearSplitState()
             return
         }
-        splitPaymentsDone++
-        val nextShare = splitPaymentsDone + 1
-        val amount = minOf(splitPayAmount, roundMoney(remainingBalance))
+        val total = splitShareInfos?.size ?: splitTotalCount
+        val hasMore = splitPaymentsCompleted < total
+        if (!hasMore) {
+            clearSplitState()
+            return
+        }
+        val nextShare = splitPaymentsCompleted + 1
+        val amount = computeCurrentSplitAmountDollars()
         if (amount <= 0) return
-        val title = if (nextShare <= splitTotalCount) {
-            "Pay your share ($nextShare of $splitTotalCount)"
+        val title = if (total > 1) {
+            "Pay your share ($nextShare of $total)"
         } else {
             "Pay remaining balance"
         }
         Handler(Looper.getMainLooper()).postDelayed({
             showSplitPayShareDialogWithTitle(amount, title)
         }, 1500)
+    }
+
+    private fun formatSplitPaymentMethod(paymentType: String, entryType: String?): String {
+        if (paymentType.equals("Cash", ignoreCase = true)) return "Cash"
+        val entry = receiptLabelForCardEntryType(entryType)
+        return if (entry != null) "$paymentType · $entry" else paymentType
+    }
+
+    private fun buildSplitReceiptOrNull(
+        orderDoc: com.google.firebase.firestore.DocumentSnapshot,
+        itemDocs: List<com.google.firebase.firestore.DocumentSnapshot>,
+        chargedCents: Long,
+        paymentType: String,
+        entryType: String?
+    ): SplitReceiptPayload? {
+        if (!isSplitPayMode()) return null
+        val total = splitShareInfos?.size ?: splitTotalCount
+        val shareIdx0 = splitPaymentsCompleted
+        val splitIndex1Based = shareIdx0 + 1
+        val method = formatSplitPaymentMethod(paymentType, entryType)
+        val infos = splitShareInfos
+        return if (!infos.isNullOrEmpty()) {
+            val info = infos[shareIdx0]
+            SplitReceiptCalculator.computeByItemsSplit(
+                orderDoc,
+                itemDocs,
+                info.lineKeys.toSet(),
+                splitIndex1Based,
+                total,
+                chargedCents,
+                method,
+                info.guestLabel
+            )
+        } else {
+            SplitReceiptCalculator.computeEvenSplit(
+                orderDoc,
+                itemDocs,
+                splitIndex1Based,
+                total,
+                chargedCents,
+                method
+            )
+        }
+    }
+
+    private fun executePaymentWithSplitMetadata(
+        amountInCents: Long,
+        paymentType: String,
+        authCode: String = "",
+        cardBrand: String = "",
+        last4: String = "",
+        entryType: String = "",
+        referenceId: String = "",
+        clientReferenceId: String = "",
+        batchNumber: String = "",
+        transactionNumber: String = "",
+        invoiceNumber: String = "",
+        cashTenderedInCents: Long = 0L,
+        cashChangeInCents: Long = 0L,
+        onSuccess: (Long) -> Unit,
+        onFailure: (Exception) -> Unit
+    ) {
+        val oid = orderId ?: return
+        val bid = batchId?.takeIf { it.isNotBlank() }
+        if (bid.isNullOrBlank()) {
+            Toast.makeText(this, "Open a batch first", Toast.LENGTH_LONG).show()
+            setButtonsEnabled(true)
+            return
+        }
+        if (!isSplitPayMode()) {
+            paymentEngine.processPayment(
+                orderId = oid,
+                batchId = bid,
+                paymentType = paymentType,
+                amountInCents = amountInCents,
+                authCode = authCode,
+                cardBrand = cardBrand,
+                last4 = last4,
+                entryType = entryType,
+                referenceId = referenceId,
+                clientReferenceId = clientReferenceId,
+                batchNumber = batchNumber,
+                transactionNumber = transactionNumber,
+                invoiceNumber = invoiceNumber,
+                cashTenderedInCents = cashTenderedInCents,
+                cashChangeInCents = cashChangeInCents,
+                splitReceipt = null,
+                onSuccess = onSuccess,
+                onFailure = onFailure
+            )
+            return
+        }
+        db.collection("Orders").document(oid).get()
+            .addOnSuccessListener { orderDoc ->
+                db.collection("Orders").document(oid).collection("items").get()
+                    .addOnSuccessListener { itemsSnap ->
+                        val payload = buildSplitReceiptOrNull(
+                            orderDoc,
+                            itemsSnap.documents,
+                            amountInCents,
+                            paymentType,
+                            entryType
+                        )
+                        pendingSplitReceiptPayload = payload
+                        paymentEngine.processPayment(
+                            orderId = oid,
+                            batchId = bid,
+                            paymentType = paymentType,
+                            amountInCents = amountInCents,
+                            authCode = authCode,
+                            cardBrand = cardBrand,
+                            last4 = last4,
+                            entryType = entryType,
+                            referenceId = referenceId,
+                            clientReferenceId = clientReferenceId,
+                            batchNumber = batchNumber,
+                            transactionNumber = transactionNumber,
+                            invoiceNumber = invoiceNumber,
+                            cashTenderedInCents = cashTenderedInCents,
+                            cashChangeInCents = cashChangeInCents,
+                            splitReceipt = payload?.toFirestoreMap(),
+                            onSuccess = onSuccess,
+                            onFailure = {
+                                pendingSplitReceiptPayload = null
+                                onFailure(it)
+                            }
+                        )
+                    }
+                    .addOnFailureListener {
+                        pendingSplitReceiptPayload = null
+                        paymentEngine.processPayment(
+                            orderId = oid,
+                            batchId = bid,
+                            paymentType = paymentType,
+                            amountInCents = amountInCents,
+                            authCode = authCode,
+                            cardBrand = cardBrand,
+                            last4 = last4,
+                            entryType = entryType,
+                            referenceId = referenceId,
+                            clientReferenceId = clientReferenceId,
+                            batchNumber = batchNumber,
+                            transactionNumber = transactionNumber,
+                            invoiceNumber = invoiceNumber,
+                            cashTenderedInCents = cashTenderedInCents,
+                            cashChangeInCents = cashChangeInCents,
+                            splitReceipt = null,
+                            onSuccess = onSuccess,
+                            onFailure = onFailure
+                        )
+                    }
+            }
+            .addOnFailureListener {
+                pendingSplitReceiptPayload = null
+                paymentEngine.processPayment(
+                    orderId = oid,
+                    batchId = bid,
+                    paymentType = paymentType,
+                    amountInCents = amountInCents,
+                    authCode = authCode,
+                    cardBrand = cardBrand,
+                    last4 = last4,
+                    entryType = entryType,
+                    referenceId = referenceId,
+                    clientReferenceId = clientReferenceId,
+                    batchNumber = batchNumber,
+                    transactionNumber = transactionNumber,
+                    invoiceNumber = invoiceNumber,
+                    cashTenderedInCents = cashTenderedInCents,
+                    cashChangeInCents = cashChangeInCents,
+                    splitReceipt = null,
+                    onSuccess = onSuccess,
+                    onFailure = onFailure
+                )
+            }
+    }
+
+    private fun dismissSplitReceiptChoiceDialog() {
+        splitReceiptChoiceDialog?.dismiss()
+        splitReceiptChoiceDialog = null
+    }
+
+    private fun showSplitReceiptChoiceAfterPayment(remainingInCents: Long) {
+        val payload = pendingSplitReceiptPayload
+        pendingSplitReceiptPayload = null
+        if (payload == null) {
+            advanceSplitAfterReceiptAction(remainingInCents)
+            return
+        }
+        val oid = orderId ?: run {
+            advanceSplitAfterReceiptAction(remainingInCents)
+            return
+        }
+        activeSplitReceiptPayload = payload
+        activeSplitReceiptRemainingInCents = remainingInCents
+
+        CustomerDisplayManager.showReceiptOptionsOnCustomerDisplay(this) { option ->
+            runOnUiThread {
+                if (activeSplitReceiptPayload == null) return@runOnUiThread
+                applySplitReceiptOption(option, oid)
+            }
+        }
+
+        val choices = arrayOf("Print Receipt", "Email Receipt", "Text Receipt", "Skip Receipt")
+        splitReceiptChoiceDialog = AlertDialog.Builder(this)
+            .setTitle("Would you like a receipt?")
+            .setItems(choices) { _, which ->
+                val opt = when (which) {
+                    0 -> ReceiptOption.PRINT
+                    1 -> ReceiptOption.EMAIL
+                    2 -> ReceiptOption.SMS
+                    else -> ReceiptOption.SKIP
+                }
+                applySplitReceiptOption(opt, oid)
+            }
+            .setCancelable(false)
+            .create()
+        splitReceiptChoiceDialog?.show()
+    }
+
+    private fun reopenSplitReceiptOffer(oid: String, payload: SplitReceiptPayload, remainingInCents: Long) {
+        activeSplitReceiptPayload = payload
+        activeSplitReceiptRemainingInCents = remainingInCents
+        CustomerDisplayManager.clearEmailInputCallbacks()
+        CustomerDisplayManager.showReceiptOptionsOnCustomerDisplay(this) { option ->
+            runOnUiThread {
+                if (activeSplitReceiptPayload == null) return@runOnUiThread
+                applySplitReceiptOption(option, oid)
+            }
+        }
+        val choices = arrayOf("Print Receipt", "Email Receipt", "Text Receipt", "Skip Receipt")
+        dismissSplitReceiptChoiceDialog()
+        splitReceiptChoiceDialog = AlertDialog.Builder(this)
+            .setTitle("Would you like a receipt?")
+            .setItems(choices) { _, which ->
+                val opt = when (which) {
+                    0 -> ReceiptOption.PRINT
+                    1 -> ReceiptOption.EMAIL
+                    2 -> ReceiptOption.SMS
+                    else -> ReceiptOption.SKIP
+                }
+                applySplitReceiptOption(opt, oid)
+            }
+            .setCancelable(false)
+            .create()
+        splitReceiptChoiceDialog?.show()
+    }
+
+    private fun applySplitReceiptOption(option: ReceiptOption, oid: String) {
+        val payload = activeSplitReceiptPayload ?: return
+        val remaining = activeSplitReceiptRemainingInCents
+        dismissSplitReceiptChoiceDialog()
+        CustomerDisplayManager.clearReceiptOptionCallback()
+        CustomerDisplayManager.getPaymentSuccessInfo()?.let {
+            CustomerDisplayManager.showPaymentApproved(this, it)
+        }
+        when (option) {
+            ReceiptOption.PRINT -> printSplitReceiptThenContinue(oid, payload, remaining)
+            ReceiptOption.EMAIL -> showSplitReceiptEmailEntry(oid, payload, remaining)
+            ReceiptOption.SMS -> showSplitReceiptSmsEntry(oid, payload, remaining)
+            ReceiptOption.SKIP -> {
+                activeSplitReceiptPayload = null
+                advanceSplitAfterReceiptAction(remaining)
+            }
+        }
+    }
+
+    private fun showSplitReceiptEmailEntry(oid: String, payload: SplitReceiptPayload, remainingInCents: Long) {
+        fun sendAndAdvance(email: String) {
+            val e = email.trim()
+            if (e.isEmpty()) {
+                Toast.makeText(this, "Enter an email address", Toast.LENGTH_SHORT).show()
+                return
+            }
+            CustomerDisplayManager.clearEmailInputCallbacks()
+            sendSplitReceiptEmailToAddress(oid, payload, e, remainingInCents)
+        }
+        if (CustomerDisplayManager.hasCustomerDisplayAttached()) {
+            CustomerDisplayManager.showEmailInputOnCustomerDisplay(
+                this,
+                onSubmit = { em -> runOnUiThread { sendAndAdvance(em) } },
+                onCancel = {
+                    runOnUiThread {
+                        CustomerDisplayManager.clearEmailInputCallbacks()
+                        reopenSplitReceiptOffer(oid, payload, remainingInCents)
+                    }
+                }
+            )
+            return
+        }
+        ReceiptEmailKeypadDialog.show(
+            this,
+            title = "Email receipt",
+            message = "Enter the email address for this guest's receipt.",
+            hint = "customer@email.com",
+            emptyEmailToast = "Enter an email address",
+            onSend = { em -> sendAndAdvance(em) },
+            onCancel = { reopenSplitReceiptOffer(oid, payload, remainingInCents) }
+        )
+    }
+
+    private fun sendSplitReceiptEmailToAddress(
+        oid: String,
+        payload: SplitReceiptPayload,
+        email: String,
+        remainingInCents: Long
+    ) {
+        SplitReceiptEmailSender.send(
+            this,
+            email,
+            oid,
+            payload,
+            onSuccess = {
+                activeSplitReceiptPayload = null
+                advanceSplitAfterReceiptAction(remainingInCents)
+            },
+            onFailure = { reopenSplitReceiptOffer(oid, payload, remainingInCents) }
+        )
+    }
+
+    private fun showSplitReceiptSmsEntry(oid: String, payload: SplitReceiptPayload, remainingInCents: Long) {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_PHONE
+            hint = "+1XXXXXXXXXX"
+            setPadding(48, 32, 48, 32)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Text receipt")
+            .setMessage("Enter the phone number for this guest's split receipt.")
+            .setView(input)
+            .setPositiveButton("Send") { _, _ ->
+                val raw = input.text.toString().trim()
+                if (raw.isEmpty()) {
+                    Toast.makeText(this, "Enter a phone number", Toast.LENGTH_SHORT).show()
+                    reopenSplitReceiptOffer(oid, payload, remainingInCents)
+                    return@setPositiveButton
+                }
+                db.collection("Orders").document(oid).get()
+                    .addOnSuccessListener { orderDoc ->
+                        val body = SplitReceiptRenderer.buildPlainTextBody(this, orderDoc, payload)
+                        launchSplitReceiptSmsIntent(raw, body)
+                        activeSplitReceiptPayload = null
+                        advanceSplitAfterReceiptAction(remainingInCents)
+                    }
+                    .addOnFailureListener {
+                        Toast.makeText(this, "Failed to load order", Toast.LENGTH_SHORT).show()
+                        reopenSplitReceiptOffer(oid, payload, remainingInCents)
+                    }
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                reopenSplitReceiptOffer(oid, payload, remainingInCents)
+            }
+            .show()
+    }
+
+    private fun launchSplitReceiptSmsIntent(phone: String, body: String) {
+        var cleaned = phone.replace(Regex("[\\s\\-()]"), "")
+        if (cleaned.length == 10 && !cleaned.startsWith("+")) {
+            cleaned = "+1$cleaned"
+        } else if (cleaned.startsWith("1") && cleaned.length == 11 && !cleaned.startsWith("+")) {
+            cleaned = "+$cleaned"
+        }
+        val uri = Uri.parse("smsto:${Uri.encode(cleaned)}")
+        val intent = Intent(Intent.ACTION_SENDTO, uri).apply {
+            putExtra("sms_body", body)
+        }
+        try {
+            startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(this, "No SMS app available", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun advanceSplitAfterReceiptAction(remainingInCents: Long) {
+        activeSplitReceiptPayload = null
+        dismissSplitReceiptChoiceDialog()
+        CustomerDisplayManager.clearReceiptOptionCallback()
+        CustomerDisplayManager.clearEmailInputCallbacks()
+        splitPaymentsCompleted++
+        if (remainingInCents > 0L) {
+            scheduleNextSplitDialogIfNeeded()
+            orderId?.let { oid ->
+                db.collection("Orders").document(oid).get()
+                    .addOnSuccessListener { snap -> bindOrderSummary(snap) }
+            }
+        } else {
+            clearSplitState()
+            onOrderFullyPaid(skipMerchantReceiptScreen = true)
+        }
+    }
+
+    private fun printSplitReceiptThenContinue(
+        oid: String,
+        payload: SplitReceiptPayload,
+        remainingInCents: Long
+    ) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                pendingSplitPrint = PendingSplitPrint(oid, payload, remainingInCents)
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.BLUETOOTH_CONNECT),
+                    REQ_BT_SPLIT_RECEIPT
+                )
+                return
+            }
+        }
+        runSplitPrintAndContinue(oid, payload, remainingInCents)
+    }
+
+    private fun runSplitPrintAndContinue(
+        oid: String,
+        payload: SplitReceiptPayload,
+        remainingInCents: Long
+    ) {
+        Toast.makeText(this, "Preparing receipt…", Toast.LENGTH_SHORT).show()
+        db.collection("Orders").document(oid).get()
+            .addOnSuccessListener { orderDoc ->
+                val segs = SplitReceiptRenderer.buildEscPosSegments(this, orderDoc, payload)
+                EscPosPrinter.print(this, segs, ReceiptSettings.load(this))
+                advanceSplitAfterReceiptAction(remainingInCents)
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to load order for print", Toast.LENGTH_SHORT).show()
+                advanceSplitAfterReceiptAction(remainingInCents)
+            }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_BT_SPLIT_RECEIPT) return
+        val pending = pendingSplitPrint
+        pendingSplitPrint = null
+        if (pending == null) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            runSplitPrintAndContinue(pending.oid, pending.payload, pending.remainingInCents)
+        } else {
+            Toast.makeText(this, "Bluetooth permission denied", Toast.LENGTH_SHORT).show()
+            advanceSplitAfterReceiptAction(pending.remainingInCents)
+        }
     }
 
     private fun launchCashPayment(amount: Double) {
@@ -879,11 +1417,9 @@ class PaymentActivity : AppCompatActivity() {
         }
         val amountInCents = MoneyUtils.dollarsToCents(paymentAmount)
 
-        paymentEngine.processPayment(
-            orderId = oid,
-            batchId = bid,
-            paymentType = paymentType,
+        executePaymentWithSplitMetadata(
             amountInCents = amountInCents,
+            paymentType = paymentType,
             authCode = authCode,
             cardBrand = cardBrand,
             last4 = last4,
@@ -899,19 +1435,21 @@ class PaymentActivity : AppCompatActivity() {
                     showApproved(paymentType)
                     remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
-                    if (remainingInCents <= 0L) {
-                        splitPayAmount = -1.0
-                        splitTotalCount = 0
-                        splitPaymentsDone = 0
+                    if (isSplitPayMode()) {
+                        txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
+                        setButtonsEnabled(true)
+                        showSplitReceiptChoiceAfterPayment(remainingInCents)
+                    } else if (remainingInCents <= 0L) {
+                        clearSplitState()
                         Handler(Looper.getMainLooper()).postDelayed({ onOrderFullyPaid() }, 2000)
                     } else {
                         txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
                         setButtonsEnabled(true)
-                        scheduleNextSplitDialogIfNeeded()
                     }
                 }
             },
             onFailure = {
+                pendingSplitReceiptPayload = null
                 runOnUiThread {
                     Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
                     setButtonsEnabled(true)
@@ -934,11 +1472,9 @@ class PaymentActivity : AppCompatActivity() {
         val tenderedCents = if (paymentType == "Cash") lastCashTenderedCents else 0L
         val changeCents = if (paymentType == "Cash") lastCashChangeCents else 0L
 
-        paymentEngine.processPayment(
-            orderId = oid,
-            batchId = bid,
-            paymentType = paymentType,
+        executePaymentWithSplitMetadata(
             amountInCents = amountInCents,
+            paymentType = paymentType,
             cashTenderedInCents = tenderedCents,
             cashChangeInCents = changeCents,
             onSuccess = { remainingInCents ->
@@ -951,20 +1487,23 @@ class PaymentActivity : AppCompatActivity() {
 
                     remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
-                    if (remainingInCents <= 0L) {
-                        splitPayAmount = -1.0
-                        splitTotalCount = 0
-                        splitPaymentsDone = 0
+                    if (isSplitPayMode()) {
+                        txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
+                        progressBar.visibility = View.GONE
+                        setButtonsEnabled(true)
+                        showSplitReceiptChoiceAfterPayment(remainingInCents)
+                    } else if (remainingInCents <= 0L) {
+                        clearSplitState()
                         onOrderFullyPaid()
                     } else {
                         txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
                         progressBar.visibility = View.GONE
                         setButtonsEnabled(true)
-                        scheduleNextSplitDialogIfNeeded()
                     }
                 }
             },
             onFailure = {
+                pendingSplitReceiptPayload = null
                 runOnUiThread {
                     showDeclined(it.message ?: "Payment failed")
                     setButtonsEnabled(true)
@@ -1015,15 +1554,33 @@ class PaymentActivity : AppCompatActivity() {
         btnCash.isEnabled = enabled
     }
 
-    private fun onOrderFullyPaid() {
+    private fun onOrderFullyPaid(skipMerchantReceiptScreen: Boolean = false) {
         setResult(RESULT_OK)
         val oid = orderId ?: run { finish(); return }
+        if (skipMerchantReceiptScreen) {
+            CustomerDisplayManager.clearPaymentSuccessInfo()
+            CustomerDisplayManager.clearReceiptOptionCallback()
+            CustomerDisplayManager.clearEmailInputCallbacks()
+            CustomerDisplayManager.setIdle(this, ReceiptSettings.load(this).businessName)
+            startActivity(Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            })
+            finish()
+            return
+        }
         val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
             putExtra("ORDER_ID", oid)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         startActivity(intent)
         finish()
+    }
+
+    override fun onDestroy() {
+        dismissSplitReceiptChoiceDialog()
+        CustomerDisplayManager.clearReceiptOptionCallback()
+        CustomerDisplayManager.clearEmailInputCallbacks()
+        super.onDestroy()
     }
 
     private var availableManualDiscounts: List<DiscountItem> = emptyList()

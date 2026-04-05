@@ -44,6 +44,16 @@
                 android:textColor="#1A1A1A"/>
 
             <TextView
+                android:id="@+id/txtSharedTab"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#5E35B1"
+                android:layout_marginTop="2dp"
+                android:visibility="gone"/>
+
+            <TextView
                 android:id="@+id/txtCardLast4"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

@@ -37,6 +37,8 @@ import androidx.core.content.ContextCompat
 import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.ernesto.myapplication.engine.OrderEngine
+import com.ernesto.myapplication.engine.SplitReceiptPayload
+import com.ernesto.myapplication.engine.SplitReceiptReprintHelper
 import com.ernesto.myapplication.engine.PaymentService
 import android.graphics.Typeface
 import com.google.firebase.Timestamp
@@ -62,12 +64,14 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var btnTipAdjust: MaterialButton
     private lateinit var txtAddCustomer: TextView
     private lateinit var txtOrderType: TextView
+    private lateinit var txtSplitBanner: TextView
     private lateinit var orderSummaryContainer: LinearLayout
     private lateinit var txtSubtotal: TextView
     private lateinit var txtOriginalTotal: TextView
     private lateinit var refundedSummaryRow: LinearLayout
     private lateinit var txtRefundedAmount: TextView
     private lateinit var txtRemainingTotal: TextView
+    private lateinit var discountSummaryContainer: LinearLayout
     private lateinit var taxBreakdownContainer: LinearLayout
     private lateinit var tipRow: LinearLayout
     private lateinit var txtTipLabel: TextView
@@ -87,7 +91,14 @@ class OrderDetailActivity : AppCompatActivity() {
     private var saleTransactionId: String? = null
 
     private enum class ReceiptContentType { ORIGINAL, REFUND, VOID }
-    private var pendingPrintContentType: ReceiptContentType? = null
+
+    private sealed class OriginalPrintSplitChoice {
+        object CombinedReceipt : OriginalPrintSplitChoice()
+        data class PersonReceipt(val payload: SplitReceiptPayload) : OriginalPrintSplitChoice()
+    }
+
+    private var originalPrintSplitChoice: OriginalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+    private var pendingBluetoothPrintAction: (() -> Unit)? = null
 
     companion object {
         private const val REQUEST_BT_CONNECT = 1001
@@ -135,12 +146,14 @@ class OrderDetailActivity : AppCompatActivity() {
         txtAddCustomer = findViewById(R.id.txtAddCustomer)
         paymentService = PaymentService(this)
         txtOrderType = findViewById(R.id.txtOrderType)
+        txtSplitBanner = findViewById(R.id.txtSplitBanner)
         orderSummaryContainer = findViewById(R.id.orderSummaryContainer)
         txtSubtotal = findViewById(R.id.txtSubtotal)
         txtOriginalTotal = findViewById(R.id.txtOriginalTotal)
         refundedSummaryRow = findViewById(R.id.refundedSummaryRow)
         txtRefundedAmount = findViewById(R.id.txtRefundedAmount)
         txtRemainingTotal = findViewById(R.id.txtRemainingTotal)
+        discountSummaryContainer = findViewById(R.id.discountSummaryContainer)
         taxBreakdownContainer = findViewById(R.id.taxBreakdownContainer)
         tipRow = findViewById(R.id.tipRow)
         txtTipLabel = findViewById(R.id.txtTipLabel)
@@ -181,6 +194,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun loadHeader() {
 
         // Reset UI first
+        txtSplitBanner.visibility = View.GONE
         btnCheckout.visibility = View.GONE
         bottomActions.visibility = View.GONE
         btnVoid.visibility = View.GONE
@@ -248,6 +262,7 @@ class OrderDetailActivity : AppCompatActivity() {
 
                 displayOrderSummary(doc, status)
                 updateOrderTypeBadge(status)
+                refreshSplitBanner(saleTransactionId)
 
                 if (status == "OPEN") {
                     btnCheckout.visibility = View.VISIBLE
@@ -454,6 +469,7 @@ class OrderDetailActivity : AppCompatActivity() {
         isVoided: Boolean = false
     ) {
         var taxTotalCents = 0L
+        discountSummaryContainer.removeAllViews()
         taxBreakdownContainer.removeAllViews()
 
         val summaryColor = 0xFF555555.toInt()
@@ -463,12 +479,13 @@ class OrderDetailActivity : AppCompatActivity() {
         val hasDiscounts = discountInCents > 0L || grouped.isNotEmpty()
 
         if (hasDiscounts) {
-            addOrderSummarySectionHeader(taxBreakdownContainer, "Discounts", topMarginDp = 4, textColor = summaryColor)
-            addOrderSummaryDivider(taxBreakdownContainer, dividerColor)
+            discountSummaryContainer.visibility = View.VISIBLE
+            addOrderSummarySectionHeader(discountSummaryContainer, "Discounts", topMarginDp = 0, textColor = summaryColor)
+            addOrderSummaryDivider(discountSummaryContainer, dividerColor)
             if (grouped.isNotEmpty()) {
                 for (gd in grouped) {
                     addOrderSummaryAmountRow(
-                        taxBreakdownContainer,
+                        discountSummaryContainer,
                         "• ${DiscountDisplay.formatReceiptLabel(gd.name, gd.type, gd.value)}",
                         "-${MoneyUtils.centsToDisplay(gd.totalCents)}",
                         summaryColor
@@ -476,16 +493,18 @@ class OrderDetailActivity : AppCompatActivity() {
                 }
             } else if (discountInCents > 0L) {
                 addOrderSummaryAmountRow(
-                    taxBreakdownContainer,
+                    discountSummaryContainer,
                     "• Discount",
                     "-${MoneyUtils.centsToDisplay(discountInCents)}",
                     summaryColor
                 )
             }
+        } else {
+            discountSummaryContainer.visibility = View.GONE
         }
 
         if (taxBreakdown.isNotEmpty()) {
-            val headerTop = if (hasDiscounts) 12 else 4
+            val headerTop = if (hasDiscounts) 8 else 4
             addOrderSummarySectionHeader(taxBreakdownContainer, "Taxes", topMarginDp = headerTop, textColor = summaryColor)
             addOrderSummaryDivider(taxBreakdownContainer, dividerColor)
         }
@@ -913,6 +932,65 @@ class OrderDetailActivity : AppCompatActivity() {
     // ===============================
     // LOAD ITEMS
     // ===============================
+
+    private enum class SplitPayBannerKind { EVEN, BY_ITEMS }
+
+    /**
+     * Split receipts on sale payments: even splits use [SplitReceiptLine.originalItemName] or a non-empty
+     * [SplitReceiptPayload.sharedItemsNote]; split-by-item receipts have line items without original names.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun extractSplitBannerInfo(payments: List<*>): Pair<SplitPayBannerKind, Int>? {
+        for (raw in payments) {
+            val p = raw as? Map<String, Any> ?: continue
+            val sr = p["splitReceipt"] as? Map<String, Any> ?: continue
+            val totalSplits = (sr["totalSplits"] as? Number)?.toInt()?.coerceAtLeast(1) ?: continue
+            if (totalSplits < 2) continue
+            val sharedNote = sr["sharedItemsNote"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+            val itemsRaw = sr["items"] as? List<Map<String, Any>> ?: emptyList()
+            val hasEvenLineMarkers = itemsRaw.any { row ->
+                val o = row["originalItemName"]?.toString()?.trim()
+                !o.isNullOrEmpty()
+            }
+            val isEven = sharedNote != null || hasEvenLineMarkers
+            return if (isEven) SplitPayBannerKind.EVEN to totalSplits else SplitPayBannerKind.BY_ITEMS to totalSplits
+        }
+        return null
+    }
+
+    private fun refreshSplitBanner(transactionId: String?) {
+        if (transactionId.isNullOrBlank()) {
+            txtSplitBanner.visibility = View.GONE
+            return
+        }
+        db.collection("Transactions").document(transactionId).get()
+            .addOnSuccessListener { tx ->
+                if (!tx.exists()) {
+                    txtSplitBanner.visibility = View.GONE
+                    return@addOnSuccessListener
+                }
+                val payments = tx.get("payments") as? List<*> ?: emptyList<Any>()
+                val info = extractSplitBannerInfo(payments)
+                if (info == null) {
+                    txtSplitBanner.visibility = View.GONE
+                    return@addOnSuccessListener
+                }
+                val (kind, people) = info
+                txtSplitBanner.text = when (kind) {
+                    SplitPayBannerKind.EVEN -> "SPLIT EVENLY ($people)"
+                    SplitPayBannerKind.BY_ITEMS -> "SPLIT BY ITEM"
+                }
+                txtSplitBanner.visibility = View.VISIBLE
+                txtSplitBanner.setTextColor(android.graphics.Color.WHITE)
+                val bg = android.graphics.drawable.GradientDrawable()
+                bg.setColor(android.graphics.Color.parseColor("#6A4FB3"))
+                bg.cornerRadius = 16f
+                txtSplitBanner.background = bg
+            }
+            .addOnFailureListener {
+                txtSplitBanner.visibility = View.GONE
+            }
+    }
 
     private fun updateOrderTypeBadge(status: String) {
         if (orderType != "TO_GO" && orderType != "DINE_IN") {
@@ -1718,31 +1796,71 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun handleEmailReceipt(contentType: ReceiptContentType) {
         val txId = saleTransactionId ?: ""
         when (contentType) {
-            ReceiptContentType.ORIGINAL -> showTypedEmailDialog(orderId, "sendReceiptEmail", "")
+            ReceiptContentType.ORIGINAL -> beginOriginalEmailFlow()
             ReceiptContentType.REFUND -> showTypedEmailDialog(orderId, "sendRefundReceiptEmail", txId)
             ReceiptContentType.VOID -> showTypedEmailDialog(orderId, "sendVoidReceiptEmail", txId)
         }
     }
 
-    private fun showTypedEmailDialog(orderId: String, cloudFunction: String, transactionId: String) {
-        val input = EditText(this).apply {
-            hint = "Enter email address"
-            inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-            setPadding(48, 32, 48, 32)
+    @Suppress("UNCHECKED_CAST")
+    private fun beginOriginalEmailFlow() {
+        val txId = saleTransactionId?.trim()?.takeIf { it.isNotEmpty() }
+        if (txId == null) {
+            showTypedEmailDialog(orderId, "sendReceiptEmail", "")
+            return
         }
-        AlertDialog.Builder(this)
-            .setTitle("\u2709\uFE0F  Email Receipt")
-            .setView(input)
-            .setPositiveButton("Send") { _, _ ->
-                val email = input.text.toString().trim()
-                if (email.isEmpty()) {
-                    Toast.makeText(this, "Please enter an email", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
+        db.collection("Transactions").document(txId).get()
+            .addOnSuccessListener { txDoc ->
+                val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                val splitPayloads = SplitReceiptReprintHelper.payloadsOrderedBySplitIndex(payments)
+                if (splitPayloads == null) {
+                    showTypedEmailDialog(orderId, "sendReceiptEmail", "")
+                } else {
+                    showSplitReceiptEmailChooser(splitPayloads)
                 }
-                sendTypedReceiptEmail(email, orderId, cloudFunction, transactionId)
             }
-            .setNegativeButton("Cancel", null)
+            .addOnFailureListener {
+                showTypedEmailDialog(orderId, "sendReceiptEmail", "")
+            }
+    }
+
+    private fun showSplitReceiptEmailChooser(payloads: List<SplitReceiptPayload>) {
+        val labels = payloads.map { "Person ${it.splitIndex}" }.toMutableList()
+        labels.add("All in one (full receipt)")
+        labels.add("Cancel")
+        AlertDialog.Builder(this)
+            .setTitle("Email which receipt?")
+            .setItems(labels.toTypedArray()) { _, which ->
+                when {
+                    which == labels.lastIndex -> Unit
+                    which == payloads.size -> showTypedEmailDialog(orderId, "sendReceiptEmail", "")
+                    else -> showSplitReceiptEmailEntryDialog(orderId, payloads[which])
+                }
+            }
             .show()
+    }
+
+    private fun showSplitReceiptEmailEntryDialog(orderId: String, payload: SplitReceiptPayload) {
+        ReceiptEmailKeypadDialog.show(
+            this,
+            title = "Email receipt",
+            message = "Enter the email address for this guest's receipt.",
+            hint = "customer@email.com",
+            onSend = { email -> launchSplitReceiptEmailIntent(orderId, email, payload) }
+        )
+    }
+
+    private fun launchSplitReceiptEmailIntent(orderId: String, email: String, payload: SplitReceiptPayload) {
+        SplitReceiptEmailSender.send(this, email, orderId, payload)
+    }
+
+    private fun showTypedEmailDialog(orderId: String, cloudFunction: String, transactionId: String) {
+        ReceiptEmailKeypadDialog.show(
+            this,
+            title = "\u2709\uFE0F  Email Receipt",
+            hint = "Enter email address",
+            onSend = { email -> sendTypedReceiptEmail(email, orderId, cloudFunction, transactionId) }
+        )
     }
 
     private fun sendTypedReceiptEmail(email: String, orderId: String, cloudFunction: String, transactionId: String) {
@@ -1770,28 +1888,108 @@ class OrderDetailActivity : AppCompatActivity() {
 
     // ── Print Receipt ────────────────────────────────────────────
 
-    private fun handlePrintReceipt(contentType: ReceiptContentType) {
+    private fun runAfterBluetoothPermission(block: () -> Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
                 != PackageManager.PERMISSION_GRANTED
             ) {
-                pendingPrintContentType = contentType
+                pendingBluetoothPrintAction = block
                 ActivityCompat.requestPermissions(
                     this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BT_CONNECT
                 )
                 return
             }
         }
-        executePrint(contentType)
+        block()
+    }
+
+    private fun handlePrintReceipt(contentType: ReceiptContentType) {
+        if (contentType != ReceiptContentType.ORIGINAL) {
+            originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+            runAfterBluetoothPermission { executePrint(contentType) }
+            return
+        }
+        beginOriginalPrintFlow()
+    }
+
+    private fun beginOriginalPrintFlow() {
+        val txId = saleTransactionId?.trim()?.takeIf { it.isNotEmpty() }
+        if (txId == null) {
+            originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+            runAfterBluetoothPermission { executePrint(ReceiptContentType.ORIGINAL) }
+            return
+        }
+        db.collection("Transactions").document(txId).get()
+            .addOnSuccessListener { txDoc ->
+                val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                val splitPayloads = SplitReceiptReprintHelper.payloadsOrderedBySplitIndex(payments)
+                if (splitPayloads == null) {
+                    originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+                    runAfterBluetoothPermission { executePrint(ReceiptContentType.ORIGINAL) }
+                } else {
+                    showSplitReceiptReprintChooser(splitPayloads)
+                }
+            }
+            .addOnFailureListener {
+                originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+                runAfterBluetoothPermission { executePrint(ReceiptContentType.ORIGINAL) }
+            }
+    }
+
+    private fun showSplitReceiptReprintChooser(payloads: List<SplitReceiptPayload>) {
+        val labels = payloads.map { "Person ${it.splitIndex}" }.toMutableList()
+        labels.add("All in one (full receipt)")
+        labels.add("Cancel")
+        AlertDialog.Builder(this)
+            .setTitle("Print which receipt?")
+            .setItems(labels.toTypedArray()) { _, which ->
+                when {
+                    which == labels.lastIndex -> Unit
+                    which == payloads.size -> {
+                        originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+                        runAfterBluetoothPermission { executePrint(ReceiptContentType.ORIGINAL) }
+                    }
+                    else -> {
+                        originalPrintSplitChoice = OriginalPrintSplitChoice.PersonReceipt(payloads[which])
+                        runAfterBluetoothPermission { executePrint(ReceiptContentType.ORIGINAL) }
+                    }
+                }
+            }
+            .show()
     }
 
     private fun executePrint(contentType: ReceiptContentType) {
         Toast.makeText(this, "Preparing receipt\u2026", Toast.LENGTH_SHORT).show()
         when (contentType) {
-            ReceiptContentType.ORIGINAL -> printOriginalReceipt()
+            ReceiptContentType.ORIGINAL -> {
+                when (val choice = originalPrintSplitChoice) {
+                    is OriginalPrintSplitChoice.PersonReceipt -> printOriginalSplitReceipt(choice.payload)
+                    is OriginalPrintSplitChoice.CombinedReceipt -> printOriginalReceipt()
+                }
+                originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
+            }
             ReceiptContentType.REFUND -> printRefundReceipt()
             ReceiptContentType.VOID -> printVoidReceipt()
         }
+    }
+
+    private fun printOriginalSplitReceipt(payload: SplitReceiptPayload) {
+        db.collection("Orders").document(orderId).get()
+            .addOnSuccessListener { orderDoc ->
+                if (!orderDoc.exists()) {
+                    Toast.makeText(this, "Order not found", Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+                val rs = ReceiptSettings.load(this)
+                EscPosPrinter.print(
+                    this,
+                    SplitReceiptRenderer.buildEscPosSegments(this, orderDoc, payload),
+                    rs
+                )
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to load order", Toast.LENGTH_SHORT).show()
+            }
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -1901,12 +2099,7 @@ class OrderDetailActivity : AppCompatActivity() {
                 val lk = ad["lineKey"]?.toString()?.trim().orEmpty()
                 lk == lineKey
             }
-            val orderDiscounts = appliedDiscounts.filter { ad ->
-                val lk = ad["lineKey"]?.toString()?.trim().orEmpty()
-                val scope = ad["applyScope"]?.toString()?.trim()?.lowercase() ?: ""
-                lk.isEmpty() && (scope == "order" || scope == "manual")
-            }
-            for (ad in itemDiscounts + orderDiscounts) {
+            for (ad in itemDiscounts) {
                 segs += EscPosPrinter.Segment("  ${DiscountDisplay.formatBulletFromFirestoreMap(ad)}", bold = rs.boldItems, fontSize = rs.fontSizeItems)
             }
         }
@@ -2398,10 +2591,10 @@ class OrderDetailActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_BT_CONNECT) {
-            val ct = pendingPrintContentType
-            pendingPrintContentType = null
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED && ct != null) {
-                executePrint(ct)
+            val block = pendingBluetoothPrintAction
+            pendingBluetoothPrintAction = null
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                block?.invoke()
             } else {
                 Toast.makeText(this, "Bluetooth permission required for printing", Toast.LENGTH_LONG).show()
             }

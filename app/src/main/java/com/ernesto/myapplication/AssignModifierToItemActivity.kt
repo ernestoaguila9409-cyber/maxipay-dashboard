@@ -18,11 +18,15 @@ class AssignModifierToItemActivity : AppCompatActivity() {
 
     private val modifierList = mutableListOf<ModifierItem>()
 
+    private val selectedHeader = ModifierItem(null, "Selected Modifiers", null, 0, false, isHeader = true)
+    private val availableHeader = ModifierItem(null, "Available Modifiers", null, 0, false, isHeader = true)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         recyclerView = RecyclerView(this)
         recyclerView.layoutManager = LinearLayoutManager(this)
+        recyclerView.itemAnimator?.changeDuration = 0
         setContentView(recyclerView)
 
         itemId = intent.getStringExtra("ITEM_ID")
@@ -33,6 +37,12 @@ class AssignModifierToItemActivity : AppCompatActivity() {
         attachDragHelper()
         loadModifierGroups()
     }
+
+    // ── Index helpers ───────────────────────────────────────────────
+
+    private fun availableHeaderIndex(): Int = modifierList.indexOf(availableHeader)
+
+    // ── Initial load (runs once) ────────────────────────────────────
 
     private fun loadModifierGroups() {
         val iid = itemId ?: return
@@ -60,12 +70,11 @@ class AssignModifierToItemActivity : AppCompatActivity() {
 
                                 val assignedFromItem = itemModGroupIds.toSet()
                                 val assignedFromLinks = linkMap.keys
-
                                 val allAssigned = assignedFromItem.union(assignedFromLinks)
 
                                 val missingLinks = assignedFromItem - assignedFromLinks
                                 if (missingLinks.isNotEmpty()) {
-                                    syncMissingLinks(iid, missingLinks, assignedFromItem.toList())
+                                    syncMissingLinks(iid, missingLinks, itemModGroupIds)
                                 }
 
                                 val tempList = mutableListOf<ModifierItem>()
@@ -90,46 +99,20 @@ class AssignModifierToItemActivity : AppCompatActivity() {
                                     )
                                 }
 
-                                val selected = tempList
-                                    .filter { it.isAssigned }
-                                    .sortedBy { it.displayOrder }
-
-                                val unselected = tempList
-                                    .filter { !it.isAssigned }
+                                val selected = tempList.filter { it.isAssigned }.sortedBy { it.displayOrder }
+                                val unselected = tempList.filter { !it.isAssigned }
 
                                 modifierList.clear()
-
-                                modifierList.add(
-                                    ModifierItem(
-                                        groupId = null,
-                                        groupName = "Selected Modifiers",
-                                        linkId = null,
-                                        displayOrder = 0,
-                                        isAssigned = false,
-                                        isHeader = true
-                                    )
-                                )
+                                modifierList.add(selectedHeader)
                                 modifierList.addAll(selected)
-
-                                modifierList.add(
-                                    ModifierItem(
-                                        groupId = null,
-                                        groupName = "Available Modifiers",
-                                        linkId = null,
-                                        displayOrder = 0,
-                                        isAssigned = false,
-                                        isHeader = true
-                                    )
-                                )
+                                modifierList.add(availableHeader)
                                 modifierList.addAll(unselected)
 
                                 recyclerView.adapter?.notifyDataSetChanged()
                             }
                     }
             }
-            .addOnFailureListener {
-                loadModifierGroupsLegacy()
-            }
+            .addOnFailureListener { loadModifierGroupsLegacy() }
     }
 
     private fun syncMissingLinks(itemId: String, missingGroupIds: Set<String>, allIds: List<String>) {
@@ -181,9 +164,9 @@ class AssignModifierToItemActivity : AppCompatActivity() {
                         val unselected = tempList.filter { !it.isAssigned }
 
                         modifierList.clear()
-                        modifierList.add(ModifierItem(null, "Selected Modifiers", null, 0, false, true))
+                        modifierList.add(selectedHeader)
                         modifierList.addAll(selected)
-                        modifierList.add(ModifierItem(null, "Available Modifiers", null, 0, false, true))
+                        modifierList.add(availableHeader)
                         modifierList.addAll(unselected)
 
                         recyclerView.adapter?.notifyDataSetChanged()
@@ -191,13 +174,12 @@ class AssignModifierToItemActivity : AppCompatActivity() {
             }
     }
 
+    // ── Drag-to-reorder ─────────────────────────────────────────────
+
     private fun attachDragHelper() {
-
         val callback = object : ItemTouchHelper.SimpleCallback(
-            ItemTouchHelper.UP or ItemTouchHelper.DOWN,
-            0
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0
         ) {
-
             override fun isLongPressDragEnabled(): Boolean = true
 
             override fun onMove(
@@ -205,113 +187,135 @@ class AssignModifierToItemActivity : AppCompatActivity() {
                 viewHolder: RecyclerView.ViewHolder,
                 target: RecyclerView.ViewHolder
             ): Boolean {
-
                 val from = viewHolder.adapterPosition
                 val to = target.adapterPosition
-
                 val fromItem = modifierList[from]
                 val toItem = modifierList[to]
-
                 if (fromItem.isHeader || toItem.isHeader) return false
                 if (!fromItem.isAssigned || !toItem.isAssigned) return false
 
-                val item = modifierList.removeAt(from)
-                modifierList.add(to, item)
-
+                modifierList.removeAt(from)
+                modifierList.add(to, fromItem)
                 recyclerView.adapter?.notifyItemMoved(from, to)
-
-                updateDisplayOrder()
-
+                persistToFirestore()
                 return true
             }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
         }
-
         ItemTouchHelper(callback).attachToRecyclerView(recyclerView)
     }
 
-    private fun updateDisplayOrder() {
-        val batch = db.batch()
-
-        modifierList
-            .filter { it.isAssigned && !it.isHeader }
-            .forEachIndexed { index, item ->
-                item.displayOrder = index + 1
-                item.linkId?.let {
-                    val ref = db.collection("ItemModifierGroups").document(it)
-                    batch.update(ref, "displayOrder", item.displayOrder)
-                }
-            }
-
-        batch.commit()
-        syncModifierGroupIdsOnItem()
-    }
+    // ── Optimistic assign (instant UI) ──────────────────────────────
 
     private fun assignGroup(item: ModifierItem) {
         val iid = itemId ?: return
+        item.isAssigned = true
 
-        val nextOrder = modifierList
-            .filter { it.isAssigned && !it.isHeader }
-            .size + 1
+        val oldPos = modifierList.indexOf(item)
+        if (oldPos < 0) return
+        modifierList.removeAt(oldPos)
+
+        val insertPos = availableHeaderIndex()
+        modifierList.add(insertPos, item)
+
+        recyclerView.adapter?.notifyItemMoved(oldPos, insertPos)
+
+        val nextOrder = modifierList.filter { it.isAssigned && !it.isHeader }.size
+        item.displayOrder = nextOrder
 
         val data = hashMapOf(
             "itemId" to iid,
             "groupId" to item.groupId,
             "displayOrder" to nextOrder
         )
-
-        db.collection("ItemModifierGroups")
-            .add(data)
-            .addOnSuccessListener {
-                syncModifierGroupIdsOnItem()
-                loadModifierGroups()
+        db.collection("ItemModifierGroups").add(data)
+            .addOnSuccessListener { ref ->
+                item.linkId = ref.id
+                persistModifierGroupIdsOnItem()
             }
     }
 
+    // ── Optimistic remove (instant UI) ──────────────────────────────
+
     private fun removeGroup(item: ModifierItem) {
-        item.linkId?.let { linkId ->
-            db.collection("ItemModifierGroups")
-                .document(linkId)
-                .delete()
-                .addOnSuccessListener {
-                    syncModifierGroupIdsOnItem()
-                    loadModifierGroups()
-                }
-        } ?: run {
-            syncModifierGroupIdsOnItem()
-            loadModifierGroups()
+        val iid = itemId ?: return
+        val gid = item.groupId ?: return
+        item.isAssigned = false
+
+        val oldPos = modifierList.indexOf(item)
+        if (oldPos < 0) return
+        modifierList.removeAt(oldPos)
+
+        modifierList.add(item)
+
+        recyclerView.adapter?.notifyItemMoved(oldPos, modifierList.size - 1)
+
+        val linkId = item.linkId
+        item.linkId = null
+
+        if (linkId != null) {
+            db.collection("ItemModifierGroups").document(linkId).delete()
+                .addOnSuccessListener { persistModifierGroupIdsOnItem() }
+                .addOnFailureListener { deleteLinksAndPersist(iid, gid) }
+        } else {
+            deleteLinksAndPersist(iid, gid)
         }
     }
 
-    private fun syncModifierGroupIdsOnItem() {
-        val iid = itemId ?: return
+    // ── Background Firestore sync ───────────────────────────────────
 
+    private fun deleteLinksAndPersist(itemId: String, groupId: String) {
         db.collection("ItemModifierGroups")
-            .whereEqualTo("itemId", iid)
+            .whereEqualTo("itemId", itemId)
+            .whereEqualTo("groupId", groupId)
             .get()
             .addOnSuccessListener { snap ->
-                val ids = snap.documents
-                    .sortedBy { it.getLong("displayOrder")?.toInt() ?: 0 }
-                    .mapNotNull { it.getString("groupId") }
-
-                db.collection("MenuItems").document(iid)
-                    .update("modifierGroupIds", ids)
-                    .addOnSuccessListener {
-                        Log.d("Inventory", "Synced modifierGroupIds on item: $ids")
-                    }
-                    .addOnFailureListener { e ->
-                        Log.e("Inventory", "Failed to sync modifierGroupIds: ${e.message}")
-                    }
+                if (snap.isEmpty) {
+                    persistModifierGroupIdsOnItem()
+                    return@addOnSuccessListener
+                }
+                val batch = db.batch()
+                for (doc in snap.documents) batch.delete(doc.reference)
+                batch.commit().addOnCompleteListener { persistModifierGroupIdsOnItem() }
             }
+            .addOnFailureListener { persistModifierGroupIdsOnItem() }
     }
+
+    private fun persistModifierGroupIdsOnItem() {
+        val iid = itemId ?: return
+        val ids = modifierList
+            .filter { it.isAssigned && !it.isHeader }
+            .mapNotNull { it.groupId }
+
+        db.collection("MenuItems").document(iid)
+            .update("modifierGroupIds", ids)
+            .addOnSuccessListener { Log.d("Inventory", "Synced modifierGroupIds: $ids") }
+            .addOnFailureListener { Log.e("Inventory", "Failed to sync modifierGroupIds: ${it.message}") }
+    }
+
+    private fun persistToFirestore() {
+        val iid = itemId ?: return
+        val assigned = modifierList.filter { it.isAssigned && !it.isHeader }
+
+        val batch = db.batch()
+        assigned.forEachIndexed { index, item ->
+            item.displayOrder = index + 1
+            item.linkId?.let {
+                batch.update(db.collection("ItemModifierGroups").document(it), "displayOrder", item.displayOrder)
+            }
+        }
+        batch.commit()
+        persistModifierGroupIdsOnItem()
+    }
+
+    // ── Adapter ─────────────────────────────────────────────────────
 
     inner class ModifierAdapter :
         RecyclerView.Adapter<ModifierAdapter.ViewHolder>() {
 
-        override fun getItemViewType(position: Int): Int {
-            return if (modifierList[position].isHeader) 0 else 1
-        }
+        override fun getItemViewType(position: Int): Int =
+            if (modifierList[position].isHeader) 0 else 1
 
         inner class ViewHolder(
             view: android.view.View,
@@ -319,7 +323,6 @@ class AssignModifierToItemActivity : AppCompatActivity() {
         ) : RecyclerView.ViewHolder(view)
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-
             if (viewType == 0) {
                 val textView = android.widget.TextView(parent.context)
                 textView.textSize = 20f
@@ -339,7 +342,6 @@ class AssignModifierToItemActivity : AppCompatActivity() {
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-
             val item = modifierList[position]
 
             if (item.isHeader) {
@@ -353,11 +355,7 @@ class AssignModifierToItemActivity : AppCompatActivity() {
                 isChecked = item.isAssigned
 
                 setOnCheckedChangeListener { _, isChecked ->
-                    if (isChecked) {
-                        assignGroup(item)
-                    } else {
-                        removeGroup(item)
-                    }
+                    if (isChecked) assignGroup(item) else removeGroup(item)
                 }
             }
         }

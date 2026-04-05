@@ -7,18 +7,28 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.DragEvent
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.R as MTR
 import com.google.firebase.firestore.FirebaseFirestore
 import com.ernesto.myapplication.engine.MoneyUtils
+import com.ernesto.myapplication.engine.SplitReceiptCalculator
+import org.json.JSONArray
+import org.json.JSONObject
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.Locale
@@ -335,49 +345,152 @@ class SplitPaymentActivity : AppCompatActivity() {
             return
         }
 
-        val firstGuestIdx = guestsWithItems.first().first
-        val firstShareCents = guestsWithItems.first().second
-        val firstShareDollars = firstShareCents / 100.0
+        val oid = orderId ?: return
+        db.collection("Orders").document(oid).get()
+            .addOnSuccessListener { orderDoc ->
+                db.collection("Orders").document(oid).collection("items").get()
+                    .addOnSuccessListener { itemsSnap ->
+                        val itemDocs = itemsSnap.documents
+                        val arr = JSONArray()
+                        for ((guestIdx, _) in guestsWithItems) {
+                            val keys = orderItems
+                                .filter { (itemGuestAssignment[it.lineKey] ?: 0) == guestIdx }
+                                .map { it.lineKey }
+                            if (keys.isEmpty()) continue
+                            val totalCents = SplitReceiptCalculator.shareTotalCentsForLineKeys(
+                                orderDoc, itemDocs, keys.toSet()
+                            )
+                            val o = JSONObject()
+                            o.put("guestIndex", guestIdx)
+                            o.put("guestLabel", getPersonLabel(guestIdx))
+                            o.put("lineKeys", JSONArray(keys))
+                            o.put("amountCents", totalCents)
+                            arr.put(o)
+                        }
+                        if (arr.length() == 0) {
+                            Toast.makeText(this, "No items to pay", Toast.LENGTH_SHORT).show()
+                            return@addOnSuccessListener
+                        }
 
-        if (guestsWithItems.size == 1) {
-            AlertDialog.Builder(this)
-                .setTitle("Pay Full Bill")
-                .setMessage("${getPersonLabel(firstGuestIdx)} pays ${MoneyUtils.centsToDisplay(firstShareCents)}")
-                .setPositiveButton("Pay Now") { _, _ ->
-                    goToPayOneShare(firstShareDollars, 1)
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-            return
-        }
+                        val firstGuestIdx = guestsWithItems.first().first
+                        val firstTotalCents = (0 until arr.length())
+                            .map { arr.getJSONObject(it).getLong("amountCents") }
+                            .first()
 
-        val msg = buildString {
-            for ((idx, cents) in guestsWithItems) {
-                append("${getPersonLabel(idx)} pays ${MoneyUtils.centsToDisplay(cents)}\n")
+                        if (arr.length() == 1) {
+                            AlertDialog.Builder(this)
+                                .setTitle("Pay Full Bill")
+                                .setMessage("${getPersonLabel(firstGuestIdx)} pays ${MoneyUtils.centsToDisplay(firstTotalCents)}")
+                                .setPositiveButton("Pay Now") { _, _ ->
+                                    goToPayByItemsShares(arr.toString())
+                                }
+                                .setNegativeButton("Cancel", null)
+                                .show()
+                            return@addOnSuccessListener
+                        }
+
+                        val msg = buildString {
+                            for (i in 0 until arr.length()) {
+                                val row = arr.getJSONObject(i)
+                                append("${row.getString("guestLabel")} pays ${MoneyUtils.centsToDisplay(row.getLong("amountCents"))}\n")
+                            }
+                            append("\nPay first share now?")
+                        }
+                        AlertDialog.Builder(this)
+                            .setTitle("Split complete")
+                            .setMessage(msg)
+                            .setPositiveButton("Pay ${getPersonLabel(firstGuestIdx)}'s share") { _, _ ->
+                                goToPayByItemsShares(arr.toString())
+                            }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    }
+                    .addOnFailureListener {
+                        Toast.makeText(this, "Failed to load items", Toast.LENGTH_SHORT).show()
+                    }
             }
-            append("\nPay first share now?")
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Split complete")
-            .setMessage(msg)
-            .setPositiveButton("Pay ${getPersonLabel(firstGuestIdx)}'s share") { _, _ ->
-                goToPayOneShare(firstShareDollars, guestsWithItems.size)
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to load order", Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("Cancel", null)
-            .show()
     }
 
     private fun showSplitNumberDialog() {
+        val imm = getSystemService(InputMethodManager::class.java)
+        val density = resources.displayMetrics.density
+        fun dp(v: Float): Int = (v * density).toInt()
+
         val input = EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            showSoftInputOnFocus = false
             hint = "e.g. 2, 3, 4..."
             setPadding(48, 32, 48, 32)
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setOnClickListener { v -> v.requestFocus() }
+            setOnFocusChangeListener { v, _ ->
+                imm.hideSoftInputFromWindow(v.windowToken, 0)
+            }
         }
 
-        AlertDialog.Builder(this)
+        fun applyKey(key: String) {
+            val s = input.text?.toString() ?: ""
+            when (key) {
+                "⌫" -> if (s.isNotEmpty()) {
+                    val ns = s.dropLast(1)
+                    input.setText(ns)
+                    input.setSelection(ns.length)
+                }
+                "C" -> input.setText("")
+                else -> {
+                    val ns = s + key
+                    input.setText(ns)
+                    input.setSelection(ns.length)
+                }
+            }
+        }
+
+        val grid = GridLayout(this).apply {
+            columnCount = 3
+            setPadding(dp(8f), dp(4f), dp(8f), dp(4f))
+        }
+        for (k in listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "⌫")) {
+            grid.addView(
+                MaterialButton(this, null, MTR.attr.materialButtonOutlinedStyle).apply {
+                    text = k
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+                    minimumHeight = dp(48f)
+                    minimumWidth = 0
+                    insetTop = 0
+                    insetBottom = 0
+                    layoutParams = GridLayout.LayoutParams().apply {
+                        width = 0
+                        height = ViewGroup.LayoutParams.WRAP_CONTENT
+                        columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                        setMargins(dp(4f), dp(4f), dp(4f), dp(4f))
+                    }
+                    setOnClickListener { applyKey(k) }
+                }
+            )
+        }
+
+        val dialogLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16f), dp(8f), dp(16f), dp(4f))
+            addView(TextView(this@SplitPaymentActivity).apply {
+                text = "How many ways do you want to split the bill?"
+                textSize = 15f
+                setPadding(dp(4f), 0, dp(4f), dp(8f))
+            })
+            addView(input, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(8f) })
+            addView(grid)
+        }
+
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Split evenly")
-            .setMessage("How many ways do you want to split the bill?")
-            .setView(input)
+            .setView(dialogLayout)
             .setPositiveButton("Split") { _, _ ->
                 val text = input.text.toString()
                 val count = text.toIntOrNull() ?: 0
@@ -397,7 +510,13 @@ class SplitPaymentActivity : AppCompatActivity() {
                 showSplitResultDialog(count, perPerson)
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
+            imm.hideSoftInputFromWindow(input.windowToken, 0)
+        }
+        dialog.show()
     }
 
     private fun showSplitResultDialog(count: Int, perPerson: Double) {
@@ -418,8 +537,22 @@ class SplitPaymentActivity : AppCompatActivity() {
         val intent = Intent(this, PaymentActivity::class.java).apply {
             putExtra("ORDER_ID", oid)
             putExtra("BATCH_ID", bid)
+            putExtra("SPLIT_MODE", "evenly")
             putExtra("SPLIT_PAY_AMOUNT", amount)
             putExtra("SPLIT_TOTAL_COUNT", totalCount)
+        }
+        startActivity(intent)
+        finish()
+    }
+
+    private fun goToPayByItemsShares(sharesJson: String) {
+        val oid = orderId ?: return
+        val bid = batchId
+        val intent = Intent(this, PaymentActivity::class.java).apply {
+            putExtra("ORDER_ID", oid)
+            putExtra("BATCH_ID", bid)
+            putExtra("SPLIT_MODE", "items")
+            putExtra("SPLIT_SHARES_JSON", sharesJson)
         }
         startActivity(intent)
         finish()

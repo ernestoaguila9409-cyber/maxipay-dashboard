@@ -324,10 +324,12 @@ class MenuActivity : AppCompatActivity() {
                             val name = doc.getString("name") ?: "Item"
                             val qty = (doc.getLong("quantity") ?: 1L).toInt()
 
-                            val unitPriceInCents =
-                                doc.getLong("unitPriceInCents") ?: 0L
+                            val basePriceInCents =
+                                doc.getLong("basePriceInCents")
+                                    ?: doc.getLong("unitPriceInCents")
+                                    ?: 0L
 
-                            val basePrice = unitPriceInCents / 100.0
+                            val basePrice = basePriceInCents / 100.0
 
                             val modifiers = parseModifiers(doc.get("modifiers"))
                             val stock = 0L
@@ -471,9 +473,19 @@ class MenuActivity : AppCompatActivity() {
                 else (map["price"] as? Number)?.toDouble()
                     ?: (map["second"] as? Number)?.toDouble()
                     ?: 0.0
-            out.add(OrderModifier(name, action, price))
+            val groupId = map["groupId"]?.toString() ?: ""
+            val groupName = map["groupName"]?.toString() ?: ""
+            val children = parseModifiers(map["children"])
+            out.add(OrderModifier(name, action, price, groupId, groupName, children))
         }
         return out
+    }
+
+    private fun sumModifierPrices(modifiers: List<OrderModifier>): Double {
+        return modifiers.sumOf { mod ->
+            val selfPrice = if (mod.action == "ADD") mod.price else 0.0
+            selfPrice + sumModifierPrices(mod.children)
+        }
     }
 
     // ----------------------------
@@ -1477,7 +1489,7 @@ class MenuActivity : AppCompatActivity() {
                         val itemView = buildCartItemView(lineKey, item)
                         sectionLayout.addView(itemView)
 
-                        val modifiersTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+                        val modifiersTotal = sumModifierPrices(item.modifiers)
                         val unitPrice = item.basePrice + modifiersTotal
                         totalAmount += unitPrice * item.quantity
                     }
@@ -1495,14 +1507,14 @@ class MenuActivity : AppCompatActivity() {
                 val itemView = buildCartItemView(lineKey, item)
                 cartContainer.addView(itemView)
 
-                val modifiersTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+                val modifiersTotal = sumModifierPrices(item.modifiers)
                 val unitPrice = item.basePrice + modifiersTotal
                 totalAmount += unitPrice * item.quantity
             }
         }
 
         val subtotal = totalAmount
-        val subtotalCents = (subtotal * 100).toLong()
+        val subtotalCents = Math.round(subtotal * 100)
         cartTaxDetails.removeAllViews()
         cartTaxSummary.removeAllViews()
 
@@ -1597,7 +1609,7 @@ class MenuActivity : AppCompatActivity() {
         for (tax in allTaxes) {
             var taxableBase = 0.0
             for ((lineKey, item) in cartMap.entries) {
-                val modTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+                val modTotal = sumModifierPrices(item.modifiers)
                 var lineTotal = (item.basePrice + modTotal) * item.quantity
 
                 val lineDiscounts = appliedDiscounts.filter { it.lineKey == lineKey }
@@ -1626,7 +1638,7 @@ class MenuActivity : AppCompatActivity() {
             totalAmount += taxAmount
             val taxLine = TextView(this)
             val label = if (tax.type == "PERCENTAGE") "${tax.name} (${String.format(Locale.US, "%.1f", tax.amount)}%)" else tax.name
-            taxLine.text = "$label: ${MoneyUtils.centsToDisplay((taxAmount * 100).toLong())}"
+            taxLine.text = "$label: ${MoneyUtils.centsToDisplay(Math.round(taxAmount * 100))}"
             taxLine.textSize = 13f
             taxLine.setTextColor(Color.parseColor("#5D4E7B"))
             cartTaxSummary.addView(taxLine)
@@ -1639,7 +1651,7 @@ class MenuActivity : AppCompatActivity() {
         subtotalLabel.setTypeface(null, android.graphics.Typeface.BOLD)
         cartTaxSummary.addView(subtotalLabel)
 
-        txtTotal.text = "Total: ${MoneyUtils.centsToDisplay((totalAmount * 100).toLong())}"
+        txtTotal.text = "Total: ${MoneyUtils.centsToDisplay(Math.round(totalAmount * 100))}"
 
         syncOrderTotal()
         pushOrderToCustomerDisplay()
@@ -1650,7 +1662,7 @@ class MenuActivity : AppCompatActivity() {
         val totalInCents = Math.round(totalAmount * 100)
 
         val discountedSubtotal = (cartMap.entries.sumOf { (_, item) ->
-            val modTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+            val modTotal = sumModifierPrices(item.modifiers)
             (item.basePrice + modTotal) * item.quantity
         }) - (discountTotalCents / 100.0)
 
@@ -1658,14 +1670,14 @@ class MenuActivity : AppCompatActivity() {
         for (tax in allTaxes) {
             var taxableBase = 0.0
             for ((lineKey, item) in cartMap.entries) {
-                val modTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+                val modTotal = sumModifierPrices(item.modifiers)
                 var lineTotal = (item.basePrice + modTotal) * item.quantity
                 val lineDiscounts = appliedDiscounts.filter { it.lineKey == lineKey }
                 if (lineDiscounts.isNotEmpty()) {
                     lineTotal = (lineTotal - lineDiscounts.sumOf { it.amountInCents } / 100.0).coerceAtLeast(0.0)
                 }
                 val subtotal = cartMap.entries.sumOf { (_, i) ->
-                    val mt = i.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+                    val mt = sumModifierPrices(i.modifiers)
                     (i.basePrice + mt) * i.quantity
                 }
                 val orderDiscount = appliedDiscounts.find {
@@ -1733,9 +1745,7 @@ class MenuActivity : AppCompatActivity() {
                 }
             }
             val modStrings = flattenModStrings(item.modifiers)
-            val unitPrice = item.basePrice + item.modifiers
-                .filter { it.action == "ADD" }
-                .sumOf { it.price }
+            val unitPrice = item.basePrice + sumModifierPrices(item.modifiers)
             val lineTotalCents = Math.round(unitPrice * item.quantity * 100)
 
             CustomerOrderLine(
@@ -1747,7 +1757,7 @@ class MenuActivity : AppCompatActivity() {
         }
 
         val rawSubtotal = cartMap.values.sumOf { item ->
-            val modTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+            val modTotal = sumModifierPrices(item.modifiers)
             (item.basePrice + modTotal) * item.quantity
         }
         val subtotalCents = Math.round(rawSubtotal * 100)
@@ -1774,7 +1784,7 @@ class MenuActivity : AppCompatActivity() {
         for (tax in allTaxes) {
             var taxableBase = 0.0
             for ((lineKey, item) in cartMap.entries) {
-                val modTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+                val modTotal = sumModifierPrices(item.modifiers)
                 var lineTotal = (item.basePrice + modTotal) * item.quantity
 
                 val lineDisc = appliedDiscounts.filter { it.lineKey == lineKey }
@@ -1823,7 +1833,7 @@ class MenuActivity : AppCompatActivity() {
         nameText.setTypeface(null, Typeface.BOLD)
         itemLayout.addView(nameText)
 
-        val modifiersTotal = item.modifiers.filter { it.action == "ADD" }.sumOf { it.price }
+        val modifiersTotal = sumModifierPrices(item.modifiers)
 
         fun addModifierViews(modifiers: List<OrderModifier>, indent: String = "") {
             for (modifier in modifiers) {
@@ -1864,7 +1874,7 @@ class MenuActivity : AppCompatActivity() {
         if (orderDiscount != null && orderDiscount.amountInCents > 0L) {
             val lineCents = (lineTotal * 100).toLong()
             val subtotalAll = cartMap.entries.sumOf { (_, it) ->
-                val mod = it.modifiers.filter { m -> m.action == "ADD" }.sumOf { m -> m.price }
+                val mod = sumModifierPrices(it.modifiers)
                 ((it.basePrice + mod) * it.quantity * 100).toLong()
             }
             val share = if (subtotalAll > 0L) {

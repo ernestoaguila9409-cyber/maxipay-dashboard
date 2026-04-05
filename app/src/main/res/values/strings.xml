@@ -62,4 +62,30 @@
     <string name="receipt_line_ok_address">About %1$d characters per line on the printer (Address font: %2$s). Preview shows how text wraps.</string>
     <string name="receipt_line_over">Longest line is %1$d characters — will wrap to multiple lines (max ~%2$d per line at %3$s font).</string>
 
+    <string name="add_printer">Add printer</string>
+    <string name="select_printer_type">Select printer type</string>
+    <string name="receipt_printer">Receipt printer</string>
+    <string name="kitchen_printer">Kitchen printer</string>
+    <string name="add_printer_screen_title">Add printer</string>
+    <string name="scanning_for_printers">Scanning for printers…</string>
+    <string name="detected_printers">Detected printers</string>
+    <string name="no_printers_found_scan">No printers responded on 10.0.0.1–255 port 9100. Try Add manually.</string>
+    <string name="add_manually">Add manually</string>
+    <string name="ip_address">IP address</string>
+    <string name="invalid_ip_address">Enter a valid IPv4 address (e.g. 10.0.0.50).</string>
+    <string name="printer_name">Name</string>
+    <string name="printer_name_required">Enter a printer name.</string>
+    <string name="save_printer">Save printer</string>
+    <string name="save_printer_ip_message">IP address: %1$s</string>
+    <string name="save">Save</string>
+    <string name="continue_label">Continue</string>
+    <string name="default_printer_name_template">%1$s (%2$s)</string>
+    <string name="unknown_printer">Unknown Printer</string>
+    <string name="printer_saved">Printer saved</string>
+    <string name="printer_save_failed">Could not save printer. %1$s</string>
+    <string name="printers_no_selection_yet">Tap + to add a receipt or kitchen printer.</string>
+    <string name="printer_test_print">Test print</string>
+    <string name="printer_test_sent">Test print sent</string>
+    <string name="printer_test_failed">Test print failed. %1$s</string>
+
 </resources>
