@@ -7,16 +7,15 @@ import { db } from "@/firebase/firebaseConfig";
 import {
   PRINTER_STATUS_TICK_MS,
   formatLastSeenAgo,
-  isOnlineFromLastSeen,
   mapPrinterDocument,
   type PrinterDocFields,
+  type PrinterStatus,
 } from "@/lib/printerStatusUtils";
 
-export type PrinterFilter = "all" | "online" | "offline";
+export type PrinterFilter = "all" | "online" | "offline" | "unknown";
 export type PrinterSort = "name" | "status";
 
 export interface PrinterViewRow extends PrinterDocFields {
-  isOnline: boolean;
   lastSeenAgo: string;
 }
 
@@ -30,9 +29,15 @@ interface UsePrintersStatusResult {
   setSort: (s: PrinterSort) => void;
 }
 
+const STATUS_ORDER: Record<PrinterStatus, number> = {
+  ONLINE: 0,
+  UNKNOWN: 1,
+  OFFLINE: 2,
+};
+
 /**
- * Real-time `Printers` collection + periodic wall-clock tick (does not probe IPs).
- * @param enabled Set false when unauthenticated to avoid subscribing.
+ * Real-time `Printers` collection + periodic wall-clock tick.
+ * Status comes from the POS via the `status` field — NOT computed here.
  */
 export function usePrintersStatus(enabled: boolean): UsePrintersStatusResult {
   const [raw, setRaw] = useState<PrinterDocFields[]>([]);
@@ -95,15 +100,15 @@ export function usePrintersStatus(enabled: boolean): UsePrintersStatusResult {
   const nowMs = useMemo(() => Date.now(), [tick, raw]);
 
   const printers = useMemo((): PrinterViewRow[] => {
-    const withStatus: PrinterViewRow[] = raw.map((p) => ({
+    const withView: PrinterViewRow[] = raw.map((p) => ({
       ...p,
-      isOnline: isOnlineFromLastSeen(p.lastSeenMs, nowMs),
       lastSeenAgo: formatLastSeenAgo(p.lastSeenMs, nowMs),
     }));
 
-    let filtered = withStatus;
-    if (filter === "online") filtered = withStatus.filter((p) => p.isOnline);
-    if (filter === "offline") filtered = withStatus.filter((p) => !p.isOnline);
+    let filtered = withView;
+    if (filter === "online") filtered = withView.filter((p) => p.status === "ONLINE");
+    if (filter === "offline") filtered = withView.filter((p) => p.status === "OFFLINE");
+    if (filter === "unknown") filtered = withView.filter((p) => p.status === "UNKNOWN");
 
     const sorted = [...filtered];
     if (sort === "name") {
@@ -112,7 +117,8 @@ export function usePrintersStatus(enabled: boolean): UsePrintersStatusResult {
       );
     } else {
       sorted.sort((a, b) => {
-        if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
+        const diff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+        if (diff !== 0) return diff;
         return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
       });
     }

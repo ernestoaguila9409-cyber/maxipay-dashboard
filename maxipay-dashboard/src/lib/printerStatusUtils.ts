@@ -1,18 +1,17 @@
 import type { Timestamp } from "firebase/firestore";
 
-/** Online if `lastSeen` is within this many milliseconds of client `Date.now()`. */
-export const PRINTER_ONLINE_THRESHOLD_MS = 15_000;
-
-/** Client refresh interval for recomputing online/offline from wall clock. */
+/** Client refresh interval for recomputing "last seen ago" from wall clock. */
 export const PRINTER_STATUS_TICK_MS = 5_000;
+
+export type PrinterStatus = "ONLINE" | "OFFLINE" | "UNKNOWN";
 
 export interface PrinterDocFields {
   id: string;
   name: string;
-  ip: string;
-  type: string;
-  typeLabel: string;
-  assignedDeviceId: string | null;
+  ipAddress: string;
+  port: number;
+  labels: string[];
+  status: PrinterStatus;
   lastSeenMs: number | null;
 }
 
@@ -25,9 +24,6 @@ function hasToDate(v: unknown): v is Timestamp {
   );
 }
 
-/**
- * Normalize Firestore `lastSeen` to epoch ms (same idea as Android `readLastSeenMillis`).
- */
 export function parseFirestoreLastSeenMillis(
   data: Record<string, unknown>
 ): number | null {
@@ -47,7 +43,6 @@ export function parseFirestoreLastSeenMillis(
   }
 
   if (typeof v === "number" && Number.isFinite(v)) {
-    // Assume seconds if it looks like Unix seconds
     if (v > 0 && v < 1e12) return Math.round(v * 1000);
     return v;
   }
@@ -60,45 +55,40 @@ export function parseFirestoreLastSeenMillis(
   return null;
 }
 
-function formatTypeLabel(raw: string): string {
+function parseStatus(raw: unknown): PrinterStatus {
+  if (typeof raw !== "string") return "UNKNOWN";
   const u = raw.trim().toUpperCase();
-  if (u === "RECEIPT") return "Receipt";
-  if (u === "KITCHEN") return "Kitchen";
-  if (!u) return "—";
-  return raw
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  if (u === "ONLINE") return "ONLINE";
+  if (u === "OFFLINE") return "OFFLINE";
+  return "UNKNOWN";
+}
+
+function parseLabels(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((v) => (typeof v === "string" ? v.trim() : ""))
+      .filter(Boolean);
+  }
+  return [];
 }
 
 export function mapPrinterDocument(
   id: string,
   data: Record<string, unknown>
 ): PrinterDocFields {
-  const ip = String(data.ip ?? data.ipAddress ?? "").trim() || "—";
-  const typeRaw = String(data.type ?? "").trim();
+  const ipAddress = String(data.ipAddress ?? data.ip ?? "").trim() || "—";
   const name = String(data.name ?? "").trim() || "Unnamed printer";
-  const assigned =
-    data.assignedDeviceId != null && String(data.assignedDeviceId).trim() !== ""
-      ? String(data.assignedDeviceId).trim()
-      : null;
+  const port = typeof data.port === "number" && Number.isFinite(data.port) ? data.port : 9100;
 
   return {
     id,
     name,
-    ip,
-    type: typeRaw || "—",
-    typeLabel: formatTypeLabel(typeRaw || ""),
-    assignedDeviceId: assigned,
+    ipAddress,
+    port,
+    labels: parseLabels(data.labels),
+    status: parseStatus(data.status),
     lastSeenMs: parseFirestoreLastSeenMillis(data),
   };
-}
-
-export function isOnlineFromLastSeen(
-  lastSeenMs: number | null,
-  nowMs: number
-): boolean {
-  if (lastSeenMs == null || !Number.isFinite(lastSeenMs)) return false;
-  return nowMs - lastSeenMs <= PRINTER_ONLINE_THRESHOLD_MS;
 }
 
 /** Human-readable age since lastSeen; `null` lastSeen → "Never". */
