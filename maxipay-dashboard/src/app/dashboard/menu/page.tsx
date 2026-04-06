@@ -2047,24 +2047,27 @@ export default function MenuPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        if (categoryFilterMode) clearCategoryFilters();
-                        else {
-                          setActiveCategory(null);
-                          setActiveSubcategory(null);
+                        if (categoryFilterMode) {
+                          toggleFilterSelectAllCategories();
+                        } else {
+                          enterCategoryFilterMode();
                         }
                       }}
                       className={`w-full flex items-center justify-between px-3 py-2.5 text-sm transition-all duration-150 ${
                         categoryFilterMode
-                          ? filterCategoryIds.length === 0 && filterSubcategoryIds.length === 0
+                          ? categoriesVisibleForMenu.length > 0 && categoriesVisibleForMenu.every((c) => filterCategoryIds.includes(c.id))
                             ? "bg-blue-50 text-blue-700 font-bold border-l-4 border-blue-600"
                             : "text-slate-600 font-semibold hover:bg-slate-50 border-l-4 border-transparent"
-                          : activeCategory === null
-                            ? "bg-blue-50 text-blue-700 font-bold border-l-4 border-blue-600"
-                            : "text-slate-600 font-semibold hover:bg-slate-50 border-l-4 border-transparent"
+                          : "text-slate-600 font-semibold hover:bg-slate-50 border-l-4 border-transparent"
                       }`}
                     >
-                      <span>All Items</span>
-                      <span className="text-xs text-slate-400 font-medium tabular-nums bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">{itemsForMenuType.length}</span>
+                      <span>{categoryFilterMode
+                        ? categoriesVisibleForMenu.length > 0 && categoriesVisibleForMenu.every((c) => filterCategoryIds.includes(c.id))
+                          ? "Deselect All"
+                          : "Select All"
+                        : "Select"
+                      }</span>
+                      <CheckSquare size={14} className="text-slate-400 shrink-0" />
                     </button>
                     {categoriesVisibleForMenu.map((cat) => {
                       const catItemCount = itemsForMenuType.filter((i) => i.viewCategoryId === cat.id).length;
@@ -2260,20 +2263,25 @@ export default function MenuPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (categoryFilterMode) clearCategoryFilters();
-                      else setActiveCategory(null);
+                      if (categoryFilterMode) {
+                        toggleFilterSelectAllCategories();
+                      } else {
+                        enterCategoryFilterMode();
+                      }
                     }}
-                    className={`shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                      categoryFilterMode
-                        ? filterCategoryIds.length === 0 && filterSubcategoryIds.length === 0
-                          ? "bg-blue-600 text-white shadow-sm"
-                          : "bg-white border border-slate-200 text-slate-600"
-                        : activeCategory === null
-                          ? "bg-blue-600 text-white shadow-sm"
-                          : "bg-white border border-slate-200 text-slate-600"
+                    className={`shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-1.5 ${
+                      categoryFilterMode && categoriesVisibleForMenu.length > 0 && categoriesVisibleForMenu.every((c) => filterCategoryIds.includes(c.id))
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-white border border-slate-200 text-slate-600"
                     }`}
                   >
-                    All
+                    <CheckSquare size={14} />
+                    {categoryFilterMode
+                      ? categoriesVisibleForMenu.length > 0 && categoriesVisibleForMenu.every((c) => filterCategoryIds.includes(c.id))
+                        ? "Deselect All"
+                        : "Select All"
+                      : "Select"
+                    }
                   </button>
                   {categoriesVisibleForMenu.map((cat) => {
                     const catOn = categoryFilterMode ? filterCategoryIds.includes(cat.id) : activeCategory === cat.id;
