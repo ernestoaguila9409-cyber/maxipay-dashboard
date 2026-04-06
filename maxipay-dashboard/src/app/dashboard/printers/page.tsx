@@ -583,7 +583,6 @@ export default function PrintersPage() {
                 ["all", "All"],
                 ["online", "Online"],
                 ["offline", "Offline"],
-                ["unknown", "Unknown"],
               ] as const
             ).map(([value, label]) => (
               <button

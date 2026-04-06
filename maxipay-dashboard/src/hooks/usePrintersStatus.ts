@@ -13,7 +13,7 @@ import {
   type PrinterStatus,
 } from "@/lib/printerStatusUtils";
 
-export type PrinterFilter = "all" | "online" | "offline" | "unknown";
+export type PrinterFilter = "all" | "online" | "offline";
 export type PrinterSort = "name" | "status";
 
 export interface PrinterViewRow extends PrinterDocFields {
@@ -112,7 +112,6 @@ export function usePrintersStatus(enabled: boolean): UsePrintersStatusResult {
     let filtered = withView;
     if (filter === "online") filtered = withView.filter((p) => p.status === "ONLINE");
     if (filter === "offline") filtered = withView.filter((p) => p.status === "OFFLINE");
-    if (filter === "unknown") filtered = withView.filter((p) => p.status === "UNKNOWN");
 
     const sorted = [...filtered];
     if (sort === "name") {
