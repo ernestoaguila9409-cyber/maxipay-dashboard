@@ -8,6 +8,7 @@ import {
   PRINTER_STATUS_TICK_MS,
   formatLastSeenAgo,
   mapPrinterDocument,
+  resolveStatus,
   type PrinterDocFields,
   type PrinterStatus,
 } from "@/lib/printerStatusUtils";
@@ -16,6 +17,8 @@ export type PrinterFilter = "all" | "online" | "offline" | "unknown";
 export type PrinterSort = "name" | "status";
 
 export interface PrinterViewRow extends PrinterDocFields {
+  /** Effective status (resolved from rawStatus + lastSeen fallback). */
+  status: PrinterStatus;
   lastSeenAgo: string;
 }
 
@@ -102,6 +105,7 @@ export function usePrintersStatus(enabled: boolean): UsePrintersStatusResult {
   const printers = useMemo((): PrinterViewRow[] => {
     const withView: PrinterViewRow[] = raw.map((p) => ({
       ...p,
+      status: resolveStatus(p.rawStatus, p.lastSeenMs, nowMs),
       lastSeenAgo: formatLastSeenAgo(p.lastSeenMs, nowMs),
     }));
 

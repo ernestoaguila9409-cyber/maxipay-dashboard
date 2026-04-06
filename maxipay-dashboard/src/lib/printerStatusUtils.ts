@@ -1,5 +1,8 @@
 import type { Timestamp } from "firebase/firestore";
 
+/** Online if `lastSeen` is within this many milliseconds of client `Date.now()`. */
+export const PRINTER_ONLINE_THRESHOLD_MS = 15_000;
+
 /** Client refresh interval for recomputing "last seen ago" from wall clock. */
 export const PRINTER_STATUS_TICK_MS = 5_000;
 
@@ -11,7 +14,8 @@ export interface PrinterDocFields {
   ipAddress: string;
   port: number;
   labels: string[];
-  status: PrinterStatus;
+  /** Raw status from Firestore (may be UNKNOWN if field is missing). */
+  rawStatus: PrinterStatus;
   lastSeenMs: number | null;
 }
 
@@ -86,9 +90,24 @@ export function mapPrinterDocument(
     ipAddress,
     port,
     labels: parseLabels(data.labels),
-    status: parseStatus(data.status),
+    rawStatus: parseStatus(data.status),
     lastSeenMs: parseFirestoreLastSeenMillis(data),
   };
+}
+
+/**
+ * Resolve the effective status for display.
+ * If the POS wrote an explicit `status` field (ONLINE/OFFLINE), use that.
+ * Otherwise fall back to computing from `lastSeen` vs wall-clock threshold.
+ */
+export function resolveStatus(
+  rawStatus: PrinterStatus,
+  lastSeenMs: number | null,
+  nowMs: number
+): PrinterStatus {
+  if (rawStatus !== "UNKNOWN") return rawStatus;
+  if (lastSeenMs == null || !Number.isFinite(lastSeenMs)) return "UNKNOWN";
+  return (nowMs - lastSeenMs) <= PRINTER_ONLINE_THRESHOLD_MS ? "ONLINE" : "OFFLINE";
 }
 
 /** Human-readable age since lastSeen; `null` lastSeen → "Never". */
