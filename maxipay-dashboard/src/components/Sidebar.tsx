@@ -20,6 +20,9 @@ import {
   ChevronDown,
   CalendarClock,
   Store,
+  DollarSign,
+  CreditCard,
+  Package,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
@@ -46,7 +49,20 @@ const navItems: NavItem[] = [
   },
   { label: "Employees", href: "/dashboard/employees", icon: Users },
   { label: "Printers", href: "/dashboard/printers", icon: Printer },
-  { label: "Reports", href: "/dashboard/reports", icon: BarChart3 },
+  {
+    label: "Reports",
+    href: "/dashboard/reports",
+    icon: BarChart3,
+    children: [
+      { label: "Overview", href: "/dashboard/reports/overview", icon: LayoutDashboard },
+      { label: "Sales", href: "/dashboard/reports/sales", icon: DollarSign },
+      { label: "Orders", href: "/dashboard/reports/orders", icon: ClipboardList },
+      { label: "Payments", href: "/dashboard/reports/payments", icon: CreditCard },
+      { label: "Employees", href: "/dashboard/reports/employees", icon: Users },
+      { label: "Taxes", href: "/dashboard/reports/taxes", icon: Receipt },
+      { label: "Inventory", href: "/dashboard/reports/inventory", icon: Package },
+    ],
+  },
   {
     label: "Settings",
     href: "/dashboard/settings",
@@ -170,20 +186,21 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 </div>
 
                 {!collapsed && isExpanded && (
-                  <div className="ml-5 pl-3 border-l border-slate-200 mt-1 space-y-0.5">
+                  <div className="ml-4 mt-1 space-y-0.5 border-l border-slate-200 pl-3">
                     {item.children.map((child) => {
-                      const isChildActive = pathname.startsWith(child.href);
+                      const isChildActive =
+                        pathname === child.href || pathname.startsWith(`${child.href}/`);
                       return (
                         <Link
                           key={child.href}
                           href={child.href}
-                          className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                          className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
                             isChildActive
                               ? "bg-blue-50 text-blue-600"
-                              : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                              : "text-slate-500 hover:bg-slate-100/90 hover:text-slate-800"
                           }`}
                         >
-                          <child.icon size={16} className="flex-shrink-0" />
+                          <child.icon size={15} className="flex-shrink-0 opacity-80" />
                           <span>{child.label}</span>
                         </Link>
                       );
