@@ -310,6 +310,7 @@ export default function MenuPage() {
   const [addTaxes, setAddTaxes] = useState<Record<string, boolean>>({});
   const [addModifiersExpanded, setAddModifiersExpanded] = useState(false);
   const [addTaxesExpanded, setAddTaxesExpanded] = useState(false);
+  const [addLabelExpanded, setAddLabelExpanded] = useState(false);
   const [stockCountingEnabled, setStockCountingEnabled] = useState(true);
   /** Synced with POS: Settings/kitchenRoutingLabels.labels */
   const [kitchenRoutingLabels, setKitchenRoutingLabels] = useState<string[]>([]);
@@ -319,7 +320,7 @@ export default function MenuPage() {
   const [addMenuId, setAddMenuId] = useState("");
   const [addMenuIds, setAddMenuIds] = useState<Record<string, boolean>>({});
   const [addPosPrice, setAddPosPrice] = useState("");
-  const [addPosSelected, setAddPosSelected] = useState(true);
+  const [addPosSelected, setAddPosSelected] = useState(false);
   const [addOnlinePrice, setAddOnlinePrice] = useState("");
   const [addMenuPrices, setAddMenuPrices] = useState<Record<string, string>>({});
   const [menuEntities, setMenuEntities] = useState<MenuEntity[]>([]);
@@ -347,6 +348,9 @@ export default function MenuPage() {
   const [taxes, setTaxes] = useState<TaxEntry[]>([]);
   const [editModifiers, setEditModifiers] = useState<Record<string, boolean>>({});
   const [editTaxes, setEditTaxes] = useState<Record<string, boolean>>({});
+  const [editLabelExpanded, setEditLabelExpanded] = useState(false);
+  const [editModifiersExpanded, setEditModifiersExpanded] = useState(false);
+  const [editTaxesExpanded, setEditTaxesExpanded] = useState(false);
   const [editMenuId, setEditMenuId] = useState("");
   const [editMenuIds, setEditMenuIds] = useState<Record<string, boolean>>({});
   const [editPosPrice, setEditPosPrice] = useState("");
@@ -1243,6 +1247,9 @@ export default function MenuPage() {
     }
     setEditTaxes(txs);
     setEditPrinterLabel(item.printerLabel?.trim() ?? "");
+    setEditLabelExpanded(false);
+    setEditModifiersExpanded(false);
+    setEditTaxesExpanded(false);
   };
 
   const handleSave = async () => {
@@ -1338,7 +1345,7 @@ export default function MenuPage() {
     setAddMenuIds({});
     setAddMenuPrices({});
     setAddPosPrice("");
-    setAddPosSelected(true);
+    setAddPosSelected(false);
     setAddOnlinePrice("");
     setAddUseCategoryTypes(true);
     setAddOrderTypes(Object.fromEntries(ALL_ORDER_TYPES.map((t) => [t, true])));
@@ -1346,6 +1353,7 @@ export default function MenuPage() {
     setAddTaxes({});
     setAddModifiersExpanded(false);
     setAddTaxesExpanded(false);
+    setAddLabelExpanded(false);
     setAddPrinterLabel("");
   };
 
@@ -3556,32 +3564,60 @@ export default function MenuPage() {
                   )}
                 </div>
 
-                <div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5">
-                    <Printer size={15} className="text-slate-500" />
-                    Assign label
-                  </label>
-                  <p className="text-[10px] text-slate-400 mb-1.5">
-                    Labels match kitchen printers on the POS. (None) = do not send to kitchen printers.
-                  </p>
-                  <select
-                    value={addPrinterLabel}
-                    onChange={(e) => setAddPrinterLabel(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                {/* ── Assign label (collapsible) ── */}
+                <div className="rounded-xl border border-slate-200/80 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setAddLabelExpanded((v) => !v)}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left bg-slate-50/90 hover:bg-slate-100/90 transition-colors"
                   >
-                    <option value="">(None)</option>
-                    {[
-                      ...new Set(
-                        [...kitchenRoutingLabels, addPrinterLabel.trim()].filter(Boolean)
-                      ),
-                    ]
-                      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-                      .map((lbl) => (
-                        <option key={lbl} value={lbl}>
-                          {lbl}
-                        </option>
-                      ))}
-                  </select>
+                    <span className="flex items-center gap-2 min-w-0 text-sm font-medium text-slate-700">
+                      <Printer size={15} className="text-slate-500 shrink-0" />
+                      <span className="truncate">Assign label</span>
+                      {addPrinterLabel.trim().length > 0 && (
+                        <span className="text-xs font-semibold text-blue-600 tabular-nums shrink-0 truncate max-w-[120px]">
+                          ({addPrinterLabel.trim()})
+                        </span>
+                      )}
+                    </span>
+                    <ChevronDown
+                      size={18}
+                      className={`text-slate-400 shrink-0 transition-transform duration-200 ${
+                        addLabelExpanded ? "rotate-180" : ""
+                      }`}
+                    />
+                  </button>
+                  <div
+                    className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+                      addLabelExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                    }`}
+                  >
+                    <div className="min-h-0 overflow-hidden">
+                      <div className="px-3 py-3 space-y-1.5 border-t border-slate-100">
+                        <p className="text-[10px] text-slate-400">
+                          Labels match kitchen printers on the POS. (None) = do not send to kitchen printers.
+                        </p>
+                        <select
+                          value={addPrinterLabel}
+                          onChange={(e) => setAddPrinterLabel(e.target.value)}
+                          className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                        >
+                          <option value="">(None)</option>
+                          {[
+                            ...new Set(
+                              [...kitchenRoutingLabels, addPrinterLabel.trim()].filter(Boolean)
+                            ),
+                          ]
+                            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+                            .map((lbl) => (
+                              <option key={lbl} value={lbl}>
+                                {lbl}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* ── Assign Modifiers (collapsible) ── */}
@@ -3994,35 +4030,63 @@ export default function MenuPage() {
                   )}
                 </div>
 
-                <div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5">
-                    <Printer size={15} className="text-slate-500" />
-                    Assign label
-                  </label>
-                  <p className="text-[10px] text-slate-400 mb-1.5">
-                    Labels match kitchen printers on the POS. (None) clears routing.
-                  </p>
-                  <select
-                    value={editPrinterLabel}
-                    onChange={(e) => setEditPrinterLabel(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                {/* ── Assign label (collapsible) ── */}
+                <div className="rounded-xl border border-slate-200/80 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setEditLabelExpanded((v) => !v)}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left bg-slate-50/90 hover:bg-slate-100/90 transition-colors"
                   >
-                    <option value="">(None)</option>
-                    {[
-                      ...new Set(
-                        [...kitchenRoutingLabels, editPrinterLabel.trim()].filter(Boolean)
-                      ),
-                    ]
-                      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-                      .map((lbl) => (
-                        <option key={lbl} value={lbl}>
-                          {lbl}
-                        </option>
-                      ))}
-                  </select>
+                    <span className="flex items-center gap-2 min-w-0 text-sm font-medium text-slate-700">
+                      <Printer size={15} className="text-slate-500 shrink-0" />
+                      <span className="truncate">Assign label</span>
+                      {editPrinterLabel.trim().length > 0 && (
+                        <span className="text-xs font-semibold text-blue-600 tabular-nums shrink-0 truncate max-w-[120px]">
+                          ({editPrinterLabel.trim()})
+                        </span>
+                      )}
+                    </span>
+                    <ChevronDown
+                      size={18}
+                      className={`text-slate-400 shrink-0 transition-transform duration-200 ${
+                        editLabelExpanded ? "rotate-180" : ""
+                      }`}
+                    />
+                  </button>
+                  <div
+                    className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+                      editLabelExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                    }`}
+                  >
+                    <div className="min-h-0 overflow-hidden">
+                      <div className="px-3 py-3 space-y-1.5 border-t border-slate-100">
+                        <p className="text-[10px] text-slate-400">
+                          Labels match kitchen printers on the POS. (None) clears routing.
+                        </p>
+                        <select
+                          value={editPrinterLabel}
+                          onChange={(e) => setEditPrinterLabel(e.target.value)}
+                          className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                        >
+                          <option value="">(None)</option>
+                          {[
+                            ...new Set(
+                              [...kitchenRoutingLabels, editPrinterLabel.trim()].filter(Boolean)
+                            ),
+                          ]
+                            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+                            .map((lbl) => (
+                              <option key={lbl} value={lbl}>
+                                {lbl}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                {/* ── Assign Modifiers ── */}
+                {/* ── Assign Modifiers (collapsible) ── */}
                 {modifierGroups.length > 0 && (() => {
                   const nestedIds = new Set<string>();
                   for (const g of modifierGroups) {
@@ -4032,46 +4096,41 @@ export default function MenuPage() {
                   }
                   const topLevelGroups = modifierGroups.filter((g) => !nestedIds.has(g.id));
                   const nestedGroups = modifierGroups.filter((g) => nestedIds.has(g.id));
+                  const selectedEditModCount = Object.values(editModifiers).filter(Boolean).length;
                   return (
-                  <div>
-                    <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
-                      <SlidersHorizontal size={15} />
-                      Assign Modifiers
-                    </label>
-                    <div className="flex flex-col gap-2 pl-1 max-h-40 overflow-y-auto">
-                      {topLevelGroups.map((g) => (
-                        <label
-                          key={g.id}
-                          className="flex items-center gap-2 cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={editModifiers[g.id] ?? false}
-                            onChange={(e) =>
-                              setEditModifiers((prev) => ({
-                                ...prev,
-                                [g.id]: e.target.checked,
-                              }))
-                            }
-                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span className="text-sm text-slate-700">{g.name}</span>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                            g.groupType === "REMOVE"
-                              ? "bg-red-50 text-red-500"
-                              : "bg-slate-100 text-slate-400"
-                          }`}>
-                            {g.groupType === "REMOVE" ? "Remove" : "Add-on"}
+                  <div className="rounded-xl border border-slate-200/80 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setEditModifiersExpanded((v) => !v)}
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left bg-slate-50/90 hover:bg-slate-100/90 transition-colors"
+                    >
+                      <span className="flex items-center gap-2 min-w-0 text-sm font-medium text-slate-700">
+                        <SlidersHorizontal size={15} className="text-slate-500 shrink-0" />
+                        <span className="truncate">Assign Modifiers</span>
+                        {selectedEditModCount > 0 && (
+                          <span className="text-xs font-semibold text-blue-600 tabular-nums shrink-0">
+                            ({selectedEditModCount})
                           </span>
-                        </label>
-                      ))}
-                      {nestedGroups.length > 0 && (
-                        <div className="mt-1 pt-1 border-t border-slate-100">
-                          <p className="text-[10px] text-slate-400 mb-1">Triggered by modifier options:</p>
-                          {nestedGroups.map((g) => (
+                        )}
+                      </span>
+                      <ChevronDown
+                        size={18}
+                        className={`text-slate-400 shrink-0 transition-transform duration-200 ${
+                          editModifiersExpanded ? "rotate-180" : ""
+                        }`}
+                      />
+                    </button>
+                    <div
+                      className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+                        editModifiersExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                      }`}
+                    >
+                      <div className="min-h-0 overflow-hidden">
+                        <div className="flex flex-col gap-2 px-3 py-3 max-h-40 overflow-y-auto border-t border-slate-100">
+                          {topLevelGroups.map((g) => (
                             <label
                               key={g.id}
-                              className="flex items-center gap-2 cursor-pointer opacity-60"
+                              className="flex items-center gap-2 cursor-pointer"
                             >
                               <input
                                 type="checkbox"
@@ -4085,51 +4144,113 @@ export default function MenuPage() {
                                 className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                               />
                               <span className="text-sm text-slate-700">{g.name}</span>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-50 text-blue-500">
-                                Nested
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                g.groupType === "REMOVE"
+                                  ? "bg-red-50 text-red-500"
+                                  : "bg-slate-100 text-slate-400"
+                              }`}>
+                                {g.groupType === "REMOVE" ? "Remove" : "Add-on"}
                               </span>
                             </label>
                           ))}
+                          {nestedGroups.length > 0 && (
+                            <div className="mt-1 pt-1 border-t border-slate-100">
+                              <p className="text-[10px] text-slate-400 mb-1">Triggered by modifier options:</p>
+                              {nestedGroups.map((g) => (
+                                <label
+                                  key={g.id}
+                                  className="flex items-center gap-2 cursor-pointer opacity-60"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={editModifiers[g.id] ?? false}
+                                    onChange={(e) =>
+                                      setEditModifiers((prev) => ({
+                                        ...prev,
+                                        [g.id]: e.target.checked,
+                                      }))
+                                    }
+                                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span className="text-sm text-slate-700">{g.name}</span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-50 text-blue-500">
+                                    Nested
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      )}
+                      </div>
                     </div>
                   </div>
                   );
                 })()}
 
-                {/* ── Assign Taxes ── */}
-                {taxes.length > 0 && (
-                  <div>
-                    <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
-                      <Receipt size={15} />
-                      Assign Taxes
-                    </label>
-                    <div className="flex flex-col gap-2 pl-1 max-h-40 overflow-y-auto">
-                      {taxes.filter((t) => t.enabled).map((t) => (
-                        <label
-                          key={t.id}
-                          className="flex items-center gap-2 cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={editTaxes[t.id] ?? false}
-                            onChange={(e) =>
-                              setEditTaxes((prev) => ({
-                                ...prev,
-                                [t.id]: e.target.checked,
-                              }))
-                            }
-                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span className="text-sm text-slate-700">{t.name}</span>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-amber-50 text-amber-600">
-                            {t.amount}%
+                {/* ── Assign Taxes (collapsible) ── */}
+                {taxes.length > 0 && (() => {
+                  const enabledEditTaxes = taxes.filter((t) => t.enabled);
+                  const selectedEditTaxCount = Object.entries(editTaxes).filter(
+                    ([id, v]) => v && enabledEditTaxes.some((t) => t.id === id)
+                  ).length;
+                  return (
+                  <div className="rounded-xl border border-slate-200/80 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setEditTaxesExpanded((v) => !v)}
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left bg-slate-50/90 hover:bg-slate-100/90 transition-colors"
+                    >
+                      <span className="flex items-center gap-2 min-w-0 text-sm font-medium text-slate-700">
+                        <Receipt size={15} className="text-slate-500 shrink-0" />
+                        <span className="truncate">Assign Taxes</span>
+                        {selectedEditTaxCount > 0 && (
+                          <span className="text-xs font-semibold text-blue-600 tabular-nums shrink-0">
+                            ({selectedEditTaxCount})
                           </span>
-                        </label>
-                      ))}
+                        )}
+                      </span>
+                      <ChevronDown
+                        size={18}
+                        className={`text-slate-400 shrink-0 transition-transform duration-200 ${
+                          editTaxesExpanded ? "rotate-180" : ""
+                        }`}
+                      />
+                    </button>
+                    <div
+                      className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+                        editTaxesExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                      }`}
+                    >
+                      <div className="min-h-0 overflow-hidden">
+                        <div className="flex flex-col gap-2 px-3 py-3 max-h-40 overflow-y-auto border-t border-slate-100">
+                          {enabledEditTaxes.map((t) => (
+                            <label
+                              key={t.id}
+                              className="flex items-center gap-2 cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={editTaxes[t.id] ?? false}
+                                onChange={(e) =>
+                                  setEditTaxes((prev) => ({
+                                    ...prev,
+                                    [t.id]: e.target.checked,
+                                  }))
+                                }
+                                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="text-sm text-slate-700">{t.name}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-amber-50 text-amber-600">
+                                {t.amount}%
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </div>
 
               <div className="flex gap-3 pt-1">
