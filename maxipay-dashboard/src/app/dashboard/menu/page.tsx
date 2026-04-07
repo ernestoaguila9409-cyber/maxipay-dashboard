@@ -164,6 +164,13 @@ type MenuItemViewRow = MenuItem & {
   viewCategoryScheduleIds: string[];
 };
 
+/** One titled block of items in the main list (category group or subcategory under a parent). */
+type MenuItemSection = {
+  key: string;
+  title: string;
+  items: MenuItemViewRow[];
+};
+
 function viewCategoryIdForMenuFilter(
   item: Pick<MenuItem, "categoryId" | "categoryIds">,
   menuTypeFilter: string | null,
@@ -765,11 +772,58 @@ export default function MenuPage() {
     return true;
   });
 
-  const grouped = new Map<string, MenuItemViewRow[]>();
-  for (const item of filtered) {
-    const key = item.viewCategoryName;
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(item);
+  const subsForActiveCategory =
+    activeCategory && !categoryFilterMode && !activeSubcategory
+      ? allSubcategories
+          .filter((s) => s.categoryId === activeCategory)
+          .sort((a, b) => a.order - b.order)
+      : [];
+
+  let itemSections: MenuItemSection[];
+
+  if (subsForActiveCategory.length > 1) {
+    const bySubId = new Map<string, MenuItemViewRow[]>();
+    for (const sub of subsForActiveCategory) {
+      bySubId.set(sub.id, []);
+    }
+    const UNCATEGORIZED = "__uncategorized__";
+    for (const item of filtered) {
+      const sid = item.viewSubcategoryId;
+      if (sid && bySubId.has(sid)) {
+        bySubId.get(sid)!.push(item);
+      } else {
+        if (!bySubId.has(UNCATEGORIZED)) bySubId.set(UNCATEGORIZED, []);
+        bySubId.get(UNCATEGORIZED)!.push(item);
+      }
+    }
+    itemSections = [];
+    for (const sub of subsForActiveCategory) {
+      const arr = bySubId.get(sub.id) ?? [];
+      if (arr.length > 0) {
+        itemSections.push({ key: `sub-${sub.id}`, title: sub.name, items: arr });
+      }
+    }
+    const uncat = bySubId.get(UNCATEGORIZED);
+    if (uncat && uncat.length > 0) {
+      itemSections.push({ key: "uncategorized", title: "Uncategorized", items: uncat });
+    }
+  } else {
+    const grouped = new Map<string, MenuItemViewRow[]>();
+    for (const item of filtered) {
+      const key = item.viewCategoryName;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(item);
+    }
+    const sorted = Array.from(grouped.entries()).sort(([a], [b]) => {
+      if (a === "Uncategorized") return 1;
+      if (b === "Uncategorized") return -1;
+      return a.localeCompare(b);
+    });
+    itemSections = sorted.map(([title, items]) => ({
+      key: `cat-${title}`,
+      title,
+      items,
+    }));
   }
 
   // Clear selected item if it's no longer in filtered list
@@ -805,12 +859,6 @@ export default function MenuPage() {
       return next;
     });
   }, [addOpen, addPosSelected, addMenuIds, categories, menuEntities]);
-
-  const sortedGroups = Array.from(grouped.entries()).sort(([a], [b]) => {
-    if (a === "Uncategorized") return 1;
-    if (b === "Uncategorized") return -1;
-    return a.localeCompare(b);
-  });
 
   // ── Delete ──
 
@@ -2348,10 +2396,10 @@ export default function MenuPage() {
               ) : viewMode === "compact" ? (
                 /* ── Compact list view ── */
                 <div className="space-y-6">
-                  {sortedGroups.map(([categoryName, groupItems]) => (
-                    <section key={categoryName} className="animate-in fade-in duration-200">
+                  {itemSections.map(({ key: sectionKey, title: sectionTitle, items: groupItems }) => (
+                    <section key={sectionKey} className="animate-in fade-in duration-200">
                       <div className="flex items-center gap-3 mb-2 px-1">
-                        <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider">{categoryName}</h2>
+                        <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider">{sectionTitle}</h2>
                         <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">{groupItems.length}</span>
                       </div>
                       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -2494,10 +2542,10 @@ export default function MenuPage() {
               ) : (
                 /* ── Card view ── */
                 <div className="space-y-6">
-                  {sortedGroups.map(([categoryName, groupItems]) => (
-                    <section key={categoryName} className="animate-in fade-in duration-200">
+                  {itemSections.map(({ key: sectionKey, title: sectionTitle, items: groupItems }) => (
+                    <section key={sectionKey} className="animate-in fade-in duration-200">
                       <div className="flex items-center gap-3 mb-3 px-1">
-                        <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider">{categoryName}</h2>
+                        <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider">{sectionTitle}</h2>
                         <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">{groupItems.length}</span>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
