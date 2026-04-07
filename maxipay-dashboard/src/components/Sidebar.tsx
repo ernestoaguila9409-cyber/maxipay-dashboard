@@ -23,6 +23,7 @@ import {
   DollarSign,
   CreditCard,
   Package,
+  LayoutTemplate,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
@@ -69,6 +70,7 @@ const navItems: NavItem[] = [
     icon: Settings,
     children: [
       { label: "Business Information", href: "/dashboard/settings/business", icon: Store },
+      { label: "Table Layout", href: "/dashboard/settings/table-layout", icon: LayoutTemplate },
       { label: "Taxes", href: "/dashboard/taxes", icon: Receipt },
       { label: "Discounts", href: "/dashboard/discounts", icon: Tags },
       { label: "Customize Dashboard", href: "/dashboard/settings/customize-dashboard", icon: LayoutGrid },
