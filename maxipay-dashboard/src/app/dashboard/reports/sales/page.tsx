@@ -1,5 +1,5 @@
-import ReportSectionPlaceholder from "@/components/ReportSectionPlaceholder";
+import SalesReportClient from "./SalesReportClient";
 
 export default function ReportsSalesPage() {
-  return <ReportSectionPlaceholder title="Sales Report" />;
+  return <SalesReportClient />;
 }
