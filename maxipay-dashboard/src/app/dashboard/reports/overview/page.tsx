@@ -1,5 +1,5 @@
-import ReportSectionPlaceholder from "@/components/ReportSectionPlaceholder";
+import OverviewReportClient from "./OverviewReportClient";
 
 export default function ReportsOverviewPage() {
-  return <ReportSectionPlaceholder title="Overview Report" />;
+  return <OverviewReportClient />;
 }
