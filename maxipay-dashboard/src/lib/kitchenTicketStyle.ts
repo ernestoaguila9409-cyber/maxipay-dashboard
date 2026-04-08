@@ -12,6 +12,10 @@ export const KITCHEN_FONT_SIZE_LABELS: Record<KitchenFontSize, string> = {
 };
 
 export interface KitchenTicketStyleState {
+  /** When true, print `Table: …` only if order type is Dine In. */
+  showTableLineOnlyForDineIn: boolean;
+  /** When true, print routing tag line (e.g. `[drinks]`) under each item. */
+  showRoutingTag: boolean;
   titleFontSize: KitchenFontSize;
   titleBold: boolean;
   metaFontSize: KitchenFontSize;
@@ -31,6 +35,8 @@ export interface KitchenTicketStyleState {
 }
 
 export const DEFAULT_KITCHEN_TICKET_STYLE: KitchenTicketStyleState = {
+  showTableLineOnlyForDineIn: true,
+  showRoutingTag: false,
   titleFontSize: 0,
   titleBold: false,
   metaFontSize: 0,
@@ -79,6 +85,8 @@ export function parseKitchenTicketStyle(raw: unknown): KitchenTicketStyleState |
   const o = raw as Record<string, unknown>;
   const d = DEFAULT_KITCHEN_TICKET_STYLE;
   return {
+    showTableLineOnlyForDineIn: bool(o.showTableLineOnlyForDineIn, d.showTableLineOnlyForDineIn),
+    showRoutingTag: bool(o.showRoutingTag, d.showRoutingTag),
     titleFontSize: clampFontSize(num(o.titleFontSize) ?? d.titleFontSize),
     titleBold: bool(o.titleBold, d.titleBold),
     metaFontSize: clampFontSize(num(o.metaFontSize) ?? d.metaFontSize),
@@ -100,6 +108,8 @@ export function parseKitchenTicketStyle(raw: unknown): KitchenTicketStyleState |
 
 export function kitchenTicketStyleForFirestore(s: KitchenTicketStyleState): Record<string, number | boolean> {
   return {
+    showTableLineOnlyForDineIn: s.showTableLineOnlyForDineIn,
+    showRoutingTag: s.showRoutingTag,
     titleFontSize: s.titleFontSize,
     titleBold: s.titleBold,
     metaFontSize: s.metaFontSize,

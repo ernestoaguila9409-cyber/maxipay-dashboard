@@ -85,13 +85,17 @@ function KitchenTicketPreview({
     add(title, style.titleFontSize, style.titleBold, true);
     add(`Order #265`, style.metaFontSize, style.metaBold);
     add(`Type: TO GO`, style.metaFontSize, style.metaBold);
-    add(`Table: -`, style.metaFontSize, style.metaBold);
+    if (!style.showTableLineOnlyForDineIn) {
+      add(`Table: -`, style.metaFontSize, style.metaBold);
+    }
     add(`Time: 9:08 PM`, style.metaFontSize, style.metaBold);
     add(repeatDash(dw), style.dividerFontSize, style.dividerBold);
     add("", 0, false);
     add(`1x Sprite`, style.itemFontSize, style.itemBold);
     add(`   - Small`, style.modifierFontSize, style.modifierBold);
-    add(`[drinks]`, style.stationTagFontSize, style.stationTagBold);
+    if (style.showRoutingTag) {
+      add(`[drinks]`, style.stationTagFontSize, style.stationTagBold);
+    }
     add("", 0, false);
     add(repeatDash(dw), style.dividerFontSize, style.dividerBold);
     add(`Notes:`, style.notesHeadingFontSize, style.notesHeadingBold);
@@ -128,7 +132,8 @@ function KitchenTicketPreview({
         ))}
       </div>
       <p className="text-[11px] text-slate-400 mt-3">
-        Approximate layout. Physical printers may differ slightly. X-Large uses half the characters per line on paper.
+        Sample order is <strong>To Go</strong>. With “table only for Dine In” on, the table line is hidden here as on the printed chit.
+        X-Large uses half the characters per line on paper.
       </p>
     </div>
   );
@@ -140,7 +145,7 @@ const SECTIONS: {
   boldKey: keyof KitchenTicketStyleState;
 }[] = [
   { label: "Station title (e.g. BAR)", fontKey: "titleFontSize", boldKey: "titleBold" },
-  { label: "Order info (order #, type, table, time)", fontKey: "metaFontSize", boldKey: "metaBold" },
+  { label: "Order info (order #, type, time; table if applicable)", fontKey: "metaFontSize", boldKey: "metaBold" },
   { label: "Divider lines", fontKey: "dividerFontSize", boldKey: "dividerBold" },
   { label: "Item name & qty", fontKey: "itemFontSize", boldKey: "itemBold" },
   { label: "Modifiers", fontKey: "modifierFontSize", boldKey: "modifierBold" },
@@ -215,7 +220,43 @@ export function KitchenTicketStyleModal({
               <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg mb-4">{err}</p>
             )}
             <p className="text-sm text-slate-600 mb-2">
-              Font size and bold apply only to <strong>kitchen chits</strong> sent to this printer from the POS.
+              Saved to Firestore and applied by the POS when it prints to this printer&apos;s IP.
+            </p>
+            <div className="rounded-xl border border-violet-100 bg-violet-50/40 p-4 mb-4 space-y-3">
+              <p className="text-xs font-semibold text-violet-900 uppercase tracking-wide">Content</p>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={state.showTableLineOnlyForDineIn}
+                  onChange={(e) =>
+                    setState((s) => ({ ...s, showTableLineOnlyForDineIn: e.target.checked }))
+                  }
+                  className="mt-1 rounded border-slate-300 text-violet-600 focus:ring-violet-500/30"
+                />
+                <span>
+                  <span className="text-sm font-medium text-slate-800">Table line only for Dine In</span>
+                  <span className="block text-xs text-slate-500 mt-0.5">
+                    Hide &quot;Table: …&quot; on To Go, bar tab, and other types. Dine In orders still show the table name.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={state.showRoutingTag}
+                  onChange={(e) => setState((s) => ({ ...s, showRoutingTag: e.target.checked }))}
+                  className="mt-1 rounded border-slate-300 text-violet-600 focus:ring-violet-500/30"
+                />
+                <span>
+                  <span className="text-sm font-medium text-slate-800">Show routing label under items</span>
+                  <span className="block text-xs text-slate-500 mt-0.5">
+                    Prints lines like [drinks] below each item. Off by default.
+                  </span>
+                </span>
+              </label>
+            </div>
+            <p className="text-sm text-slate-600 mb-2">
+              Font size and bold for each section:
             </p>
             <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-1">
               {SECTIONS.map(({ label, fontKey, boldKey }) => (
