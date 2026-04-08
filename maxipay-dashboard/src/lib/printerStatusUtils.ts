@@ -1,4 +1,9 @@
 import type { Timestamp } from "firebase/firestore";
+import {
+  DEFAULT_KITCHEN_TICKET_STYLE,
+  parseKitchenTicketStyle,
+  type KitchenTicketStyleState,
+} from "@/lib/kitchenTicketStyle";
 
 /** Online if `lastSeen` is within this many milliseconds of client `Date.now()`. */
 export const PRINTER_ONLINE_THRESHOLD_MS = 15_000;
@@ -17,6 +22,8 @@ export interface PrinterDocFields {
   /** Raw status from Firestore (may be UNKNOWN if field is missing). */
   rawStatus: PrinterStatus;
   lastSeenMs: number | null;
+  /** Kitchen chit typography; defaults when absent in Firestore. */
+  kitchenTicketStyle: KitchenTicketStyleState;
 }
 
 function hasToDate(v: unknown): v is Timestamp {
@@ -84,6 +91,9 @@ export function mapPrinterDocument(
   const name = String(data.name ?? "").trim() || "Unnamed printer";
   const port = typeof data.port === "number" && Number.isFinite(data.port) ? data.port : 9100;
 
+  const parsedStyle = parseKitchenTicketStyle(data.kitchenTicketStyle);
+  const kitchenTicketStyle = parsedStyle ?? DEFAULT_KITCHEN_TICKET_STYLE;
+
   return {
     id,
     name,
@@ -92,6 +102,7 @@ export function mapPrinterDocument(
     labels: parseLabels(data.labels),
     rawStatus: parseStatus(data.status),
     lastSeenMs: parseFirestoreLastSeenMillis(data),
+    kitchenTicketStyle,
   };
 }
 

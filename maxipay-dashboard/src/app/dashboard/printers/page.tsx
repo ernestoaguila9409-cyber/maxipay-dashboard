@@ -21,7 +21,8 @@ import {
   PRINTER_STATUS_TICK_MS,
   type PrinterStatus,
 } from "@/lib/printerStatusUtils";
-import { Plus, X, FlaskConical, Pencil, Trash2 } from "lucide-react";
+import { Plus, X, FlaskConical, Pencil, Trash2, ClipboardList } from "lucide-react";
+import { KitchenTicketStyleModal } from "@/components/KitchenTicketStyleModal";
 import { deleteDoc } from "firebase/firestore";
 
 /* ─── helpers ─── */
@@ -333,12 +334,14 @@ const PrinterTableRow = memo(function PrinterTableRow({
   onTest,
   onEdit,
   onDelete,
+  onKitchenStyle,
   testing,
 }: {
   row: PrinterViewRow;
   onTest: (id: string) => void;
   onEdit: (row: PrinterViewRow) => void;
   onDelete: (row: PrinterViewRow) => void;
+  onKitchenStyle: (row: PrinterViewRow) => void;
   testing: boolean;
 }) {
   return (
@@ -370,6 +373,14 @@ const PrinterTableRow = memo(function PrinterTableRow({
           </button>
           <button
             type="button"
+            onClick={() => onKitchenStyle(row)}
+            title="Kitchen ticket style"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors opacity-0 group-hover:opacity-100"
+          >
+            <ClipboardList size={15} />
+          </button>
+          <button
+            type="button"
             onClick={() => onEdit(row)}
             title="Edit printer"
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors opacity-0 group-hover:opacity-100"
@@ -397,12 +408,14 @@ function PrinterCard({
   onTest,
   onEdit,
   onDelete,
+  onKitchenStyle,
   testing,
 }: {
   row: PrinterViewRow;
   onTest: (id: string) => void;
   onEdit: (row: PrinterViewRow) => void;
   onDelete: (row: PrinterViewRow) => void;
+  onKitchenStyle: (row: PrinterViewRow) => void;
   testing: boolean;
 }) {
   return (
@@ -445,6 +458,14 @@ function PrinterCard({
         </button>
         <button
           type="button"
+          onClick={() => onKitchenStyle(row)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-violet-700 bg-violet-50 hover:bg-violet-100 transition-colors"
+        >
+          <ClipboardList size={13} />
+          Kitchen
+        </button>
+        <button
+          type="button"
           onClick={() => onEdit(row)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors"
         >
@@ -478,6 +499,7 @@ export default function PrintersPage() {
   const [modalInitial, setModalInitial] = useState<PrinterFormData>(EMPTY_FORM);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PrinterViewRow | null>(null);
+  const [kitchenStyleRow, setKitchenStyleRow] = useState<PrinterViewRow | null>(null);
 
   const openAdd = useCallback(() => {
     setEditId(null);
@@ -651,6 +673,7 @@ export default function PrintersPage() {
                         onTest={handleTest}
                         onEdit={openEdit}
                         onDelete={setDeleteTarget}
+                        onKitchenStyle={setKitchenStyleRow}
                         testing={testingId === row.id}
                       />
                     ))}
@@ -668,6 +691,7 @@ export default function PrintersPage() {
                   onTest={handleTest}
                   onEdit={openEdit}
                   onDelete={setDeleteTarget}
+                  onKitchenStyle={setKitchenStyleRow}
                   testing={testingId === row.id}
                 />
               ))}
@@ -695,6 +719,12 @@ export default function PrintersPage() {
           onClose={() => setDeleteTarget(null)}
         />
       )}
+
+      <KitchenTicketStyleModal
+        row={kitchenStyleRow}
+        open={kitchenStyleRow != null}
+        onClose={() => setKitchenStyleRow(null)}
+      />
     </>
   );
 }
