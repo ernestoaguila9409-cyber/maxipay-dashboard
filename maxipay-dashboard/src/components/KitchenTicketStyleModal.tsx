@@ -62,6 +62,9 @@ function SectionRow({
   );
 }
 
+/** Sample order for preview + POS test print — keep in sync with `KitchenTicketBuilder.DEMO_KITCHEN_ORDER_NUMBER` (Android). */
+const KITCHEN_STYLE_PREVIEW_ORDER_NUMBER = 265;
+
 function KitchenTicketPreview({
   printerName,
   style,
@@ -69,6 +72,13 @@ function KitchenTicketPreview({
   printerName: string;
   style: KitchenTicketStyleState;
 }) {
+  const [previewTime] = useState(() =>
+    new Date().toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    })
+  );
   const sample = useMemo(() => {
     const dw = kitchenPreviewLineWidth(style.dividerFontSize);
     const title = printerName.trim().toUpperCase() || "KITCHEN";
@@ -83,12 +93,12 @@ function KitchenTicketPreview({
 
     add(repeatDash(dw), style.dividerFontSize, style.dividerBold);
     add(title, style.titleFontSize, style.titleBold, true);
-    add(`Order #265`, style.metaFontSize, style.metaBold);
+    add(`Order #${KITCHEN_STYLE_PREVIEW_ORDER_NUMBER}`, style.metaFontSize, style.metaBold);
     add(`Type: TO GO`, style.metaFontSize, style.metaBold);
     if (!style.showTableLineOnlyForDineIn) {
       add(`Table: -`, style.metaFontSize, style.metaBold);
     }
-    add(`Time: 9:08 PM`, style.metaFontSize, style.metaBold);
+    add(`Time: ${previewTime}`, style.metaFontSize, style.metaBold);
     add(repeatDash(dw), style.dividerFontSize, style.dividerBold);
     add("", 0, false);
     add(`1x Sprite`, style.itemFontSize, style.itemBold);
@@ -103,7 +113,7 @@ function KitchenTicketPreview({
     add(repeatDash(dw), style.dividerFontSize, style.dividerBold);
 
     return lines;
-  }, [printerName, style]);
+  }, [printerName, style, previewTime]);
 
   const fontPx = (sz: KitchenFontSize) => (sz === 2 ? 17 : sz === 1 ? 13.5 : 11);
 
