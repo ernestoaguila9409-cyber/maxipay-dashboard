@@ -13,6 +13,21 @@ export const PRINTER_STATUS_TICK_MS = 5_000;
 
 export type PrinterStatus = "ONLINE" | "OFFLINE" | "UNKNOWN";
 
+export type PrinterCommandSet = "ESCPOS" | "STAR_DOT_MATRIX";
+
+export const PRINTER_COMMAND_SET_LABELS: Record<PrinterCommandSet, string> = {
+  ESCPOS: "Epson (ESC/POS)",
+  STAR_DOT_MATRIX: "Star (Dot Matrix)",
+};
+
+function parseCommandSet(raw: unknown): PrinterCommandSet {
+  if (typeof raw === "string") {
+    const u = raw.trim().toUpperCase();
+    if (u === "STAR_DOT_MATRIX") return "STAR_DOT_MATRIX";
+  }
+  return "ESCPOS";
+}
+
 export interface PrinterDocFields {
   id: string;
   name: string;
@@ -24,6 +39,8 @@ export interface PrinterDocFields {
   lastSeenMs: number | null;
   /** Kitchen chit typography; defaults when absent in Firestore. */
   kitchenTicketStyle: KitchenTicketStyleState;
+  /** ESC/POS dialect for kitchen chits; auto-detected on POS, overridable from dashboard. */
+  commandSet: PrinterCommandSet;
 }
 
 function hasToDate(v: unknown): v is Timestamp {
@@ -103,6 +120,7 @@ export function mapPrinterDocument(
     rawStatus: parseStatus(data.status),
     lastSeenMs: parseFirestoreLastSeenMillis(data),
     kitchenTicketStyle,
+    commandSet: parseCommandSet(data.commandSet),
   };
 }
 

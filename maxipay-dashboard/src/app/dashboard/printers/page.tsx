@@ -19,6 +19,8 @@ import {
 } from "@/hooks/usePrintersStatus";
 import {
   PRINTER_STATUS_TICK_MS,
+  PRINTER_COMMAND_SET_LABELS,
+  type PrinterCommandSet,
   type PrinterStatus,
 } from "@/lib/printerStatusUtils";
 import { Plus, X, FlaskConical, Pencil, Trash2, ClipboardList } from "lucide-react";
@@ -47,6 +49,43 @@ function statusLabel(s: PrinterStatus) {
   if (s === "ONLINE") return "Online";
   if (s === "OFFLINE") return "Offline";
   return "Unknown";
+}
+
+/* ─── Command set selector (inline per-row) ─── */
+
+function CommandSetSelect({ row }: { row: PrinterViewRow }) {
+  const [saving, setSaving] = useState(false);
+  const handleChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value as PrinterCommandSet;
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, "Printers", row.id), {
+        commandSet: value,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error("[Printers] commandSet update failed:", err);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <select
+      value={row.commandSet}
+      onChange={handleChange}
+      disabled={saving}
+      title="Printer command set"
+      className="text-xs border border-slate-200 rounded-lg px-1.5 py-1 bg-white text-slate-700 disabled:opacity-50"
+    >
+      {(Object.entries(PRINTER_COMMAND_SET_LABELS) as [PrinterCommandSet, string][]).map(
+        ([val, label]) => (
+          <option key={val} value={val}>
+            {label}
+          </option>
+        )
+      )}
+    </select>
+  );
 }
 
 /* ─── Add / Edit Modal ─── */
@@ -356,6 +395,9 @@ const PrinterTableRow = memo(function PrinterTableRow({
           )) : <span className="text-slate-400 text-xs">—</span>}
         </div>
       </td>
+      <td className="px-4 py-3.5">
+        <CommandSetSelect row={row} />
+      </td>
       <td className="px-4 py-3.5 text-sm text-slate-500">{row.lastSeenAgo}</td>
       <td className="px-4 py-3.5">
         <StatusBadge status={row.status} />
@@ -440,6 +482,10 @@ function PrinterCard({
               <span key={l} className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">{l}</span>
             )) : <span className="text-slate-400 text-xs">—</span>}
           </dd>
+        </div>
+        <div className="flex justify-between items-center gap-2">
+          <dt className="text-slate-500">Command set</dt>
+          <dd><CommandSetSelect row={row} /></dd>
         </div>
         <div className="flex justify-between gap-2">
           <dt className="text-slate-500">Last seen</dt>
@@ -660,6 +706,7 @@ export default function PrintersPage() {
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">IP Address</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Port</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Labels</th>
+                      <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Command Set</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Last Seen</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
