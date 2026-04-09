@@ -20,7 +20,6 @@ import com.google.android.material.textfield.TextInputLayout
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 class AddPrinterActivity : AppCompatActivity() {
@@ -36,7 +35,7 @@ class AddPrinterActivity : AppCompatActivity() {
     private lateinit var btnAddManually: MaterialButton
 
     private val adapter by lazy {
-        DiscoveredIpAdapter { printer -> showNameDialogAndSave(printer) }
+        DiscoveredIpAdapter(this) { printer -> showNameDialogAndSave(printer) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,8 +71,25 @@ class AddPrinterActivity : AppCompatActivity() {
             } catch (_: Exception) {
                 emptyList()
             }
-            showResults(found)
+            showResults(filterOutAlreadyConfiguredPrinters(found))
         }
+    }
+
+    /** IPs already saved on this device (receipt and kitchen); exclude from scan so users do not re-add the same printer. */
+    private fun configuredPrinterIpSet(): Set<String> {
+        val ips = LinkedHashSet<String>()
+        for (type in PrinterDeviceType.values()) {
+            for (p in SelectedPrinterPrefs.getAll(this, type)) {
+                p.ipAddress.trim().takeIf { it.isNotEmpty() }?.let { ips.add(it) }
+            }
+        }
+        return ips
+    }
+
+    private fun filterOutAlreadyConfiguredPrinters(found: List<DetectedPrinter>): List<DetectedPrinter> {
+        val used = configuredPrinterIpSet()
+        if (used.isEmpty()) return found
+        return found.filterNot { used.contains(it.ipAddress.trim()) }
     }
 
     private fun showResults(found: List<DetectedPrinter>) {
@@ -187,18 +203,9 @@ class AddPrinterActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    val data = mutableMapOf<String, Any>(
-                        "name" to name,
-                        "ipAddress" to printer.ipAddress,
-                        "type" to printerType.firestoreValue,
-                        "isActive" to true,
-                    )
-                    printer.model?.let { data["model"] = it }
-                    printer.manufacturer?.let { data["manufacturer"] = it }
-
-                    db.collection(FIRESTORE_PRINTERS).add(data).await()
+                    PrinterFirestoreSync.mergeRegistrationFromDetected(db, printerType, name, printer)
                 }
-                SelectedPrinterPrefs.save(
+                SelectedPrinterPrefs.add(
                     this@AddPrinterActivity,
                     printerType,
                     name = name,
@@ -224,7 +231,6 @@ class AddPrinterActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_PRINTER_TYPE = "printer_type"
-        private const val FIRESTORE_PRINTERS = "Printers"
 
         fun createIntent(context: Context, type: PrinterDeviceType): Intent =
             Intent(context, AddPrinterActivity::class.java).putExtra(EXTRA_PRINTER_TYPE, type.name)

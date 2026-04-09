@@ -21,19 +21,15 @@ class ConfigurationActivity : AppCompatActivity() {
         }
 
         findViewById<android.view.View>(R.id.optionOrderTypes).setOnClickListener {
-            startActivity(Intent(this, OrderTypesConfigureActivity::class.java))
+            startActivity(Intent(this, OrderConfigurationActivity::class.java))
         }
 
         findViewById<android.view.View>(R.id.optionTips).setOnClickListener {
-            startActivity(Intent(this, TipConfigActivity::class.java))
+            startActivity(Intent(this, TipsAndDiscountsHubActivity::class.java))
         }
 
         findViewById<android.view.View>(R.id.optionInventory).setOnClickListener {
             startActivity(Intent(this, InventoryConfigActivity::class.java))
-        }
-
-        findViewById<android.view.View>(R.id.optionDiscounts).setOnClickListener {
-            startActivity(Intent(this, DiscountsActivity::class.java))
         }
 
         findViewById<android.view.View>(R.id.optionPrintReceiptDisplay).setOnClickListener {

@@ -7,6 +7,39 @@ import com.google.firebase.firestore.DocumentSnapshot
  */
 object SplitReceiptCalculator {
 
+    /**
+     * Same structure as order line [modifiers] in Firestore (maps / nested children / legacy list pairs).
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun modifierLinesFromItemDoc(doc: DocumentSnapshot): List<String> {
+        val raw = doc.get("modifiers") as? List<*> ?: return emptyList()
+        if (raw.isEmpty()) return emptyList()
+        val lines = mutableListOf<String>()
+        fun appendModifier(item: Any?, indent: String = "") {
+            when (item) {
+                is Map<*, *> -> {
+                    val action = item["action"]?.toString() ?: "ADD"
+                    val modName = item["name"]?.toString()
+                        ?: item["first"]?.toString()
+                        ?: return
+                    lines.add(
+                        if (action == "REMOVE") "${indent}\u2022 No $modName"
+                        else "${indent}\u2022 $modName"
+                    )
+                    val children = item["children"] as? List<*>
+                    children?.forEach { ch -> appendModifier(ch, "$indent    \u21B3 ") }
+                }
+                is List<*> -> {
+                    if (item.isEmpty()) return
+                    val modName = item[0]?.toString() ?: return
+                    lines.add("${indent}\u2022 $modName")
+                }
+            }
+        }
+        raw.forEach { appendModifier(it) }
+        return lines
+    }
+
     data class OrderMoney(
         val subtotalCents: Long,
         val discountTotalCents: Long,
@@ -194,6 +227,7 @@ object SplitReceiptCalculator {
             val baseName = doc.getString("name") ?: doc.getString("itemName") ?: "Item"
             val qty = (doc.getLong("qty") ?: doc.getLong("quantity") ?: 1L).toInt()
             val displayName = if (qty > 1) "$baseName (Qty: $qty)" else baseName
+            val modLines = modifierLinesFromItemDoc(doc)
             items.add(
                 SplitReceiptLine(
                     name = displayName,
@@ -202,7 +236,8 @@ object SplitReceiptCalculator {
                     originalItemName = displayName,
                     originalLineTotalInCents = lt,
                     splitIndex = splitIndex1Based,
-                    totalSplits = n
+                    totalSplits = n,
+                    modifierLines = modLines
                 )
             )
         }
@@ -288,7 +323,14 @@ object SplitReceiptCalculator {
             val lineTotal = doc.getLong("lineTotalInCents") ?: 0L
             subGuest += lineTotal
             taxFromLines += doc.getLong("lineTaxInCents") ?: 0L
-            lines.add(SplitReceiptLine(name, qty, lineTotal))
+            lines.add(
+                SplitReceiptLine(
+                    name = name,
+                    quantity = qty,
+                    lineTotalInCents = lineTotal,
+                    modifierLines = modifierLinesFromItemDoc(doc)
+                )
+            )
         }
 
         val discGuest = if (om.subtotalCents > 0L) {

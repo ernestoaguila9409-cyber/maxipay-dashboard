@@ -442,6 +442,19 @@ function isEvenSplitShareLineEmail(line) {
     line.splitIndex != null && line.totalSplits != null;
 }
 
+/** Matches app SplitReceiptLine.modifierLines (bullet text per line). */
+function splitReceiptModifierRowsHtml(line) {
+  const raw = line && line.modifierLines;
+  if (!Array.isArray(raw) || raw.length === 0) return "";
+  let html = "";
+  raw.forEach((m) => {
+    const s = m != null ? String(m).trim() : "";
+    if (!s) return;
+    html += `<tr><td colspan="2" style="padding:2px 0 2px 12px;font-size:13px;color:#555;line-height:1.35;">${escapeHtml(s)}</td></tr>`;
+  });
+  return html;
+}
+
 function validateSplitReceiptPayload(sr) {
   if (!sr || typeof sr !== "object") return false;
   if (sr.splitIndex == null || sr.totalSplits == null) return false;
@@ -466,6 +479,7 @@ function splitReceiptItemsAndTotalsHtml(sr, tipConfig) {
         const ts = line.totalSplits;
         itemRows += `<tr><td style="padding:6px 0;">${escapeHtml(`${label} (${si}/${ts} share)`)}</td>` +
           `<td style="padding:6px 0;text-align:right;">$${centsToDisplayFromSplit(share)}</td></tr>`;
+        itemRows += splitReceiptModifierRowsHtml(line);
         const o = Number(line.originalLineTotalInCents) || 0;
         itemRows += `<tr><td colspan="2" style="padding:2px 0 8px 12px;font-size:13px;color:#666;">` +
           `Line total $${centsToDisplayFromSplit(o)}</td></tr>`;
@@ -475,6 +489,7 @@ function splitReceiptItemsAndTotalsHtml(sr, tipConfig) {
         const lbl = qty > 1 ? `${qty}x ${name}` : name;
         itemRows += `<tr><td style="padding:6px 0;">${escapeHtml(lbl)}</td>` +
           `<td style="padding:6px 0;text-align:right;">$${centsToDisplayFromSplit(share)}</td></tr>`;
+        itemRows += splitReceiptModifierRowsHtml(line);
       }
     });
   }

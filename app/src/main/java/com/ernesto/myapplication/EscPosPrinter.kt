@@ -12,6 +12,7 @@ import android.util.Log
 import android.widget.Toast
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -56,7 +57,12 @@ object EscPosPrinter {
         val text: String,
         val bold: Boolean = false,
         val fontSize: Int = 0,
-        val centered: Boolean = false
+        val centered: Boolean = false,
+        /**
+         * When true, kitchen chits on [PrinterCommandSet.STAR_DOT_MATRIX] (SP700 + two-color ribbon)
+         * print this line in red. Ignored by [PrinterCommandSet.ESCPOS] (Epson thermal).
+         */
+        val red: Boolean = false,
     )
 
     /**
@@ -118,7 +124,7 @@ object EscPosPrinter {
 
     @SuppressLint("MissingPermission")
     fun print(context: Context, segments: List<Segment>, settings: ReceiptSettings? = null) {
-        Log.d(TAG, "Print requested (${segments.size} segments) → $LANDI_BT_ADDRESS")
+        Log.d(TAG, "Print requested (${segments.size} segments) → Landi BT + optional LAN receipt")
 
         Thread {
             var logoBitmap: Bitmap? = null
@@ -126,55 +132,109 @@ object EscPosPrinter {
                 logoBitmap = downloadLogo(settings.logoUrl)
             }
 
-            var socket: BluetoothSocket? = null
-            try {
-                val adapter = BluetoothAdapter.getDefaultAdapter()
-                if (adapter == null || !adapter.isEnabled) {
-                    uiToast(context, "Bluetooth not available or disabled")
-                    return@Thread
-                }
-
-                val device = adapter.getRemoteDevice(LANDI_BT_ADDRESS)
-                Log.d(TAG, "Device: ${device.name ?: "(null)"}")
-
-                socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
-                socket.connect()
-                Log.d(TAG, "Connected")
-
-                val out = socket.outputStream
-                out.write(INIT)
-
-                if (logoBitmap != null) {
-                    out.write(ALIGN_CENTER)
-                    out.write(SIZE_NORMAL)
-                    out.write(BOLD_OFF)
-                    printBitmap(out, logoBitmap)
-                    out.write(LF)
-                }
-
-                for (seg in segments) {
-                    out.write(if (seg.centered) ALIGN_CENTER else ALIGN_LEFT)
-                    out.write(ReceiptSettings.escPosSizeBytes(seg.fontSize))
-                    out.write(if (seg.bold) BOLD_ON else BOLD_OFF)
-                    out.printLine(seg.text)
-                }
-
-                out.write(SIZE_NORMAL)
-                out.write(BOLD_OFF)
-                out.write(ALIGN_LEFT)
-                repeat(4) { out.write(LF) }
-                out.write(CUT)
-                out.flush()
-
-                Log.d(TAG, "Print complete")
-                uiToast(context, "Receipt printed!")
+            val payload = try {
+                buildReceiptEscPosPayload(segments, logoBitmap)
             } catch (e: Exception) {
-                Log.e(TAG, "Print failed: ${e.message}", e)
+                Log.e(TAG, "Build receipt payload failed: ${e.message}", e)
                 uiToast(context, "Print failed: ${e.message}")
-            } finally {
-                try { socket?.close() } catch (_: Exception) {}
+                return@Thread
             }
+
+            printPayloadToLandiBluetooth(context, payload)
+            printPayloadToLanReceiptPrinterIfConfigured(context, payload)
         }.start()
+    }
+
+    private fun buildReceiptEscPosPayload(segments: List<Segment>, logoBitmap: Bitmap?): ByteArray {
+        val bos = ByteArrayOutputStream()
+        val out: OutputStream = bos
+        out.write(INIT)
+        if (logoBitmap != null) {
+            out.write(ALIGN_CENTER)
+            out.write(SIZE_NORMAL)
+            out.write(BOLD_OFF)
+            printBitmap(out, logoBitmap)
+            out.write(LF)
+        }
+        for (seg in segments) {
+            out.write(if (seg.centered) ALIGN_CENTER else ALIGN_LEFT)
+            out.write(ReceiptSettings.escPosSizeBytes(seg.fontSize))
+            out.write(if (seg.bold) BOLD_ON else BOLD_OFF)
+            out.printLine(seg.text)
+        }
+        out.write(SIZE_NORMAL)
+        out.write(BOLD_OFF)
+        out.write(ALIGN_LEFT)
+        repeat(4) { out.write(LF) }
+        out.write(CUT)
+        out.flush()
+        return bos.toByteArray()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun printPayloadToLandiBluetooth(context: Context, payload: ByteArray) {
+        var socket: BluetoothSocket? = null
+        try {
+            val adapter = BluetoothAdapter.getDefaultAdapter()
+            if (adapter == null || !adapter.isEnabled) {
+                uiToast(context, "Bluetooth not available or disabled")
+                return
+            }
+
+            val device = adapter.getRemoteDevice(LANDI_BT_ADDRESS)
+            Log.d(TAG, "Landi device: ${device.name ?: "(null)"}")
+
+            socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+            socket.connect()
+            Log.d(TAG, "Landi connected")
+
+            socket.outputStream.apply {
+                write(payload)
+                flush()
+            }
+
+            Log.d(TAG, "Landi print complete")
+            uiToast(context, "Receipt printed!")
+        } catch (e: Exception) {
+            Log.e(TAG, "Landi print failed: ${e.message}", e)
+            uiToast(context, "Print failed: ${e.message}")
+        } finally {
+            try {
+                socket?.close()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun printPayloadToLanReceiptPrinterIfConfigured(context: Context, payload: ByteArray) {
+        val receipts = SelectedPrinterPrefs.getAll(context, PrinterDeviceType.RECEIPT)
+        if (receipts.isEmpty()) return
+
+        for (receipt in receipts) {
+            var socket: Socket? = null
+            try {
+                socket = Socket()
+                socket.connect(InetSocketAddress(receipt.ipAddress, 9100), 10_000)
+                socket.soTimeout = 30_000
+                socket.outputStream.apply {
+                    write(payload)
+                    flush()
+                }
+                Log.d(TAG, "LAN receipt copy sent to ${receipt.ipAddress}")
+            } catch (e: Exception) {
+                Log.w(TAG, "LAN receipt printer failed (Landi unaffected): ${e.message}", e)
+                uiToast(
+                    context,
+                    context.getString(R.string.receipt_lan_copy_failed, e.message ?: ""),
+                    Toast.LENGTH_SHORT,
+                )
+            } finally {
+                try {
+                    socket?.close()
+                } catch (_: Exception) {
+                }
+            }
+        }
     }
 
     // ── Test receipt ──────────────────────────────────────────────
@@ -227,6 +287,159 @@ object EscPosPrinter {
                 uiToast(
                     context,
                     context.getString(R.string.printer_test_failed, e.message ?: ""),
+                )
+            } finally {
+                try {
+                    socket?.close()
+                } catch (_: Exception) {
+                }
+            }
+        }.start()
+    }
+
+    // ── Star Dot Matrix commands (SP700 / SP742 kitchen impact printers) ──────
+    // These are separate 2–3 byte commands that avoid GS (0x1D) and the multi-bit
+    // ESC ! (0x1B 0x21) which the SP700 does not implement.
+
+    /**
+     * Star Line Mode alignment: `ESC GS a n` (4-byte).
+     * The SP700 does NOT recognize the 3-byte ESC/POS `ESC a n` (0x1B 0x61 n) —
+     * sending it causes the unrecognized bytes to print as visible garbage.
+     */
+    private val STAR_ALIGN_LEFT   = byteArrayOf(0x1B, 0x1D, 0x61, 0x00)
+    private val STAR_ALIGN_CENTER = byteArrayOf(0x1B, 0x1D, 0x61, 0x01)
+
+    /**
+     * ESC E 1 — emphasized ON. Star treats `ESC E` as a 2-byte toggle and ignores the
+     * trailing `0x01` (SOH). Including the parameter makes this safe if the payload is
+     * accidentally sent to an Epson printer (`ESC E n` is 3-byte on ESC/POS).
+     */
+    private val STAR_BOLD_ON  = byteArrayOf(0x1B, 0x45, 0x01)
+    /** ESC F — emphasized OFF (Star: 2-byte, no parameter; also recognized on most Epson). */
+    private val STAR_BOLD_OFF = byteArrayOf(0x1B, 0x46)
+    /**
+     * Star Line Mode two-color ribbon commands (SP700 black/red):
+     * `ESC 4` — select red ink, `ESC 5` — cancel red (select black).
+     * These are 2-byte commands with no parameter; Epson path never sends them.
+     */
+    private val STAR_COLOR_BLACK = byteArrayOf(0x1B, 0x35)
+    private val STAR_COLOR_RED  = byteArrayOf(0x1B, 0x34)
+    /** ESC h n — select character height: 0 = normal, 1 = double. */
+    private fun starHeight(double: Boolean) = byteArrayOf(0x1B, 0x68, if (double) 0x01 else 0x00)
+    /** ESC W n — double-width mode: 0 = off, 1 = on. */
+    private fun starWidth(double: Boolean) = byteArrayOf(0x1B, 0x57, if (double) 0x01 else 0x00)
+
+    /**
+     * Writes Star Dot Matrix size + bold commands for one line.
+     * - fontSize 0 → normal height, normal width
+     * - fontSize 1 → double height, normal width  (Large)
+     * - fontSize 2 → double height + double width  (X-Large)
+     */
+    private fun OutputStream.writeStarStyle(fontSize: Int, bold: Boolean) {
+        val sz = fontSize.coerceIn(0, 2)
+        write(starHeight(sz >= 1))
+        write(starWidth(sz >= 2))
+        write(if (bold) STAR_BOLD_ON else STAR_BOLD_OFF)
+    }
+
+    /**
+     * Kitchen chit payload routed by [commandSet]:
+     * - [PrinterCommandSet.ESCPOS]: `ESC !` combined print-mode (Epson TM-T88 etc.)
+     * - [PrinterCommandSet.STAR_DOT_MATRIX]: `ESC h` + `ESC W` + `ESC E`/`ESC F` (Star SP700)
+     */
+    fun buildKitchenLanPayload(
+        segments: List<Segment>,
+        commandSet: PrinterCommandSet = PrinterCommandSet.ESCPOS,
+    ): ByteArray {
+        return when (commandSet) {
+            PrinterCommandSet.STAR_DOT_MATRIX -> buildKitchenPayloadStar(segments)
+            PrinterCommandSet.ESCPOS -> buildKitchenPayloadEpson(segments)
+        }
+    }
+
+    /**
+     * `ESC ! n` — sets font, bold, double-height, and double-width in a single command.
+     * More reliable than separate `GS ! n` + `ESC E n` on many Epson thermal printers.
+     */
+    private fun escPosPrintMode(fontSize: Int, bold: Boolean): ByteArray {
+        var n = 0
+        if (bold) n = n or 0x08
+        when (fontSize.coerceIn(0, 2)) {
+            1 -> n = n or 0x10
+            2 -> n = n or 0x30
+        }
+        return byteArrayOf(0x1B, 0x21, n.toByte())
+    }
+
+    private fun buildKitchenPayloadEpson(segments: List<Segment>): ByteArray {
+        val bos = ByteArrayOutputStream()
+        val out: OutputStream = bos
+        out.write(INIT)
+        for (seg in segments) {
+            out.write(if (seg.centered) ALIGN_CENTER else ALIGN_LEFT)
+            out.write(escPosPrintMode(seg.fontSize, seg.bold))
+            out.printLine(seg.text)
+        }
+        out.write(byteArrayOf(0x1B, 0x21, 0x00))
+        out.write(ALIGN_LEFT)
+        out.write(byteArrayOf(0x1B, 0x64, 4))
+        out.flush()
+        return bos.toByteArray()
+    }
+
+    private fun buildKitchenPayloadStar(segments: List<Segment>): ByteArray {
+        val bos = ByteArrayOutputStream()
+        val out: OutputStream = bos
+        out.write(INIT)
+        out.write(LF)
+        for (seg in segments) {
+            out.write(if (seg.centered) STAR_ALIGN_CENTER else STAR_ALIGN_LEFT)
+            out.write(if (seg.red) STAR_COLOR_RED else STAR_COLOR_BLACK)
+            out.writeStarStyle(seg.fontSize, seg.bold)
+            out.printLine(seg.text)
+        }
+        out.write(STAR_COLOR_BLACK)
+        out.write(starHeight(false))
+        out.write(starWidth(false))
+        out.write(STAR_BOLD_OFF)
+        out.write(STAR_ALIGN_LEFT)
+        out.write(LF)
+        out.write(byteArrayOf(0x1B, 0x64, 1))
+        out.flush()
+        return bos.toByteArray()
+    }
+
+    /**
+     * Styled kitchen chit to one LAN printer (no Bluetooth, no cut — feed only).
+     */
+    fun printKitchenChitToLan(
+        context: Context,
+        ipAddress: String,
+        port: Int = 9100,
+        segments: List<Segment>,
+        commandSet: PrinterCommandSet = PrinterCommandSet.ESCPOS,
+        showSuccessToast: Boolean = false,
+    ) {
+        Thread {
+            var socket: Socket? = null
+            try {
+                val payload = buildKitchenLanPayload(segments, commandSet)
+                socket = Socket()
+                socket.connect(InetSocketAddress(ipAddress, port), 8_000)
+                socket.soTimeout = 15_000
+                socket.outputStream.apply {
+                    write(payload)
+                    flush()
+                }
+                if (showSuccessToast) {
+                    uiToast(context, context.getString(R.string.printer_test_sent))
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Kitchen LAN print failed for $ipAddress: ${e.message}", e)
+                uiToast(
+                    context,
+                    context.getString(R.string.kitchen_print_failed, ipAddress, e.message ?: ""),
+                    Toast.LENGTH_SHORT,
                 )
             } finally {
                 try {
@@ -370,15 +583,36 @@ object EscPosPrinter {
 
     // ── Helpers ───────────────────────────────────────────────────
 
+    /**
+     * Many thermal printers treat text as a single-byte code page even when the app sends UTF-8.
+     * Unicode bullets, arrows, and dashes then print as garbage (e.g. "ΓC6" instead of "•").
+     * Use this for lines that may contain those characters (e.g. modifier bullets from Firestore).
+     */
+    fun sanitizeForThermalText(s: String): String {
+        if (s.isEmpty()) return s
+        return buildString(s.length) {
+            for (ch in s) {
+                when (ch) {
+                    '\u2022', '\u2023', '\u2043', '\u2219' -> append('-') // bullets
+                    '\u00B7' -> append('-') // middle dot
+                    '\u21B3', '\u2192', '\u2190' -> append('>') // arrows used for nested mods
+                    '\u2013', '\u2014' -> append('-') // en/em dash
+                    '\u00A0' -> append(' ') // nbsp
+                    else -> append(ch)
+                }
+            }
+        }
+    }
+
     private fun OutputStream.printLine(text: String) {
         write(text.toByteArray(Charsets.UTF_8))
         write(LF)
     }
 
-    private fun uiToast(context: Context, msg: String) {
+    private fun uiToast(context: Context, msg: String, length: Int = Toast.LENGTH_LONG) {
         if (context is android.app.Activity) {
             context.runOnUiThread {
-                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                Toast.makeText(context, msg, length).show()
             }
         }
     }

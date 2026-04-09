@@ -1,5 +1,6 @@
 package com.ernesto.myapplication
 
+import android.content.Context
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -7,6 +8,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 
 class DiscoveredIpAdapter(
+    private val context: Context,
     private val onPrinterClick: (DetectedPrinter) -> Unit,
 ) : RecyclerView.Adapter<DiscoveredIpAdapter.VH>() {
 
@@ -26,8 +28,22 @@ class DiscoveredIpAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val printer = items[position]
-        holder.txtIp.text = printer.ipAddress
-        holder.txtInfo.text = printer.displayLabel
+        val ip = printer.ipAddress.trim()
+        val saved = PrinterDeviceType.values()
+            .flatMap { SelectedPrinterPrefs.getAll(context, it) }
+            .firstOrNull { it.ipAddress.trim() == ip }
+
+        if (saved != null && saved.name.isNotBlank()) {
+            holder.txtIp.text = saved.name
+            holder.txtInfo.text = context.getString(
+                R.string.discovered_printer_saved_line,
+                ip,
+                printer.displayLabel,
+            )
+        } else {
+            holder.txtIp.text = printer.ipAddress
+            holder.txtInfo.text = printer.displayLabel
+        }
         holder.itemView.setOnClickListener { onPrinterClick(printer) }
     }
 

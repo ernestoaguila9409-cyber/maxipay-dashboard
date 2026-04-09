@@ -8,4 +8,11 @@
 
     <style name="Theme.MyApplication" parent="Base.Theme.MyApplication" />
 
+    <!-- Modifier option dialogs: brand-colored buttons and controls (IME still system-owned). -->
+    <style name="ThemeOverlay.MyApplication.MaterialAlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorOnSurface">@color/pos_primary_text</item>
+        <item name="android:colorAccent">@color/brand_primary</item>
+    </style>
+
 </resources>

@@ -10,4 +10,19 @@
     <color name="box_stroke_resting">#79747E</color>
     <!-- Light brand tint for text selection highlight -->
     <color name="brand_primary_highlight">#335E4085</color>
+    <color name="printer_status_online">#2E7D32</color>
+    <color name="printer_status_offline">#C62828</color>
+    <color name="printer_status_checking">#757575</color>
+
+    <!-- Embedded POS keyboard (Square / Clover–style) -->
+    <color name="pos_keyboard_panel_bg">#F8F9FB</color>
+    <color name="pos_key_fill">#FFFFFF</color>
+    <color name="pos_key_border">#E5E7EB</color>
+    <color name="pos_key_text_primary">#111827</color>
+    <color name="pos_key_ripple">#1A000000</color>
+    <color name="pos_key_special_fill">#F3F4F6</color>
+    <color name="pos_key_pressed_overlay">#E5E7EB</color>
+    <color name="pos_key_enter_fill">#EDE9FE</color>
+    <color name="pos_key_enter_stroke">#C4B5FD</color>
+    <color name="pos_key_shift_active_fill">#DDD6FE</color>
 </resources>

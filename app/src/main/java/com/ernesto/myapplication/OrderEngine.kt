@@ -4,6 +4,7 @@ import com.ernesto.myapplication.OrderModifier
 import com.ernesto.myapplication.OrderNumberGenerator
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import java.util.Date
 
 class OrderEngine(private val db: FirebaseFirestore) {
@@ -19,7 +20,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
         val modifiers: List<OrderModifier>,
         val guestNumber: Int = 0,
         val taxMode: String = "INHERIT",
-        val taxIds: List<String> = emptyList()
+        val taxIds: List<String> = emptyList(),
+        val printerLabel: String? = null,
     )
 
     /** Create an order if orderId is null; otherwise keep existing orderId */
@@ -160,6 +162,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
         )
         if (input.taxIds.isNotEmpty()) itemMap["taxIds"] = input.taxIds
         if (input.guestNumber > 0) itemMap["guestNumber"] = input.guestNumber
+        val pl = input.printerLabel?.trim()
+        if (!pl.isNullOrEmpty()) itemMap["printerLabel"] = pl
 
         val orderRef = db.collection("Orders").document(orderId)
 
@@ -171,7 +175,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
 
         orderRef.collection("items")
             .document(lineKey)
-            .set(itemMap)
+            .set(itemMap, SetOptions.merge())
             .addOnSuccessListener {
                 pendingWrites--
                 drainFlushCallbacks()

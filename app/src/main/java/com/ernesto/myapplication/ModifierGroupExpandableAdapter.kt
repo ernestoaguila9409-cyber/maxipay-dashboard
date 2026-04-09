@@ -4,10 +4,12 @@ import android.app.AlertDialog
 import android.graphics.Typeface
 import android.text.InputType
 import android.view.ViewGroup
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Locale
 
@@ -257,7 +259,6 @@ class ModifierGroupExpandableAdapter(
         context: android.content.Context,
         group: ModifierGroupModel
     ) {
-
         val layout = LinearLayout(context)
         layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(40, 20, 40, 10)
@@ -270,29 +271,49 @@ class ModifierGroupExpandableAdapter(
         priceInput.inputType =
             InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
 
+        val removeCheckbox = CheckBox(context)
+        removeCheckbox.text = "Remove-style (no charge)"
+        if (group.groupType == "REMOVE") {
+            removeCheckbox.isChecked = true
+            removeCheckbox.isEnabled = false
+            priceInput.isEnabled = false
+        }
+
         layout.addView(nameInput)
         layout.addView(priceInput)
+        layout.addView(removeCheckbox)
 
         AlertDialog.Builder(context)
             .setTitle("Add Option")
             .setView(layout)
             .setPositiveButton("Save") { _, _ ->
-
                 val name = nameInput.text.toString().trim()
-                val price = priceInput.text.toString().toDoubleOrNull() ?: 0.0
+                val price = if (group.groupType == "REMOVE" || removeCheckbox.isChecked) {
+                    0.0
+                } else {
+                    priceInput.text.toString().toDoubleOrNull() ?: 0.0
+                }
+                val action = if (group.groupType == "REMOVE" || removeCheckbox.isChecked) "REMOVE" else "ADD"
 
                 if (name.isNotEmpty()) {
-
-                    val option = hashMapOf(
+                    val optId = "opt_${System.currentTimeMillis()}_${
+                        java.util.UUID.randomUUID().toString().take(5)
+                    }"
+                    val option = hashMapOf<String, Any>(
+                        "id" to optId,
                         "name" to name,
                         "price" to price,
-                        "groupId" to group.id
+                        "action" to action,
                     )
-
-                    db.collection("ModifierOptions")
-                        .add(option)
-                        .addOnSuccessListener {
-                            notifyDataSetChanged()
+                    db.collection("ModifierGroups")
+                        .document(group.id)
+                        .update("options", FieldValue.arrayUnion(option))
+                        .addOnSuccessListener { notifyDataSetChanged() }
+                        .addOnFailureListener {
+                            option["groupId"] = group.id
+                            db.collection("ModifierOptions")
+                                .add(option)
+                                .addOnSuccessListener { notifyDataSetChanged() }
                         }
                 }
             }

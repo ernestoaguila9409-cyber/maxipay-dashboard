@@ -10,7 +10,7 @@ class OrderTypesConfigureActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_order_types_configure)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Order Types Configure"
+        supportActionBar?.title = "Order Types configuration"
 
         findViewById<android.view.View>(R.id.optionBarTab).setOnClickListener {
             startActivity(Intent(this, BarTabConfigureActivity::class.java))

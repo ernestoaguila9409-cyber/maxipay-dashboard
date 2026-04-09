@@ -2,7 +2,6 @@ package com.ernesto.myapplication
 
 import android.app.Activity
 import android.content.Context
-import android.graphics.Color
 import android.text.InputType
 import android.util.TypedValue
 import android.view.ViewGroup
@@ -13,13 +12,14 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.R as MTR
-import com.google.android.material.button.MaterialButton
+import androidx.core.content.ContextCompat
 
 /**
- * Email entry with an in-app keypad (no system IME), matching POS / bar-seat keyboard styling.
+ * Email and guest-name entry with an in-app keypad (no system IME), matching POS / bar-seat keyboard styling.
  */
 object ReceiptEmailKeypadDialog {
+
+    enum class KeypadVariant { EMAIL, GUEST_NAME }
 
     fun insertAtCaret(edit: EditText, token: String) {
         val ed = edit.text ?: return
@@ -56,178 +56,37 @@ object ReceiptEmailKeypadDialog {
     ).toInt()
 
     /**
-     * Vertical [LinearLayout] of email-oriented keys; calls [onInsert] with a character or "⌫" / "SPACE".
+     * Vertical [LinearLayout] of keys; calls [onInsert] with a character or "⌫" / "SPACE".
+     * [KeypadVariant.GUEST_NAME] omits email-specific keys (uses hyphen, apostrophe, period row).
+     * Sizing parameters are kept for API compatibility; layout uses [R.dimen.pos_key_*].
      */
-    fun buildKeypadView(context: Context, onInsert: (String) -> Unit): LinearLayout {
-        val panel = LinearLayout(context).apply {
+    fun buildKeypadView(
+        context: Context,
+        variant: KeypadVariant = KeypadVariant.EMAIL,
+        keyMinHeightDp: Float = 36f,
+        keyMarginDp: Float = 2f,
+        keyTextSizeSp: Float = 15f,
+        keyTextSizeCompactSp: Float = 12f,
+        panelPaddingHorizontalDp: Float = 6f,
+        panelPaddingVerticalDp: Float = 8f,
+        onInsert: (String) -> Unit,
+    ): LinearLayout {
+        val posVariant = when (variant) {
+            KeypadVariant.EMAIL -> PosQwertyKeypad.Variant.EMAIL
+            KeypadVariant.GUEST_NAME -> PosQwertyKeypad.Variant.GUEST_NAME
+        }
+        val keys = PosQwertyKeypad.build(context, posVariant, onInsert)
+        return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#ECEFF4"))
-            setPadding(dp(context, 6f), dp(context, 8f), dp(context, 6f), dp(context, 8f))
-        }
-
-        val letterButtons = mutableListOf<MaterialButton>()
-        var capsOn = false
-        val m = dp(context, 2f)
-        val btnH = dp(context, 36f)
-
-        fun refreshCapsLabels() {
-            for (btn in letterButtons) {
-                val k = btn.tag as? String ?: continue
-                btn.text = if (capsOn) k.uppercase() else k
-            }
-        }
-
-        fun addRow(keys: List<String>) {
-            val row = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(
+            setBackgroundColor(ContextCompat.getColor(context, R.color.pos_keyboard_panel_bg))
+            addView(
+                keys,
+                LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            }
-            val w = 1f / keys.size.coerceAtLeast(1)
-            for (k in keys) {
-                val isLetter = k.length == 1 && k[0].isLetter()
-                val display = if (isLetter && capsOn) k.uppercase() else k
-                val btn = MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
-                    text = display
-                    tag = if (isLetter) k else null
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, if (k.length > 2) 12f else 15f)
-                    minimumHeight = btnH
-                    minimumWidth = 0
-                    insetTop = 0
-                    insetBottom = 0
-                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, w)
-                        .apply { setMargins(m, m, m, m) }
-                    setOnClickListener {
-                        when (k) {
-                            "⌫" -> onInsert("⌫")
-                            else -> {
-                                val ch = if (isLetter && capsOn) k.uppercase() else k
-                                onInsert(ch)
-                            }
-                        }
-                    }
-                }
-                if (isLetter) letterButtons.add(btn)
-                row.addView(btn)
-            }
-            panel.addView(row)
-        }
-
-        addRow(listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0"))
-        addRow(listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"))
-        addRow(listOf("a", "s", "d", "f", "g", "h", "j", "k", "l"))
-
-        val zRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
             )
         }
-        zRow.addView(
-            MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
-                text = "⇧"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
-                minimumHeight = btnH
-                minimumWidth = 0
-                insetTop = 0
-                insetBottom = 0
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f)
-                    .apply { setMargins(m, m, m, m) }
-                setOnClickListener {
-                    capsOn = !capsOn
-                    text = if (capsOn) "⇩" else "⇧"
-                    refreshCapsLabels()
-                }
-            }
-        )
-        for (k in listOf("z", "x", "c", "v", "b", "n", "m")) {
-            val btn = MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
-                text = k
-                tag = k
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                minimumHeight = btnH
-                minimumWidth = 0
-                insetTop = 0
-                insetBottom = 0
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    .apply { setMargins(m, m, m, m) }
-                setOnClickListener {
-                    val ch = if (capsOn) k.uppercase() else k
-                    onInsert(ch)
-                }
-            }
-            letterButtons.add(btn)
-            zRow.addView(btn)
-        }
-        zRow.addView(
-            MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
-                text = "⌫"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                minimumHeight = btnH
-                minimumWidth = 0
-                insetTop = 0
-                insetBottom = 0
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f)
-                    .apply { setMargins(m, m, m, m) }
-                setOnClickListener { onInsert("⌫") }
-            }
-        )
-        panel.addView(zRow)
-
-        addRow(listOf("@", ".", "_", "-", "+"))
-
-        val bottomRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        }
-        bottomRow.addView(
-            MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
-                text = ".com"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                minimumHeight = btnH
-                minimumWidth = 0
-                insetTop = 0
-                insetBottom = 0
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.4f)
-                    .apply { setMargins(m, m, m, m) }
-                setOnClickListener { onInsert(".com") }
-            }
-        )
-        bottomRow.addView(
-            MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
-                text = "Space"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                minimumHeight = btnH
-                minimumWidth = 0
-                insetTop = 0
-                insetBottom = 0
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f)
-                    .apply { setMargins(m, m, m, m) }
-                setOnClickListener { onInsert("SPACE") }
-            }
-        )
-        bottomRow.addView(
-            MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
-                text = "⌫"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                minimumHeight = btnH
-                minimumWidth = 0
-                insetTop = 0
-                insetBottom = 0
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.9f)
-                    .apply { setMargins(m, m, m, m) }
-                setOnClickListener { onInsert("⌫") }
-            }
-        )
-        panel.addView(bottomRow)
-
-        return panel
     }
 
     fun show(

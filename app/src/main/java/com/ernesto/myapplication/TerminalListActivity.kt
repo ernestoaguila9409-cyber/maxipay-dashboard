@@ -13,6 +13,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -27,6 +28,8 @@ class TerminalListActivity : AppCompatActivity() {
         private const val TAG = "TerminalHealth"
         private const val SPIN_BASE_URL = "https://spinpos.net/v2"
         private const val HEALTH_CHECK_INTERVAL_MS = 10_000L
+        /** Min interval between Firestore lastSeen writes while terminal stays ONLINE (avoids spam). */
+        private const val LAST_SEEN_PERSIST_INTERVAL_MS = 45_000L
 
         private val OFFLINE_MESSAGES = listOf(
             "route not found",
@@ -52,6 +55,7 @@ class TerminalListActivity : AppCompatActivity() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var healthCheckRunnable: Runnable? = null
+    private val lastSeenFirestoreWrittenAt = mutableMapOf<String, Long>()
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -200,7 +204,9 @@ class TerminalListActivity : AppCompatActivity() {
         if (isOnline) {
             terminal.status = "ONLINE"
             terminal.lastSeen = now
-            if (!wasOnline) persistStatusToFirestore(terminal.id, "ONLINE", now)
+            // Always refresh Firestore lastSeen while online (throttled), so "Last seen" is not
+            // stuck at the last OFFLINE→ONLINE transition from days ago.
+            persistOnlineLastSeenToFirestore(terminal.id, now, force = !wasOnline)
         } else {
             terminal.status = "OFFLINE"
             if (wasOnline) persistStatusToFirestore(terminal.id, "OFFLINE", terminal.lastSeen)
@@ -209,6 +215,13 @@ class TerminalListActivity : AppCompatActivity() {
         if (isOnline != wasOnline) {
             mainHandler.post { adapter.notifyDataSetChanged() }
         }
+    }
+
+    private fun persistOnlineLastSeenToFirestore(terminalId: String, nowMs: Long, force: Boolean) {
+        val lastWrite = lastSeenFirestoreWrittenAt[terminalId] ?: 0L
+        if (!force && nowMs - lastWrite < LAST_SEEN_PERSIST_INTERVAL_MS) return
+        persistStatusToFirestore(terminalId, "ONLINE", nowMs)
+        lastSeenFirestoreWrittenAt[terminalId] = nowMs
     }
 
     // ── Firestore persistence ──────────────────────────────────────
@@ -234,12 +247,7 @@ class TerminalListActivity : AppCompatActivity() {
             .addOnSuccessListener { snap ->
                 terminals.clear()
                 for (doc in snap.documents) {
-                    val lastSeenTimestamp = doc.get("lastSeen")
-                    val lastSeenMs = when (lastSeenTimestamp) {
-                        is Timestamp -> lastSeenTimestamp.toDate().time
-                        is Number -> lastSeenTimestamp.toLong()
-                        else -> null
-                    }
+                    val lastSeenMs = readLastSeenMillis(doc)
                     terminals.add(
                         Terminal(
                             id = doc.id,
@@ -266,6 +274,28 @@ class TerminalListActivity : AppCompatActivity() {
             .addOnFailureListener {
                 Toast.makeText(this, "Failed to load terminals: ${it.message}", Toast.LENGTH_LONG).show()
             }
+    }
+
+    /**
+     * Normalize Firestore lastSeen to epoch millis (UTC). Handles Timestamp, legacy Date,
+     * and numeric seconds vs milliseconds from dashboard/API.
+     */
+    private fun readLastSeenMillis(doc: DocumentSnapshot): Long? {
+        doc.getTimestamp("lastSeen")?.let { return it.toDate().time }
+        @Suppress("DEPRECATION")
+        doc.getDate("lastSeen")?.let { return it.time }
+        return when (val raw = doc.get("lastSeen")) {
+            is Timestamp -> raw.toDate().time
+            is Number -> normalizeLastSeenNumber(raw.toLong())
+            else -> null
+        }
+    }
+
+    /**
+     * Values in ~1e9..1e10 are almost certainly Unix **seconds**; larger values are **ms**.
+     */
+    private fun normalizeLastSeenNumber(n: Long): Long {
+        return if (n in 1_000_000_000L until 10_000_000_000L) n * 1000L else n
     }
 
     override fun onSupportNavigateUp(): Boolean {

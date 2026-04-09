@@ -86,6 +86,7 @@ class CategoryAdapter(
     private fun bindCategory(holder: CategoryViewHolder, category: CategoryModel, position: Int) {
         val isSelected = position == selectedPosition
 
+        // Category name only in the list; kitchen label is for routing (long-press → Kitchen Label).
         holder.nameText.text = category.name
         holder.nameText.setTypeface(null, if (isSelected) Typeface.BOLD else Typeface.NORMAL)
         holder.nameText.setTextColor(
@@ -143,14 +144,16 @@ class CategoryAdapter(
     override fun getItemCount(): Int = rows.size
 
     private fun showCategoryOptions(category: CategoryModel) {
-        val options = arrayOf("Edit", "Delete")
+        val labelSuffix = if (category.kitchenLabel.isNotEmpty()) " (${category.kitchenLabel})" else ""
+        val options = arrayOf("Edit", "Kitchen Label$labelSuffix", "Delete")
 
         AlertDialog.Builder(context)
             .setTitle(category.name)
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> showEditDialog(category)
-                    1 -> deleteCategory(category.id)
+                    1 -> showKitchenLabelPicker(category)
+                    2 -> deleteCategory(category.id)
                 }
             }
             .show()
@@ -214,6 +217,44 @@ class CategoryAdapter(
                             onDataChanged()
                         }
                 }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showKitchenLabelPicker(category: CategoryModel) {
+        val available = KitchenRoutingLabelsFirestore
+            .labelsForItemAssignmentPicker(context, listOfNotNull(category.kitchenLabel.takeIf { it.isNotEmpty() }))
+        if (available.isEmpty()) {
+            Toast.makeText(context, "No kitchen labels configured on any printer", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val current = PrinterLabelKey.normalize(category.kitchenLabel)
+        val names = arrayOf("None") + available.toTypedArray()
+        val checkedIndex = if (current.isEmpty()) 0
+            else available.indexOfFirst { PrinterLabelKey.normalize(it) == current } + 1
+
+        AlertDialog.Builder(context)
+            .setTitle("Kitchen Label — ${category.name}")
+            .setSingleChoiceItems(names, checkedIndex.coerceAtLeast(0), null)
+            .setPositiveButton("Save") { dialog, _ ->
+                val selected = (dialog as AlertDialog).listView.checkedItemPosition
+                val label = if (selected <= 0) "" else available[selected - 1]
+                val updates = if (label.isEmpty()) {
+                    mapOf("kitchenLabel" to com.google.firebase.firestore.FieldValue.delete())
+                } else {
+                    mapOf("kitchenLabel" to label)
+                }
+                db.collection("Categories").document(category.id).update(updates)
+                    .addOnSuccessListener {
+                        Toast.makeText(context,
+                            if (label.isEmpty()) "Kitchen label removed" else "Label set to \"$label\"",
+                            Toast.LENGTH_SHORT).show()
+                        onDataChanged()
+                    }
+                    .addOnFailureListener { e ->
+                        Toast.makeText(context, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
             }
             .setNegativeButton("Cancel", null)
             .show()

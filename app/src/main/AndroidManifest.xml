@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <application
+        android:name=".PosApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label=""
@@ -93,9 +94,19 @@
             android:parentActivityName=".ConfigurationActivity" />
 
         <activity
-            android:name=".OrderTypesConfigureActivity"
+            android:name=".OrderConfigurationActivity"
             android:exported="false"
             android:parentActivityName=".ConfigurationActivity" />
+
+        <activity
+            android:name=".KitchenOrderConfigurationActivity"
+            android:exported="false"
+            android:parentActivityName=".OrderConfigurationActivity" />
+
+        <activity
+            android:name=".OrderTypesConfigureActivity"
+            android:exported="false"
+            android:parentActivityName=".OrderConfigurationActivity" />
 
         <activity
             android:name=".ToGoConfigureActivity"
@@ -117,7 +128,8 @@
             android:parentActivityName=".BarTabConfigureActivity" />
         <activity
             android:name=".MenuActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:windowSoftInputMode="adjustNothing" />
         <activity
             android:name=".MenuOnlyActivity"
             android:exported="false" />
@@ -163,9 +175,14 @@
             android:parentActivityName=".MainActivity" />
 
         <activity
-            android:name=".TipConfigActivity"
+            android:name=".TipsAndDiscountsHubActivity"
             android:exported="false"
             android:parentActivityName=".ConfigurationActivity" />
+
+        <activity
+            android:name=".TipConfigActivity"
+            android:exported="false"
+            android:parentActivityName=".TipsAndDiscountsHubActivity" />
         <activity
             android:name=".TipAdjustmentActivity"
             android:exported="false" />
@@ -184,6 +201,10 @@
             android:name=".PrintersActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity" />
+        <activity
+            android:name=".PrinterDetailActivity"
+            android:exported="false"
+            android:parentActivityName=".PrintersActivity" />
         <activity
             android:name=".PrinterListActivity"
             android:exported="false"
@@ -211,7 +232,9 @@
             android:name=".ModifierSalesReportActivity"
             android:exported="false"
             android:parentActivityName=".MenuPerformanceActivity" />
-        <activity android:name=".GlobalModifierActivity" />
+        <activity
+            android:name=".GlobalModifierActivity"
+            android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".CashFlowActivity"
             android:exported="false"
@@ -221,6 +244,13 @@
             android:exported="false" />
         <activity android:name=".SelectTaxesActivity"
             android:exported="false" />
+        <activity
+            android:name=".SelectPrinterLabelActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ItemDetailActivity"
+            android:exported="false"
+            android:parentActivityName=".MenuOnlyActivity" />
 
         <activity
             android:name=".InventoryConfigActivity"
@@ -230,7 +260,7 @@
         <activity
             android:name=".DiscountsActivity"
             android:exported="false"
-            android:parentActivityName=".ConfigurationActivity" />
+            android:parentActivityName=".TipsAndDiscountsHubActivity" />
 
         <activity
             android:name=".ReceiptDisplayConfigActivity"

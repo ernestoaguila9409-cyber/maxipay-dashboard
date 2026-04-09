@@ -3,4 +3,6 @@
     <dimen name="modifier_panel_width">220dp</dimen>
     <dimen name="modifier_option_min_height">60dp</dimen>
     <dimen name="modifier_action_button_size">48dp</dimen>
+    <dimen name="split_guest_column_width">300dp</dimen>
+    <dimen name="split_guest_add_column_width">120dp</dimen>
 </resources>

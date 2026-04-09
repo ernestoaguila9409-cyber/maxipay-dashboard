@@ -252,7 +252,7 @@ class TableShapeView(context: Context) : View(context) {
     companion object {
         fun shapeFromString(value: String?): Shape {
             return when (value?.uppercase()) {
-                "ROUND" -> Shape.ROUND
+                "ROUND", "CIRCLE" -> Shape.ROUND
                 "RECTANGLE" -> Shape.RECTANGLE
                 "BOOTH" -> Shape.BOOTH
                 else -> Shape.SQUARE

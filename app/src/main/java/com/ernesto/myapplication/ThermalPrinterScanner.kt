@@ -58,33 +58,41 @@ object ThermalPrinterScanner {
     fun clearCache() = cache.clear()
 
     suspend fun scanSubnet10_0_0(context: android.content.Context? = null): List<DetectedPrinter> {
+        // TCP scan runs FIRST so ESC/POS probes get exclusive access to port 9100.
+        // Most receipt printers only accept one TCP connection at a time, and the
+        // Star SDK would hold that connection during its 8-second discovery window.
+        val tcpResults = scanLastOctetRange(DEFAULT_SUBNET_PREFIX, 1..255)
+
+        // Star SDK supplements for printers the TCP scan couldn't identify
         val starResults = if (context != null) {
             try { StarPrinterDiscovery.discoverLan(context) } catch (_: Exception) { emptyList() }
         } else emptyList()
 
-        val starWithModel = starResults.filter { !it.model.isNullOrBlank() }
-        val starNeedsIdentify = starResults.filter { it.model.isNullOrBlank() }
-        val skipIps = starWithModel.map { it.ipAddress }.toSet()
-
-        for (p in starWithModel) {
-            cache[p.ipAddress] = CacheEntry(p, System.currentTimeMillis())
-        }
-
-        val tcpResults = scanLastOctetRange(
-            DEFAULT_SUBNET_PREFIX, 1..255,
-            skipIps = skipIps,
-        )
-
+        // TCP identification is authoritative (ENPC / ESC/POS / SNMP / HTTP).
+        // Star SDK can discover non-Star printers on the LAN, so only use its
+        // manufacturer/model when our own probes couldn't determine anything.
         val merged = LinkedHashMap<String, DetectedPrinter>()
-        for (p in starWithModel) merged[p.ipAddress] = p
-        for (p in tcpResults) merged.putIfAbsent(p.ipAddress, p)
+        for (p in tcpResults) merged[p.ipAddress] = p
 
-        for (p in starNeedsIdentify) {
-            if (merged.containsKey(p.ipAddress)) {
-                val existing = merged[p.ipAddress]!!
-                if (existing.manufacturer == null && p.manufacturer != null) {
-                    merged[p.ipAddress] = existing.copy(manufacturer = p.manufacturer)
-                }
+        for (star in starResults) {
+            val existing = merged[star.ipAddress]
+            if (existing == null) {
+                merged[star.ipAddress] = star
+                continue
+            }
+
+            val tcpIdentified = existing.manufacturer != null
+                    || existing.model != null || existing.name != null
+
+            if (!tcpIdentified && !star.model.isNullOrBlank() && isKnownStarModel(star.model)) {
+                merged[star.ipAddress] = star
+            } else if (existing.model == null && !star.model.isNullOrBlank()
+                && isKnownStarModel(star.model)
+            ) {
+                merged[star.ipAddress] = existing.copy(
+                    model = star.model,
+                    manufacturer = star.manufacturer ?: existing.manufacturer,
+                )
             }
         }
 
@@ -160,11 +168,32 @@ object ThermalPrinterScanner {
             }
         }
 
-        if (model == null) {
+        // ESC/POS GS I sometimes returns firmware strings like "30.50 ESC/POS" as maker
+        // and the bare manufacturer name "EPSON" as model. Clean up firmware junk so later
+        // strategies (HTTP, SNMP) still get a chance to fill the real model.
+        if (manufacturer != null && looksLikeFirmwareString(manufacturer!!)) {
+            val realMfr = extractManufacturerFromFirmwareString(manufacturer!!)
+            val realModel = extractModelFromFirmwareString(manufacturer!!)
+            manufacturer = realMfr
+            if (model == null) model = realModel
+        }
+        if (model != null && looksLikeFirmwareString(model!!)) {
+            if (manufacturer == null) manufacturer = extractManufacturerFromFirmwareString(model!!)
+            model = extractModelFromFirmwareString(model!!)
+        }
+        // When model holds a bare manufacturer name (e.g. "EPSON"), promote it
+        if (model != null && manufacturer == null) {
+            val mfr = recognizeAsBareManufacturerName(model!!)
+            if (mfr != null) { manufacturer = mfr; model = null }
+        }
+
+        val alreadyConfidentEpson = manufacturer != null
+                && manufacturer!!.lowercase().contains("epson")
+        if (!alreadyConfidentEpson) {
             val starResult = probeStarLineMode(ip, port)
             if (starResult != null) {
                 manufacturer = starResult.manufacturer
-                model = starResult.model
+                model = starResult.model ?: model
                 Log.d(TAG, "$ip → Star Line Mode: ${starResult.manufacturer} ${starResult.model}")
             }
         }
@@ -172,19 +201,58 @@ object ThermalPrinterScanner {
         if (model == null) {
             val http = probeHttp(ip)
             if (http != null) {
-                if (http.manufacturer != null && manufacturer == null) manufacturer = http.manufacturer
+                if (http.manufacturer != null) {
+                    if (manufacturer == null) {
+                        manufacturer = http.manufacturer
+                    } else if (http.manufacturer != manufacturer) {
+                        // HTTP web-interface identification is high-confidence (e.g. Epson
+                        // web UI title or Server header).  Override a Star Line Mode guess
+                        // that may have false-positived on an Epson intelligent printer.
+                        Log.d(TAG, "$ip → HTTP manufacturer override: $manufacturer → ${http.manufacturer}")
+                        manufacturer = http.manufacturer
+                    }
+                }
                 if (http.model != null) model = http.model
-                Log.d(TAG, "$ip → HTTP: ${http.manufacturer} ${http.model}")
+                if (http.fallbackLabel != null && manufacturer == null && model == null && name == null) {
+                    name = http.fallbackLabel
+                }
+                Log.d(TAG, "$ip → HTTP: ${http.manufacturer} ${http.model} fallback=${http.fallbackLabel}")
             }
         }
 
-        if (model == null) {
-            val snmp = querySnmpInfo(ip, SNMP_TIMEOUT_MS)
-            if (snmp != null) {
-                if (snmp.manufacturer != null && manufacturer == null) manufacturer = snmp.manufacturer
-                if (snmp.model != null) model = snmp.model
-                name = snmp.name
-                Log.d(TAG, "$ip → SNMP: ${snmp.manufacturer} ${snmp.model} name=${snmp.name}")
+        val snmp = querySnmpInfo(ip, SNMP_TIMEOUT_MS)
+        if (snmp != null) {
+            val preferSnmpModel = model == null || shouldPreferSnmpModelOverCurrent(snmp.model, model)
+            if (preferSnmpModel) {
+                if (!snmp.model.isNullOrBlank()) model = snmp.model
+            }
+            // SNMP manufacturer: only fill when still unknown. Earlier probes
+            // (ENPC, ESC/POS, HTTP) are higher-confidence than SNMP heuristics.
+            if (!snmp.manufacturer.isNullOrBlank() && manufacturer == null) {
+                manufacturer = snmp.manufacturer
+            }
+            if (snmp.model != null && model == null) model = snmp.model
+            if (name == null && snmp.name != null) name = snmp.name
+            Log.d(TAG, "$ip → SNMP merged: $manufacturer $model name=$name")
+        }
+
+        if (manufacturer == null && model == null && name == null) {
+            val hostHint = tryReverseDnsHostname(ip)
+            if (hostHint != null) name = hostHint
+        }
+
+        // Model pattern is the strongest signal — override manufacturer if it
+        // contradicts the model (e.g. Star Line Mode probe guessed "Star" but
+        // HTTP/SNMP later found a TM-T88 model string).
+        if (model != null) {
+            val epsonModel = EPSON_MODEL_REGEX.containsMatchIn(model!!)
+            val starModel = STAR_MODEL_PATTERN.containsMatchIn(model!!)
+            if (epsonModel && manufacturer != "Epson") {
+                Log.d(TAG, "$ip → sanity override: manufacturer $manufacturer → Epson (model=$model)")
+                manufacturer = "Epson"
+            } else if (starModel && manufacturer != "Star Micronics") {
+                Log.d(TAG, "$ip → sanity override: manufacturer $manufacturer → Star Micronics (model=$model)")
+                manufacturer = "Star Micronics"
             }
         }
 
@@ -254,6 +322,14 @@ object ThermalPrinterScanner {
     private data class EscPosIdentity(val maker: String?, val model: String?)
 
     private fun probeEscPosIdentity(ip: String, port: Int): EscPosIdentity? {
+        // Epson / many clones: GS I 65 ('A') manufacturer, 66 ('B') model. Others use 66/67 or 49/50.
+        probeEscPosIdentityPair(ip, port, 65, 66)?.let { return it }
+        probeEscPosIdentityPair(ip, port, 66, 67)?.let { return it }
+        probeEscPosIdentityPair(ip, port, 49, 50)?.let { return it }
+        return null
+    }
+
+    private fun probeEscPosIdentityPair(ip: String, port: Int, nMaker: Int, nModel: Int): EscPosIdentity? {
         var socket: Socket? = null
         return try {
             socket = Socket()
@@ -262,16 +338,15 @@ object ThermalPrinterScanner {
             val out = socket.getOutputStream()
             val inp = socket.getInputStream()
 
-            // GS I n=66 → maker name, n=67 → model name
-            out.write(byteArrayOf(0x1D, 0x49, 66))
+            out.write(byteArrayOf(0x1D, 0x49, nMaker.toByte()))
             out.flush()
-            Thread.sleep(300)
+            Thread.sleep(350)
             val makerRaw = readAvailableAscii(inp)
             val maker = cleanGsIResponse(makerRaw)
 
-            out.write(byteArrayOf(0x1D, 0x49, 67))
+            out.write(byteArrayOf(0x1D, 0x49, nModel.toByte()))
             out.flush()
-            Thread.sleep(300)
+            Thread.sleep(350)
             val modelRaw = readAvailableAscii(inp)
             val model = cleanGsIResponse(modelRaw)
 
@@ -286,19 +361,22 @@ object ThermalPrinterScanner {
 
     private fun readAvailableAscii(inp: java.io.InputStream): String? {
         return try {
-            val avail = inp.available()
-            if (avail <= 0) {
-                Thread.sleep(200)
-                val avail2 = inp.available()
-                if (avail2 <= 0) return null
-                val buf = ByteArray(avail2.coerceAtMost(128))
-                val read = inp.read(buf)
-                if (read <= 0) null else String(buf, 0, read, Charsets.US_ASCII)
-            } else {
-                val buf = ByteArray(avail.coerceAtMost(128))
-                val read = inp.read(buf)
-                if (read <= 0) null else String(buf, 0, read, Charsets.US_ASCII)
+            val acc = StringBuilder()
+            var waited = 0
+            while (waited < 600) {
+                val avail = inp.available()
+                if (avail > 0) {
+                    val buf = ByteArray(avail.coerceAtMost(160))
+                    val read = inp.read(buf)
+                    if (read > 0) acc.append(String(buf, 0, read, Charsets.US_ASCII))
+                    waited = 0
+                } else {
+                    if (acc.isNotEmpty()) break
+                    Thread.sleep(50)
+                    waited += 50
+                }
             }
+            acc.toString().takeIf { it.isNotEmpty() }
         } catch (_: Exception) {
             null
         }
@@ -314,6 +392,62 @@ object ThermalPrinterScanner {
         if (printable.length < 2) return null
         return printable
     }
+
+    // ── Firmware-string cleanup helpers ─────────────────────────────────
+
+    private fun looksLikeFirmwareString(s: String): Boolean {
+        val t = s.trim()
+        if (t.contains("ESC/POS", ignoreCase = true)) return true
+        if (t.matches(Regex("""^\d+\.\d+\s.*"""))) return true
+        if (t.matches(Regex("""^\d+(\.\d+)+$"""))) return true
+        return false
+    }
+
+    private fun extractManufacturerFromFirmwareString(s: String): String? {
+        val lower = s.lowercase()
+        if (lower.contains("epson")) return "Epson"
+        if (lower.contains("star")) return "Star Micronics"
+        if (lower.contains("bixolon")) return "Bixolon"
+        if (lower.contains("citizen")) return "Citizen"
+        if (lower.contains("zebra")) return "Zebra"
+        if (lower.contains("rongta")) return "Rongta"
+        if (lower.contains("xprinter")) return "Xprinter"
+        if (lower.contains("sunmi")) return "Sunmi"
+        return null
+    }
+
+    private fun extractModelFromFirmwareString(s: String): String? {
+        Regex("""(TM-[A-Za-z0-9\-]+)""", RegexOption.IGNORE_CASE).find(s)?.let { return it.value }
+        Regex(
+            """(SP\s?7\d{2}|TSP\d{3,4}[A-Z]*|mC-Print\d?|mPOP|BSC\d+|SM-[A-Z0-9]+|SK[15]-\d+)""",
+            RegexOption.IGNORE_CASE,
+        ).find(s)?.let { return it.value }
+        return null
+    }
+
+    private val BARE_MANUFACTURER_NAMES = mapOf(
+        "epson" to "Epson", "seiko epson" to "Epson", "seiko epson corp" to "Epson",
+        "star micronics" to "Star Micronics", "star" to "Star Micronics",
+        "bixolon" to "Bixolon", "citizen" to "Citizen", "zebra" to "Zebra",
+        "brother" to "Brother", "rongta" to "Rongta", "xprinter" to "Xprinter",
+        "sunmi" to "Sunmi", "gprinter" to "Gprinter", "custom" to "Custom",
+    )
+
+    private fun recognizeAsBareManufacturerName(s: String): String? =
+        BARE_MANUFACTURER_NAMES[s.trim().lowercase()]
+
+    private val EPSON_MODEL_REGEX = Regex(
+        """TM-[A-Za-z0-9\-]+""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private val STAR_MODEL_PATTERN = Regex(
+        """(SP\s?7\d{2}|SP742|SP712|SP747|TSP\d{3,4}[A-Z]*|mC-Print\d?|mPOP|BSC\d+|SM-[A-Z0-9]+|SK[15]-\d+)""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private fun isKnownStarModel(model: String?): Boolean =
+        model != null && STAR_MODEL_PATTERN.containsMatchIn(model)
 
     // ── Strategy 3: Star Line Mode firmware query (port 9100) ──────────
 
@@ -341,11 +475,18 @@ object ThermalPrinterScanner {
                 val starModel = parseStarFirmwareForModel(ascii)
                 if (starModel != null) return StarProbeResult("Star Micronics", starModel)
 
-                // Status-byte pattern: if first byte is 0x23 ('#') and rest are
-                // non-printable status bytes → confirmed Star Line Mode printer.
-                if (fw.size >= 2 && fw[0] == 0x23.toByte()) {
-                    val hasStatusBytes = fw.drop(1).any { it.toInt() and 0xFF > 0x7F }
-                    if (hasStatusBytes) {
+                // Status-byte pattern: first byte is 0x23 echo and ALL remaining
+                // bytes are non-printable (< 0x20 or > 0x7F).  A mix of printable
+                // ASCII and control codes typically means an Epson or other
+                // ESC/POS printer echoed the '#' and appended its own response.
+                if (fw.size in 3..16 && fw[0] == 0x23.toByte()) {
+                    val tail = fw.drop(1)
+                    val allNonPrintable = tail.all { b ->
+                        val v = b.toInt() and 0xFF
+                        v < 0x20 || v > 0x7F
+                    }
+                    val hasHighBytes = tail.any { it.toInt() and 0xFF > 0x7F }
+                    if (allNonPrintable && hasHighBytes) {
                         Log.d(TAG, "$ip confirmed Star Line Mode via status bytes")
                         val model = inferStarModelFromStatus(fw)
                         return StarProbeResult("Star Micronics", model)
@@ -416,7 +557,12 @@ object ThermalPrinterScanner {
 
     // ── Strategy 4: HTTP probe (port 80 web interface) ─────────────────
 
-    private data class HttpPrinterInfo(val manufacturer: String?, val model: String?)
+    private data class HttpPrinterInfo(
+        val manufacturer: String?,
+        val model: String?,
+        /** When vendor/model cannot be parsed, still show e.g. web UI title or "EPSON TM-T88" from HTML */
+        val fallbackLabel: String? = null,
+    )
 
     private fun probeHttp(ip: String): HttpPrinterInfo? {
         return try {
@@ -456,7 +602,7 @@ object ThermalPrinterScanner {
                 } catch (_: Exception) { "" }
 
                 Log.d(TAG, "$ip HTTP $code server=[$server] auth=[$wwwAuth] body=${body.take(200)}")
-                parseHttpForPrinter(server, body, wwwAuth, allHeaders)
+                parseHttpForPrinter(server, body, wwwAuth, allHeaders, code)
             } finally {
                 conn.disconnect()
             }
@@ -467,11 +613,13 @@ object ThermalPrinterScanner {
 
     private fun parseHttpForPrinter(
         server: String, body: String, wwwAuth: String, allHeaders: String,
+        httpCode: Int,
     ): HttpPrinterInfo? {
         val combined = "$server $body $wwwAuth $allHeaders"
 
-        val titleMatch = Regex("""<title[^>]*>(.*?)</title>""", RegexOption.IGNORE_CASE)
+        val titleRaw = Regex("""<title[^>]*>(.*?)</title>""", RegexOption.IGNORE_CASE)
             .find(body)?.groupValues?.get(1)?.trim()
+        val titleMatch = titleRaw?.let { stripHtmlTagsMinimal(it) }
 
         val epsonModelRegex = Regex("""(TM-[A-Za-z0-9\-]+[iv]*)""", RegexOption.IGNORE_CASE)
         val starModelRegex = Regex(
@@ -484,7 +632,7 @@ object ThermalPrinterScanner {
             "star ethernet", "ifbd-h", "star printer", "star http",
         )
         val epsonIdentifiers = listOf(
-            "epson", "seiko epson", "epos", "tm-t", "tm-u", "tm-m", "tm-l",
+            "epson", "seiko epson", "epos", "tm-t", "tm-u", "tm-m", "tm-l", "tm-h",
         )
 
         val lowerCombined = combined.lowercase()
@@ -501,13 +649,15 @@ object ThermalPrinterScanner {
         if (isEpson) {
             val model = epsonModelRegex.find(combined)?.value
                 ?: epsonModelRegex.find(titleMatch.orEmpty())?.value
-            return HttpPrinterInfo("Epson", model)
+            val fb = httpTitleAsFallbackLabel(titleMatch, httpCode)?.takeIf { model == null }
+            return HttpPrinterInfo("Epson", model, fb)
         }
 
         if (isStar) {
             val model = starModelRegex.find(combined)?.value
                 ?: starModelRegex.find(titleMatch.orEmpty())?.value
-            return HttpPrinterInfo("Star Micronics", model)
+            val fb = httpTitleAsFallbackLabel(titleMatch, httpCode)?.takeIf { model == null }
+            return HttpPrinterInfo("Star Micronics", model, fb)
         }
 
         val modelFromTitle = starModelRegex.find(titleMatch.orEmpty())?.value
@@ -518,13 +668,78 @@ object ThermalPrinterScanner {
         }
 
         if (server.isNotBlank() || body.length > 20) {
-            return HttpPrinterInfo(null, null)
+            return HttpPrinterInfo(null, null, httpTitleAsFallbackLabel(titleMatch, httpCode))
         }
 
         return null
     }
 
+    private fun stripHtmlTagsMinimal(s: String): String =
+        s.replace(Regex("""<[^>]+>"""), "").replace(Regex("""\s+"""), " ").trim()
+
+    private fun httpTitleAsFallbackLabel(title: String?, httpCode: Int): String? {
+        if (title.isNullOrBlank()) return null
+        val t = title.replace(Regex("""\s+"""), " ").trim()
+        if (t.length < 3 || t.length > 80) return null
+        val low = t.lowercase()
+        val bannedExact = setOf(
+            "401 unauthorized", "403 forbidden", "404 not found", "500 internal server error",
+            "error", "log in", "login", "index", "index of", "untitled document",
+            "welcome to nginx", "home", "sign in",
+        )
+        if (low in bannedExact) return null
+        if (listOf("401 ", "403 ", "404 ").any { low.startsWith(it) } && low.length < 24) return null
+        if (httpCode >= 400 && t.length < 10) return null
+        return t
+    }
+
+    private fun tryReverseDnsHostname(ip: String): String? {
+        return try {
+            val ia = InetAddress.getByName(ip)
+            val hn = ia.hostName?.trim().orEmpty()
+            if (hn.isEmpty() || hn.equals(ip, ignoreCase = true)) return null
+            if (hn.matches(Regex("""^\d{1,3}(\.\d{1,3}){3}$"""))) return null
+            hn
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     // ── Strategy 4: SNMP ───────────────────────────────────────────────
+
+    /**
+     * ESC/POS GS I often returns firmware strings (e.g. `30.50 ESC/POS EPSON`) while SNMP
+     * sysDescr carries a stable model (`TM-T88V`). We always query SNMP and upgrade weak labels.
+     */
+    private fun isLowConfidencePrinterModel(manufacturer: String?, model: String?): Boolean {
+        val m = model?.trim().orEmpty()
+        if (m.isEmpty()) return true
+        val low = m.lowercase()
+        if (low.contains("esc/pos")) return true
+        if (m.matches(Regex("""^\d+(\.\d+)+\b.*"""))) return true
+        val mfr = manufacturer?.lowercase().orEmpty()
+        val epsonLike = mfr.contains("epson") || low.contains("epson")
+        if (epsonLike && !Regex("""TM-[A-Z0-9\-]+""", RegexOption.IGNORE_CASE).containsMatchIn(m)) {
+            return true
+        }
+        return false
+    }
+
+    private fun shouldPreferSnmpModelOverCurrent(snmpModel: String?, currentModel: String?): Boolean {
+        if (snmpModel.isNullOrBlank()) return false
+        if (currentModel.isNullOrBlank()) return true
+        val tm = Regex("""(TM-[A-Z0-9\-]+)""", RegexOption.IGNORE_CASE)
+        val snmpTm = tm.find(snmpModel)?.value
+        val curTm = tm.find(currentModel)?.value
+        if (snmpTm != null && curTm != null && snmpTm.equals(curTm, ignoreCase = true)) return false
+        if (snmpTm != null && curTm == null) return true
+        if (isLowConfidencePrinterModel(null, currentModel) &&
+            !isLowConfidencePrinterModel(null, snmpModel)
+        ) {
+            return true
+        }
+        return false
+    }
 
     private data class SnmpPrinterInfo(
         val name: String?,
@@ -570,6 +785,8 @@ object ThermalPrinterScanner {
             "hewlett-packard" to "HP", "samsung" to "Samsung",
             "toshiba" to "Toshiba", "oki" to "OKI",
             "seiko" to "Seiko", "fujitsu" to "Fujitsu",
+            "rongta" to "Rongta", "xprinter" to "Xprinter", "gprinter" to "Gprinter",
+            "sunmi" to "Sunmi", "custom" to "Custom", "daruma" to "Daruma",
         )
         val hit = known.firstOrNull { all.contains(it.first) }
         if (hit != null) return hit.second
@@ -579,12 +796,21 @@ object ThermalPrinterScanner {
     }
 
     private fun isLikelyStarPrinter(sysDescr: String?, sysName: String?): Boolean {
-        val descr = sysDescr?.lowercase() ?: return false
-        if (descr.startsWith("linux") && descr.contains("armv")) return true
         val name = sysName?.lowercase().orEmpty()
-        return name.contains("star") || name.contains("sp700") || name.contains("tsp")
-                || name.contains("mc-print") || name.contains("mpop")
+        val descr = sysDescr?.lowercase().orEmpty()
+        val combined = "$descr $name"
+        // "Linux armv" alone is NOT Star evidence — Epson intelligent printers
+        // (TM-T88V-i, TM-T88VI-i, etc.) also run Linux on ARM.  Only claim Star
+        // when SNMP data explicitly mentions Star identifiers.
+        return STAR_SNMP_HINTS.any { combined.contains(it) }
     }
+
+    private val STAR_SNMP_HINTS = listOf(
+        "star micronics", "starmicronics", "star_micronics",
+        "sp700", "sp742", "sp712", "sp747",
+        "tsp100", "tsp143", "tsp650", "tsp700", "tsp800",
+        "mc-print", "mpop",
+    )
 
     private fun extractModel(
         sysDescr: String?, sysName: String?, hrDeviceDescr: String?, manufacturer: String?,

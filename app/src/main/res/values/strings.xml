@@ -1,6 +1,7 @@
 <resources>
 
     <string name="app_name">My Application</string>
+    <string name="tips_discounts_hub_title">Setup Tips &amp; Discounts</string>
     <string name="categories">Categories</string>
     <string name="add_category">Add Category</string>
 
@@ -69,6 +70,7 @@
     <string name="add_printer_screen_title">Add printer</string>
     <string name="scanning_for_printers">Scanning for printers…</string>
     <string name="detected_printers">Detected printers</string>
+    <string name="discovered_printer_saved_line">%1$s · %2$s</string>
     <string name="no_printers_found_scan">No printers responded on 10.0.0.1–255 port 9100. Try Add manually.</string>
     <string name="add_manually">Add manually</string>
     <string name="ip_address">IP address</string>
@@ -84,8 +86,90 @@
     <string name="printer_saved">Printer saved</string>
     <string name="printer_save_failed">Could not save printer. %1$s</string>
     <string name="printers_no_selection_yet">Tap + to add a receipt or kitchen printer.</string>
+    <string name="pos_keypad_done">Done</string>
+    <string name="pos_keyboard_hide">Hide keyboard</string>
+    <string name="pos_keyboard_show">Show keyboard</string>
     <string name="printer_test_print">Test print</string>
     <string name="printer_test_sent">Test print sent</string>
     <string name="printer_test_failed">Test print failed. %1$s</string>
+    <string name="receipt_lan_copy_failed">Network receipt printer failed (in-store still printed). %1$s</string>
+    <string name="printer_status_online">Online</string>
+    <string name="printer_status_offline">Offline</string>
+    <string name="printer_status_checking">Checking…</string>
+
+    <string name="printer_card_labels_line">Labels: %1$s</string>
+    <string name="printer_detail_title">Printer</string>
+    <string name="printer_detail_ip_line">IP: %1$s</string>
+    <string name="printer_detail_labels_heading">Labels</string>
+    <string name="printer_detail_labels_hint">Items with a matching printer label route here. Add labels (e.g. Drinks, Grill), then assign the same label on menu items.</string>
+    <string name="printer_detail_delete">Remove printer</string>
+    <string name="printer_detail_delete_action">Remove</string>
+    <string name="printer_detail_delete_confirm">Remove this printer from this device and the dashboard? It will no longer receive orders until added again.</string>
+    <string name="printer_detail_delete_failed">Could not remove printer. %1$s</string>
+    <string name="printer_removed">Printer removed</string>
+    <string name="printer_detail_edit_name">Edit name</string>
+    <string name="printer_detail_edit_name_title">Rename printer</string>
+    <string name="printer_name_updated">Printer name updated</string>
+    <string name="printer_detail_add_label">Add label</string>
+    <string name="printer_detail_label_hint">Label name</string>
+    <string name="printer_detail_label_duplicate">That label is already on this printer.</string>
+    <string name="kitchen_print_failed">Kitchen printer %1$s: %2$s</string>
+
+    <string name="menu_item_printer_label">Printer label</string>
+    <string name="menu_item_printer_label_none">None</string>
+    <string name="menu_item_printer_label_hint">Choose a label that matches a kitchen printer. None = do not print to kitchen.</string>
+    <string name="assign_printer_label_menu">Assign label</string>
+    <string name="assign_printer_label_title">Assign label</string>
+    <string name="assign_printer_label_saved">Label saved</string>
+
+    <!-- Item Detail -->
+    <string name="item_detail_title">Item Detail</string>
+    <string name="item_detail_edit_name">Edit name</string>
+    <string name="item_detail_name_hint">Item name</string>
+    <string name="item_detail_name_required">Enter an item name.</string>
+    <string name="item_detail_edit_price">Edit price</string>
+    <string name="item_detail_price_hint">Price</string>
+    <string name="item_detail_price_invalid">Enter a valid price.</string>
+    <string name="item_detail_no_category">No category</string>
+    <string name="item_detail_saved">Saved</string>
+    <string name="item_detail_not_found">Item not found.</string>
+    <string name="item_detail_load_failed">Could not load item.</string>
+    <string name="item_detail_taxes_heading">Taxes</string>
+    <string name="item_detail_no_taxes_assigned">No taxes assigned.</string>
+    <string name="item_detail_add_tax">+ Add Tax</string>
+    <string name="item_detail_add_tax_title">Assign Taxes</string>
+    <string name="item_detail_modifiers_heading">Modifier Groups</string>
+    <string name="item_detail_no_modifiers">No modifier groups assigned.</string>
+    <string name="item_detail_add_modifier">+ Add Modifier</string>
+    <string name="item_detail_add_modifier_title">Assign Modifier Groups</string>
+    <string name="item_detail_labels_heading">Labels</string>
+    <string name="item_detail_no_labels_assigned">No labels assigned.</string>
+    <string name="item_detail_label_from_subcategory">From subcategory</string>
+    <string name="item_detail_label_from_category">From category</string>
+    <string name="item_detail_add_label">+ Add Label</string>
+    <string name="item_detail_add_label_title">Assign Labels</string>
+    <string name="item_detail_no_labels_available">No labels available. Add labels on kitchen printers first.</string>
+    <string name="item_detail_delete">Delete item</string>
+    <string name="item_detail_delete_title">Delete %1$s?</string>
+    <string name="item_detail_delete_message">This will permanently remove this item.</string>
+    <string name="item_detail_delete_action">Delete</string>
+    <string name="item_detail_deleted">Item deleted</string>
+
+    <!-- Cart / POS -->
+    <string name="cart_send_to_kitchen">Send to Kitchen</string>
+    <string name="cart_send_update">Send Update</string>
+    <string name="cart_checkout">Checkout</string>
+    <string name="cart_sent_to_kitchen">Sent to kitchen</string>
+    <string name="cart_nothing_new_kitchen">Nothing new to send to the kitchen.</string>
+    <string name="cart_kitchen_items_load_failed">Could not load items for kitchen print.</string>
+    <string name="cart_sending_kitchen">Sending…</string>
+
+    <!-- Modifier option dialogs -->
+    <string name="modifier_dialog_option_name_hint">Option name (e.g. Small)</string>
+    <string name="modifier_dialog_price_hint">Price adjustment</string>
+    <string name="modifier_dialog_triggers_title">Triggers modifier groups</string>
+    <string name="modifier_dialog_triggers_hint">When this option is selected, these groups become required choices. Tap to expand.</string>
+    <string name="modifier_trigger_checkbox_line">%1$s  %2$s</string>
+    <string name="modifier_option_remove_style_checkbox">Remove-style (no charge; shows as “No …” on cart and receipts)</string>
 
 </resources>

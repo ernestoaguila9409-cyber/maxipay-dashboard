@@ -96,10 +96,16 @@ object SplitReceiptRenderer {
                         textWidth
                     )
                 )
+                for (m in line.modifierLines) {
+                    sb.appendLine(m)
+                }
                 sb.appendLine("  Line total ${MoneyUtils.centsToDisplay(line.originalLineTotalInCents!!)}")
             } else {
                 val label = if (line.quantity > 1) "${line.quantity}x ${line.name}" else line.name
                 sb.appendLine(formatLine(label, MoneyUtils.centsToDisplay(line.lineTotalInCents), textWidth))
+                for (m in line.modifierLines) {
+                    sb.appendLine(m)
+                }
             }
         }
     }
@@ -186,10 +192,16 @@ object SplitReceiptRenderer {
                             lwi
                         )
                     )
+                    for (m in line.modifierLines) {
+                        item(EscPosPrinter.sanitizeForThermalText(m))
+                    }
                     item("  Line total ${MoneyUtils.centsToDisplay(line.originalLineTotalInCents!!)}")
                 } else {
                     val label = if (line.quantity > 1) "${line.quantity}x ${line.name}" else line.name
                     item(formatLine(label, MoneyUtils.centsToDisplay(line.lineTotalInCents), lwi))
+                    for (m in line.modifierLines) {
+                        item(EscPosPrinter.sanitizeForThermalText(m))
+                    }
                 }
             }
         }

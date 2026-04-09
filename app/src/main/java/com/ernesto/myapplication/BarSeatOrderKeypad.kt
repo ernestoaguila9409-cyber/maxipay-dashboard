@@ -18,7 +18,6 @@ import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import com.google.android.material.R as MTR
 import com.google.android.material.button.MaterialButton
 
 /**
@@ -29,6 +28,16 @@ import com.google.android.material.button.MaterialButton
  * @see InventoryPriceKeypad — same UX contract for price fields.
  */
 object BarSeatOrderKeypad {
+
+    private fun outlinedStyle(context: Context): Int {
+        val attrId = context.resources.getIdentifier(
+            "materialButtonOutlinedStyle", "attr", context.packageName
+        )
+        if (attrId == 0) return 0
+        val tv = TypedValue()
+        context.theme.resolveAttribute(attrId, tv, true)
+        return tv.data
+    }
 
     private enum class KeypadKind { ALPHA, PHONE }
 
@@ -157,7 +166,7 @@ object BarSeatOrderKeypad {
 
         /** Phone-pad key (same outlined style as [InventoryPriceKeypad]). */
         fun makeKeyButton(label: String, grid: GridLayout, onPress: () -> Unit): MaterialButton {
-            return MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
+            return MaterialButton(context, null, outlinedStyle(context)).apply {
                 text = label
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
                 minimumHeight = dp(46f)
@@ -199,7 +208,7 @@ object BarSeatOrderKeypad {
             for (k in keys) {
                 val isLetter = k.length == 1 && k[0].isLetter()
                 val display  = if (isLetter && capsOn) k.uppercase() else k
-                val btn = MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
+                val btn = MaterialButton(context, null, outlinedStyle(context)).apply {
                     text = display
                     tag  = if (isLetter) k else null
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, if (k.length > 2) 13f else 16f)
@@ -238,7 +247,7 @@ object BarSeatOrderKeypad {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
-        val capsBtn = MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
+        val capsBtn = MaterialButton(context, null, outlinedStyle(context)).apply {
             text = "⇧"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
             minimumHeight = btnH
@@ -255,7 +264,7 @@ object BarSeatOrderKeypad {
         }
         zRow.addView(capsBtn)
         for (k in listOf("z", "x", "c", "v", "b", "n", "m")) {
-            val btn = MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
+            val btn = MaterialButton(context, null, outlinedStyle(context)).apply {
                 text = k
                 tag  = k
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
@@ -276,7 +285,7 @@ object BarSeatOrderKeypad {
             zRow.addView(btn)
         }
         zRow.addView(
-            MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
+            MaterialButton(context, null, outlinedStyle(context)).apply {
                 text = "⌫"
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                 minimumHeight = btnH
@@ -300,7 +309,7 @@ object BarSeatOrderKeypad {
             )
         }
         spaceRow.addView(
-            MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
+            MaterialButton(context, null, outlinedStyle(context)).apply {
                 text = "Space"
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                 minimumHeight = btnH
@@ -313,7 +322,7 @@ object BarSeatOrderKeypad {
             }
         )
         spaceRow.addView(
-            MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
+            MaterialButton(context, null, outlinedStyle(context)).apply {
                 text = "⌫"
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                 minimumHeight = btnH
@@ -327,7 +336,7 @@ object BarSeatOrderKeypad {
         )
         lateinit var doneBtnRef: MaterialButton
         spaceRow.addView(
-            MaterialButton(context, null, MTR.attr.materialButtonOutlinedStyle).apply {
+            MaterialButton(context, null, outlinedStyle(context)).apply {
                 text = "Done"
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                 minimumHeight = btnH

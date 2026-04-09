@@ -1,27 +1,35 @@
 package com.ernesto.myapplication
 
 import android.content.ClipData
-import android.content.ClipDescription
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.DragEvent
 import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.ListAdapter
+import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.R as MTR
 import com.google.firebase.firestore.FirebaseFirestore
@@ -42,6 +50,14 @@ class SplitPaymentActivity : AppCompatActivity() {
     private val db = FirebaseFirestore.getInstance()
 
     private data class OrderLineItem(val lineKey: String, val name: String, val quantity: Int, val lineTotalInCents: Long, val guestNumber: Int)
+
+    private val orderLineItemDiff = object : DiffUtil.ItemCallback<OrderLineItem>() {
+        override fun areItemsTheSame(oldItem: OrderLineItem, newItem: OrderLineItem) =
+            oldItem.lineKey == newItem.lineKey
+
+        override fun areContentsTheSame(oldItem: OrderLineItem, newItem: OrderLineItem) =
+            oldItem == newItem
+    }
     private var orderItems = emptyList<OrderLineItem>()
     private var totalRemainingInCents = 0L
     private var currentPerson = 1
@@ -50,6 +66,37 @@ class SplitPaymentActivity : AppCompatActivity() {
     private var byItemsMode = false
     private var guestNames: List<String> = emptyList()
     private val itemGuestAssignment = mutableMapOf<String, Int>()
+
+    private val guestColumnAdapters = mutableListOf<GuestColumnItemsAdapter>()
+    private val guestTotalViews = mutableListOf<TextView>()
+    private val guestEmptyHints = mutableListOf<TextView>()
+    private lateinit var columnBgNormal: Drawable
+    private lateinit var columnBgHighlight: Drawable
+
+    private inner class GuestColumnDropHighlight(private val columnOuter: View) {
+        private var enterDepth = 0
+
+        fun dragEnter() {
+            if (enterDepth++ == 0) {
+                columnOuter.background =
+                    columnBgHighlight.constantState?.newDrawable()?.mutate() ?: columnBgHighlight
+            }
+        }
+
+        fun dragExit() {
+            enterDepth = (enterDepth - 1).coerceAtLeast(0)
+            if (enterDepth == 0) {
+                columnOuter.background =
+                    columnBgNormal.constantState?.newDrawable()?.mutate() ?: columnBgNormal
+            }
+        }
+
+        fun reset() {
+            enterDepth = 0
+            columnOuter.background =
+                columnBgNormal.constantState?.newDrawable()?.mutate() ?: columnBgNormal
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -135,7 +182,9 @@ class SplitPaymentActivity : AppCompatActivity() {
 
                         byItemsMode = true
                         setContentView(R.layout.activity_split_by_items)
-                        supportActionBar?.title = "Split by items"
+                        supportActionBar?.title = "Split by Guest"
+                        columnBgNormal = ContextCompat.getDrawable(this, R.drawable.split_guest_column_bg)!!
+                        columnBgHighlight = ContextCompat.getDrawable(this, R.drawable.split_guest_column_bg_highlight)!!
                         setupSplitByItemsListeners()
                         buildSplitView()
                     }
@@ -160,169 +209,234 @@ class SplitPaymentActivity : AppCompatActivity() {
         }
     }
 
+    private fun dp(v: Float): Int = TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_DIP,
+        v,
+        resources.displayMetrics
+    ).toInt()
+
+    private fun itemsForGuest(guestIdx: Int): List<OrderLineItem> =
+        orderItems.filter { (itemGuestAssignment[it.lineKey] ?: 0) == guestIdx }
+
+    private fun startLineDrag(item: OrderLineItem, view: View) {
+        val clipData = ClipData.newPlainText("lineKey", item.lineKey)
+        ViewCompat.startDragAndDrop(view, clipData, View.DragShadowBuilder(view), null, 0)
+    }
+
+    private fun refreshGuestColumns(vararg guestIndices: Int) {
+        for (idx in guestIndices.distinct()) {
+            if (idx !in guestColumnAdapters.indices) continue
+            val list = itemsForGuest(idx)
+            guestColumnAdapters[idx].submitGuestLines(list)
+            guestTotalViews[idx].text = MoneyUtils.centsToDisplay(list.sumOf { it.lineTotalInCents })
+            guestEmptyHints[idx].visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun guestColumnDropListener(guestIdx: Int, highlight: GuestColumnDropHighlight): View.OnDragListener {
+        return View.OnDragListener { _, event ->
+            when (event.action) {
+                DragEvent.ACTION_DRAG_ENTERED -> {
+                    highlight.dragEnter()
+                    true
+                }
+                DragEvent.ACTION_DRAG_EXITED -> {
+                    highlight.dragExit()
+                    true
+                }
+                DragEvent.ACTION_DROP -> {
+                    highlight.reset()
+                    val lineKey = event.clipData?.getItemAt(0)?.text?.toString()
+                        ?: return@OnDragListener false
+                    val currentGuest = itemGuestAssignment[lineKey] ?: 0
+                    if (currentGuest != guestIdx) {
+                        itemGuestAssignment[lineKey] = guestIdx
+                        refreshGuestColumns(currentGuest, guestIdx)
+                    }
+                    true
+                }
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    highlight.reset()
+                    true
+                }
+                else -> true
+            }
+        }
+    }
+
     private fun buildSplitView() {
         val itemsContainer = findViewById<LinearLayout>(R.id.itemsContainer)
         itemsContainer.removeAllViews()
+        guestColumnAdapters.clear()
+        guestTotalViews.clear()
+        guestEmptyHints.clear()
+
+        val pool = RecyclerView.RecycledViewPool()
 
         val guestCount = guestNames.size.coerceAtLeast(1)
+        val colW = resources.getDimensionPixelSize(R.dimen.split_guest_column_width)
+        val addColW = resources.getDimensionPixelSize(R.dimen.split_guest_add_column_width)
+        val headerTopR = dp(12f).toFloat()
 
         for (guestIdx in 0 until guestCount) {
-            val itemsForGuest = orderItems.filter { (itemGuestAssignment[it.lineKey] ?: 0) == guestIdx }
-            val guestTotal = itemsForGuest.sumOf { it.lineTotalInCents }
+            val list = itemsForGuest(guestIdx)
+            val guestTotal = list.sumOf { it.lineTotalInCents }
 
-            val sectionLayout = LinearLayout(this).apply {
+            val columnOuter = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(0, 0, 0, 16)
-                tag = "guest_section_$guestIdx"
+                background = columnBgNormal.constantState?.newDrawable()?.mutate() ?: columnBgNormal
+                layoutParams = LinearLayout.LayoutParams(colW, ViewGroup.LayoutParams.MATCH_PARENT).apply {
+                    marginEnd = dp(12f)
+                }
             }
 
             val headerBg = GradientDrawable().apply {
                 setColor(Color.parseColor("#6A4FB3"))
-                cornerRadius = 20f
+                cornerRadii = floatArrayOf(
+                    headerTopR, headerTopR,
+                    headerTopR, headerTopR,
+                    0f, 0f,
+                    0f, 0f
+                )
             }
+
             val headerRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 background = headerBg
-                setPadding(32, 20, 32, 20)
+                setPadding(dp(16f), dp(14f), dp(16f), dp(14f))
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { bottomMargin = 8 }
-                tag = "guest_header_$guestIdx"
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
             }
             val headerLabel = TextView(this).apply {
                 text = getPersonLabel(guestIdx)
                 setTextColor(Color.WHITE)
                 textSize = 15f
                 setTypeface(null, Typeface.BOLD)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
             val headerTotal = TextView(this).apply {
                 text = MoneyUtils.centsToDisplay(guestTotal)
                 setTextColor(Color.WHITE)
                 textSize = 15f
                 setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.END
             }
             headerRow.addView(headerLabel)
             headerRow.addView(headerTotal)
-            sectionLayout.addView(headerRow)
+            guestTotalViews.add(headerTotal)
 
-            val dropZone = sectionLayout
-            dropZone.setOnDragListener { v, event ->
-                when (event.action) {
-                    DragEvent.ACTION_DRAG_ENTERED -> {
-                        val hdr = v.findViewWithTag<View>("guest_header_$guestIdx")
-                        hdr?.let {
-                            val bg = GradientDrawable().apply {
-                                setColor(Color.parseColor("#9575CD"))
-                                cornerRadius = 20f
-                            }
-                            it.background = bg
-                        }
-                        true
-                    }
-                    DragEvent.ACTION_DRAG_EXITED -> {
-                        val hdr = v.findViewWithTag<View>("guest_header_$guestIdx")
-                        hdr?.let {
-                            val bg = GradientDrawable().apply {
-                                setColor(Color.parseColor("#6A4FB3"))
-                                cornerRadius = 20f
-                            }
-                            it.background = bg
-                        }
-                        true
-                    }
-                    DragEvent.ACTION_DROP -> {
-                        val lineKey = event.clipData?.getItemAt(0)?.text?.toString() ?: return@setOnDragListener false
-                        val currentGuest = itemGuestAssignment[lineKey] ?: 0
-                        if (currentGuest != guestIdx) {
-                            itemGuestAssignment[lineKey] = guestIdx
-                            buildSplitView()
-                        }
-                        true
-                    }
-                    DragEvent.ACTION_DRAG_ENDED -> {
-                        val hdr = v.findViewWithTag<View>("guest_header_$guestIdx")
-                        hdr?.let {
-                            val bg = GradientDrawable().apply {
-                                setColor(Color.parseColor("#6A4FB3"))
-                                cornerRadius = 20f
-                            }
-                            it.background = bg
-                        }
-                        true
-                    }
-                    else -> true
-                }
+            val body = FrameLayout(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f
+                )
+                setPadding(dp(8f), dp(8f), dp(8f), dp(8f))
             }
 
-            for (item in itemsForGuest) {
-                val itemCard = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    setPadding(32, 20, 32, 20)
-                    gravity = Gravity.CENTER_VERTICAL
-                    val bg = GradientDrawable().apply {
-                        setColor(Color.WHITE)
-                        cornerRadius = 16f
-                        setStroke(1, Color.parseColor("#E0E0E0"))
-                    }
-                    background = bg
-                    layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    ).apply {
-                        bottomMargin = 6
-                        marginStart = 8
-                        marginEnd = 8
-                    }
-                }
+            val emptyHint = TextView(this).apply {
+                text = "Drop items here"
+                textSize = 13f
+                setTextColor(Color.parseColor("#AAAAAA"))
+                gravity = Gravity.CENTER
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+            }
+            guestEmptyHints.add(emptyHint)
 
-                val dragHandle = TextView(this).apply {
-                    text = "☰"
-                    textSize = 18f
-                    setTextColor(Color.parseColor("#AAAAAA"))
-                    setPadding(0, 0, 24, 0)
-                }
-
-                val label = TextView(this).apply {
-                    text = "${item.name} (Qty: ${item.quantity})"
-                    textSize = 14f
-                    setTextColor(Color.parseColor("#333333"))
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                }
-                val price = TextView(this).apply {
-                    text = MoneyUtils.centsToDisplay(item.lineTotalInCents)
-                    textSize = 14f
-                    setTextColor(Color.parseColor("#333333"))
-                }
-
-                itemCard.addView(dragHandle)
-                itemCard.addView(label)
-                itemCard.addView(price)
-
-                itemCard.setOnLongClickListener { view ->
-                    val clipData = ClipData.newPlainText("lineKey", item.lineKey)
-                    val shadow = View.DragShadowBuilder(view)
-                    view.startDragAndDrop(clipData, shadow, null, 0)
-                    true
-                }
-
-                sectionLayout.addView(itemCard)
+            val rv = RecyclerView(this).apply {
+                layoutManager = LinearLayoutManager(this@SplitPaymentActivity)
+                setRecycledViewPool(pool)
+                overScrollMode = View.OVER_SCROLL_NEVER
+                clipToPadding = false
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
             }
 
-            if (itemsForGuest.isEmpty()) {
-                val emptyHint = TextView(this).apply {
-                    text = "Drop items here"
-                    textSize = 13f
-                    setTextColor(Color.parseColor("#AAAAAA"))
-                    gravity = Gravity.CENTER
-                    setPadding(0, 24, 0, 24)
-                }
-                sectionLayout.addView(emptyHint)
-            }
+            val adapter = GuestColumnItemsAdapter()
+            adapter.submitGuestLines(list)
+            rv.adapter = adapter
+            guestColumnAdapters.add(adapter)
 
-            itemsContainer.addView(sectionLayout)
+            val dropHighlight = GuestColumnDropHighlight(columnOuter)
+            val dropListener = guestColumnDropListener(guestIdx, dropHighlight)
+            headerRow.setOnDragListener(dropListener)
+            body.setOnDragListener(dropListener)
+            rv.setOnDragListener(dropListener)
+
+            body.addView(rv)
+            body.addView(emptyHint)
+            emptyHint.setOnDragListener(dropListener)
+
+            columnOuter.addView(headerRow)
+            columnOuter.addView(body)
+
+            itemsContainer.addView(columnOuter)
+        }
+
+        val addColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setBackgroundResource(R.drawable.split_guest_add_column_bg)
+            layoutParams = LinearLayout.LayoutParams(addColW, ViewGroup.LayoutParams.MATCH_PARENT).apply {
+                marginEnd = dp(4f)
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                guestNames = guestNames.toMutableList().apply { add("") }
+                buildSplitView()
+            }
+        }
+        addColumn.addView(
+            TextView(this).apply {
+                text = "+ Add Guest"
+                gravity = Gravity.CENTER
+                textSize = 15f
+                setTextColor(Color.parseColor("#6A4FB3"))
+                setTypeface(null, Typeface.BOLD)
+                setPadding(dp(8f), 0, dp(8f), 0)
+            }
+        )
+        itemsContainer.addView(addColumn)
+    }
+
+    private inner class GuestColumnItemsAdapter :
+        ListAdapter<OrderLineItem, GuestColumnItemsAdapter.VH>(orderLineItemDiff) {
+
+        fun submitGuestLines(newItems: List<OrderLineItem>) {
+            submitList(newItems.toList())
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+            val v = LayoutInflater.from(parent.context)
+                .inflate(R.layout.item_split_guest_line, parent, false)
+            return VH(v)
+        }
+
+        override fun onBindViewHolder(holder: VH, position: Int) {
+            val item = getItem(position)
+            holder.name.text = item.name
+            holder.qty.text = "×${item.quantity}"
+            holder.price.text = MoneyUtils.centsToDisplay(item.lineTotalInCents)
+            holder.itemView.setOnLongClickListener { v ->
+                startLineDrag(item, v)
+                true
+            }
+        }
+
+        inner class VH(view: View) : RecyclerView.ViewHolder(view) {
+            val name: TextView = view.findViewById(R.id.txtItemName)
+            val qty: TextView = view.findViewById(R.id.txtQty)
+            val price: TextView = view.findViewById(R.id.txtPrice)
         }
     }
 

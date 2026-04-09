@@ -5,12 +5,14 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.View
+import android.view.WindowManager
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.FieldValue
@@ -82,10 +84,20 @@ class GlobalModifierActivity : AppCompatActivity() {
 
                     val rawOptions = doc.get("options") as? List<Map<String, Any>> ?: emptyList()
                     val options = rawOptions.mapIndexed { i, opt ->
+                        val rawAct = opt["action"] as? String
+                        val optAction = if (groupType == "REMOVE") {
+                            "REMOVE"
+                        } else if (rawAct?.trim()?.uppercase() == "REMOVE") {
+                            "REMOVE"
+                        } else {
+                            "ADD"
+                        }
                         ModifierOptionEntry(
                             id = opt["id"] as? String ?: "opt_${i}",
                             name = opt["name"] as? String ?: "",
-                            price = (opt["price"] as? Number)?.toDouble() ?: 0.0
+                            price = (opt["price"] as? Number)?.toDouble() ?: 0.0,
+                            triggersModifierGroupIds = (opt["triggersModifierGroupIds"] as? List<String>) ?: emptyList(),
+                            action = optAction,
                         )
                     }
 
@@ -148,12 +160,22 @@ class GlobalModifierActivity : AppCompatActivity() {
                 if (rawEmbedded.isNotEmpty()) {
                     val optionList = rawEmbedded.mapIndexed { i, opt ->
                         @Suppress("UNCHECKED_CAST")
+                        val rawAct = opt["action"] as? String
+                        val storedAction = if (isRemove) {
+                            "REMOVE"
+                        } else if (rawAct?.trim()?.uppercase() == "REMOVE") {
+                            "REMOVE"
+                        } else {
+                            "ADD"
+                        }
+                        val showRemoveStyle = isRemove || storedAction == "REMOVE"
                         ModifierOptionDisplay(
                             id = (opt["id"] as? String) ?: "opt_$i",
                             name = (opt["name"] as? String) ?: "",
                             price = (opt["price"] as? Number)?.toDouble() ?: 0.0,
-                            isRemove = isRemove,
-                            triggersModifierGroupIds = (opt["triggersModifierGroupIds"] as? List<String>) ?: emptyList()
+                            isRemove = showRemoveStyle,
+                            triggersModifierGroupIds = (opt["triggersModifierGroupIds"] as? List<String>) ?: emptyList(),
+                            action = storedAction,
                         )
                     }.sortedBy { it.name.lowercase() }
 
@@ -165,7 +187,8 @@ class GlobalModifierActivity : AppCompatActivity() {
                         optionList = optionList,
                         refresh = { loadGroups() },
                         groupId = groupId,
-                        useEmbeddedOptions = true
+                        useEmbeddedOptions = true,
+                        groupType = selected.groupType,
                     )
                     optionRecycler.adapter = currentOptionAdapter
                     return@addOnSuccessListener
@@ -181,12 +204,22 @@ class GlobalModifierActivity : AppCompatActivity() {
                         for (doc in documents) {
                             val name = doc.getString("name") ?: continue
                             val price = doc.getDouble("price") ?: 0.0
+                            val rawAct = doc.getString("action")
+                            val storedAction = if (isRemove) {
+                                "REMOVE"
+                            } else if (rawAct?.trim()?.uppercase() == "REMOVE") {
+                                "REMOVE"
+                            } else {
+                                "ADD"
+                            }
+                            val showRemoveStyle = isRemove || storedAction == "REMOVE"
                             optionList.add(
                                 ModifierOptionDisplay(
                                     id = doc.id,
                                     name = name,
                                     price = price,
-                                    isRemove = isRemove
+                                    isRemove = showRemoveStyle,
+                                    action = storedAction,
                                 )
                             )
                         }
@@ -201,7 +234,8 @@ class GlobalModifierActivity : AppCompatActivity() {
                             optionList = optionList,
                             refresh = { loadOptions(groupId) },
                             groupId = groupId,
-                            useEmbeddedOptions = false
+                            useEmbeddedOptions = false,
+                            groupType = selected.groupType,
                         )
                         optionRecycler.adapter = currentOptionAdapter
                     }
@@ -283,82 +317,83 @@ class GlobalModifierActivity : AppCompatActivity() {
         group: ModifierGroupModel,
         otherGroups: List<Triple<String, String, String>>
     ) {
-        val layout = LinearLayout(this)
-        layout.orientation = LinearLayout.VERTICAL
-        layout.setPadding(40, 20, 40, 10)
+        val showPrice = group.groupType != "REMOVE"
+        val form = ModifierOptionFormHelper.inflateForm(
+            this,
+            showPrice = showPrice,
+            otherGroups = otherGroups,
+            initialSelected = emptySet(),
+            startExpanded = false,
+        )
 
-        val nameInput = EditText(this)
-        nameInput.hint = "Option name (e.g. Small)"
-
-        val priceInput = EditText(this)
-        priceInput.hint = "Price adjustment"
-        priceInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-
-        layout.addView(nameInput)
-        if (group.groupType != "REMOVE") {
-            layout.addView(priceInput)
+        val dialogRoot = ModifierOptionKeypadHost.wrap(this, form)
+        val removeStyleCb = CheckBox(this).apply {
+            text = getString(R.string.modifier_option_remove_style_checkbox)
+            visibility = if (group.groupType == "REMOVE") View.GONE else View.VISIBLE
         }
-
-        val triggerCheckboxes = mutableMapOf<String, CheckBox>()
-        if (otherGroups.isNotEmpty()) {
-            val triggerLabel = android.widget.TextView(this).apply {
-                text = "Triggers Modifier Groups"
-                textSize = 14f
-                setPadding(0, 32, 0, 4)
-                setTypeface(null, android.graphics.Typeface.BOLD)
-            }
-            val triggerHint = android.widget.TextView(this).apply {
-                text = "When this option is selected, these groups become required choices."
-                textSize = 12f
-                setTextColor(android.graphics.Color.GRAY)
-                setPadding(0, 0, 0, 16)
-            }
-            layout.addView(triggerLabel)
-            layout.addView(triggerHint)
-
-            for ((gId, gName, gInfo) in otherGroups) {
-                val cb = CheckBox(this).apply {
-                    text = "$gName  $gInfo"
-                    textSize = 14f
-                }
-                triggerCheckboxes[gId] = cb
-                layout.addView(cb)
-            }
+        val shell = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            if (group.groupType != "REMOVE") addView(removeStyleCb)
+            addView(
+                dialogRoot,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
         }
-
-        AlertDialog.Builder(this)
+        val dialog = MaterialAlertDialogBuilder(this, R.style.ThemeOverlay_MyApplication_MaterialAlertDialog)
             .setTitle("Add Option")
-            .setView(layout)
-            .setPositiveButton("Save") { _, _ ->
-                val name = nameInput.text.toString().trim()
-                val price = if (group.groupType == "REMOVE") 0.0
-                    else priceInput.text.toString().toDoubleOrNull() ?: 0.0
-                val selectedTriggers = triggerCheckboxes.filter { it.value.isChecked }.keys.toList()
-
-                if (name.isNotEmpty()) {
-                    val optId = "opt_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(5)}"
-                    val option = hashMapOf<String, Any>(
-                        "id" to optId,
-                        "name" to name,
-                        "price" to price
-                    )
-                    if (selectedTriggers.isNotEmpty()) {
-                        option["triggersModifierGroupIds"] = selectedTriggers
-                    }
-
-                    db.collection("ModifierGroups")
-                        .document(group.id)
-                        .update("options", FieldValue.arrayUnion(option))
-                        .addOnSuccessListener {
-                            loadGroups()
-                            Toast.makeText(this, "$name added", Toast.LENGTH_SHORT).show()
-                        }
-                        .addOnFailureListener {
-                            Toast.makeText(this, "Failed to add option", Toast.LENGTH_SHORT).show()
-                        }
-                }
-            }
+            .setView(shell)
+            .setPositiveButton("Save", null)
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = form.editName.text?.toString()?.trim().orEmpty()
+                if (name.isEmpty()) {
+                    form.tilName.error = getString(R.string.item_detail_name_required)
+                    return@setOnClickListener
+                }
+                form.tilName.error = null
+                val price = if (showPrice) {
+                    form.editPrice.text?.toString()?.toDoubleOrNull() ?: 0.0
+                } else {
+                    0.0
+                }
+                val selectedTriggers = form.triggers.selectedTriggerGroupIds()
+
+                val optId = "opt_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(5)}"
+                val optAction = when {
+                    group.groupType == "REMOVE" -> "REMOVE"
+                    removeStyleCb.isChecked -> "REMOVE"
+                    else -> "ADD"
+                }
+                val option = hashMapOf<String, Any>(
+                    "id" to optId,
+                    "name" to name,
+                    "price" to price,
+                    "action" to optAction,
+                )
+                if (selectedTriggers.isNotEmpty()) {
+                    option["triggersModifierGroupIds"] = selectedTriggers
+                }
+
+                db.collection("ModifierGroups")
+                    .document(group.id)
+                    .update("options", FieldValue.arrayUnion(option))
+                    .addOnSuccessListener {
+                        dialog.dismiss()
+                        loadGroups()
+                        Toast.makeText(this, "$name added", Toast.LENGTH_SHORT).show()
+                    }
+                    .addOnFailureListener {
+                        Toast.makeText(this, "Failed to add option", Toast.LENGTH_SHORT).show()
+                    }
+            }
+        }
+        dialog.show()
     }
 }

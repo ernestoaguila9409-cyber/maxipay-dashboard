@@ -3,4 +3,17 @@
     <dimen name="modifier_panel_width">160dp</dimen>
     <dimen name="modifier_option_min_height">48dp</dimen>
     <dimen name="modifier_action_button_size">36dp</dimen>
+    <dimen name="split_guest_column_width">280dp</dimen>
+    <dimen name="split_guest_add_column_width">112dp</dimen>
+
+    <dimen name="pos_keyboard_panel_padding">12dp</dimen>
+    <dimen name="pos_keyboard_panel_top_radius">16dp</dimen>
+    <dimen name="pos_keyboard_elevation">6dp</dimen>
+    <dimen name="pos_key_min_height">42dp</dimen>
+    <dimen name="pos_key_margin_h">5dp</dimen>
+    <dimen name="pos_key_margin_v">5dp</dimen>
+    <dimen name="pos_key_corner_radius">14dp</dimen>
+    <dimen name="pos_key_label_sp">16sp</dimen>
+    <dimen name="pos_key_label_compact_sp">13sp</dimen>
+    <dimen name="pos_key_icon_size">22dp</dimen>
 </resources>

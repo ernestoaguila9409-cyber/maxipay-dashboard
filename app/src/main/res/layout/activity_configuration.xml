@@ -79,7 +79,7 @@
             android:textColor="@android:color/darker_gray"/>
     </LinearLayout>
 
-    <!-- Clickable option: opens Order Types Configure screen -->
+    <!-- Clickable option: opens Order Configuration hub -->
     <LinearLayout
         android:id="@+id/optionOrderTypes"
         android:layout_width="match_parent"
@@ -96,7 +96,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="ORDER TYPES CONFIGURE"
+            android:text="Order Configuration"
             android:textSize="16sp"
             android:textStyle="bold"/>
 
@@ -124,7 +124,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="SETUP TIPS"
+            android:text="SETUP TIPS &amp; DISCOUNTS"
             android:textSize="16sp"
             android:textStyle="bold"/>
 
@@ -153,34 +153,6 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="INVENTORY CONFIGURATION"
-            android:textSize="16sp"
-            android:textStyle="bold"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="›"
-            android:textSize="24sp"
-            android:textColor="@android:color/darker_gray"/>
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/optionDiscounts"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="@android:color/white"
-        android:padding="16dp"
-        android:layout_marginTop="12dp"
-        android:clickable="true"
-        android:focusable="true">
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="SETUP DISCOUNTS"
             android:textSize="16sp"
             android:textStyle="bold"/>
 

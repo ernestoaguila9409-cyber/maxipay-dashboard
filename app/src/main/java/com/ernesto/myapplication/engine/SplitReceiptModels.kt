@@ -13,7 +13,9 @@ data class SplitReceiptLine(
     /** Full line total before splitting (even split only). */
     val originalLineTotalInCents: Long? = null,
     val splitIndex: Int? = null,
-    val totalSplits: Int? = null
+    val totalSplits: Int? = null,
+    /** Bullet lines from Firestore [modifiers] (split by guest / even split item rows). */
+    val modifierLines: List<String> = emptyList()
 )
 
 data class SplitReceiptPayload(
@@ -42,6 +44,7 @@ data class SplitReceiptPayload(
             if (it.originalLineTotalInCents != null) row["originalLineTotalInCents"] = it.originalLineTotalInCents
             if (it.splitIndex != null) row["splitIndex"] = it.splitIndex
             if (it.totalSplits != null) row["totalSplits"] = it.totalSplits
+            if (it.modifierLines.isNotEmpty()) row["modifierLines"] = it.modifierLines
             row
         }
         val taxLinesList = taxLines.map { mapOf("label" to it.first, "amountInCents" to it.second) }
@@ -76,6 +79,9 @@ data class SplitReceiptPayload(
                 val origTotal = (row["originalLineTotalInCents"] as? Number)?.toLong()
                 val sIdx = (row["splitIndex"] as? Number)?.toInt()
                 val tSpl = (row["totalSplits"] as? Number)?.toInt()
+                val modLines = (row["modifierLines"] as? List<*>)
+                    ?.mapNotNull { it?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                    ?: emptyList()
                 SplitReceiptLine(
                     name = name,
                     quantity = qty,
@@ -83,7 +89,8 @@ data class SplitReceiptPayload(
                     originalItemName = origName,
                     originalLineTotalInCents = origTotal,
                     splitIndex = sIdx,
-                    totalSplits = tSpl
+                    totalSplits = tSpl,
+                    modifierLines = modLines
                 )
             }
             val note = m["sharedItemsNote"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }

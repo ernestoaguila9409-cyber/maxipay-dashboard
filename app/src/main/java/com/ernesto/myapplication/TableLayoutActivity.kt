@@ -16,7 +16,9 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import kotlin.math.abs
 
 class TableLayoutActivity : AppCompatActivity() {
@@ -33,6 +35,12 @@ class TableLayoutActivity : AppCompatActivity() {
     private val knownSections = mutableListOf<String>()
     private var selectedSection = ""
     private val dragThreshold = 15f
+
+    private var useTableLayouts: Boolean = false
+    private var activeLayoutId: String = ""
+    private var layoutCanvasW: Double = 1200.0
+    private var layoutCanvasH: Double = 800.0
+    private var layoutTablesListener: ListenerRegistration? = null
 
     private val shapeLabels = arrayOf("Square", "Round", "Rectangle", "Booth")
     private val shapeValues = arrayOf(
@@ -66,6 +74,11 @@ class TableLayoutActivity : AppCompatActivity() {
         }
 
         loadSectionsAndTables()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        layoutTablesListener?.remove()
     }
 
     // ── SECTION CHIPS ──────────────────────────────────────
@@ -199,21 +212,98 @@ class TableLayoutActivity : AppCompatActivity() {
                     if (name.isNotBlank() && name != SECTION_ALL) knownSections.add(name)
                 }
                 rebuildSectionChips()
-                loadTables()
+                loadTablesPreferred()
             }
             .addOnFailureListener {
-                loadTables()
+                loadTablesPreferred()
             }
     }
 
-    private fun loadTables() {
+    private fun clearEditorCanvas() {
+        tableViews.values.forEach { canvas.removeView(it) }
+        tableViews.clear()
+        tableSections.clear()
+    }
+
+    private fun loadTablesPreferred() {
+        db.collection("tableLayouts").get()
+            .addOnSuccessListener { layoutSnap ->
+                if (layoutSnap.isEmpty) {
+                    useTableLayouts = false
+                    activeLayoutId = ""
+                    layoutTablesListener?.remove()
+                    layoutTablesListener = null
+                    loadTablesLegacy()
+                    return@addOnSuccessListener
+                }
+                useTableLayouts = true
+                val layoutDoc = layoutSnap.documents.find { it.getBoolean("isDefault") == true }
+                    ?: layoutSnap.documents.minByOrNull { it.getLong("sortOrder") ?: 0L }
+                    ?: layoutSnap.documents.first()
+                activeLayoutId = layoutDoc.id
+                layoutCanvasW = layoutDoc.getDouble("canvasWidth") ?: 1200.0
+                layoutCanvasH = layoutDoc.getDouble("canvasHeight") ?: 800.0
+
+                layoutTablesListener?.remove()
+                layoutTablesListener = db.collection("tableLayouts").document(activeLayoutId)
+                    .collection("tables")
+                    .addSnapshotListener { snap, err ->
+                        if (err != null || snap == null) return@addSnapshotListener
+                        applyLayoutTablesSnapshotForEditor(snap)
+                    }
+            }
+            .addOnFailureListener { loadTablesLegacy() }
+    }
+
+    private fun applyLayoutTablesSnapshotForEditor(snap: com.google.firebase.firestore.QuerySnapshot) {
+        clearEditorCanvas()
+        var sectionsAdded = false
+        canvas.post {
+            val cw = canvas.width.toFloat().coerceAtLeast(1f)
+            val ch = canvas.height.toFloat().coerceAtLeast(1f)
+
+            for (doc in snap.documents) {
+                val isActive: Boolean = when {
+                    doc.contains("isActive") -> doc.getBoolean("isActive") ?: true
+                    doc.contains("active") -> doc.getBoolean("active") ?: true
+                    else -> true
+                }
+                if (!isActive) continue
+                val areaType = doc.getString("areaType") ?: "DINING_TABLE"
+                if (areaType == "BAR_SEAT") continue
+
+                val name = doc.getString("name") ?: "Table"
+                val seats = (doc.getLong("capacity") ?: doc.getLong("seats"))?.toInt() ?: 0
+                val shapeStr = doc.getString("shape")
+                val shape = TableShapeView.shapeFromString(shapeStr)
+                val xL = doc.getDouble("x") ?: doc.getDouble("posX") ?: 50.0
+                val yL = doc.getDouble("y") ?: doc.getDouble("posY") ?: 50.0
+                val section = doc.getString("section") ?: ""
+
+                tableSections[doc.id] = section
+                if (section.isNotBlank() && section !in knownSections) {
+                    knownSections.add(section)
+                    db.collection("Sections").document(section)
+                        .set(hashMapOf("name" to section))
+                    sectionsAdded = true
+                }
+
+                val posX = (xL * cw / layoutCanvasW).toFloat()
+                val posY = (yL * ch / layoutCanvasH).toFloat()
+                addTableToCanvas(doc.id, name, seats, shape, posX, posY)
+            }
+
+            if (sectionsAdded) rebuildSectionChips()
+            filterTablesBySection()
+        }
+    }
+
+    private fun loadTablesLegacy() {
         db.collection("Tables")
             .whereEqualTo("active", true)
             .get()
             .addOnSuccessListener { snap ->
-                tableViews.values.forEach { canvas.removeView(it) }
-                tableViews.clear()
-                tableSections.clear()
+                clearEditorCanvas()
 
                 var sectionsAdded = false
 
@@ -339,8 +429,24 @@ class TableLayoutActivity : AppCompatActivity() {
     }
 
     private fun saveTablePosition(tableId: String, x: Float, y: Float) {
-        db.collection("Tables").document(tableId)
-            .update("posX", x.toDouble(), "posY", y.toDouble())
+        if (useTableLayouts && activeLayoutId.isNotBlank()) {
+            val cw = canvas.width.toFloat().coerceAtLeast(1f)
+            val ch = canvas.height.toFloat().coerceAtLeast(1f)
+            val xL = x.toDouble() * layoutCanvasW / cw
+            val yL = y.toDouble() * layoutCanvasH / ch
+            db.collection("tableLayouts").document(activeLayoutId)
+                .collection("tables").document(tableId)
+                .update(
+                    mapOf(
+                        "x" to xL,
+                        "y" to yL,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+        } else {
+            db.collection("Tables").document(tableId)
+                .update("posX", x.toDouble(), "posY", y.toDouble())
+        }
     }
 
     // ── GRID PLACEMENT ─────────────────────────────────────
@@ -420,28 +526,65 @@ class TableLayoutActivity : AppCompatActivity() {
 
                 val (newX, newY) = nextAvailablePosition()
 
-                val data = hashMapOf(
-                    "name" to name,
-                    "seats" to seats,
-                    "shape" to TableShapeView.shapeToString(shape),
-                    "posX" to newX.toDouble(),
-                    "posY" to newY.toDouble(),
-                    "section" to section,
-                    "areaType" to "DINING_TABLE",
-                    "active" to true
-                )
-
-                db.collection("Tables").add(data)
-                    .addOnSuccessListener { ref ->
-                        tableSections[ref.id] = section
-                        ensureSection(section)
-                        addTableToCanvas(ref.id, name, seats, shape, newX, newY)
-                        filterTablesBySection()
-                        Toast.makeText(this, "\"$name\" added", Toast.LENGTH_SHORT).show()
-                    }
-                    .addOnFailureListener {
-                        Toast.makeText(this, "Failed: ${it.message}", Toast.LENGTH_LONG).show()
-                    }
+                if (useTableLayouts && activeLayoutId.isNotBlank()) {
+                    val cw = canvas.width.toFloat().coerceAtLeast(1f)
+                    val ch = canvas.height.toFloat().coerceAtLeast(1f)
+                    val xL = newX.toDouble() * layoutCanvasW / cw
+                    val yL = newY.toDouble() * layoutCanvasH / ch
+                    val data = hashMapOf(
+                        "name" to name,
+                        "capacity" to seats,
+                        "seats" to seats,
+                        "shape" to TableShapeView.shapeToString(shape),
+                        "x" to xL,
+                        "y" to yL,
+                        "width" to 100.0,
+                        "height" to 80.0,
+                        "rotation" to 0.0,
+                        "code" to "",
+                        "section" to section,
+                        "areaType" to "DINING_TABLE",
+                        "isActive" to true,
+                        "active" to true,
+                        "sortOrder" to tableViews.size,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                    db.collection("tableLayouts").document(activeLayoutId)
+                        .collection("tables").add(data)
+                        .addOnSuccessListener { ref ->
+                            tableSections[ref.id] = section
+                            ensureSection(section)
+                            addTableToCanvas(ref.id, name, seats, shape, newX, newY)
+                            filterTablesBySection()
+                            Toast.makeText(this, "\"$name\" added", Toast.LENGTH_SHORT).show()
+                        }
+                        .addOnFailureListener {
+                            Toast.makeText(this, "Failed: ${it.message}", Toast.LENGTH_LONG).show()
+                        }
+                } else {
+                    val data = hashMapOf(
+                        "name" to name,
+                        "seats" to seats,
+                        "shape" to TableShapeView.shapeToString(shape),
+                        "posX" to newX.toDouble(),
+                        "posY" to newY.toDouble(),
+                        "section" to section,
+                        "areaType" to "DINING_TABLE",
+                        "active" to true
+                    )
+                    db.collection("Tables").add(data)
+                        .addOnSuccessListener { ref ->
+                            tableSections[ref.id] = section
+                            ensureSection(section)
+                            addTableToCanvas(ref.id, name, seats, shape, newX, newY)
+                            filterTablesBySection()
+                            Toast.makeText(this, "\"$name\" added", Toast.LENGTH_SHORT).show()
+                        }
+                        .addOnFailureListener {
+                            Toast.makeText(this, "Failed: ${it.message}", Toast.LENGTH_LONG).show()
+                        }
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -450,12 +593,18 @@ class TableLayoutActivity : AppCompatActivity() {
     // ── EDIT / DELETE ──────────────────────────────────────
 
     private fun showEditDeleteDialog(tableId: String) {
-        db.collection("Tables").document(tableId).get()
+        val tableRef = if (useTableLayouts && activeLayoutId.isNotBlank()) {
+            db.collection("tableLayouts").document(activeLayoutId)
+                .collection("tables").document(tableId)
+        } else {
+            db.collection("Tables").document(tableId)
+        }
+        tableRef.get()
             .addOnSuccessListener { doc ->
                 if (!doc.exists()) return@addOnSuccessListener
 
                 val currentName = doc.getString("name") ?: ""
-                val currentSeats = doc.getLong("seats")?.toInt() ?: 0
+                val currentSeats = (doc.getLong("capacity") ?: doc.getLong("seats"))?.toInt() ?: 0
                 val currentShape = TableShapeView.shapeFromString(doc.getString("shape"))
                 val currentSection = doc.getString("section") ?: ""
 
@@ -510,14 +659,22 @@ class TableLayoutActivity : AppCompatActivity() {
                 }
                 val section = knownSections[spinnerSection.selectedItemPosition]
 
-                db.collection("Tables").document(tableId)
-                    .update(
-                        "name", name,
-                        "seats", seats,
-                        "shape", TableShapeView.shapeToString(shape),
-                        "section", section,
-                        "areaType", "DINING_TABLE"
-                    )
+                val updates = hashMapOf<String, Any>(
+                    "name" to name,
+                    "capacity" to seats,
+                    "seats" to seats,
+                    "shape" to TableShapeView.shapeToString(shape),
+                    "section" to section,
+                    "areaType" to "DINING_TABLE",
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                val ref = if (useTableLayouts && activeLayoutId.isNotBlank()) {
+                    db.collection("tableLayouts").document(activeLayoutId)
+                        .collection("tables").document(tableId)
+                } else {
+                    db.collection("Tables").document(tableId)
+                }
+                ref.update(updates)
                     .addOnSuccessListener {
                         val tv = tableViews[tableId] as? TableShapeView
                         if (tv != null) {
@@ -540,14 +697,25 @@ class TableLayoutActivity : AppCompatActivity() {
             .setTitle("Delete Table")
             .setMessage("Delete \"$name\"?")
             .setPositiveButton("Delete") { _, _ ->
-                db.collection("Tables").document(tableId)
-                    .update("active", false)
-                    .addOnSuccessListener {
-                        tableViews[tableId]?.let { canvas.removeView(it) }
-                        tableViews.remove(tableId)
-                        tableSections.remove(tableId)
-                        Toast.makeText(this, "\"$name\" deleted", Toast.LENGTH_SHORT).show()
-                    }
+                val del = if (useTableLayouts && activeLayoutId.isNotBlank()) {
+                    db.collection("tableLayouts").document(activeLayoutId)
+                        .collection("tables").document(tableId)
+                        .update(
+                            mapOf(
+                                "isActive" to false,
+                                "active" to false,
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                } else {
+                    db.collection("Tables").document(tableId).update("active", false)
+                }
+                del.addOnSuccessListener {
+                    tableViews[tableId]?.let { canvas.removeView(it) }
+                    tableViews.remove(tableId)
+                    tableSections.remove(tableId)
+                    Toast.makeText(this, "\"$name\" deleted", Toast.LENGTH_SHORT).show()
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()

@@ -1,12 +1,16 @@
 package com.ernesto.myapplication
 
+import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
@@ -14,6 +18,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import android.widget.Button
+import android.widget.ScrollView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.chip.Chip
@@ -46,6 +51,13 @@ class TableSelectionActivity : AppCompatActivity() {
     private var selectedSection = ""
     private val occupiedTableData = mutableMapOf<String, OccupiedTableInfo>()
     private var occupiedListener: ListenerRegistration? = null
+
+    /** When true, table defs come from Firestore `tableLayouts/{id}/tables` (synced with web). */
+    private var useTableLayouts: Boolean = false
+    private var activeLayoutId: String = ""
+    private var layoutCanvasW: Double = 1200.0
+    private var layoutCanvasH: Double = 800.0
+    private var layoutTablesListener: ListenerRegistration? = null
 
     private val waitingHandler = Handler(Looper.getMainLooper())
     private val waitingRefreshRunnable = object : Runnable {
@@ -103,6 +115,7 @@ class TableSelectionActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         occupiedListener?.remove()
+        layoutTablesListener?.remove()
         waitingHandler.removeCallbacks(waitingRefreshRunnable)
     }
 
@@ -147,21 +160,116 @@ class TableSelectionActivity : AppCompatActivity() {
                     if (name.isNotBlank() && name != "Bar") knownSections.add(name)
                 }
                 rebuildSectionChips()
-                loadTables()
+                loadTablesPreferred()
             }
-            .addOnFailureListener { loadTables() }
+            .addOnFailureListener { loadTablesPreferred() }
     }
 
-    private fun loadTables() {
+    private fun clearTableCanvas() {
+        tableViews.values.forEach { canvas.removeView(it) }
+        tableViews.clear()
+        tableSections.clear()
+        tableNames.clear()
+        tableSeats.clear()
+    }
+
+    /**
+     * Prefer shared `tableLayouts` + `tables` subcollection (web dashboard).
+     * Falls back to legacy top-level `Tables` if no layouts exist.
+     */
+    private fun loadTablesPreferred() {
+        db.collection("tableLayouts").get()
+            .addOnSuccessListener { layoutSnap ->
+                if (layoutSnap.isEmpty) {
+                    useTableLayouts = false
+                    activeLayoutId = ""
+                    layoutTablesListener?.remove()
+                    layoutTablesListener = null
+                    loadTablesLegacy()
+                    return@addOnSuccessListener
+                }
+                useTableLayouts = true
+                val layoutDoc = layoutSnap.documents.find { it.getBoolean("isDefault") == true }
+                    ?: layoutSnap.documents.minByOrNull { it.getLong("sortOrder") ?: 0L }
+                    ?: layoutSnap.documents.first()
+                activeLayoutId = layoutDoc.id
+                layoutCanvasW = layoutDoc.getDouble("canvasWidth") ?: 1200.0
+                layoutCanvasH = layoutDoc.getDouble("canvasHeight") ?: 800.0
+
+                layoutTablesListener?.remove()
+                layoutTablesListener = db.collection("tableLayouts").document(activeLayoutId)
+                    .collection("tables")
+                    .addSnapshotListener { snap, err ->
+                        if (err != null || snap == null) return@addSnapshotListener
+                        applyLayoutTablesSnapshot(snap)
+                    }
+            }
+            .addOnFailureListener {
+                useTableLayouts = false
+                loadTablesLegacy()
+            }
+    }
+
+    private fun applyLayoutTablesSnapshot(snap: com.google.firebase.firestore.QuerySnapshot) {
+        clearTableCanvas()
+        var sectionsAdded = false
+        canvas.post {
+            val cw = canvas.width.toFloat().coerceAtLeast(1f)
+            val ch = canvas.height.toFloat().coerceAtLeast(1f)
+
+            for (doc in snap.documents) {
+                val isActive: Boolean = when {
+                    doc.contains("isActive") -> doc.getBoolean("isActive") ?: true
+                    doc.contains("active") -> doc.getBoolean("active") ?: true
+                    else -> true
+                }
+                if (!isActive) continue
+                val areaType = doc.getString("areaType") ?: "DINING_TABLE"
+                if (areaType == "BAR_SEAT") continue
+
+                val name = doc.getString("name") ?: "Table"
+                val seats = (doc.getLong("capacity") ?: doc.getLong("seats"))?.toInt() ?: 4
+                val shapeStr = doc.getString("shape")
+                val shape = TableShapeView.shapeFromString(shapeStr)
+                val xL = doc.getDouble("x") ?: doc.getDouble("posX") ?: 50.0
+                val yL = doc.getDouble("y") ?: doc.getDouble("posY") ?: 50.0
+                val section = doc.getString("section") ?: ""
+
+                tableSections[doc.id] = section
+                tableNames[doc.id] = name
+                tableSeats[doc.id] = seats
+                if (section.isNotBlank() && section !in knownSections) {
+                    knownSections.add(section)
+                    db.collection("Sections").document(section)
+                        .set(hashMapOf("name" to section))
+                    sectionsAdded = true
+                }
+
+                val posX = (xL * cw / layoutCanvasW).toFloat()
+                val posY = (yL * ch / layoutCanvasH).toFloat()
+                addTableToCanvas(doc.id, name, seats, shape, posX, posY)
+            }
+
+            if (sectionsAdded) rebuildSectionChips()
+            filterTablesBySection()
+            applyOccupiedState()
+
+            if (snap.isEmpty) {
+                Toast.makeText(
+                    this,
+                    "No tables in this layout. Add tables in Dashboard → Settings → Table Layout.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    private fun loadTablesLegacy() {
         db.collection("Tables")
             .whereEqualTo("active", true)
             .get()
             .addOnSuccessListener { snap ->
-                tableViews.values.forEach { canvas.removeView(it) }
-                tableViews.clear()
-                tableSections.clear()
-                tableNames.clear()
-                tableSeats.clear()
+                clearTableCanvas()
 
                 for (doc in snap.documents) {
                     val areaType = doc.getString("areaType") ?: "DINING_TABLE"
@@ -241,16 +349,60 @@ class TableSelectionActivity : AppCompatActivity() {
         val maxSeats = tableSeats[tableId] ?: 4
 
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_guest_count, null)
+        val guestDialogContentScroll = dialogView.findViewById<ScrollView>(R.id.guestDialogContentScroll)
+        val btnGuestDialogCancel = dialogView.findViewById<TextView>(R.id.btnGuestDialogCancel)
+        val btnGuestDialogStart = dialogView.findViewById<TextView>(R.id.btnGuestDialogStart)
         val txtTableInfo = dialogView.findViewById<TextView>(R.id.txtTableInfo)
         val txtGuestCount = dialogView.findViewById<TextView>(R.id.txtGuestCount)
         val btnMinus = dialogView.findViewById<Button>(R.id.btnMinus)
         val btnPlus = dialogView.findViewById<Button>(R.id.btnPlus)
         val guestNamesContainer = dialogView.findViewById<LinearLayout>(R.id.guestNamesContainer)
+        val guestNameKeypadHost = dialogView.findViewById<LinearLayout>(R.id.guestNameKeypadHost)
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
 
         txtTableInfo.text = "$name • $maxSeats seats"
 
         var guestCount = 1
         val nameInputs = mutableListOf<EditText>()
+        var activeNameEdit: EditText? = null
+
+        val keypad = ReceiptEmailKeypadDialog.buildKeypadView(
+            this,
+            ReceiptEmailKeypadDialog.KeypadVariant.GUEST_NAME,
+            keyMinHeightDp = 30f,
+            keyMarginDp = 1.5f,
+            keyTextSizeSp = 13.5f,
+            keyTextSizeCompactSp = 11f,
+            panelPaddingHorizontalDp = 5f,
+            panelPaddingVerticalDp = 6f,
+        ) { token ->
+            activeNameEdit?.let { ReceiptEmailKeypadDialog.insertAtCaret(it, token) }
+        }
+        guestNameKeypadHost.addView(
+            keypad,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+
+        fun wireGuestNameField(editText: EditText) {
+            editText.inputType = InputType.TYPE_NULL
+            editText.showSoftInputOnFocus = false
+            editText.isCursorVisible = true
+            editText.setOnFocusChangeListener { v, hasFocus ->
+                if (hasFocus) {
+                    activeNameEdit = v as EditText
+                    imm.hideSoftInputFromWindow(v.windowToken, 0)
+                    scrollGuestDialogToShowField(guestDialogContentScroll, v as EditText)
+                }
+            }
+            editText.setOnClickListener {
+                activeNameEdit = editText
+                imm.hideSoftInputFromWindow(editText.windowToken, 0)
+                scrollGuestDialogToShowField(guestDialogContentScroll, editText)
+            }
+        }
 
         fun updateNameInputs() {
             val currentCount = nameInputs.size
@@ -265,14 +417,19 @@ class TableSelectionActivity : AppCompatActivity() {
                                 LinearLayout.LayoutParams.WRAP_CONTENT
                             ).apply { bottomMargin = 12 }
                         }
+                        wireGuestNameField(editText)
                         guestNamesContainer.addView(editText)
                         nameInputs.add(editText)
                     }
                 }
                 guestCount < currentCount -> {
                     for (i in guestCount until currentCount) {
-                        guestNamesContainer.removeView(nameInputs.last())
-                        nameInputs.removeAt(nameInputs.lastIndex)
+                        val removed = nameInputs.removeAt(nameInputs.lastIndex)
+                        guestNamesContainer.removeView(removed)
+                        if (activeNameEdit === removed) {
+                            activeNameEdit = nameInputs.lastOrNull()
+                            activeNameEdit?.requestFocus()
+                        }
                     }
                 }
             }
@@ -303,15 +460,66 @@ class TableSelectionActivity : AppCompatActivity() {
             }
         }
 
-        AlertDialog.Builder(this)
-            .setTitle("How many guests?")
+        val dialog = AlertDialog.Builder(this)
             .setView(dialogView)
-            .setPositiveButton("Start Order") { _, _ ->
-                val guestNames = nameInputs.map { it.text.toString().trim() }
-                navigateToMenu(tableId, name, guestCount, guestNames)
+            .create()
+
+        fun confirmStartOrder() {
+            val guestNames = nameInputs.map { it.text.toString().trim() }
+            imm.hideSoftInputFromWindow(dialogView.windowToken, 0)
+            dialog.dismiss()
+            navigateToMenu(tableId, name, guestCount, guestNames)
+        }
+
+        btnGuestDialogCancel.setOnClickListener {
+            imm.hideSoftInputFromWindow(dialogView.windowToken, 0)
+            dialog.dismiss()
+        }
+        btnGuestDialogStart.setOnClickListener { confirmStartOrder() }
+
+        dialog.setOnShowListener {
+            dialog.window?.let { win ->
+                win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
+                val displayHeight = resources.displayMetrics.heightPixels
+                win.setLayout(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    (displayHeight * 0.92).toInt()
+                )
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+            nameInputs.firstOrNull()?.let { first ->
+                activeNameEdit = first
+                first.post {
+                    first.requestFocus()
+                    imm.hideSoftInputFromWindow(first.windowToken, 0)
+                }
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun scrollGuestDialogToShowField(scroll: ScrollView, field: View) {
+        scroll.post {
+            var y = 0
+            var v: View? = field
+            while (v != null) {
+                val p = v.parent
+                if (p === scroll) break
+                y += v.top
+                v = p as? View
+            }
+            val slack = (resources.displayMetrics.density * 12f).toInt()
+            val bottomVisible = scroll.scrollY + scroll.height - scroll.paddingBottom
+            val fieldBottom = y + field.height
+            if (fieldBottom > bottomVisible - slack) {
+                scroll.smoothScrollTo(0, fieldBottom - scroll.height + scroll.paddingBottom + slack)
+            } else {
+                val topVisible = scroll.scrollY + scroll.paddingTop
+                if (y < topVisible + slack) {
+                    scroll.smoothScrollTo(0, (y - slack).coerceAtLeast(0))
+                }
+            }
+        }
     }
 
     private fun showDeoccupyDialog(tableId: String, info: OccupiedTableInfo) {

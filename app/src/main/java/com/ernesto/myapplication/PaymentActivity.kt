@@ -1557,6 +1557,7 @@ class PaymentActivity : AppCompatActivity() {
     private fun onOrderFullyPaid(skipMerchantReceiptScreen: Boolean = false) {
         setResult(RESULT_OK)
         val oid = orderId ?: run { finish(); return }
+        KitchenPrintHelper.maybePrintKitchenTicketsAfterOrderFullyPaid(this, oid)
         if (skipMerchantReceiptScreen) {
             CustomerDisplayManager.clearPaymentSuccessInfo()
             CustomerDisplayManager.clearReceiptOptionCallback()

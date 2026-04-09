@@ -21,6 +21,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.firebase.firestore.Filter
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Calendar
 import java.util.Locale
@@ -54,10 +55,12 @@ class MenuOnlyActivity : AppCompatActivity() {
     private var pendingTaxIds: ArrayList<String> = arrayListOf()
     private var pendingUseCategoryAvail: Boolean = true
     private var pendingOrderTypes: List<String> = emptyList()
+    private var pendingPrinterLabel: String = ""
     private var addItemDialogOpen: Boolean = false
 
     private lateinit var modifierLauncher: ActivityResultLauncher<Intent>
     private lateinit var taxLauncher: ActivityResultLauncher<Intent>
+    private lateinit var printerLabelLauncher: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,6 +77,13 @@ class MenuOnlyActivity : AppCompatActivity() {
         taxLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
                 pendingTaxIds = result.data?.getStringArrayListExtra("SELECTED_IDS") ?: arrayListOf()
+            }
+            if (addItemDialogOpen) showAddItemDialog()
+        }
+
+        printerLabelLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                pendingPrinterLabel = result.data?.getStringExtra(SelectPrinterLabelActivity.RESULT_SELECTED_LABEL)?.trim().orEmpty()
             }
             if (addItemDialogOpen) showAddItemDialog()
         }
@@ -192,7 +202,8 @@ class MenuOnlyActivity : AppCompatActivity() {
                         id = doc.id,
                         name = name,
                         categoryId = doc.getString("categoryId") ?: "",
-                        order = (doc.getLong("order") ?: 0L).toInt()
+                        order = (doc.getLong("order") ?: 0L).toInt(),
+                        kitchenLabel = doc.getString("kitchenLabel")?.trim().orEmpty(),
                     )
                 }.sortedBy { it.order }
                 onComplete()
@@ -235,7 +246,8 @@ class MenuOnlyActivity : AppCompatActivity() {
                                 name = name,
                                 normalizedName = doc.getString("normalizedName"),
                                 availableOrderTypes = availableOrderTypes,
-                                scheduleIds = scheduleIds
+                                scheduleIds = scheduleIds,
+                                kitchenLabel = doc.getString("kitchenLabel")?.trim().orEmpty(),
                             )
                         )
                     }
@@ -303,7 +315,10 @@ class MenuOnlyActivity : AppCompatActivity() {
             }
         }
 
-        fun addChip(label: String, active: Boolean, onClick: () -> Unit) {
+        fun addChip(
+            label: String, active: Boolean,
+            onClick: () -> Unit, onLongClick: (() -> Unit)? = null,
+        ) {
             val tv = TextView(this).apply {
                 text = label
                 textSize = 13f
@@ -313,6 +328,9 @@ class MenuOnlyActivity : AppCompatActivity() {
                 isClickable = true
                 isFocusable = true
                 setOnClickListener { onClick() }
+                if (onLongClick != null) {
+                    setOnLongClickListener { onLongClick(); true }
+                }
             }
             val lp = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -321,19 +339,63 @@ class MenuOnlyActivity : AppCompatActivity() {
             subcategoryChipsRow.addView(tv, lp)
         }
 
-        addChip("All", selectedSubcategoryId == null) {
+        addChip("All", selectedSubcategoryId == null, onClick = {
             selectedSubcategoryId = null
             buildSubcategoryChips(categoryId)
             loadItems(categoryId)
-        }
+        })
 
         for (sub in subs) {
-            addChip(sub.name, selectedSubcategoryId == sub.id) {
+            // Subcategory name only on the chip; kitchen routing label is set via long-press and
+            // used for printing without cluttering the filter UI.
+            val chipLabel = sub.name
+            addChip(chipLabel, selectedSubcategoryId == sub.id, onClick = {
                 selectedSubcategoryId = sub.id
                 buildSubcategoryChips(categoryId)
                 loadItems(categoryId)
-            }
+            }, onLongClick = {
+                showSubcategoryKitchenLabelPicker(sub, categoryId)
+            })
         }
+    }
+
+    private fun showSubcategoryKitchenLabelPicker(sub: SubcategoryModel, categoryId: String) {
+        val available = KitchenRoutingLabelsFirestore
+            .labelsForItemAssignmentPicker(this, listOfNotNull(sub.kitchenLabel.takeIf { it.isNotEmpty() }))
+        if (available.isEmpty()) {
+            Toast.makeText(this, "No kitchen labels configured on any printer", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val current = PrinterLabelKey.normalize(sub.kitchenLabel)
+        val names = arrayOf("None") + available.toTypedArray()
+        val checkedIndex = if (current.isEmpty()) 0
+            else available.indexOfFirst { PrinterLabelKey.normalize(it) == current } + 1
+
+        AlertDialog.Builder(this)
+            .setTitle("Kitchen Label \u2014 ${sub.name}")
+            .setSingleChoiceItems(names, checkedIndex.coerceAtLeast(0), null)
+            .setPositiveButton("Save") { dialog, _ ->
+                val lv = (dialog as AlertDialog).listView
+                val selected = lv.checkedItemPosition
+                val label = if (selected <= 0) "" else available[selected - 1]
+                val updates: Map<String, Any> = if (label.isEmpty()) {
+                    mapOf("kitchenLabel" to com.google.firebase.firestore.FieldValue.delete())
+                } else {
+                    mapOf("kitchenLabel" to label)
+                }
+                db.collection("subcategories").document(sub.id).update(updates)
+                    .addOnSuccessListener {
+                        Toast.makeText(this,
+                            if (label.isEmpty()) "Kitchen label removed" else "Label set to \"$label\"",
+                            Toast.LENGTH_SHORT).show()
+                        loadCategories()
+                    }
+                    .addOnFailureListener { e ->
+                        Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     // =========================================================
@@ -401,7 +463,8 @@ class MenuOnlyActivity : AppCompatActivity() {
                             pricing = pricingObj,
                             menuIds = menuIdsRaw,
                             channels = channelsObj,
-                            subcategoryId = doc.getString("subcategoryId") ?: ""
+                            subcategoryId = doc.getString("subcategoryId") ?: "",
+                            printerLabel = MenuItemRoutingLabel.fromMenuItemDoc(doc),
                         )
                     )
                 }
@@ -429,9 +492,24 @@ class MenuOnlyActivity : AppCompatActivity() {
         itemRecycler.adapter = null
     }
 
+    private fun subcategoryIdForCategory(doc: com.google.firebase.firestore.DocumentSnapshot, categoryId: String): String {
+        @Suppress("UNCHECKED_CAST")
+        val byCat = doc.get("subcategoryByCategoryId") as? Map<*, *>
+        if (byCat != null) {
+            val v = byCat[categoryId] as? String
+            if (v != null) return v
+        }
+        return doc.getString("subcategoryId") ?: ""
+    }
+
     private fun loadItems(categoryId: String) {
         db.collection("MenuItems")
-            .whereEqualTo("categoryId", categoryId)
+            .where(
+                Filter.or(
+                    Filter.equalTo("categoryId", categoryId),
+                    Filter.arrayContains("categoryIds", categoryId),
+                ),
+            )
             .get()
             .addOnSuccessListener { documents ->
                 val itemList = mutableListOf<ItemModel>()
@@ -439,7 +517,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                 for (doc in documents) {
                     val name = doc.getString("name") ?: continue
 
-                    val subcategoryId = doc.getString("subcategoryId") ?: ""
+                    val subcategoryId = subcategoryIdForCategory(doc, categoryId)
                     if (selectedSubcategoryId != null && subcategoryId != selectedSubcategoryId) continue
 
                     @Suppress("UNCHECKED_CAST")
@@ -494,7 +572,8 @@ class MenuOnlyActivity : AppCompatActivity() {
                             pricing = pricingObj,
                             menuIds = menuIdsRaw,
                             channels = channelsObj,
-                            subcategoryId = subcategoryId
+                            subcategoryId = subcategoryId,
+                            printerLabel = MenuItemRoutingLabel.fromMenuItemDoc(doc),
                         )
                     )
                 }
@@ -738,6 +817,49 @@ class MenuOnlyActivity : AppCompatActivity() {
             return row
         }
 
+        fun createOptionRowWithBadge(label: String, badgeText: String?, onClick: () -> Unit): View {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(8, 28, 8, 28)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onClick() }
+            }
+            row.addView(
+                TextView(this).apply {
+                    text = label
+                    textSize = 15f
+                    setTextColor(Color.parseColor("#1E293B"))
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                },
+            )
+            val bt = badgeText?.trim()
+            if (!bt.isNullOrEmpty()) {
+                row.addView(
+                    TextView(this).apply {
+                        text = bt
+                        textSize = 12f
+                        setTextColor(Color.parseColor("#6366F1"))
+                        setPadding(16, 4, 16, 4)
+                        background = GradientDrawable().apply {
+                            cornerRadius = 20f
+                            setColor(Color.parseColor("#EEF2FF"))
+                        }
+                    },
+                )
+            }
+            row.addView(
+                TextView(this).apply {
+                    text = "›"
+                    textSize = 20f
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    setPadding(16, 0, 0, 0)
+                },
+            )
+            return row
+        }
+
         val nameInput = EditText(this).apply {
             hint = "Item name"
             setText(pendingName)
@@ -780,6 +902,31 @@ class MenuOnlyActivity : AppCompatActivity() {
             }
             layout.addView(subSpinner)
         }
+
+        layout.addView(createDivider())
+
+        layout.addView(
+            createOptionRowWithBadge(
+                getString(R.string.assign_printer_label_menu),
+                pendingPrinterLabel.trim().takeIf { it.isNotEmpty() },
+            ) {
+                pendingName = nameInput.text.toString()
+                pendingPrice = priceInput.text.toString()
+                pendingStock = stockInput.text.toString()
+                pendingSubId = selectedSubId
+                val intent = Intent(this, SelectPrinterLabelActivity::class.java)
+                intent.putExtra(SelectPrinterLabelActivity.EXTRA_CURRENT_LABEL, pendingPrinterLabel)
+                printerLabelLauncher.launch(intent)
+            },
+        )
+        layout.addView(
+            TextView(this).apply {
+                text = getString(R.string.menu_item_printer_label_hint)
+                textSize = 11f
+                setTextColor(Color.GRAY)
+                setPadding(8, 0, 8, 8)
+            },
+        )
 
         layout.addView(createDivider())
 
@@ -880,8 +1027,13 @@ class MenuOnlyActivity : AppCompatActivity() {
                     "taxIds" to pendingTaxIds.toList(),
                     "modifierGroupIds" to pendingModifierIds.toList(),
                     "isScheduled" to false,
-                    "scheduleIds" to emptyList<String>()
+                    "scheduleIds" to emptyList<String>(),
                 )
+
+                val pl = pendingPrinterLabel.trim().takeIf { it.isNotEmpty() }
+                if (!pl.isNullOrEmpty()) {
+                    item["printerLabel"] = pl
+                }
 
                 if (!useCategorySwitch.isChecked) {
                     val selectedTypes =
@@ -903,6 +1055,9 @@ class MenuOnlyActivity : AppCompatActivity() {
                                 ))
                             }
                             batch.commit()
+                        }
+                        pl?.let {
+                            KitchenRoutingLabelsFirestore.mergeLabelsIntoFirestore(db, listOf(it))
                         }
                         clearPendingForm()
                         loadItems(selectedCategoryId!!)
@@ -929,5 +1084,7 @@ class MenuOnlyActivity : AppCompatActivity() {
         pendingTaxIds = arrayListOf()
         pendingUseCategoryAvail = true
         pendingOrderTypes = emptyList()
+        pendingPrinterLabel = ""
     }
+
 }

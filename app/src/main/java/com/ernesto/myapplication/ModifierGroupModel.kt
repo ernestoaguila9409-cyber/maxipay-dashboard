@@ -14,5 +14,7 @@ data class ModifierOptionEntry(
     val id: String = "",
     val name: String = "",
     val price: Double = 0.0,
-    val triggersModifierGroupIds: List<String> = emptyList()
+    val triggersModifierGroupIds: List<String> = emptyList(),
+    /** Per-option remove (e.g. "No onions"); stored on `ModifierOptions` / embedded `options[]` as `action`. */
+    val action: String = "ADD",
 )
