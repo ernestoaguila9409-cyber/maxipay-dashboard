@@ -349,13 +349,23 @@ export async function importLegacyTablesLayout(
   return layoutId;
 }
 
-/** Doc id = display name, matching Android `Sections.document(name).set({ name })`. */
+/**
+ * Firestore document id cannot contain `/`. Android uses the trimmed display name as doc id.
+ */
+export function sanitizeSectionDocumentId(displayName: string): string {
+  return displayName.trim().replace(/\//g, "-");
+}
+
+/** Doc id = sanitized display name (matches Android when name has no `/`). */
 export async function upsertFirestoreSection(db: Firestore, displayName: string): Promise<void> {
   const name = displayName.trim();
   if (!name) throw new Error("Section name is required");
+  if (name === "." || name === "..") throw new Error("Invalid section name");
   if (name.toLowerCase() === "bar") throw new Error(`"${name}" is reserved`);
+  const docId = sanitizeSectionDocumentId(name);
+  if (!docId) throw new Error("Section name is required");
   await setDoc(
-    doc(db, SECTIONS_COLLECTION, name),
+    doc(db, SECTIONS_COLLECTION, docId),
     { name, updatedAt: serverTimestamp() },
     { merge: true }
   );

@@ -335,6 +335,7 @@ const DEFAULT_MODULES: DashboardModule[] = [
   { key: "reports", label: "REPORTS", iconName: "ic_reports", colorKey: "purple", position: 11 },
   { key: "printers", label: "PRINTERS", iconName: "ic_printer", colorKey: "purple", position: 12 },
   { key: "cash_flow", label: "CASH FLOW", iconName: "ic_cash", colorKey: "purple", position: 13 },
+  { key: "reservation", label: "RESERVATION", iconName: "ic_calendar", colorKey: "purple", position: 14 },
 ];
 
 // Must match Android ColorRegistry

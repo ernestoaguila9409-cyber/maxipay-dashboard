@@ -334,7 +334,15 @@ export default function TableLayoutEditorClient() {
 
   const addSectionFromWeb = async () => {
     const name = newSectionName.trim();
-    if (!name) return;
+    if (!name) {
+      window.alert("Enter a section name in the box, then click Add (or press Enter).");
+      return;
+    }
+    const dup = sectionRows.find((r) => r.name.toLowerCase() === name.toLowerCase());
+    if (dup) {
+      window.alert(`Section "${dup.name}" already exists.`);
+      return;
+    }
     setSaveState("saving");
     try {
       await upsertFirestoreSection(db, name);
@@ -343,8 +351,9 @@ export default function TableLayoutEditorClient() {
       setTimeout(() => setSaveState("idle"), 1200);
     } catch (e) {
       console.error(e);
-      alert(e instanceof Error ? e.message : "Could not add section");
+      window.alert(e instanceof Error ? e.message : "Could not add section. Check Firestore rules and your connection.");
       setSaveState("error");
+      setTimeout(() => setSaveState("idle"), 2000);
     }
   };
 
@@ -657,24 +666,29 @@ export default function TableLayoutEditorClient() {
               Synced with Android POS Setup and Dine In chips. Create zones here, then set each
               table&apos;s section in the properties panel.
             </p>
-            <div className="flex gap-2">
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void addSectionFromWeb();
+              }}
+            >
               <input
-                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                placeholder="e.g. Inside, Rooftop"
+                name="sectionName"
+                autoComplete="off"
+                className="relative z-0 min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                placeholder="e.g. Patio, VIP"
                 value={newSectionName}
                 onChange={(e) => setNewSectionName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void addSectionFromWeb();
-                }}
               />
               <button
-                type="button"
-                onClick={() => void addSectionFromWeb()}
-                className="flex-shrink-0 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900"
+                type="submit"
+                disabled={saveState === "saving"}
+                className="relative z-10 flex-shrink-0 cursor-pointer rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900 disabled:cursor-wait disabled:opacity-70"
               >
-                Add
+                {saveState === "saving" ? "…" : "Add"}
               </button>
-            </div>
+            </form>
             <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto text-sm">
               {sectionRows.length === 0 && (
                 <li className="text-xs text-slate-400">No sections yet — add one or import tables.</li>
