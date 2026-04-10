@@ -29,6 +29,8 @@ import {
 
 export const TABLE_LAYOUTS_COLLECTION = "tableLayouts";
 export const TABLES_SUBCOLLECTION = "tables";
+/** Same collection Android Setup + Dine In use for floor-plan chips. */
+export const SECTIONS_COLLECTION = "Sections";
 
 /** Matches Android TableShapeView.shapeToString / shapeFromString (+ CIRCLE → ROUND at save boundary). */
 export type TableShape = "SQUARE" | "RECTANGLE" | "ROUND" | "BOOTH";
@@ -345,6 +347,22 @@ export async function importLegacyTablesLayout(
     await upsertLayoutTable(db, layoutId, null, data);
   }
   return layoutId;
+}
+
+/** Doc id = display name, matching Android `Sections.document(name).set({ name })`. */
+export async function upsertFirestoreSection(db: Firestore, displayName: string): Promise<void> {
+  const name = displayName.trim();
+  if (!name) throw new Error("Section name is required");
+  if (name.toLowerCase() === "bar") throw new Error(`"${name}" is reserved`);
+  await setDoc(
+    doc(db, SECTIONS_COLLECTION, name),
+    { name, updatedAt: serverTimestamp() },
+    { merge: true }
+  );
+}
+
+export async function deleteFirestoreSectionDoc(db: Firestore, sectionDocId: string): Promise<void> {
+  await deleteDoc(doc(db, SECTIONS_COLLECTION, sectionDocId));
 }
 
 export function emptyTable(
