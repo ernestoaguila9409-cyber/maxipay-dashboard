@@ -49,12 +49,21 @@ export interface TableLayoutDocument {
    * Android POS reads this from the layout doc when auto-releasing holds.
    */
   reservationGraceAfterSlotMinutes: number;
+  /**
+   * Dine-In POS only: show tables as reserved starting this many minutes before reservation time (0 = at slot time only).
+   * Does not change Firestore table status early; Android applies this as a display rule on the floor plan.
+   */
+  reservationHoldStartsMinutesBeforeSlot: number;
   createdAt?: Timestamp | null;
   updatedAt?: Timestamp | null;
 }
 
 export interface TableLayoutTableDocument {
   name: string;
+  /** Same sorted list on each member table — set from Android POS “link tables”. */
+  joinedTableIds?: string[];
+  /** Stable id for the link group (optional). */
+  tableJoinGroupId?: string;
   /** Short code for tickets / reporting (optional). */
   code: string;
   capacity: number;
@@ -153,6 +162,12 @@ function parseGraceMinutes(raw: DocumentData): number {
   return Math.max(0, Math.min(Math.round(v), MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES));
 }
 
+function parseHoldStartsBeforeMinutes(raw: DocumentData): number {
+  const v = raw.reservationHoldStartsMinutesBeforeSlot;
+  if (typeof v !== "number" || !Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(Math.round(v), MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES));
+}
+
 function parseLayoutDoc(id: string, raw: DocumentData): TableLayoutDocument {
   return {
     name: String(raw.name ?? "Layout"),
@@ -161,6 +176,7 @@ function parseLayoutDoc(id: string, raw: DocumentData): TableLayoutDocument {
     canvasHeight: typeof raw.canvasHeight === "number" ? raw.canvasHeight : DEFAULT_CANVAS.height,
     sortOrder: typeof raw.sortOrder === "number" ? raw.sortOrder : 0,
     reservationGraceAfterSlotMinutes: parseGraceMinutes(raw),
+    reservationHoldStartsMinutesBeforeSlot: parseHoldStartsBeforeMinutes(raw),
     createdAt: raw.createdAt ?? null,
     updatedAt: raw.updatedAt ?? null,
   };
@@ -185,8 +201,14 @@ function parseTableDoc(raw: DocumentData): TableLayoutTableDocument {
       : typeof raw.posY === "number"
         ? raw.posY
         : Number(raw.y ?? raw.posY ?? 0);
+  const joinedRaw = raw.joinedTableIds as unknown;
+  const joinedIds = Array.isArray(joinedRaw)
+    ? joinedRaw.map((x) => String(x ?? "").trim()).filter(Boolean)
+    : undefined;
   return {
     name: String(raw.name ?? "Table"),
+    joinedTableIds: joinedIds && joinedIds.length > 0 ? joinedIds : undefined,
+    tableJoinGroupId: typeof raw.tableJoinGroupId === "string" ? raw.tableJoinGroupId : undefined,
     code: String(raw.code ?? ""),
     capacity: Number.isFinite(cap) ? Math.round(cap) : 4,
     shape: normalizeShape(String(raw.shape ?? "SQUARE")),
@@ -227,6 +249,16 @@ export async function createTableLayout(
             )
           )
         : 0,
+    reservationHoldStartsMinutesBeforeSlot:
+      typeof partial.reservationHoldStartsMinutesBeforeSlot === "number"
+        ? Math.max(
+            0,
+            Math.min(
+              Math.round(partial.reservationHoldStartsMinutesBeforeSlot),
+              MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES
+            )
+          )
+        : 0,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -247,6 +279,7 @@ export async function updateTableLayoutMeta(
       | "canvasHeight"
       | "sortOrder"
       | "reservationGraceAfterSlotMinutes"
+      | "reservationHoldStartsMinutesBeforeSlot"
     >
   >
 ): Promise<void> {
@@ -260,6 +293,13 @@ export async function updateTableLayoutMeta(
     payload.reservationGraceAfterSlotMinutes = Math.max(
       0,
       Math.min(Number.isFinite(g) ? g : 0, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
+    );
+  }
+  if (patch.reservationHoldStartsMinutesBeforeSlot !== undefined) {
+    const b = Math.round(Number(patch.reservationHoldStartsMinutesBeforeSlot));
+    payload.reservationHoldStartsMinutesBeforeSlot = Math.max(
+      0,
+      Math.min(Number.isFinite(b) ? b : 0, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
     );
   }
   await updateDoc(layoutDocRef(db, layoutId), payload);
