@@ -812,122 +812,126 @@ export default function TableLayoutEditorClient() {
                       <Trash2 size={16} /> Delete table
                     </button>
                   </div>
-                  <div className="mb-3 flex flex-wrap items-end gap-3 text-sm">
-                    <div>
-                      <label className="mb-1 block text-xs text-slate-500">Canvas width</label>
-                      <input
-                        type="number"
-                        className="w-24 rounded-lg border border-slate-200 px-2 py-1.5"
-                        value={layout?.canvasWidth ?? DEFAULT_CANVAS.width}
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          if (!layoutId || !Number.isFinite(v)) return;
-                          setLayouts((prev) =>
-                            prev.map((l) =>
-                              l.id === layoutId
-                                ? { ...l, data: { ...l.data, canvasWidth: Math.max(400, v) } }
-                                : l
-                            )
-                          );
-                        }}
-                        onBlur={saveCanvasSize}
-                      />
+                  <div className="mb-3 space-y-3 text-sm">
+                    <div className="flex flex-wrap gap-3">
+                      <div>
+                        <label className="mb-1 block text-xs text-slate-500">Canvas width</label>
+                        <input
+                          type="number"
+                          className="w-24 rounded-lg border border-slate-200 px-2 py-1.5"
+                          value={layout?.canvasWidth ?? DEFAULT_CANVAS.width}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            if (!layoutId || !Number.isFinite(v)) return;
+                            setLayouts((prev) =>
+                              prev.map((l) =>
+                                l.id === layoutId
+                                  ? { ...l, data: { ...l.data, canvasWidth: Math.max(400, v) } }
+                                  : l
+                              )
+                            );
+                          }}
+                          onBlur={saveCanvasSize}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-slate-500">Canvas height</label>
+                        <input
+                          type="number"
+                          className="w-24 rounded-lg border border-slate-200 px-2 py-1.5"
+                          value={layout?.canvasHeight ?? DEFAULT_CANVAS.height}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            if (!layoutId || !Number.isFinite(v)) return;
+                            setLayouts((prev) =>
+                              prev.map((l) =>
+                                l.id === layoutId
+                                  ? { ...l, data: { ...l.data, canvasHeight: Math.max(300, v) } }
+                                  : l
+                              )
+                            );
+                          }}
+                          onBlur={saveCanvasSize}
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="mb-1 block text-xs text-slate-500">Canvas height</label>
-                      <input
-                        type="number"
-                        className="w-24 rounded-lg border border-slate-200 px-2 py-1.5"
-                        value={layout?.canvasHeight ?? DEFAULT_CANVAS.height}
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          if (!layoutId || !Number.isFinite(v)) return;
-                          setLayouts((prev) =>
-                            prev.map((l) =>
-                              l.id === layoutId
-                                ? { ...l, data: { ...l.data, canvasHeight: Math.max(300, v) } }
-                                : l
-                            )
-                          );
-                        }}
-                        onBlur={saveCanvasSize}
-                      />
-                    </div>
-                    <div className="min-w-[200px] max-w-xs">
-                      <label className="mb-1 block text-xs text-slate-500">
-                        Show reserved on Dine-In (minutes before slot)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES}
-                        className="w-28 rounded-lg border border-slate-200 px-2 py-1.5"
-                        value={layout?.reservationHoldStartsMinutesBeforeSlot ?? 0}
-                        onChange={(e) => {
-                          const v = Math.round(Number(e.target.value));
-                          if (!layoutId || !Number.isFinite(v)) return;
-                          const clamped = Math.max(
-                            0,
-                            Math.min(v, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
-                          );
-                          setLayouts((prev) =>
-                            prev.map((l) =>
-                              l.id === layoutId
-                                ? {
-                                    ...l,
-                                    data: {
-                                      ...l.data,
-                                      reservationHoldStartsMinutesBeforeSlot: clamped,
-                                    },
-                                  }
-                                : l
-                            )
-                          );
-                        }}
-                        onBlur={saveCanvasSize}
-                      />
-                      <p className="mt-1 text-[11px] leading-snug text-slate-500">
-                        Dine-In floor only: tables look RESERVED starting this many minutes before
-                        the booking time (e.g. 15 = 6:45 PM for a 7:00 PM reservation). Does not
-                        change table status in Firestore early. Max {MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES}{" "}
-                        min.
-                      </p>
-                    </div>
-                    <div className="min-w-[200px] max-w-xs">
-                      <label className="mb-1 block text-xs text-slate-500">
-                        Extra reserved time after slot (minutes)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES}
-                        className="w-28 rounded-lg border border-slate-200 px-2 py-1.5"
-                        value={layout?.reservationGraceAfterSlotMinutes ?? 0}
-                        onChange={(e) => {
-                          const v = Math.round(Number(e.target.value));
-                          if (!layoutId || !Number.isFinite(v)) return;
-                          const clamped = Math.max(
-                            0,
-                            Math.min(v, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
-                          );
-                          setLayouts((prev) =>
-                            prev.map((l) =>
-                              l.id === layoutId
-                                ? {
-                                    ...l,
-                                    data: { ...l.data, reservationGraceAfterSlotMinutes: clamped },
-                                  }
-                                : l
-                            )
-                          );
-                        }}
-                        onBlur={saveCanvasSize}
-                      />
-                      <p className="mt-1 text-[11px] leading-snug text-slate-500">
-                        After the reservation time, the table stays RESERVED for this many extra
-                        minutes before the POS frees it (0 = free as soon as the slot time passes).
-                        Max {MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES} min (1 week).
-                      </p>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
+                      <div className="min-w-0">
+                        <label className="mb-1 block min-h-[3.25rem] text-xs leading-snug text-slate-500">
+                          Show reserved on Dine-In (minutes before slot)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES}
+                          className="w-28 rounded-lg border border-slate-200 px-2 py-1.5"
+                          value={layout?.reservationHoldStartsMinutesBeforeSlot ?? 0}
+                          onChange={(e) => {
+                            const v = Math.round(Number(e.target.value));
+                            if (!layoutId || !Number.isFinite(v)) return;
+                            const clamped = Math.max(
+                              0,
+                              Math.min(v, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
+                            );
+                            setLayouts((prev) =>
+                              prev.map((l) =>
+                                l.id === layoutId
+                                  ? {
+                                      ...l,
+                                      data: {
+                                        ...l.data,
+                                        reservationHoldStartsMinutesBeforeSlot: clamped,
+                                      },
+                                    }
+                                  : l
+                              )
+                            );
+                          }}
+                          onBlur={saveCanvasSize}
+                        />
+                        <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                          Dine-In floor only: tables look RESERVED starting this many minutes before
+                          the booking time (e.g. 15 = 6:45 PM for a 7:00 PM reservation). Does not
+                          change table status in Firestore early. Max{" "}
+                          {MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES} min.
+                        </p>
+                      </div>
+                      <div className="min-w-0">
+                        <label className="mb-1 block min-h-[3.25rem] text-xs leading-snug text-slate-500">
+                          Extra reserved time after slot (minutes)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES}
+                          className="w-28 rounded-lg border border-slate-200 px-2 py-1.5"
+                          value={layout?.reservationGraceAfterSlotMinutes ?? 0}
+                          onChange={(e) => {
+                            const v = Math.round(Number(e.target.value));
+                            if (!layoutId || !Number.isFinite(v)) return;
+                            const clamped = Math.max(
+                              0,
+                              Math.min(v, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
+                            );
+                            setLayouts((prev) =>
+                              prev.map((l) =>
+                                l.id === layoutId
+                                  ? {
+                                      ...l,
+                                      data: { ...l.data, reservationGraceAfterSlotMinutes: clamped },
+                                    }
+                                  : l
+                              )
+                            );
+                          }}
+                          onBlur={saveCanvasSize}
+                        />
+                        <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                          After the reservation time, the table stays RESERVED for this many extra
+                          minutes before the POS frees it (0 = free as soon as the slot time passes).
+                          Max {MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES} min (1 week).
+                        </p>
+                      </div>
                     </div>
                   </div>
                   <div
