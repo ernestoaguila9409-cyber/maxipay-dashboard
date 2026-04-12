@@ -44,6 +44,11 @@ export interface TableLayoutDocument {
   canvasWidth: number;
   canvasHeight: number;
   sortOrder: number;
+  /**
+   * After the reservation slot time, keep the table RESERVED for this many extra minutes (0 = free immediately).
+   * Android POS reads this from the layout doc when auto-releasing holds.
+   */
+  reservationGraceAfterSlotMinutes: number;
   createdAt?: Timestamp | null;
   updatedAt?: Timestamp | null;
 }
@@ -69,6 +74,9 @@ export interface TableLayoutTableDocument {
 }
 
 export const DEFAULT_CANVAS = { width: 1200, height: 800 } as const;
+
+/** Max grace period (minutes) allowed in dashboard + Android clamp — one week. */
+export const MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES = 7 * 24 * 60;
 
 export const DEFAULT_TABLE_SIZE: Pick<TableLayoutTableDocument, "width" | "height"> = {
   width: 100,
@@ -139,6 +147,12 @@ export function subscribeLayoutTables(
   );
 }
 
+function parseGraceMinutes(raw: DocumentData): number {
+  const v = raw.reservationGraceAfterSlotMinutes;
+  if (typeof v !== "number" || !Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(Math.round(v), MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES));
+}
+
 function parseLayoutDoc(id: string, raw: DocumentData): TableLayoutDocument {
   return {
     name: String(raw.name ?? "Layout"),
@@ -146,6 +160,7 @@ function parseLayoutDoc(id: string, raw: DocumentData): TableLayoutDocument {
     canvasWidth: typeof raw.canvasWidth === "number" ? raw.canvasWidth : DEFAULT_CANVAS.width,
     canvasHeight: typeof raw.canvasHeight === "number" ? raw.canvasHeight : DEFAULT_CANVAS.height,
     sortOrder: typeof raw.sortOrder === "number" ? raw.sortOrder : 0,
+    reservationGraceAfterSlotMinutes: parseGraceMinutes(raw),
     createdAt: raw.createdAt ?? null,
     updatedAt: raw.updatedAt ?? null,
   };
@@ -202,6 +217,16 @@ export async function createTableLayout(
     canvasWidth: partial.canvasWidth ?? DEFAULT_CANVAS.width,
     canvasHeight: partial.canvasHeight ?? DEFAULT_CANVAS.height,
     sortOrder: partial.sortOrder ?? sortOrder,
+    reservationGraceAfterSlotMinutes:
+      typeof partial.reservationGraceAfterSlotMinutes === "number"
+        ? Math.max(
+            0,
+            Math.min(
+              Math.round(partial.reservationGraceAfterSlotMinutes),
+              MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES
+            )
+          )
+        : 0,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -214,12 +239,30 @@ export async function createTableLayout(
 export async function updateTableLayoutMeta(
   db: Firestore,
   layoutId: string,
-  patch: Partial<Pick<TableLayoutDocument, "name" | "canvasWidth" | "canvasHeight" | "sortOrder">>
+  patch: Partial<
+    Pick<
+      TableLayoutDocument,
+      | "name"
+      | "canvasWidth"
+      | "canvasHeight"
+      | "sortOrder"
+      | "reservationGraceAfterSlotMinutes"
+    >
+  >
 ): Promise<void> {
-  await updateDoc(layoutDocRef(db, layoutId), {
-    ...patch,
-    updatedAt: serverTimestamp(),
-  });
+  const payload: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  if (patch.name !== undefined) payload.name = patch.name;
+  if (patch.canvasWidth !== undefined) payload.canvasWidth = patch.canvasWidth;
+  if (patch.canvasHeight !== undefined) payload.canvasHeight = patch.canvasHeight;
+  if (patch.sortOrder !== undefined) payload.sortOrder = patch.sortOrder;
+  if (patch.reservationGraceAfterSlotMinutes !== undefined) {
+    const g = Math.round(Number(patch.reservationGraceAfterSlotMinutes));
+    payload.reservationGraceAfterSlotMinutes = Math.max(
+      0,
+      Math.min(Number.isFinite(g) ? g : 0, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
+    );
+  }
+  await updateDoc(layoutDocRef(db, layoutId), payload);
 }
 
 /** Ensures exactly one default layout (best-effort batch). */

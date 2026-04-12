@@ -24,6 +24,7 @@ import {
   deleteTableLayout,
   emptyTable,
   importLegacyTablesLayout,
+  MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES,
   SECTIONS_COLLECTION,
   setDefaultTableLayout,
   subscribeLayoutTables,
@@ -446,6 +447,7 @@ export default function TableLayoutEditorClient() {
       await updateTableLayoutMeta(db, layoutId, {
         canvasWidth: l.data.canvasWidth,
         canvasHeight: l.data.canvasHeight,
+        reservationGraceAfterSlotMinutes: l.data.reservationGraceAfterSlotMinutes ?? 0,
       });
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 1200);
@@ -858,6 +860,42 @@ export default function TableLayoutEditorClient() {
                         }}
                         onBlur={saveCanvasSize}
                       />
+                    </div>
+                    <div className="min-w-[200px] max-w-xs">
+                      <label className="mb-1 block text-xs text-slate-500">
+                        Extra reserved time after slot (minutes)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES}
+                        className="w-28 rounded-lg border border-slate-200 px-2 py-1.5"
+                        value={layout?.reservationGraceAfterSlotMinutes ?? 0}
+                        onChange={(e) => {
+                          const v = Math.round(Number(e.target.value));
+                          if (!layoutId || !Number.isFinite(v)) return;
+                          const clamped = Math.max(
+                            0,
+                            Math.min(v, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
+                          );
+                          setLayouts((prev) =>
+                            prev.map((l) =>
+                              l.id === layoutId
+                                ? {
+                                    ...l,
+                                    data: { ...l.data, reservationGraceAfterSlotMinutes: clamped },
+                                  }
+                                : l
+                            )
+                          );
+                        }}
+                        onBlur={saveCanvasSize}
+                      />
+                      <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                        After the reservation time, the table stays RESERVED for this many extra
+                        minutes before the POS frees it (0 = free as soon as the slot time passes).
+                        Max {MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES} min (1 week).
+                      </p>
                     </div>
                   </div>
                   <div
