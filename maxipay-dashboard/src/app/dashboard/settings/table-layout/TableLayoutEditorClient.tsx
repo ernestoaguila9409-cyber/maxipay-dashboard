@@ -864,42 +864,6 @@ export default function TableLayoutEditorClient() {
                     </div>
                     <div className="min-w-[200px] max-w-xs">
                       <label className="mb-1 block text-xs text-slate-500">
-                        Extra reserved time after slot (minutes)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES}
-                        className="w-28 rounded-lg border border-slate-200 px-2 py-1.5"
-                        value={layout?.reservationGraceAfterSlotMinutes ?? 0}
-                        onChange={(e) => {
-                          const v = Math.round(Number(e.target.value));
-                          if (!layoutId || !Number.isFinite(v)) return;
-                          const clamped = Math.max(
-                            0,
-                            Math.min(v, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
-                          );
-                          setLayouts((prev) =>
-                            prev.map((l) =>
-                              l.id === layoutId
-                                ? {
-                                    ...l,
-                                    data: { ...l.data, reservationGraceAfterSlotMinutes: clamped },
-                                  }
-                                : l
-                            )
-                          );
-                        }}
-                        onBlur={saveCanvasSize}
-                      />
-                      <p className="mt-1 text-[11px] leading-snug text-slate-500">
-                        After the reservation time, the table stays RESERVED for this many extra
-                        minutes before the POS frees it (0 = free as soon as the slot time passes).
-                        Max {MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES} min (1 week).
-                      </p>
-                    </div>
-                    <div className="min-w-[200px] max-w-xs">
-                      <label className="mb-1 block text-xs text-slate-500">
                         Show reserved on Dine-In (minutes before slot)
                       </label>
                       <input
@@ -936,6 +900,42 @@ export default function TableLayoutEditorClient() {
                         the booking time (e.g. 15 = 6:45 PM for a 7:00 PM reservation). Does not
                         change table status in Firestore early. Max {MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES}{" "}
                         min.
+                      </p>
+                    </div>
+                    <div className="min-w-[200px] max-w-xs">
+                      <label className="mb-1 block text-xs text-slate-500">
+                        Extra reserved time after slot (minutes)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES}
+                        className="w-28 rounded-lg border border-slate-200 px-2 py-1.5"
+                        value={layout?.reservationGraceAfterSlotMinutes ?? 0}
+                        onChange={(e) => {
+                          const v = Math.round(Number(e.target.value));
+                          if (!layoutId || !Number.isFinite(v)) return;
+                          const clamped = Math.max(
+                            0,
+                            Math.min(v, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
+                          );
+                          setLayouts((prev) =>
+                            prev.map((l) =>
+                              l.id === layoutId
+                                ? {
+                                    ...l,
+                                    data: { ...l.data, reservationGraceAfterSlotMinutes: clamped },
+                                  }
+                                : l
+                            )
+                          );
+                        }}
+                        onBlur={saveCanvasSize}
+                      />
+                      <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                        After the reservation time, the table stays RESERVED for this many extra
+                        minutes before the POS frees it (0 = free as soon as the slot time passes).
+                        Max {MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES} min (1 week).
                       </p>
                     </div>
                   </div>
