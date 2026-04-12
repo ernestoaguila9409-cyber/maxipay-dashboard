@@ -471,15 +471,6 @@ export default function TableLayoutEditorClient() {
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">Code / number</label>
-          <input
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-            value={d.code}
-            onChange={(e) => updateTableLocal(selected.id, { code: e.target.value })}
-            placeholder="e.g. T12"
-          />
-        </div>
-        <div>
           <label className="mb-1 block text-xs font-medium text-slate-500">Capacity</label>
           <input
             type="number"

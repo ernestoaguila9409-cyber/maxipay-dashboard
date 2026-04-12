@@ -11,6 +11,7 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDocs,
   limit,
@@ -64,8 +65,6 @@ export interface TableLayoutTableDocument {
   joinedTableIds?: string[];
   /** Stable id for the link group (optional). */
   tableJoinGroupId?: string;
-  /** Short code for tickets / reporting (optional). */
-  code: string;
   capacity: number;
   shape: TableShape;
   x: number;
@@ -209,7 +208,6 @@ function parseTableDoc(raw: DocumentData): TableLayoutTableDocument {
     name: String(raw.name ?? "Table"),
     joinedTableIds: joinedIds && joinedIds.length > 0 ? joinedIds : undefined,
     tableJoinGroupId: typeof raw.tableJoinGroupId === "string" ? raw.tableJoinGroupId : undefined,
-    code: String(raw.code ?? ""),
     capacity: Number.isFinite(cap) ? Math.round(cap) : 4,
     shape: normalizeShape(String(raw.shape ?? "SQUARE")),
     x,
@@ -352,7 +350,8 @@ export async function upsertLayoutTable(
   const ref = tableId ? doc(col, tableId) : doc(col);
   const payload = {
     name: data.name.trim() || "Table",
-    code: data.code.trim(),
+    /** Remove legacy field from older docs. */
+    code: deleteField(),
     capacity: Math.max(0, Math.round(data.capacity)),
     shape: data.shape,
     x: data.x,
@@ -414,7 +413,6 @@ export async function importLegacyTablesLayout(
     if (String(raw.areaType ?? "") === "BAR_SEAT") continue;
     const data: TableLayoutTableDocument = {
       name: String(raw.name ?? "Table"),
-      code: String(raw.code ?? ""),
       capacity: Math.round(Number(raw.seats ?? raw.capacity ?? 4)),
       shape: normalizeShape(String(raw.shape ?? "SQUARE")),
       x: Number(raw.x ?? raw.posX ?? 50 + order * 30),
@@ -465,7 +463,6 @@ export function emptyTable(
 ): TableLayoutTableDocument {
   return {
     name: `Table ${sortOrder + 1}`,
-    code: "",
     capacity: 4,
     shape: "SQUARE",
     x: Math.round(canvasW / 2 - DEFAULT_TABLE_SIZE.width / 2),
