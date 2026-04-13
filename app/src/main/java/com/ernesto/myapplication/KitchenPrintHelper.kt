@@ -23,6 +23,12 @@ object KitchenPrintHelper {
      */
     const val KITCHEN_SENT_BY_LINE_MAP_FIELD = "kitchenSentQtyByLineKey"
 
+    /**
+     * On `Orders/{id}`: map printer LAN IP (or fallback key) → last resolved notes string printed for that printer.
+     * Used so Send Update tickets omit the Notes block when order notes did not change since last print.
+     */
+    const val KITCHEN_NOTES_LAST_PRINTED_BY_PRINTER_IP = "kitchenNotesLastPrintedByPrinterIp"
+
     /** Legacy per-line field; still read as fallback when merging payment-triggered deltas. */
     private const val KITCHEN_SENT_QTY_LEGACY_FIELD = "kitchenSentQty"
 
@@ -57,15 +63,18 @@ object KitchenPrintHelper {
                     )
                     return@addOnSuccessListener
                 }
-                printKitchenTickets(context, orderId, lineItems)
-                val merged = kitchenSentByLineFromOrder(orderDoc).toMutableMap()
-                qtyUpdates.forEach { (k, v) -> merged[k] = v }
-                orderRef.update(
-                    mapOf(
+                printKitchenTickets(context, orderId, lineItems) { notesPrintedByIp ->
+                    val merged = kitchenSentByLineFromOrder(orderDoc).toMutableMap()
+                    qtyUpdates.forEach { (k, v) -> merged[k] = v }
+                    val update = mutableMapOf<String, Any>(
                         PrintingSettingsFirestore.FIELD_KITCHEN_CHITS_PRINTED_AT to FieldValue.serverTimestamp(),
                         KITCHEN_SENT_BY_LINE_MAP_FIELD to merged,
-                    ),
-                )
+                    )
+                    if (notesPrintedByIp != null) {
+                        update[KITCHEN_NOTES_LAST_PRINTED_BY_PRINTER_IP] = notesPrintedByIp
+                    }
+                    orderRef.update(update)
+                }
             }
         }
     }
@@ -85,6 +94,16 @@ object KitchenPrintHelper {
             merged[id] = kotlin.math.max(merged[id] ?: 0, legacy)
         }
         return merged
+    }
+
+    /** Last printed notes text per printer key (see [KITCHEN_NOTES_LAST_PRINTED_BY_PRINTER_IP]). */
+    fun kitchenNotesLastPrintedFromOrder(orderDoc: DocumentSnapshot): Map<String, String> {
+        @Suppress("UNCHECKED_CAST")
+        val raw = orderDoc.get(KITCHEN_NOTES_LAST_PRINTED_BY_PRINTER_IP) as? Map<*, *> ?: return emptyMap()
+        return raw.mapNotNull { (k, v) ->
+            val key = k?.toString()?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            key to (v?.toString() ?: "")
+        }.toMap()
     }
 
     /** Parses [KITCHEN_SENT_BY_LINE_MAP_FIELD] from an order document (line doc id → sent qty). */
@@ -114,6 +133,8 @@ object KitchenPrintHelper {
         itemsSnap: QuerySnapshot,
     ): Pair<List<KitchenTicketLineInput>, Map<String, Int>> {
         val orderSent = kitchenSentByLineFromOrder(orderDoc)
+        val orderTypeRaw = orderDoc.getString("orderType")
+        val guestNames = guestNamesListFromOrderDoc(orderDoc)
         val lineItems = mutableListOf<KitchenTicketLineInput>()
         val qtyUpdates = mutableMapOf<String, Int>()
         for (doc in itemsSnap.documents) {
@@ -127,24 +148,51 @@ object KitchenPrintHelper {
             val name = doc.getString("name") ?: continue
             val mods = parseModifiersFromFirestore(doc.get("modifiers"))
             val label = doc.getString("printerLabel")?.trim()?.takeIf { it.isNotEmpty() }
-            lineItems.add(KitchenTicketLineInput(delta, name, mods, label))
+            val guestNum = (doc.getLong("guestNumber") ?: 0L).toInt()
+            val guestLabel = KitchenTicketBuilder.guestKitchenLabelForLine(orderTypeRaw, guestNum, guestNames)
+            lineItems.add(KitchenTicketLineInput(delta, name, mods, label, guestLabel))
             qtyUpdates[lineKey] = qty
         }
         return lineItems to qtyUpdates
     }
 
+    /** Preserves indices for [KitchenTicketBuilder.guestKitchenLabelForLine] (empty strings allowed). */
+    private fun guestNamesListFromOrderDoc(orderDoc: DocumentSnapshot): List<String>? {
+        @Suppress("UNCHECKED_CAST")
+        val raw = orderDoc.get("guestNames") as? List<*> ?: return null
+        if (raw.isEmpty()) return null
+        return raw.map { it?.toString().orEmpty() }
+    }
+
+    private fun printerNotesMapKey(printer: SelectedPrinterDisplay): String {
+        val ip = printer.ipAddress.trim()
+        if (ip.isNotEmpty()) return ip
+        val name = printer.name.trim().ifEmpty { "printer" }
+        return "nolan_$name"
+    }
+
     /**
      * Prints kitchen tickets for the given line items (e.g. one new line or full cart).
      * Applies ALL_ITEMS / BY_LABEL routing only; ticket layout is entirely in [KitchenTicketBuilder].
+     *
+     * [onNotesPrintedMapReady] receives the full map to store on the order under [KITCHEN_NOTES_LAST_PRINTED_BY_PRINTER_IP]
+     * (merge of previous + this run). Pass `null` if the order read failed or early-exit before printing.
      */
     fun printKitchenTickets(
         context: Context,
         orderId: String,
         lineItems: List<KitchenTicketLineInput>,
+        onNotesPrintedMapReady: (Map<String, String>?) -> Unit = {},
     ) {
-        if (lineItems.isEmpty()) return
+        if (lineItems.isEmpty()) {
+            onNotesPrintedMapReady(null)
+            return
+        }
         val batches = buildBatches(context, lineItems)
-        if (batches.isEmpty()) return
+        if (batches.isEmpty()) {
+            onNotesPrintedMapReady(null)
+            return
+        }
 
         FirebaseFirestore.getInstance()
             .collection("Orders")
@@ -155,18 +203,31 @@ object KitchenPrintHelper {
                 val tableRaw = doc.getString("tableName")?.trim()?.takeIf { it.isNotEmpty() }
                 val tableDisplay = tableRaw ?: "-"
                 val orderTypeRaw = doc.getString("orderType")
+                val customerDisplayName = doc.getString("customerName")?.trim()?.takeIf { it.isNotEmpty() }
+                val isKitchenDeltaChit = doc.getTimestamp("lastKitchenSentAt") != null
                 val genericNotes = KitchenTicketBuilder.readOrderNotes(doc)
                 @Suppress("UNCHECKED_CAST")
                 val notesByLabel = (doc.get("kitchenNotesByLabel") as? Map<String, String>) ?: emptyMap()
                 val timeStr = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
 
+                val mergeNotesPrinted = kitchenNotesLastPrintedFromOrder(doc).toMutableMap()
+
                 for (batch in batches) {
                     if (batch.ticketItems.isEmpty()) continue
                     val printerTitle = batch.printer.name.trim().ifEmpty { "KITCHEN" }
                     val batchIp = batch.printer.ipAddress
+                    val mapKey = printerNotesMapKey(batch.printer)
                     val style = PrinterKitchenStyleCache.styleForIp(batchIp)
                     val cmdSet = PrinterKitchenStyleCache.commandSetForKitchenLan(batchIp, batch.printer.modelLine)
-                    val batchNotes = resolveBatchNotes(genericNotes, notesByLabel, batch.printer)
+                    val fullResolvedNotes = resolveBatchNotes(genericNotes, notesByLabel, batch.printer)
+                    val normalized = fullResolvedNotes?.trim().orEmpty()
+                    val lastPrinted = mergeNotesPrinted[mapKey]?.trim().orEmpty()
+                    mergeNotesPrinted[mapKey] = normalized
+                    val notesForTicket = if (normalized == lastPrinted) {
+                        null
+                    } else {
+                        fullResolvedNotes?.trim()?.takeIf { it.isNotEmpty() }
+                    }
                     val segments = KitchenTicketBuilder.buildTicketSegments(
                         printerTitle = printerTitle,
                         orderNumber = orderNum,
@@ -174,7 +235,9 @@ object KitchenPrintHelper {
                         orderTypeDisplay = KitchenTicketBuilder.formatOrderTypeForTicket(orderTypeRaw),
                         tableDisplay = tableDisplay,
                         timeFormatted = timeStr,
-                        orderNotes = batchNotes,
+                        customerDisplayName = customerDisplayName,
+                        isKitchenDeltaChit = isKitchenDeltaChit,
+                        orderNotes = notesForTicket,
                         items = batch.ticketItems,
                         style = style,
                     )
@@ -186,6 +249,10 @@ object KitchenPrintHelper {
                         commandSet = cmdSet,
                     )
                 }
+                onNotesPrintedMapReady(mergeNotesPrinted)
+            }
+            .addOnFailureListener {
+                onNotesPrintedMapReady(null)
             }
     }
 

@@ -178,8 +178,9 @@ object CustomerDialogHelper {
         FirebaseFirestore.getInstance().collection("Customers")
             .get()
             .addOnSuccessListener { snap ->
-                allCustomers.clear()
-                for (doc in snap.documents) {
+                data class Row(val id: String, val name: String, val phone: String, val email: String)
+
+                val rows = snap.documents.mapNotNull { doc ->
                     val firstName = (doc.getString("firstName") ?: "").trim()
                     val lastName = (doc.getString("lastName") ?: "").trim()
                     val nameField = (doc.getString("name") ?: "").trim()
@@ -188,18 +189,77 @@ object CustomerDialogHelper {
                     } else {
                         nameField
                     }
-                    if (fullName.isBlank()) continue
-
-                    allCustomers.add(
-                        SavedCustomer(
-                            id = doc.id,
-                            name = fullName,
-                            phone = doc.getString("phone") ?: "",
-                            email = doc.getString("email") ?: ""
-                        )
+                    if (fullName.isBlank()) return@mapNotNull null
+                    Row(
+                        id = doc.id,
+                        name = fullName,
+                        phone = doc.getString("phone") ?: "",
+                        email = doc.getString("email") ?: "",
                     )
                 }
-                allCustomers.sortBy { it.name.lowercase() }
+
+                /** Same human when one normalized name is the other + a space + more (e.g. ernesto vs ernesto rodriguez). */
+                fun namesLookLikeDuplicates(a: String, b: String): Boolean {
+                    val an = CustomerFirestoreHelper.normalizeNameForMatch(a)
+                    val bn = CustomerFirestoreHelper.normalizeNameForMatch(b)
+                    if (an == bn) return true
+                    val shorter = if (an.length <= bn.length) an else bn
+                    val longer = if (an.length > bn.length) an else bn
+                    if (shorter.length < 2) return false
+                    if (!longer.startsWith(shorter)) return false
+                    if (longer.length == shorter.length) return true
+                    return longer[shorter.length] == ' '
+                }
+
+                fun pickBestRow(group: List<Row>): Row {
+                    return group.maxWith(
+                        compareBy<Row> { it.name.trim().length }
+                            .thenByDescending { it.email.isNotBlank() },
+                    )
+                }
+
+                val minDigitsForPhoneDedupe = 7
+                val byPhone = rows
+                    .filter { CustomerFirestoreHelper.normalizePhoneDigits(it.phone).length >= minDigitsForPhoneDedupe }
+                    .groupBy { CustomerFirestoreHelper.normalizePhoneDigits(it.phone) }
+
+                val usedIds = mutableSetOf<String>()
+                val merged = mutableListOf<SavedCustomer>()
+
+                for ((_, phoneGroup) in byPhone) {
+                    if (phoneGroup.size == 1) {
+                        val r = phoneGroup[0]
+                        merged.add(SavedCustomer(r.id, r.name, r.phone, r.email))
+                        usedIds.add(r.id)
+                        continue
+                    }
+                    val clusters = mutableListOf<MutableList<Row>>()
+                    for (r in phoneGroup) {
+                        var placed = false
+                        for (cl in clusters) {
+                            if (cl.any { namesLookLikeDuplicates(it.name, r.name) }) {
+                                cl.add(r)
+                                placed = true
+                                break
+                            }
+                        }
+                        if (!placed) clusters.add(mutableListOf(r))
+                    }
+                    for (cl in clusters) {
+                        val best = pickBestRow(cl)
+                        val email = cl.firstOrNull { it.email.isNotBlank() }?.email ?: best.email
+                        merged.add(SavedCustomer(best.id, best.name, best.phone, email))
+                        cl.forEach { usedIds.add(it.id) }
+                    }
+                }
+
+                for (r in rows) {
+                    if (r.id in usedIds) continue
+                    merged.add(SavedCustomer(r.id, r.name, r.phone, r.email))
+                }
+
+                allCustomers.clear()
+                allCustomers.addAll(merged.sortedBy { it.name.lowercase() })
                 adapter.notifyDataSetChanged()
             }
     }

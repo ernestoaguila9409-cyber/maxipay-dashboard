@@ -1,13 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="#E8E8E8">
 
-    <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -22,7 +20,7 @@
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:paddingStart="12dp"
-            android:paddingEnd="8dp"
+            android:paddingEnd="12dp"
             android:paddingTop="12dp">
 
             <ImageButton
@@ -31,48 +29,53 @@
                 android:layout_height="40dp"
                 android:src="@android:drawable/ic_menu_revert"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Back"
-                android:scaleType="centerInside"/>
+                android:contentDescription="@string/reservation_back_cd"
+                android:scaleType="centerInside" />
 
-            <TextView
-                android:id="@+id/txtTableSelectTitle"
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Select a Table"
-                android:textSize="22sp"
-                android:textStyle="bold"
-                android:textColor="#333333"
-                android:paddingStart="8dp"/>
+                android:orientation="vertical"
+                android:paddingStart="8dp">
 
-            <ImageButton
-                android:id="@+id/btnJoinTables"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                <TextView
+                    android:id="@+id/txtTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/reservation_mapping_title"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#333333" />
+
+                <TextView
+                    android:id="@+id/txtSubtitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="13sp"
+                    android:textColor="#777777" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/btnCancelReservation"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/table_join_link_cd"
                 android:padding="10dp"
-                android:scaleType="centerInside"
-                android:src="@drawable/ic_table_join" />
-
+                android:text="@string/reservation_cancel_action"
+                android:textColor="#C62828"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
         </LinearLayout>
-
-        <TextView
-            android:id="@+id/txtTableSelectSubtitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/table_select_subtitle_dine_in"
-            android:textSize="13sp"
-            android:textColor="#777777"
-            android:paddingStart="60dp"
-            android:paddingEnd="16dp"
-            android:layout_marginTop="2dp"/>
 
         <HorizontalScrollView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:scrollbars="none"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="8dp"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:clipToPadding="false">
@@ -83,13 +86,10 @@
                 android:layout_height="wrap_content"
                 app:singleSelection="true"
                 app:selectionRequired="true"
-                app:chipSpacingHorizontal="8dp"/>
-
+                app:chipSpacingHorizontal="8dp" />
         </HorizontalScrollView>
-
     </LinearLayout>
 
-    <!-- Canvas area for tables -->
     <FrameLayout
         android:id="@+id/tableCanvas"
         android:layout_width="match_parent"
@@ -97,6 +97,5 @@
         android:layout_weight="1"
         android:background="#F0F0F0"
         android:clipChildren="false"
-        android:clipToPadding="false"/>
-
+        android:clipToPadding="false" />
 </LinearLayout>

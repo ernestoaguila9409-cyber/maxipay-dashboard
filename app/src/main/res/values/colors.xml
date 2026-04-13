@@ -25,4 +25,7 @@
     <color name="pos_key_enter_fill">#EDE9FE</color>
     <color name="pos_key_enter_stroke">#C4B5FD</color>
     <color name="pos_key_shift_active_fill">#DDD6FE</color>
+
+    <color name="reservation_time_field_bg">#F3F4F6</color>
+    <color name="reservation_time_field_stroke">#E5E7EB</color>
 </resources>

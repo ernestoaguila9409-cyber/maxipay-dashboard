@@ -2,6 +2,7 @@ package com.ernesto.myapplication.engine
 
 import com.ernesto.myapplication.OrderModifier
 import com.ernesto.myapplication.OrderNumberGenerator
+import com.ernesto.myapplication.TableFirestoreHelper
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -30,6 +31,10 @@ class OrderEngine(private val db: FirebaseFirestore) {
         employeeName: String,
         orderType: String = "",
         tableId: String? = null,
+        /** Non-empty when the table lives under [tableLayouts/{id}/tables]. */
+        tableLayoutId: String? = null,
+        /** Same IDs written on each joined table doc; dine-in / payment clear the whole set. */
+        joinedTableIds: List<String>? = null,
         tableName: String? = null,
         sectionId: String? = null,
         sectionName: String? = null,
@@ -65,6 +70,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
                 )
 
                 if (!tableId.isNullOrBlank()) orderMap["tableId"] = tableId
+                if (!tableLayoutId.isNullOrBlank()) orderMap["tableLayoutId"] = tableLayoutId
+                if (!joinedTableIds.isNullOrEmpty()) orderMap["joinedTableIds"] = joinedTableIds
                 if (!tableName.isNullOrBlank()) orderMap["tableName"] = tableName
                 if (!sectionId.isNullOrBlank()) orderMap["sectionId"] = sectionId
                 if (!sectionName.isNullOrBlank()) orderMap["sectionName"] = sectionName
@@ -79,7 +86,22 @@ class OrderEngine(private val db: FirebaseFirestore) {
 
                 db.collection("Orders")
                     .add(orderMap)
-                    .addOnSuccessListener { doc -> onSuccess(doc.id) }
+                    .addOnSuccessListener { doc ->
+                        if (orderType == "DINE_IN" && !tableId.isNullOrBlank()) {
+                            val joined = joinedTableIds?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct()
+                            if (!joined.isNullOrEmpty() && joined.size > 1) {
+                                TableFirestoreHelper.markDineInJoinedTablesOccupied(
+                                    db,
+                                    joined,
+                                    tableLayoutId,
+                                    doc.id,
+                                )
+                            } else {
+                                TableFirestoreHelper.markDineInTableOccupied(db, tableId, tableLayoutId, doc.id)
+                            }
+                        }
+                        onSuccess(doc.id)
+                    }
                     .addOnFailureListener { e -> onFailure(e) }
             },
             onFailure = { e -> onFailure(e) }

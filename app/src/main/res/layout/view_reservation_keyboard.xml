@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/white"
+    android:orientation="vertical"
+    android:paddingTop="8dp"
+    android:paddingBottom="6dp">
+
+    <!-- Numbers always visible -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/key1" style="@style/ReservationKeyboardKey" android:text="1" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/key2" style="@style/ReservationKeyboardKey" android:text="2" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/key3" style="@style/ReservationKeyboardKey" android:text="3" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/key4" style="@style/ReservationKeyboardKey" android:text="4" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/key5" style="@style/ReservationKeyboardKey" android:text="5" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/key6" style="@style/ReservationKeyboardKey" android:text="6" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/key7" style="@style/ReservationKeyboardKey" android:text="7" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/key8" style="@style/ReservationKeyboardKey" android:text="8" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/key9" style="@style/ReservationKeyboardKey" android:text="9" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/key0" style="@style/ReservationKeyboardKey" android:text="0" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyQ" style="@style/ReservationKeyboardKey" android:text="q" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyW" style="@style/ReservationKeyboardKey" android:text="w" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyE" style="@style/ReservationKeyboardKey" android:text="e" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyR" style="@style/ReservationKeyboardKey" android:text="r" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyT" style="@style/ReservationKeyboardKey" android:text="t" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyY" style="@style/ReservationKeyboardKey" android:text="y" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyU" style="@style/ReservationKeyboardKey" android:text="u" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyI" style="@style/ReservationKeyboardKey" android:text="i" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyO" style="@style/ReservationKeyboardKey" android:text="o" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyP" style="@style/ReservationKeyboardKey" android:text="p" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyA" style="@style/ReservationKeyboardKey" android:text="a" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyS" style="@style/ReservationKeyboardKey" android:text="s" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyD" style="@style/ReservationKeyboardKey" android:text="d" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyF" style="@style/ReservationKeyboardKey" android:text="f" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyG" style="@style/ReservationKeyboardKey" android:text="g" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyH" style="@style/ReservationKeyboardKey" android:text="h" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyJ" style="@style/ReservationKeyboardKey" android:text="j" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyK" style="@style/ReservationKeyboardKey" android:text="k" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyL" style="@style/ReservationKeyboardKey" android:text="l" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyColon" style="@style/ReservationKeyboardKey" android:text=":" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/keyShift"
+            style="@style/ReservationKeyboardKey"
+            android:background="@drawable/bg_pos_key_special"
+            android:contentDescription="@string/reservation_keyboard_shift_cd"
+            android:text="⇧" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyZ" style="@style/ReservationKeyboardKey" android:text="z" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyX" style="@style/ReservationKeyboardKey" android:text="x" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyC" style="@style/ReservationKeyboardKey" android:text="c" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyV" style="@style/ReservationKeyboardKey" android:text="v" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyB" style="@style/ReservationKeyboardKey" android:text="b" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyN" style="@style/ReservationKeyboardKey" android:text="n" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyM" style="@style/ReservationKeyboardKey" android:text="m" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyComma" style="@style/ReservationKeyboardKey" android:text="," />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyPeriod" style="@style/ReservationKeyboardKey" android:text="." />
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/keyBackspace"
+            style="@style/ReservationKeyboardKey"
+            android:background="@drawable/bg_pos_key_special"
+            android:text="⌫" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyAt" style="@style/ReservationKeyboardKey" android:text="&#64;" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyPlus" style="@style/ReservationKeyboardKey" android:text="+" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyMinus" style="@style/ReservationKeyboardKey" android:text="-" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keySlash" style="@style/ReservationKeyboardKey" android:text="/" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyLparen" style="@style/ReservationKeyboardKey" android:text="(" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/keyRparen" style="@style/ReservationKeyboardKey" android:text=")" />
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/keySpace"
+            style="@style/ReservationKeyboardKey"
+            android:layout_weight="3"
+            android:background="@drawable/bg_pos_key_special"
+            android:text="Space" />
+    </LinearLayout>
+</LinearLayout>

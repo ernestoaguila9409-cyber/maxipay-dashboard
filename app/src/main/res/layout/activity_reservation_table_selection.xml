@@ -35,11 +35,11 @@
                 android:scaleType="centerInside"/>
 
             <TextView
-                android:id="@+id/txtTableSelectTitle"
+                android:id="@+id/txtTitle"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Select a Table"
+                android:text="Reserve Your Table"
                 android:textSize="22sp"
                 android:textStyle="bold"
                 android:textColor="#333333"
@@ -50,18 +50,33 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/table_join_link_cd"
+                android:contentDescription="Join Tables"
                 android:padding="10dp"
                 android:scaleType="centerInside"
                 android:src="@drawable/ic_table_join" />
 
+            <TextView
+                android:id="@+id/btnConfirm"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:gravity="center"
+                android:text="Confirm"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:background="@drawable/bg_reservation_time_field"
+                android:backgroundTint="#6A4FB3"
+                android:visibility="gone"/>
+
         </LinearLayout>
 
         <TextView
-            android:id="@+id/txtTableSelectSubtitle"
+            android:id="@+id/txtSubtitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/table_select_subtitle_dine_in"
+            android:text="Tap tables to select them for a reservation"
             android:textSize="13sp"
             android:textColor="#777777"
             android:paddingStart="60dp"

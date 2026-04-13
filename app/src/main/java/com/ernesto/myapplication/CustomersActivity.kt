@@ -11,6 +11,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 
 class CustomersActivity : AppCompatActivity() {
@@ -147,8 +148,11 @@ class CustomersActivity : AppCompatActivity() {
                     val customer = hashMapOf(
                         "firstName" to firstName,
                         "lastName" to lastName,
+                        "name" to fullName,
+                        "nameSearch" to CustomerFirestoreHelper.nameSearchKey(fullName),
                         "phone" to phone,
-                        "email" to email
+                        "email" to email,
+                        "createdAt" to Timestamp.now(),
                     )
 
                     db.collection("Customers")

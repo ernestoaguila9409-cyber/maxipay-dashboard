@@ -23,8 +23,37 @@ import kotlin.math.abs
 
 class TableLayoutActivity : AppCompatActivity() {
 
-    companion object {
-        const val SECTION_ALL = "All"
+    private fun rectsOverlap(
+        ax: Float,
+        ay: Float,
+        aw: Int,
+        ah: Int,
+        bx: Float,
+        by: Float,
+        bw: Int,
+        bh: Int,
+    ): Boolean {
+        if (aw <= 0 || ah <= 0 || bw <= 0 || bh <= 0) return false
+        val ar = ax + aw
+        val ab = ay + ah
+        val br = bx + bw
+        val bb = by + bh
+        return ax < br && ar > bx && ay < bb && ab > by
+    }
+
+    private fun overlapsAnotherTable(selfId: String, self: View, x: Float, y: Float): Boolean {
+        val w = self.width
+        val h = self.height
+        if (w <= 0 || h <= 0) return false
+        for ((id, other) in tableViews) {
+            if (id == selfId) continue
+            if (other.visibility != View.VISIBLE) continue
+            val ow = other.width
+            val oh = other.height
+            if (ow <= 0 || oh <= 0) continue
+            if (rectsOverlap(x, y, w, h, other.x, other.y, ow, oh)) return true
+        }
+        return false
     }
 
     private val db = FirebaseFirestore.getInstance()
@@ -131,8 +160,9 @@ class TableLayoutActivity : AppCompatActivity() {
     private fun filterTablesBySection() {
         for ((id, view) in tableViews) {
             val section = tableSections[id] ?: ""
-            view.visibility = if (selectedSection.isEmpty() || section == selectedSection)
-                View.VISIBLE else View.GONE
+            val match = selectedSection.isEmpty() ||
+                section.equals(selectedSection, ignoreCase = true)
+            view.visibility = if (match) View.VISIBLE else View.GONE
         }
     }
 
@@ -341,12 +371,12 @@ class TableLayoutActivity : AppCompatActivity() {
 
     private fun addTableToCanvas(
         id: String, name: String, seats: Int,
-        shape: TableShapeView.Shape, posX: Float, posY: Float
+        tableShape: TableShapeView.Shape, posX: Float, posY: Float
     ) {
         val tableView = TableShapeView(this).apply {
             tableName = name
             seatCount = seats
-            this.shape = shape
+            shape = tableShape
         }
 
         val params = FrameLayout.LayoutParams(
@@ -405,8 +435,12 @@ class TableLayoutActivity : AppCompatActivity() {
                     }
 
                     if (isDragging) {
-                        v.x = (event.rawX + dX).coerceIn(0f, (canvas.width - v.width).toFloat())
-                        v.y = (event.rawY + dY).coerceIn(0f, (canvas.height - v.height).toFloat())
+                        val nx = (event.rawX + dX).coerceIn(0f, (canvas.width - v.width).toFloat())
+                        val ny = (event.rawY + dY).coerceIn(0f, (canvas.height - v.height).toFloat())
+                        if (!overlapsAnotherTable(tableId, v, nx, ny)) {
+                            v.x = nx
+                            v.y = ny
+                        }
                     }
                     isDragging
                 }
@@ -451,18 +485,21 @@ class TableLayoutActivity : AppCompatActivity() {
 
     // ── GRID PLACEMENT ─────────────────────────────────────
 
-    private fun nextAvailablePosition(): Pair<Float, Float> {
+    private fun nextAvailablePosition(shape: TableShapeView.Shape): Pair<Float, Float> {
         val dp = resources.displayMetrics.density
-        val cellW = 200f * dp
-        val cellH = 160f * dp
-        val padding = 24f * dp
+        val ew = TableShapeView.defaultMeasuredWidthPx(this, shape)
+        val eh = TableShapeView.defaultMeasuredHeightPx(this, shape)
+        val cellW = (ew + 18f * dp).coerceAtLeast(80f * dp)
+        val cellH = (eh + 18f * dp).coerceAtLeast(72f * dp)
+        val padding = 20f * dp
 
         val canvasWidth = if (canvas.width > 0) canvas.width.toFloat()
-                          else resources.displayMetrics.widthPixels.toFloat()
+            else resources.displayMetrics.widthPixels.toFloat()
         val columns = ((canvasWidth - padding) / cellW).toInt().coerceAtLeast(1)
 
         val visibleViews = tableViews.filter { (id, _) ->
-            selectedSection.isEmpty() || tableSections[id] == selectedSection
+            selectedSection.isEmpty() ||
+                (tableSections[id] ?: "").equals(selectedSection, ignoreCase = true)
         }.values
 
         for (index in 0 until columns * 100) {
@@ -472,7 +509,7 @@ class TableLayoutActivity : AppCompatActivity() {
             val y = padding + row * cellH
 
             val overlaps = visibleViews.any { v ->
-                abs(v.x - x) < cellW * 0.6f && abs(v.y - y) < cellH * 0.6f
+                rectsOverlap(x, y, ew, eh, v.x, v.y, v.width, v.height)
             }
             if (!overlaps) return Pair(x, y)
         }
@@ -524,7 +561,7 @@ class TableLayoutActivity : AppCompatActivity() {
                 }
                 val section = knownSections[spinnerSection.selectedItemPosition]
 
-                val (newX, newY) = nextAvailablePosition()
+                val (newX, newY) = nextAvailablePosition(shape)
 
                 if (useTableLayouts && activeLayoutId.isNotBlank()) {
                     val cw = canvas.width.toFloat().coerceAtLeast(1f)
@@ -541,7 +578,6 @@ class TableLayoutActivity : AppCompatActivity() {
                         "width" to 100.0,
                         "height" to 80.0,
                         "rotation" to 0.0,
-                        "code" to "",
                         "section" to section,
                         "areaType" to "DINING_TABLE",
                         "isActive" to true,
@@ -719,5 +755,9 @@ class TableLayoutActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    companion object {
+        const val SECTION_ALL = "All"
     }
 }

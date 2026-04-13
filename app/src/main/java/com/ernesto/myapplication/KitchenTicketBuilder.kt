@@ -17,6 +17,11 @@ data class KitchenTicketLineInput(
     val modifiers: List<OrderModifier>,
     /** Menu routing label; null/blank → station line shows [Kitchen] */
     val routingLabel: String?,
+    /**
+     * Dine-in only: resolved label for the seat (name from table flow, or "Guest N").
+     * Null when not shown (non–dine-in or no guest index on the line).
+     */
+    val guestKitchenLabel: String? = null,
 )
 
 object KitchenTicketBuilder {
@@ -36,6 +41,13 @@ object KitchenTicketBuilder {
         orderTypeDisplay: String,
         tableDisplay: String,
         timeFormatted: String,
+        /** Order-level customer from cart; shown for all order types when set. */
+        customerDisplayName: String? = null,
+        /**
+         * True when this chit lists only newly sent lines (e.g. after a prior Send to Kitchen).
+         * For dine-in, shows a short banner so the kitchen knows the ticket is partial.
+         */
+        isKitchenDeltaChit: Boolean = false,
         orderNotes: String?,
         items: List<KitchenTicketLineInput>,
         style: KitchenTicketStyle,
@@ -78,6 +90,16 @@ object KitchenTicketBuilder {
         }
         for (line in metaLines) {
             for (w in wrapLine(line, metaW)) {
+                seg(w, style.metaBold, style.metaFontSize)
+            }
+        }
+        customerDisplayName?.trim()?.takeIf { it.isNotEmpty() }?.let { cn ->
+            for (w in wrapLine("Customer: $cn", metaW)) {
+                seg(w, style.metaBold, style.metaFontSize)
+            }
+        }
+        if (isKitchenDeltaChit && isDineInOrder(orderTypeRaw)) {
+            for (w in wrapLine("New items only (update)", metaW)) {
                 seg(w, style.metaBold, style.metaFontSize)
             }
         }
@@ -148,10 +170,26 @@ object KitchenTicketBuilder {
             orderTypeDisplay = formatOrderTypeForTicket(DEMO_KITCHEN_ORDER_TYPE_RAW),
             tableDisplay = "-",
             timeFormatted = timeFormatted,
+            customerDisplayName = null,
+            isKitchenDeltaChit = false,
             orderNotes = DEMO_KITCHEN_NOTES,
             items = sampleItems,
             style = style,
         )
+    }
+
+    /**
+     * Label for a line item on kitchen chits (dine-in + [guestNumber] > 0 only).
+     * Uses [guestNames] index `guestNumber - 1` when non-blank; otherwise "Guest N".
+     */
+    fun guestKitchenLabelForLine(
+        orderTypeRaw: String?,
+        guestNumber: Int,
+        guestNames: List<String>?,
+    ): String? {
+        if (guestNumber <= 0 || !isDineInOrder(orderTypeRaw)) return null
+        val named = guestNames?.getOrNull(guestNumber - 1)?.trim()?.takeIf { it.isNotEmpty() }
+        return named ?: "Guest $guestNumber"
     }
 
     fun formatOrderTypeForTicket(raw: String?): String {
@@ -192,9 +230,14 @@ object KitchenTicketBuilder {
                 red = red,
             )
         }
+        val itemW = KitchenTicketStyle.lineWidthChars(style.itemFontSize)
+        item.guestKitchenLabel?.trim()?.takeIf { it.isNotEmpty() }?.let { gl ->
+            for (w in wrapLine("Guest: $gl", itemW)) {
+                seg(w, style.itemBold, style.itemFontSize)
+            }
+        }
         val qty = item.quantity.coerceAtLeast(1)
         val main = if (qty > 1) "${qty}x ${item.itemName}" else "1x ${item.itemName}"
-        val itemW = KitchenTicketStyle.lineWidthChars(style.itemFontSize)
         for (line in wrapLine(main, itemW)) {
             seg(line, style.itemBold, style.itemFontSize)
         }

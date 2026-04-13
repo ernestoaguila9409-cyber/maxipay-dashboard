@@ -45,7 +45,8 @@ data class DashboardModule(
             DashboardModule("inventory", "INVENTORY", "ic_inventory", "purple", 10),
             DashboardModule("reports", "REPORTS", "ic_reports", "purple", 11),
             DashboardModule("printers", "PRINTERS", "ic_printer", "purple", 12),
-            DashboardModule("cash_flow", "CASH FLOW", "ic_cash", "purple", 13)
+            DashboardModule("cash_flow", "CASH FLOW", "ic_cash", "purple", 13),
+            DashboardModule("reservation", "RESERVATION", "ic_calendar", "purple", 14),
         )
 
         /**
@@ -63,6 +64,25 @@ data class DashboardModule(
                 sorted.add(reportsIdx + 1, printerDef)
             } else {
                 sorted.add(printerDef)
+            }
+            return sorted.mapIndexed { index, m -> m.copy(position = index) }
+        }
+
+        /**
+         * Ensures the RESERVATION tile exists when the saved Firestore layout predates it.
+         * Inserts after CASH FLOW when possible.
+         */
+        fun mergeReservationDashboardTile(modules: List<DashboardModule>): List<DashboardModule> {
+            if (modules.any { it.key == "reservation" }) {
+                return modules.sortedBy { it.position }
+            }
+            val def = getDefaults().find { it.key == "reservation" } ?: return modules.sortedBy { it.position }
+            val sorted = modules.sortedBy { it.position }.toMutableList()
+            val cashIdx = sorted.indexOfFirst { it.key == "cash_flow" }
+            if (cashIdx >= 0) {
+                sorted.add(cashIdx + 1, def)
+            } else {
+                sorted.add(def)
             }
             return sorted.mapIndexed { index, m -> m.copy(position = index) }
         }

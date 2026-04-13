@@ -172,4 +172,81 @@
     <string name="modifier_trigger_checkbox_line">%1$s  %2$s</string>
     <string name="modifier_option_remove_style_checkbox">Remove-style (no charge; shows as “No …” on cart and receipts)</string>
 
+    <string name="reservation_keyboard_shift_cd">Shift: capitalize letters</string>
+
+    <string name="reservation_time_label">Reservation Time</string>
+    <string name="reservation_time_placeholder">Select date &amp; time</string>
+    <string name="reservation_time_picker_title">Time</string>
+    <string name="reservation_time_past_error">Choose a future date and time</string>
+    <string name="reservation_time_required">Select reservation date and time</string>
+    <string name="reservation_numeric_time_incomplete">Enter hour and minute</string>
+    <string name="reservation_numeric_time_invalid">Enter a valid time</string>
+
+    <string name="reservation_screen_title">Reservations</string>
+    <string name="reservation_mapping_title">Reservation map</string>
+    <string name="reservation_mapping_not_active">This reservation is no longer active.</string>
+    <string name="reservation_mapping_highlight_hint">Highlighted tables are assigned to this booking.</string>
+    <string name="reservation_cancel_title">Cancel reservation?</string>
+    <string name="reservation_cancel_message">The table will be freed on the floor plan and can be used for dine-in or new bookings.</string>
+    <string name="reservation_cancel_confirm">Cancel reservation</string>
+    <string name="reservation_cancel_action">Cancel</string>
+    <string name="reservation_cancelled">Reservation cancelled</string>
+    <string name="reservation_cancel_failed">Could not cancel: %1$s</string>
+    <string name="reservation_table_join_confirm_hint">%1$s • %2$d seats — tap Confirm or the link icon to place this group</string>
+    <string name="reservation_back_cd">Back</string>
+    <string name="reservation_fab_add_cd">Create reservation</string>
+    <string name="reservation_list_empty_title">No reservations yet</string>
+    <string name="reservation_list_empty_subtitle">Tap + to book a table. Upcoming visits will appear here.</string>
+    <string name="reservation_filter_active">Active</string>
+    <string name="reservation_filter_closed">Closed</string>
+    <string name="reservation_list_empty_closed_title">No closed reservations</string>
+    <string name="reservation_list_empty_closed_subtitle">Only reservations where you tapped Seat guest on Dine-In appear here.</string>
+    <string name="reservation_long_press_inactive">Only active reservations can be cancelled from this list.</string>
+    <string name="reservation_guests_one">1 guest</string>
+    <string name="reservation_guests_many">%d guests</string>
+    <string name="reservation_booked_line">Booked %1$s</string>
+    <string name="reservation_guest_placeholder">Guest</string>
+    <string name="reservation_table_placeholder">Table</string>
+    <string name="table_join_link_cd">Link tables for large groups</string>
+    <string name="table_join_mode_on">Link mode: tap tables of the same shape, then tap the link icon again to save.</string>
+    <string name="table_join_same_shape">Only tables with the same shape can be linked.</string>
+    <string name="table_join_need_two">Select at least two tables to link.</string>
+    <string name="table_join_saved">Tables linked for reservations and dine-in.</string>
+    <string name="table_join_split_title">Split linked tables?</string>
+    <string name="table_join_split_message">This removes the link so each table can be used separately.</string>
+    <string name="table_join_split_confirm">Split</string>
+    <string name="table_select_subtitle_dine_in">Tap a table to start a Dine-In order</string>
+    <string name="table_select_subtitle_reservation">Tap a table to reserve it for a guest</string>
+
+    <string name="dine_in_reserved_seat_guest">Seat guest</string>
+    <string name="dine_in_reserved_cancel_reservation">Cancel reservation</string>
+    <string name="dine_in_reserved_close">Close</string>
+    <string name="dine_in_reserved_dialog_title">Reserved table</string>
+    <string name="dine_in_reserved_label_customer">Guest</string>
+    <string name="dine_in_reserved_label_party">Party size</string>
+    <string name="dine_in_reserved_label_time">Reservation time</string>
+    <string name="dine_in_reserved_working">Please wait…</string>
+    <string name="dine_in_reserved_seated_opening_menu">Guest seated — opening order…</string>
+    <string name="dine_in_reserved_cancelled">Reservation cancelled</string>
+    <string name="dine_in_reserved_error">Could not complete action: %1$s</string>
+
+    <string name="table_status_waiting_for_order">Waiting for order</string>
+    <string name="table_status_order_open">Order open</string>
+    <string name="table_status_reserved">Reserved</string>
+    <string name="table_status_occupied">Occupied</string>
+
+    <plurals name="table_shape_party_of">
+        <item quantity="one">Party of %d</item>
+        <item quantity="other">Party of %d</item>
+    </plurals>
+
+    <string name="customer_profile_reservation_history">Reservation History</string>
+    <string name="customer_profile_upcoming_reservations">Upcoming reservations</string>
+    <string name="customer_profile_past_reservations">Past reservations</string>
+    <string name="customer_profile_no_upcoming_reservations">No upcoming reservations</string>
+    <string name="customer_profile_no_past_reservations">No past reservations</string>
+    <string name="customer_profile_no_reservations">No reservations yet</string>
+    <string name="customer_profile_load_reservations_failed">Could not load reservations</string>
+    <string name="customer_profile_section_expand_collapse">Expand or collapse section</string>
+
 </resources>

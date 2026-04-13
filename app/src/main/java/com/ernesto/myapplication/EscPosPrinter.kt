@@ -298,23 +298,15 @@ object EscPosPrinter {
     }
 
     // ── Star Dot Matrix commands (SP700 / SP742 kitchen impact printers) ──────
-    // These are separate 2–3 byte commands that avoid GS (0x1D) and the multi-bit
-    // ESC ! (0x1B 0x21) which the SP700 does not implement.
+    // Use only ESC + single-byte opcodes: no GS (0x1D), no ESC ! (0x1B 0x21).
+    // Many SP700 LAN setups print 0x1D as "|" and leak following bytes, so we never send
+    // Star "ESC GS …" sequences (alignment, code page). Centering is done with spaces in software.
 
     /**
-     * Star Line Mode alignment: `ESC GS a n` (4-byte).
-     * The SP700 does NOT recognize the 3-byte ESC/POS `ESC a n` (0x1B 0x61 n) —
-     * sending it causes the unrecognized bytes to print as visible garbage.
+     * Star dot matrix: `ESC E` is strictly 2 bytes (Rev. 1.91). A third byte (e.g. `0x01`) can
+     * desynchronize the command parser so following `ESC …` bytes print as letters (I/A/B/C…).
      */
-    private val STAR_ALIGN_LEFT   = byteArrayOf(0x1B, 0x1D, 0x61, 0x00)
-    private val STAR_ALIGN_CENTER = byteArrayOf(0x1B, 0x1D, 0x61, 0x01)
-
-    /**
-     * ESC E 1 — emphasized ON. Star treats `ESC E` as a 2-byte toggle and ignores the
-     * trailing `0x01` (SOH). Including the parameter makes this safe if the payload is
-     * accidentally sent to an Epson printer (`ESC E n` is 3-byte on ESC/POS).
-     */
-    private val STAR_BOLD_ON  = byteArrayOf(0x1B, 0x45, 0x01)
+    private val STAR_BOLD_ON  = byteArrayOf(0x1B, 0x45)
     /** ESC F — emphasized OFF (Star: 2-byte, no parameter; also recognized on most Epson). */
     private val STAR_BOLD_OFF = byteArrayOf(0x1B, 0x46)
     /**
@@ -328,6 +320,18 @@ object EscPosPrinter {
     private fun starHeight(double: Boolean) = byteArrayOf(0x1B, 0x68, if (double) 0x01 else 0x00)
     /** ESC W n — double-width mode: 0 = off, 1 = on. */
     private fun starWidth(double: Boolean) = byteArrayOf(0x1B, 0x57, if (double) 0x01 else 0x00)
+
+    /** Left-pads [Segment.text] so centered lines match [KitchenTicketStyle] column counts (no ESC GS alignment). */
+    private fun starSp700PrintableLine(seg: Segment): String {
+        val raw = seg.text
+        if (!seg.centered || raw.isEmpty()) return raw
+        val t = raw.trimEnd()
+        if (t.isEmpty()) return raw
+        val w = KitchenTicketStyle.lineWidthChars(seg.fontSize).coerceAtLeast(1)
+        if (t.length >= w) return raw
+        val left = (w - t.length) / 2
+        return " ".repeat(left) + t
+    }
 
     /**
      * Writes Star Dot Matrix size + bold commands for one line.
@@ -345,7 +349,7 @@ object EscPosPrinter {
     /**
      * Kitchen chit payload routed by [commandSet]:
      * - [PrinterCommandSet.ESCPOS]: `ESC !` combined print-mode (Epson TM-T88 etc.)
-     * - [PrinterCommandSet.STAR_DOT_MATRIX]: `ESC h` + `ESC W` + `ESC E`/`ESC F` (Star SP700)
+     * - [PrinterCommandSet.STAR_DOT_MATRIX]: `ESC h`/`ESC W`/`ESC E`/`ESC F`/`ESC 4`/`ESC 5` only — no `ESC GS` (0x1D).
      */
     fun buildKitchenLanPayload(
         segments: List<Segment>,
@@ -393,16 +397,14 @@ object EscPosPrinter {
         out.write(INIT)
         out.write(LF)
         for (seg in segments) {
-            out.write(if (seg.centered) STAR_ALIGN_CENTER else STAR_ALIGN_LEFT)
             out.write(if (seg.red) STAR_COLOR_RED else STAR_COLOR_BLACK)
             out.writeStarStyle(seg.fontSize, seg.bold)
-            out.printLine(seg.text)
+            out.printLine(starSp700PrintableLine(seg))
         }
         out.write(STAR_COLOR_BLACK)
         out.write(starHeight(false))
         out.write(starWidth(false))
         out.write(STAR_BOLD_OFF)
-        out.write(STAR_ALIGN_LEFT)
         out.write(LF)
         out.write(byteArrayOf(0x1B, 0x64, 1))
         out.flush()

@@ -110,12 +110,13 @@ class OrderDetailActivity : AppCompatActivity() {
                 val data = result.data ?: return@registerForActivityResult
                 val tableId = data.getStringExtra("tableId") ?: ""
                 val tableName = data.getStringExtra("tableName") ?: ""
+                val tableLayoutId = data.getStringExtra("tableLayoutId") ?: ""
                 val sectionId = data.getStringExtra("sectionId") ?: ""
                 val sectionName = data.getStringExtra("sectionName") ?: ""
                 val guestCount = data.getIntExtra("guestCount", 0)
                 val guestNames = data.getStringArrayListExtra("guestNames") ?: arrayListOf()
 
-                switchToDineIn(tableId, tableName, sectionId, sectionName, guestCount, guestNames)
+                switchToDineIn(tableId, tableName, tableLayoutId, sectionId, sectionName, guestCount, guestNames)
             }
         }
 
@@ -372,8 +373,10 @@ class OrderDetailActivity : AppCompatActivity() {
             } else {
                 val customer = hashMapOf<String, Any>(
                     "name" to info.name,
+                    "nameSearch" to CustomerFirestoreHelper.nameSearchKey(info.name),
                     "phone" to info.phone,
-                    "email" to info.email
+                    "email" to info.email,
+                    "createdAt" to Timestamp.now(),
                 )
                 db.collection("Customers")
                     .add(customer)
@@ -1045,6 +1048,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun switchToDineIn(
         tableId: String,
         tableName: String,
+        tableLayoutId: String,
         sectionId: String,
         sectionName: String,
         guestCount: Int,
@@ -1056,6 +1060,7 @@ class OrderDetailActivity : AppCompatActivity() {
         )
         if (tableId.isNotBlank()) updates["tableId"] = tableId
         if (tableName.isNotBlank()) updates["tableName"] = tableName
+        if (tableLayoutId.isNotBlank()) updates["tableLayoutId"] = tableLayoutId
         if (sectionId.isNotBlank()) updates["sectionId"] = sectionId
         if (sectionName.isNotBlank()) updates["sectionName"] = sectionName
         if (guestCount > 0) updates["guestCount"] = guestCount
@@ -1077,6 +1082,7 @@ class OrderDetailActivity : AppCompatActivity() {
         val updates = mapOf<String, Any>(
             "orderType" to "TO_GO",
             "tableId" to FieldValue.delete(),
+            "tableLayoutId" to FieldValue.delete(),
             "tableName" to FieldValue.delete(),
             "sectionId" to FieldValue.delete(),
             "sectionName" to FieldValue.delete(),

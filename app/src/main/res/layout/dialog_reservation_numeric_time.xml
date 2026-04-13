@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog_reservation_numeric_time"
+    android:orientation="vertical"
+    android:paddingStart="18dp"
+    android:paddingTop="16dp"
+    android:paddingEnd="18dp"
+    android:paddingBottom="14dp">
+
+    <TextView
+        android:id="@+id/txtNumericTimeTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="@color/pos_key_text_primary"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/txtNumericTimeHour"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_numeric_time_digit_selected"
+            android:gravity="center"
+            android:minWidth="52dp"
+            android:minHeight="44dp"
+            android:paddingHorizontal="10dp"
+            android:textColor="@color/pos_key_text_primary"
+            android:textSize="20sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="6dp"
+            android:text=":"
+            android:textColor="@color/pos_key_text_primary"
+            android:textSize="20sp" />
+
+        <TextView
+            android:id="@+id/txtNumericTimeMinute"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_numeric_time_digit"
+            android:gravity="center"
+            android:minWidth="52dp"
+            android:minHeight="44dp"
+            android:paddingHorizontal="10dp"
+            android:textColor="@color/pos_key_text_primary"
+            android:textSize="20sp" />
+
+        <LinearLayout
+            android:id="@+id/rowNumericTimeAmPm"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:orientation="vertical">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnNumericTimeAm"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="52dp"
+                android:minHeight="36dp"
+                android:paddingTop="0dp"
+                android:paddingBottom="0dp"
+                android:text="AM"
+                android:textSize="11sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnNumericTimePm"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:minWidth="52dp"
+                android:minHeight="36dp"
+                android:paddingTop="0dp"
+                android:paddingBottom="0dp"
+                android:text="PM"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/timeKey1"
+                style="@style/ReservationNumericTimeKey"
+                android:text="1" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/timeKey2"
+                style="@style/ReservationNumericTimeKey"
+                android:text="2" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/timeKey3"
+                style="@style/ReservationNumericTimeKey"
+                android:text="3" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/timeKey4"
+                style="@style/ReservationNumericTimeKey"
+                android:text="4" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/timeKey5"
+                style="@style/ReservationNumericTimeKey"
+                android:text="5" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/timeKey6"
+                style="@style/ReservationNumericTimeKey"
+                android:text="6" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/timeKey7"
+                style="@style/ReservationNumericTimeKey"
+                android:text="7" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/timeKey8"
+                style="@style/ReservationNumericTimeKey"
+                android:text="8" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/timeKey9"
+                style="@style/ReservationNumericTimeKey"
+                android:text="9" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/timeKeyBackspace"
+                style="@style/ReservationNumericTimeKey"
+                android:layout_weight="1"
+                android:background="@drawable/bg_pos_key_special"
+                android:text="⌫" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/timeKey0"
+                style="@style/ReservationNumericTimeKey"
+                android:layout_weight="1"
+                android:text="0" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:orientation="horizontal"
+        android:paddingTop="6dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnNumericTimeCancel"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="40dp"
+            android:text="@android:string/cancel" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnNumericTimeOk"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:minHeight="40dp"
+            android:text="@android:string/ok"
+            app:backgroundTint="@color/brand_primary"
+            app:cornerRadius="18dp" />
+    </LinearLayout>
+</LinearLayout>

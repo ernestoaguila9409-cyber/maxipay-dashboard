@@ -85,6 +85,15 @@
             android:name=".TableSelectionActivity"
             android:exported="false" />
         <activity
+            android:name=".ReservationActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ReservationMappingActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ReservationTableSelectionActivity"
+            android:exported="false" />
+        <activity
             android:name=".BarTabsActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity" />

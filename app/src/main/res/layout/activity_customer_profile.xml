@@ -197,35 +197,178 @@
 
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Order History Header -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Order History"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:textColor="#1A1A1A"
-                android:layout_marginBottom="12dp" />
-
-            <!-- Empty state -->
-            <TextView
-                android:id="@+id/txtEmptyOrders"
+            <!-- Reservation History (collapsible) -->
+            <LinearLayout
+                android:id="@+id/headerReservationHistory"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="No orders yet"
-                android:textSize="15sp"
-                android:textColor="#AAAAAA"
-                android:gravity="center"
-                android:padding="32dp"
-                android:visibility="gone" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingTop="4dp"
+                android:paddingBottom="8dp">
 
-            <!-- Order history list -->
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/recyclerOrderHistory"
+                <TextView
+                    android:id="@+id/txtReservationHistoryTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/customer_profile_reservation_history"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="#1A1A1A" />
+
+                <ImageView
+                    android:id="@+id/imgReservationHistoryChevron"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_marginStart="8dp"
+                    android:contentDescription="@string/customer_profile_section_expand_collapse"
+                    android:src="@drawable/ic_expand_more"
+                    android:tint="#666666" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/groupReservationHistoryBody"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:nestedScrollingEnabled="false"
-                android:clipToPadding="false" />
+                android:orientation="vertical"
+                android:visibility="gone"
+                android:layout_marginBottom="12dp">
+
+                <TextView
+                    android:id="@+id/txtEmptyAllReservations"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/customer_profile_no_reservations"
+                    android:textSize="15sp"
+                    android:textColor="#AAAAAA"
+                    android:gravity="center"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="16dp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/txtUpcomingReservationsHeader"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/customer_profile_upcoming_reservations"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/txtEmptyUpcomingReservations"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/customer_profile_no_upcoming_reservations"
+                    android:textSize="14sp"
+                    android:textColor="#AAAAAA"
+                    android:paddingBottom="12dp"
+                    android:visibility="gone" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recyclerUpcomingReservations"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:nestedScrollingEnabled="false"
+                    android:clipToPadding="false"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:id="@+id/txtPastReservationsHeader"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/customer_profile_past_reservations"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/txtEmptyPastReservations"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/customer_profile_no_past_reservations"
+                    android:textSize="14sp"
+                    android:textColor="#AAAAAA"
+                    android:paddingBottom="12dp"
+                    android:visibility="gone" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recyclerPastReservations"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:nestedScrollingEnabled="false"
+                    android:clipToPadding="false"
+                    android:layout_marginBottom="8dp" />
+
+            </LinearLayout>
+
+            <!-- Order History (collapsible) -->
+            <LinearLayout
+                android:id="@+id/headerOrderHistory"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingTop="4dp"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:id="@+id/txtOrderHistoryTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Order History"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="#1A1A1A" />
+
+                <ImageView
+                    android:id="@+id/imgOrderHistoryChevron"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_marginStart="8dp"
+                    android:contentDescription="@string/customer_profile_section_expand_collapse"
+                    android:src="@drawable/ic_expand_more"
+                    android:tint="#666666" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/groupOrderHistoryBody"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/txtEmptyOrders"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="No orders yet"
+                    android:textSize="15sp"
+                    android:textColor="#AAAAAA"
+                    android:gravity="center"
+                    android:padding="32dp"
+                    android:visibility="gone" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recyclerOrderHistory"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:nestedScrollingEnabled="false"
+                    android:clipToPadding="false" />
+
+            </LinearLayout>
 
         </LinearLayout>
 

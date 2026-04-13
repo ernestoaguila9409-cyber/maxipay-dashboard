@@ -16,4 +16,14 @@
     <dimen name="pos_key_label_sp">16sp</dimen>
     <dimen name="pos_key_label_compact_sp">13sp</dimen>
     <dimen name="pos_key_icon_size">22dp</dimen>
+
+    <dimen name="reservation_time_field_radius">12dp</dimen>
+
+    <dimen name="reservation_numeric_time_dialog_margin_h">24dp</dimen>
+    <dimen name="reservation_numeric_time_dialog_max_width">400dp</dimen>
+    <dimen name="reservation_numeric_time_dialog_corner">18dp</dimen>
+    <dimen name="reservation_numeric_time_key_height">34dp</dimen>
+    <dimen name="reservation_numeric_time_key_margin">1dp</dimen>
+
+    <dimen name="reservation_customer_suggestions_max_height">240dp</dimen>
 </resources>

@@ -1,6 +1,7 @@
 package com.ernesto.myapplication.engine
 
 import com.ernesto.myapplication.BarTabSeatHelper
+import com.ernesto.myapplication.TableFirestoreHelper
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.*
@@ -136,6 +137,31 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                     transaction.update(
                         db.collection("Tables").document(tid),
                         mapOf("currentOrderId" to FieldValue.delete())
+                    )
+                }
+            }
+
+            if (newStatus == "CLOSED" && orderSnap.getString("orderType") == "DINE_IN") {
+                val layoutId = orderSnap.getString("tableLayoutId")
+                @Suppress("UNCHECKED_CAST")
+                val joinedRaw = orderSnap.get("joinedTableIds") as? List<*>
+                val joinedIds = joinedRaw?.mapNotNull { it?.toString()?.trim() }?.filter { it.isNotEmpty() }?.distinct()
+                val dineTableId = orderSnap.getString("tableId")?.trim().orEmpty()
+                val tableIdsToClear = when {
+                    !joinedIds.isNullOrEmpty() && joinedIds.size > 1 -> joinedIds
+                    dineTableId.isNotEmpty() -> listOf(dineTableId)
+                    else -> emptyList()
+                }
+                for (tid in tableIdsToClear) {
+                    val tref = TableFirestoreHelper.tableRef(db, tid, layoutId)
+                    transaction.update(
+                        tref,
+                        mapOf(
+                            "status" to FieldValue.delete(),
+                            "dineInOrderId" to FieldValue.delete(),
+                            "reservationId" to FieldValue.delete(),
+                            "updatedAt" to Date()
+                        )
                     )
                 }
             }

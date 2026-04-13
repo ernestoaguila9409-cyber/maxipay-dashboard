@@ -26,6 +26,7 @@ import com.google.android.material.button.MaterialButton
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.abs
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.Filter
@@ -103,6 +104,7 @@ class MenuActivity : AppCompatActivity() {
     private var currentOrderId: String? = null
     private var isCreatingOrder = false
     private var tableId: String? = null
+    private var tableLayoutId: String? = null
     private var tableName: String? = null
     private var sectionId: String? = null
     private var sectionName: String? = null
@@ -169,6 +171,7 @@ class MenuActivity : AppCompatActivity() {
         employeeName = intent.getStringExtra("employeeName") ?: ""
         orderType = intent.getStringExtra("orderType") ?: ""
         tableId = intent.getStringExtra("tableId")
+        tableLayoutId = intent.getStringExtra("tableLayoutId")?.takeIf { it.isNotBlank() }
         tableName = intent.getStringExtra("tableName")
         sectionId = intent.getStringExtra("sectionId")
         sectionName = intent.getStringExtra("sectionName")
@@ -389,6 +392,9 @@ class MenuActivity : AppCompatActivity() {
                 if (tableId.isNullOrBlank()) {
                     tableId = orderDoc.getString("tableId")
                 }
+                if (tableLayoutId.isNullOrBlank()) {
+                    tableLayoutId = orderDoc.getString("tableLayoutId")?.takeIf { it.isNotBlank() }
+                }
                 if (tableName.isNullOrBlank()) {
                     tableName = orderDoc.getString("tableName")
                 }
@@ -539,8 +545,10 @@ class MenuActivity : AppCompatActivity() {
             }
             val customer = hashMapOf<String, Any>(
                 "name" to name,
+                "nameSearch" to CustomerFirestoreHelper.nameSearchKey(name),
                 "phone" to phone,
-                "email" to email
+                "email" to email,
+                "createdAt" to Timestamp.now(),
             )
             db.collection("Customers")
                 .add(customer)
@@ -1880,6 +1888,7 @@ class MenuActivity : AppCompatActivity() {
                     employeeName = employeeName,
                     orderType = orderType,
                     tableId = tableId,
+                    tableLayoutId = tableLayoutId,
                     tableName = tableName,
                     sectionId = sectionId,
                     sectionName = sectionName,
@@ -1969,6 +1978,7 @@ class MenuActivity : AppCompatActivity() {
                         shouldPrintKitchen: Boolean,
                         trigger: String,
                         qtyUpdates: Map<String, Int>?,
+                        notesPrintedByPrinterIp: Map<String, String>?,
                     ) {
                         val updates = hashMapOf<String, Any>("lastKitchenSentAt" to Date())
                         if (shouldPrintKitchen && trigger == PrintingSettingsFirestore.FIRST_EVENT) {
@@ -1979,6 +1989,10 @@ class MenuActivity : AppCompatActivity() {
                             val merged = KitchenPrintHelper.kitchenSentByLineFromOrder(orderSnap).toMutableMap()
                             qtyUpdates.forEach { (k, v) -> merged[k] = v }
                             updates[KitchenPrintHelper.KITCHEN_SENT_BY_LINE_MAP_FIELD] = merged
+                        }
+                        if (notesPrintedByPrinterIp != null) {
+                            updates[KitchenPrintHelper.KITCHEN_NOTES_LAST_PRINTED_BY_PRINTER_IP] =
+                                notesPrintedByPrinterIp
                         }
                         orderRef
                             .update(updates)
@@ -2021,22 +2035,35 @@ class MenuActivity : AppCompatActivity() {
                                     .addOnSuccessListener { itemsSnap ->
                                         val sent =
                                             KitchenPrintHelper.effectiveSentWithLegacyOrderMap(orderDoc, itemsSnap)
-                                        val (lineItems, qtyUpdates) = kitchenDeltaFromCartAndSentMap(sent)
+                                        val (lineItems, qtyUpdates) =
+                                            kitchenDeltaFromCartAndSentMap(orderDoc, sent)
                                         if (lineItems.isNotEmpty()) {
-                                            KitchenPrintHelper.printKitchenTickets(this, orderId, lineItems)
-                                            commitKitchenSendWithMap(
-                                                orderDoc,
-                                                shouldPrintKitchen,
-                                                trigger,
-                                                qtyUpdates,
-                                            )
+                                            KitchenPrintHelper.printKitchenTickets(
+                                                this,
+                                                orderId,
+                                                lineItems,
+                                            ) { notesMap ->
+                                                commitKitchenSendWithMap(
+                                                    orderDoc,
+                                                    shouldPrintKitchen,
+                                                    trigger,
+                                                    qtyUpdates,
+                                                    notesMap,
+                                                )
+                                            }
                                         } else {
                                             Toast.makeText(
                                                 this,
                                                 R.string.cart_nothing_new_kitchen,
                                                 Toast.LENGTH_SHORT,
                                             ).show()
-                                            commitKitchenSendWithMap(orderDoc, shouldPrintKitchen, trigger, null)
+                                            commitKitchenSendWithMap(
+                                                orderDoc,
+                                                shouldPrintKitchen,
+                                                trigger,
+                                                null,
+                                                null,
+                                            )
                                         }
                                     }
                                     .addOnFailureListener {
@@ -2045,10 +2072,16 @@ class MenuActivity : AppCompatActivity() {
                                             R.string.cart_kitchen_items_load_failed,
                                             Toast.LENGTH_LONG,
                                         ).show()
-                                        commitKitchenSendWithMap(orderDoc, shouldPrintKitchen, trigger, null)
+                                        commitKitchenSendWithMap(
+                                            orderDoc,
+                                            shouldPrintKitchen,
+                                            trigger,
+                                            null,
+                                            null,
+                                        )
                                     }
                             } else {
-                                commitKitchenSendWithMap(orderDoc, shouldPrintKitchen, trigger, null)
+                                commitKitchenSendWithMap(orderDoc, shouldPrintKitchen, trigger, null, null)
                             }
                         }
                         .addOnFailureListener {
@@ -2060,45 +2093,92 @@ class MenuActivity : AppCompatActivity() {
                             val trigger = PrintingSettingsCache.printTriggerMode
                             val shouldPrintKitchen = trigger != PrintingSettingsFirestore.ON_PAYMENT
                             if (shouldPrintKitchen) {
-                                val (lineItems, qtyUpdates) = kitchenDeltaFromCartAndSentMap(emptyMap())
-                                if (lineItems.isNotEmpty()) {
-                                    KitchenPrintHelper.printKitchenTickets(this, orderId, lineItems)
+                                val (lineItems, qtyUpdates) = kitchenDeltaFromCartAndSentMap(null, emptyMap())
+                                fun saveSendMeta(
+                                    od: DocumentSnapshot,
+                                    notesMap: Map<String, String>?,
+                                ) {
+                                    val updatesToApply =
+                                        if (qtyUpdates.isEmpty()) null else qtyUpdates
+                                    commitKitchenSendWithMap(
+                                        od,
+                                        shouldPrintKitchen,
+                                        trigger,
+                                        updatesToApply,
+                                        notesMap,
+                                    )
                                 }
-                                orderRef.get()
-                                    .addOnSuccessListener { od ->
-                                        val updatesToApply =
-                                            if (qtyUpdates.isEmpty()) null else qtyUpdates
-                                        commitKitchenSendWithMap(od, shouldPrintKitchen, trigger, updatesToApply)
-                                    }
-                                    .addOnFailureListener {
-                                        orderRef
-                                            .update("lastKitchenSentAt", Date())
-                                            .addOnSuccessListener {
-                                                runOnUiThread {
-                                                    kitchenSentForOrder = true
-                                                    isSendingToKitchen = false
-                                                    updateSendKitchenButtonLabel()
-                                                    syncCartButtonStates()
-                                                    Toast.makeText(
-                                                        this,
-                                                        R.string.cart_sent_to_kitchen,
-                                                        Toast.LENGTH_SHORT,
-                                                    ).show()
-                                                }
+                                if (lineItems.isNotEmpty()) {
+                                    KitchenPrintHelper.printKitchenTickets(
+                                        this,
+                                        orderId,
+                                        lineItems,
+                                    ) { notesMap ->
+                                        orderRef.get()
+                                            .addOnSuccessListener { od -> saveSendMeta(od, notesMap) }
+                                            .addOnFailureListener {
+                                                orderRef
+                                                    .update("lastKitchenSentAt", Date())
+                                                    .addOnSuccessListener {
+                                                        runOnUiThread {
+                                                            kitchenSentForOrder = true
+                                                            isSendingToKitchen = false
+                                                            updateSendKitchenButtonLabel()
+                                                            syncCartButtonStates()
+                                                            Toast.makeText(
+                                                                this,
+                                                                R.string.cart_sent_to_kitchen,
+                                                                Toast.LENGTH_SHORT,
+                                                            ).show()
+                                                        }
+                                                    }
+                                                    .addOnFailureListener { e ->
+                                                        runOnUiThread {
+                                                            isSendingToKitchen = false
+                                                            updateSendKitchenButtonLabel()
+                                                            syncCartButtonStates()
+                                                            Toast.makeText(
+                                                                this,
+                                                                "Could not save kitchen send: ${e.message}",
+                                                                Toast.LENGTH_LONG,
+                                                            ).show()
+                                                        }
+                                                    }
                                             }
-                                            .addOnFailureListener { e ->
-                                                runOnUiThread {
-                                                    isSendingToKitchen = false
-                                                    updateSendKitchenButtonLabel()
-                                                    syncCartButtonStates()
-                                                    Toast.makeText(
-                                                        this,
-                                                        "Could not save kitchen send: ${e.message}",
-                                                        Toast.LENGTH_LONG,
-                                                    ).show()
-                                                }
-                                            }
                                     }
+                                } else {
+                                    orderRef.get()
+                                        .addOnSuccessListener { od -> saveSendMeta(od, null) }
+                                        .addOnFailureListener {
+                                            orderRef
+                                                .update("lastKitchenSentAt", Date())
+                                                .addOnSuccessListener {
+                                                    runOnUiThread {
+                                                        kitchenSentForOrder = true
+                                                        isSendingToKitchen = false
+                                                        updateSendKitchenButtonLabel()
+                                                        syncCartButtonStates()
+                                                        Toast.makeText(
+                                                            this,
+                                                            R.string.cart_sent_to_kitchen,
+                                                            Toast.LENGTH_SHORT,
+                                                        ).show()
+                                                    }
+                                                }
+                                                .addOnFailureListener { e ->
+                                                    runOnUiThread {
+                                                        isSendingToKitchen = false
+                                                        updateSendKitchenButtonLabel()
+                                                        syncCartButtonStates()
+                                                        Toast.makeText(
+                                                            this,
+                                                            "Could not save kitchen send: ${e.message}",
+                                                            Toast.LENGTH_LONG,
+                                                        ).show()
+                                                    }
+                                                }
+                                        }
+                                }
                             } else {
                                 orderRef
                                     .update("lastKitchenSentAt", Date())
@@ -2145,28 +2225,51 @@ class MenuActivity : AppCompatActivity() {
     /**
      * Kitchen tickets only for cart lines where `quantity` exceeds stored sent qty for that line key
      * (from [KitchenPrintHelper.KITCHEN_SENT_BY_LINE_MAP_FIELD] on the order).
+     *
+     * [orderDoc] supplies [guestNames] when present so dine-in **updates** keep correct seat names
+     * after reload or after adding a customer (in-memory list may lag Firestore).
      */
     private fun kitchenDeltaFromCartAndSentMap(
+        orderDoc: DocumentSnapshot?,
         sentByLine: Map<String, Int>,
     ): Pair<List<KitchenTicketLineInput>, Map<String, Int>> {
         val lineItems = mutableListOf<KitchenTicketLineInput>()
         val qtyUpdates = mutableMapOf<String, Int>()
+        val guestNamesSnapshot = guestNamesListForKitchenPrint(orderDoc)
         for ((lineKey, item) in cartMap) {
             if (item.quantity <= 0) continue
             val sent = sentByLine[lineKey] ?: 0
             val delta = item.quantity - sent
             if (delta <= 0) continue
+            val guestLabel = KitchenTicketBuilder.guestKitchenLabelForLine(
+                orderType,
+                item.guestNumber,
+                guestNamesSnapshot,
+            )
             lineItems.add(
                 KitchenTicketLineInput(
                     quantity = delta,
                     itemName = item.name,
                     modifiers = item.modifiers,
                     routingLabel = item.printerLabel?.trim()?.takeIf { it.isNotEmpty() },
+                    guestKitchenLabel = guestLabel,
                 ),
             )
             qtyUpdates[lineKey] = item.quantity
         }
         return lineItems to qtyUpdates
+    }
+
+    /** Prefer Firestore `guestNames` (order of seats) so kitchen updates match table setup. */
+    private fun guestNamesListForKitchenPrint(orderDoc: DocumentSnapshot?): List<String> {
+        if (orderDoc != null && orderDoc.exists()) {
+            @Suppress("UNCHECKED_CAST")
+            val fromOrder = orderDoc.get("guestNames") as? List<*>
+            if (fromOrder != null && fromOrder.isNotEmpty()) {
+                return fromOrder.map { it?.toString().orEmpty() }
+            }
+        }
+        return guestNames.toList()
     }
 
     private fun addToCart(
@@ -2194,6 +2297,7 @@ class MenuActivity : AppCompatActivity() {
             employeeName = employeeName,
             orderType = orderType,
             tableId = tableId,
+            tableLayoutId = tableLayoutId,
             tableName = tableName,
             sectionId = sectionId,
             sectionName = sectionName,

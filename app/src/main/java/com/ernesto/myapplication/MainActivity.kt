@@ -3,11 +3,12 @@ package com.ernesto.myapplication
 import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
-import android.util.Log
-import android.widget.Toast
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.viewpager2.widget.ViewPager2
 import com.google.firebase.firestore.FirebaseFirestore
@@ -15,6 +16,19 @@ import com.google.firebase.firestore.ListenerRegistration
 import java.util.Locale
 import java.util.concurrent.Executors
 
+/**
+ * POS dashboard host. **Back key:** pops [androidx.fragment.app.FragmentManager] when
+ * [androidx.fragment.app.FragmentTransaction.addToBackStack] was used; at root, sends the task
+ * to the background with [android.app.Activity.moveTaskToBack] instead of finishing.
+ *
+ * Example when you add a fragment container to this activity:
+ * ```
+ * supportFragmentManager.beginTransaction()
+ *     .replace(R.id.fragment_container, OrderSummaryFragment())
+ *     .addToBackStack(null)
+ *     .commit()
+ * ```
+ */
 class MainActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
@@ -31,6 +45,12 @@ class MainActivity : AppCompatActivity() {
 
     private var employeeName: String = ""
     private var employeeRole: String = ""
+
+    /**
+     * When [moveTaskToBack] is false (rare), show a confirmation before [finishAffinity].
+     * Default false for fast POS; set true if you want a dialog instead of immediate exit fallback.
+     */
+    private val confirmBeforeFullExitFallback = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,8 +93,47 @@ class MainActivity : AppCompatActivity() {
         }
 
         loadCurrentSales()
+        // Register last so this callback runs before any library-added default back behavior.
+        registerDashboardBackHandling()
     }
 
+    /**
+     * System / predictive Back: pop fragment stack if used; otherwise always try to minimize the
+     * task. Never calls [finishAffinity] (that was killing the app when [moveTaskToBack] returned false).
+     */
+    private fun registerDashboardBackHandling() {
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    val fm = supportFragmentManager
+                    if (fm.backStackEntryCount > 0) {
+                        fm.popBackStack()
+                        return
+                    }
+                    if (moveTaskToBack(true)) {
+                        return
+                    }
+                    if (confirmBeforeFullExitFallback) {
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("Leave POS?")
+                            .setMessage("Can't send the app to the background from here. Close completely?")
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton("Close") { _, _ ->
+                                finishAffinity()
+                            }
+                            .show()
+                    } else {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Use the Home button to leave the app.",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+            },
+        )
+    }
 
     private fun setupDashboardGrid() {
         dashboardPager = findViewById(R.id.dashboardPager)
@@ -98,7 +157,9 @@ class MainActivity : AppCompatActivity() {
                     dashboardAdapter.setModules(
                         DashboardModule.mergeTipDashboardTile(
                             this,
-                            DashboardModule.mergePrintersDashboardTile(modules)
+                            DashboardModule.mergeReservationDashboardTile(
+                                DashboardModule.mergePrintersDashboardTile(modules)
+                            ),
                         )
                     )
                     updatePageIndicator(dashboardPager.currentItem)
@@ -110,7 +171,9 @@ class MainActivity : AppCompatActivity() {
                     dashboardAdapter.setModules(
                         DashboardModule.mergeTipDashboardTile(
                             this,
-                            DashboardModule.mergePrintersDashboardTile(serverModules)
+                            DashboardModule.mergeReservationDashboardTile(
+                                DashboardModule.mergePrintersDashboardTile(serverModules)
+                            ),
                         )
                     )
                     updatePageIndicator(dashboardPager.currentItem)
@@ -190,6 +253,11 @@ class MainActivity : AppCompatActivity() {
             "printers" -> startActivity(Intent(this, PrintersActivity::class.java))
             "cash_flow" -> startActivity(Intent(this, CashFlowActivity::class.java))
             "tips" -> startActivity(Intent(this, TipAdjustmentActivity::class.java))
+            "reservation" -> {
+                val i = Intent(this, ReservationActivity::class.java)
+                i.putExtra("employeeName", employeeName)
+                startActivity(i)
+            }
         }
     }
 
@@ -207,7 +275,9 @@ class MainActivity : AppCompatActivity() {
                 dashboardAdapter.setModules(
                     DashboardModule.mergeTipDashboardTile(
                         this,
-                        DashboardModule.mergePrintersDashboardTile(modules)
+                        DashboardModule.mergeReservationDashboardTile(
+                            DashboardModule.mergePrintersDashboardTile(modules)
+                        ),
                     )
                 )
                 updatePageIndicator(dashboardPager.currentItem)
@@ -263,7 +333,13 @@ class MainActivity : AppCompatActivity() {
 
                 for (doc in snapshots) {
                     when (doc.getString("orderType")) {
-                        "DINE_IN" -> dineIn++
+                        // Match [TableSelectionActivity.listenForOccupiedTables]: only orders tied to a table
+                        // count as "open dine-in" for the badge. Otherwise orphan DINE_IN docs (no tableId)
+                        // show a badge but no occupied table on the floor plan.
+                        "DINE_IN" -> {
+                            val tid = doc.getString("tableId")
+                            if (!tid.isNullOrBlank()) dineIn++
+                        }
                         "TO_GO" -> toGo++
                         "BAR", "BAR_TAB" -> bar++
                     }

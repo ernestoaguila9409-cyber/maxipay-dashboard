@@ -4,22 +4,32 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.ernesto.myapplication.engine.MoneyUtils
+import com.google.android.material.card.MaterialCardView
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class CustomerProfileActivity : AppCompatActivity() {
+
+    companion object {
+        private const val STATE_RESERVATION_HISTORY_EXPANDED = "state_reservation_history_expanded"
+        private const val STATE_ORDER_HISTORY_EXPANDED = "state_order_history_expanded"
+    }
 
     private val db = FirebaseFirestore.getInstance()
 
@@ -31,6 +41,26 @@ class CustomerProfileActivity : AppCompatActivity() {
     private lateinit var txtLastVisit: TextView
     private lateinit var txtEmptyOrders: TextView
     private lateinit var recyclerOrderHistory: RecyclerView
+    private lateinit var txtReservationHistoryTitle: TextView
+    private lateinit var txtEmptyAllReservations: TextView
+    private lateinit var txtUpcomingReservationsHeader: TextView
+    private lateinit var txtEmptyUpcomingReservations: TextView
+    private lateinit var recyclerUpcomingReservations: RecyclerView
+    private lateinit var txtPastReservationsHeader: TextView
+    private lateinit var txtEmptyPastReservations: TextView
+    private lateinit var recyclerPastReservations: RecyclerView
+    private lateinit var headerReservationHistory: View
+    private lateinit var groupReservationHistoryBody: View
+    private lateinit var imgReservationHistoryChevron: ImageView
+    private lateinit var headerOrderHistory: View
+    private lateinit var groupOrderHistoryBody: View
+    private lateinit var imgOrderHistoryChevron: ImageView
+
+    private var reservationHistoryExpanded = false
+    private var orderHistoryExpanded = false
+
+    private val upcomingReservationAdapter = CustomerReservationHistoryAdapter()
+    private val pastReservationAdapter = CustomerReservationHistoryAdapter()
 
     private val orderHistoryAdapter = OrderHistoryAdapter { orderId ->
         val intent = Intent(this, OrderDetailActivity::class.java)
@@ -43,6 +73,10 @@ class CustomerProfileActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        savedInstanceState?.let {
+            reservationHistoryExpanded = it.getBoolean(STATE_RESERVATION_HISTORY_EXPANDED, false)
+            orderHistoryExpanded = it.getBoolean(STATE_ORDER_HISTORY_EXPANDED, false)
+        }
         setContentView(R.layout.activity_customer_profile)
 
         customerId = intent.getStringExtra("customerId") ?: ""
@@ -62,14 +96,63 @@ class CustomerProfileActivity : AppCompatActivity() {
         txtLastVisit = findViewById(R.id.txtLastVisit)
         txtEmptyOrders = findViewById(R.id.txtEmptyOrders)
         recyclerOrderHistory = findViewById(R.id.recyclerOrderHistory)
+        txtReservationHistoryTitle = findViewById(R.id.txtReservationHistoryTitle)
+        txtEmptyAllReservations = findViewById(R.id.txtEmptyAllReservations)
+        txtUpcomingReservationsHeader = findViewById(R.id.txtUpcomingReservationsHeader)
+        txtEmptyUpcomingReservations = findViewById(R.id.txtEmptyUpcomingReservations)
+        recyclerUpcomingReservations = findViewById(R.id.recyclerUpcomingReservations)
+        txtPastReservationsHeader = findViewById(R.id.txtPastReservationsHeader)
+        txtEmptyPastReservations = findViewById(R.id.txtEmptyPastReservations)
+        recyclerPastReservations = findViewById(R.id.recyclerPastReservations)
+        headerReservationHistory = findViewById(R.id.headerReservationHistory)
+        groupReservationHistoryBody = findViewById(R.id.groupReservationHistoryBody)
+        imgReservationHistoryChevron = findViewById(R.id.imgReservationHistoryChevron)
+        headerOrderHistory = findViewById(R.id.headerOrderHistory)
+        groupOrderHistoryBody = findViewById(R.id.groupOrderHistoryBody)
+        imgOrderHistoryChevron = findViewById(R.id.imgOrderHistoryChevron)
+
+        applyReservationHistoryExpanded()
+        applyOrderHistoryExpanded()
+
+        headerReservationHistory.setOnClickListener {
+            reservationHistoryExpanded = !reservationHistoryExpanded
+            applyReservationHistoryExpanded()
+        }
+        headerOrderHistory.setOnClickListener {
+            orderHistoryExpanded = !orderHistoryExpanded
+            applyOrderHistoryExpanded()
+        }
 
         recyclerOrderHistory.layoutManager = LinearLayoutManager(this)
         recyclerOrderHistory.adapter = orderHistoryAdapter
 
+        recyclerUpcomingReservations.layoutManager = LinearLayoutManager(this)
+        recyclerUpcomingReservations.adapter = upcomingReservationAdapter
+        recyclerPastReservations.layoutManager = LinearLayoutManager(this)
+        recyclerPastReservations.adapter = pastReservationAdapter
+
         findViewById<View>(R.id.btnBack).setOnClickListener { finish() }
 
         loadCustomerInfo()
+        loadReservationHistory()
         loadOrderHistory()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_RESERVATION_HISTORY_EXPANDED, reservationHistoryExpanded)
+        outState.putBoolean(STATE_ORDER_HISTORY_EXPANDED, orderHistoryExpanded)
+    }
+
+    private fun applyReservationHistoryExpanded() {
+        groupReservationHistoryBody.visibility =
+            if (reservationHistoryExpanded) View.VISIBLE else View.GONE
+        imgReservationHistoryChevron.rotation = if (reservationHistoryExpanded) 180f else 0f
+    }
+
+    private fun applyOrderHistoryExpanded() {
+        groupOrderHistoryBody.visibility = if (orderHistoryExpanded) View.VISIBLE else View.GONE
+        imgOrderHistoryChevron.rotation = if (orderHistoryExpanded) 180f else 0f
     }
 
     private fun loadCustomerInfo() {
@@ -173,6 +256,204 @@ class CustomerProfileActivity : AppCompatActivity() {
             digits.length == 10 -> "${digits.take(3)}-${digits.drop(3).take(3)}-${digits.takeLast(4)}"
             digits.length == 11 && digits.startsWith("1") -> "${digits.drop(1).take(3)}-${digits.drop(4).take(3)}-${digits.takeLast(4)}"
             else -> phone
+        }
+    }
+
+    private fun loadReservationHistory() {
+        db.collection(ReservationFirestoreHelper.COLLECTION)
+            .whereEqualTo(ReservationFirestoreHelper.FIELD_CUSTOMER_ID, customerId)
+            .get()
+            .addOnSuccessListener { snap ->
+                val now = System.currentTimeMillis()
+                val slotFmt = SimpleDateFormat("EEE, MMM d · h:mm a", Locale.getDefault())
+                val upcomingRows = mutableListOf<CustomerReservationRow>()
+                val pastRows = mutableListOf<CustomerReservationRow>()
+
+                for (doc in snap.documents) {
+                    val slotMs = ReservationFirestoreHelper.reservationSlotMillisForExpiry(doc)
+                    val row = reservationRowFromDoc(doc, slotFmt, slotMs) ?: continue
+                    val active = ReservationFirestoreHelper.isReservationActiveForList(doc)
+                    val inFuture = slotMs != null && slotMs >= now
+                    val isUpcoming = active && (slotMs == null || inFuture)
+                    val sortKey = slotMs ?: if (isUpcoming) Long.MAX_VALUE else Long.MIN_VALUE
+                    val rowWithSort = row.copy(sortKeyMillis = sortKey)
+                    if (isUpcoming) upcomingRows.add(rowWithSort) else pastRows.add(rowWithSort)
+                }
+
+                upcomingRows.sortBy { it.sortKeyMillis }
+                pastRows.sortByDescending { it.sortKeyMillis }
+
+                val upcomingDecorated = upcomingRows.mapIndexed { index, r ->
+                    if (index == 0) r.copy(emphasize = true) else r.copy(emphasize = false)
+                }
+
+                val hasAny = upcomingDecorated.isNotEmpty() || pastRows.isNotEmpty()
+                if (!hasAny) {
+                    txtReservationHistoryTitle.visibility = View.VISIBLE
+                    txtEmptyAllReservations.visibility = View.VISIBLE
+                    txtUpcomingReservationsHeader.visibility = View.GONE
+                    txtEmptyUpcomingReservations.visibility = View.GONE
+                    recyclerUpcomingReservations.visibility = View.GONE
+                    txtPastReservationsHeader.visibility = View.GONE
+                    txtEmptyPastReservations.visibility = View.GONE
+                    recyclerPastReservations.visibility = View.GONE
+                    return@addOnSuccessListener
+                }
+
+                txtEmptyAllReservations.visibility = View.GONE
+                txtReservationHistoryTitle.visibility = View.VISIBLE
+                txtUpcomingReservationsHeader.visibility = View.VISIBLE
+                recyclerUpcomingReservations.visibility = View.VISIBLE
+                if (upcomingDecorated.isEmpty()) {
+                    txtEmptyUpcomingReservations.visibility = View.VISIBLE
+                    upcomingReservationAdapter.submitList(emptyList())
+                } else {
+                    txtEmptyUpcomingReservations.visibility = View.GONE
+                    upcomingReservationAdapter.submitList(upcomingDecorated)
+                }
+
+                txtPastReservationsHeader.visibility = View.VISIBLE
+                recyclerPastReservations.visibility = View.VISIBLE
+                if (pastRows.isEmpty()) {
+                    txtEmptyPastReservations.visibility = View.VISIBLE
+                    pastReservationAdapter.submitList(emptyList())
+                } else {
+                    txtEmptyPastReservations.visibility = View.GONE
+                    pastReservationAdapter.submitList(pastRows)
+                }
+            }
+            .addOnFailureListener {
+                Toast.makeText(
+                    this,
+                    getString(R.string.customer_profile_load_reservations_failed),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+    }
+
+    private fun reservationRowFromDoc(
+        doc: DocumentSnapshot,
+        slotFmt: SimpleDateFormat,
+        slotMs: Long?,
+    ): CustomerReservationRow? {
+        if (!doc.exists()) return null
+        val id = doc.id
+        val tableNames = tableNamesForReservation(doc)
+        val party = (doc.getLong("partySize") ?: 0L).toInt().coerceAtLeast(0)
+        val dateDisplay = when {
+            slotMs != null -> slotFmt.format(Date(slotMs))
+            else -> doc.getString("whenText")?.trim().orEmpty().ifBlank { "—" }
+        }
+        val displayStatus = ReservationFirestoreHelper.reservationStatusForCustomerProfile(doc)
+        return CustomerReservationRow(
+            reservationId = id,
+            tableNames = tableNames,
+            partySize = party,
+            dateDisplay = dateDisplay,
+            displayStatus = displayStatus,
+            emphasize = false,
+            sortKeyMillis = 0L,
+        )
+    }
+
+    private fun tableNamesForReservation(doc: DocumentSnapshot): String {
+        val name = doc.getString("tableName")?.trim().orEmpty()
+        if (name.isNotEmpty()) return name
+        val tid = doc.getString("tableId")?.trim().orEmpty()
+        return tid.ifEmpty { getString(R.string.reservation_table_placeholder) }
+    }
+}
+
+data class CustomerReservationRow(
+    val reservationId: String,
+    val tableNames: String,
+    val partySize: Int,
+    val dateDisplay: String,
+    val displayStatus: String,
+    val emphasize: Boolean,
+    val sortKeyMillis: Long,
+)
+
+class CustomerReservationHistoryAdapter :
+    RecyclerView.Adapter<CustomerReservationHistoryAdapter.VH>() {
+
+    private var items: List<CustomerReservationRow> = emptyList()
+
+    fun submitList(list: List<CustomerReservationRow>) {
+        items = list
+        notifyDataSetChanged()
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+        val view = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_customer_reservation_row, parent, false)
+        return VH(view)
+    }
+
+    override fun onBindViewHolder(holder: VH, position: Int) {
+        holder.bind(items[position])
+    }
+
+    override fun getItemCount(): Int = items.size
+
+    inner class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val card: MaterialCardView = itemView as MaterialCardView
+        private val txtTables: TextView = itemView.findViewById(R.id.txtReservationTables)
+        private val txtParty: TextView = itemView.findViewById(R.id.txtReservationParty)
+        private val txtStatus: TextView = itemView.findViewById(R.id.txtReservationStatus)
+        private val txtDate: TextView = itemView.findViewById(R.id.txtReservationDate)
+
+        fun bind(item: CustomerReservationRow) {
+            txtTables.text = item.tableNames
+            if (item.partySize > 0) {
+                txtParty.visibility = View.VISIBLE
+                txtParty.text = itemView.context.resources.getQuantityString(
+                    R.plurals.table_shape_party_of,
+                    item.partySize,
+                    item.partySize,
+                )
+            } else {
+                txtParty.visibility = View.GONE
+            }
+            txtDate.text = item.dateDisplay
+            txtStatus.text = item.displayStatus
+
+            val bg: Int
+            val fg: Int
+            when (item.displayStatus) {
+                "ACTIVE" -> {
+                    bg = Color.parseColor("#E8F5E9")
+                    fg = Color.parseColor("#2E7D32")
+                }
+                "CANCELLED" -> {
+                    bg = Color.parseColor("#FFEBEE")
+                    fg = Color.parseColor("#C62828")
+                }
+                else -> {
+                    bg = Color.parseColor("#ECEFF1")
+                    fg = Color.parseColor("#546E7A")
+                }
+            }
+            val badge = GradientDrawable().apply {
+                setColor(bg)
+                cornerRadius = TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_DIP,
+                    12f,
+                    itemView.context.resources.displayMetrics,
+                )
+            }
+            txtStatus.background = badge
+            txtStatus.setTextColor(fg)
+
+            val d = itemView.context.resources.displayMetrics.density
+            if (item.emphasize) {
+                card.strokeWidth = (2f * d).toInt()
+                card.strokeColor = Color.parseColor("#6A4FB3")
+                card.cardElevation = 4f * d
+            } else {
+                card.strokeWidth = 0
+                card.cardElevation = 1f * d
+            }
         }
     }
 }
