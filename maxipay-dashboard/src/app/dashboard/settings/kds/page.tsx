@@ -493,10 +493,12 @@ export default function KdsSettingsPage() {
   return (
     <>
       <Header title="KDS" />
-      <div className="p-6">
-        <div className="mx-auto flex max-w-[1600px] flex-col gap-8">
-        {/* Section 1 — Devices (full width) */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+      <div className="p-4 sm:p-6">
+        <div className="mx-auto flex w-full max-w-[1800px] min-h-0 flex-col gap-6 lg:min-h-[calc(100vh-5.5rem)] lg:flex-row lg:items-stretch lg:gap-8">
+        {/* LEFT — control panel (65%): devices + display settings */}
+        <div className="flex w-full min-w-0 flex-col gap-6 lg:w-[65%] lg:shrink-0">
+        {/* KDS devices */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-lg font-semibold text-slate-800">
@@ -609,10 +611,8 @@ export default function KdsSettingsPage() {
           )}
         </div>
 
-        <div className="flex flex-col gap-8 xl:flex-row xl:items-start xl:gap-8">
-          <div className="min-w-0 flex-1">
-        {/* Section 3 — Display settings */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+        {/* Display settings */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 sm:p-6">
           <div className="flex items-center gap-2 mb-1">
             <LayoutGrid size={20} className="text-slate-600" />
             <h2 className="text-lg font-semibold text-slate-800">
@@ -702,29 +702,31 @@ export default function KdsSettingsPage() {
             </div>
           )}
         </div>
-          </div>
+        </div>
 
-          <aside className="w-full shrink-0 xl:sticky xl:top-6 xl:w-[min(520px,calc(100%-24px))] xl:max-w-[520px] xl:self-start">
-            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+        {/* RIGHT — live KDS preview (35%), tablet-style */}
+        <aside className="flex w-full min-w-0 flex-col lg:sticky lg:top-20 lg:w-[35%] lg:shrink-0">
+          <div className="flex min-h-0 flex-1 flex-col rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 via-white to-slate-50/80 p-4 shadow-sm sm:p-5 lg:min-h-[calc(100vh-5.5rem)]">
+            <div className="shrink-0 border-b border-slate-100/80 pb-4">
               <h2 className="text-lg font-semibold text-slate-800">
                 Live preview
               </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Sample orders (dine-in, to-go, bar). Updates instantly when you
-                change settings here. Header colors use your dashboard palette
-                when <span className="font-medium">Order type colors</span> is
-                on.
+              <p className="mt-1 text-sm leading-relaxed text-slate-500">
+                Sample tickets mirror your{" "}
+                <span className="font-medium text-slate-600">Display settings</span>{" "}
+                in real time. On the tablet,{" "}
+                <span className="font-medium">2 columns</span> wraps after two
+                tickets per row.
               </p>
-              <div className="mt-4 border-t border-slate-100 pt-4">
-                <KdsPreview
-                  displaySettings={displaySettings}
-                  nowMs={nowMs}
-                  moduleColorKeys={dashboardColorKeys}
-                />
-              </div>
             </div>
-          </aside>
-        </div>
+            <div className="flex min-h-[420px] flex-1 items-center justify-center px-1 py-4 sm:min-h-[480px] sm:px-2 sm:py-6">
+              <KdsPreview
+                displaySettings={displaySettings}
+                moduleColorKeys={dashboardColorKeys}
+              />
+            </div>
+          </div>
+        </aside>
         </div>
       </div>
 

@@ -1,7 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
-
 export interface KdsPreviewDisplaySettings {
   orderTypeColorsEnabled: boolean;
   gridColumns: 2 | 3;
@@ -74,23 +72,6 @@ function formatOrderTypeLabel(type: string): string {
   return type;
 }
 
-function formatElapsed(elapsedMs: number): string {
-  const totalSec = Math.max(0, Math.floor(elapsedMs / 1000));
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0)
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function formatKitchenTime(d: Date): string {
-  return d.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 function getUrgencyBg(minutes: number): string {
   if (minutes >= 10) return "#FFCDD2";
   if (minutes >= 5) return "#FFF9C4";
@@ -110,45 +91,53 @@ type MockOrder = {
   tableName?: string;
   status: "OPEN" | "PREPARING";
   items: { qty: number; name: string; mods?: string[] }[];
-  /** Elapsed time simulated at first paint (grows with [nowMs]). */
-  placedAtMs: number;
+  /** Fixed header clock (preview only; does not tick). */
+  headerTime: string;
+  /** Fixed elapsed label (preview only; does not tick). */
+  elapsedLabel: string;
+  /** For urgency background / warn color only. */
+  elapsedMs: number;
 };
 
-function buildMockOrders(anchorMs: number): MockOrder[] {
-  return [
-    {
-      id: "pv1",
-      orderType: "DINE_IN",
-      orderNumber: 142,
-      status: "OPEN",
-      placedAtMs: anchorMs - 2 * 60 * 1000,
-      items: [
-        { qty: 2, name: "Burger", mods: ["No onion", "Extra pickle"] },
-        { qty: 1, name: "Fries" },
-      ],
-    },
-    {
-      id: "pv2",
-      orderType: "TO_GO",
-      orderNumber: 288,
-      status: "PREPARING",
-      placedAtMs: anchorMs - 7 * 60 * 1000,
-      items: [{ qty: 1, name: "Chicken wrap", mods: ["Add avocado"] }],
-    },
-    {
-      id: "pv3",
-      orderType: "BAR",
-      orderNumber: 0,
-      tableName: "Bar 7",
-      status: "OPEN",
-      placedAtMs: anchorMs - 14 * 60 * 1000,
-      items: [
-        { qty: 2, name: "Margarita" },
-        { qty: 1, name: "IPA Draft" },
-      ],
-    },
-  ];
-}
+const MOCK_PREVIEW_ORDERS: MockOrder[] = [
+  {
+    id: "pv1",
+    orderType: "DINE_IN",
+    orderNumber: 142,
+    status: "OPEN",
+    headerTime: "11:26 AM",
+    elapsedLabel: "2:00",
+    elapsedMs: 2 * 60 * 1000,
+    items: [
+      { qty: 2, name: "Burger", mods: ["No onion", "Extra pickle"] },
+      { qty: 1, name: "Fries" },
+    ],
+  },
+  {
+    id: "pv2",
+    orderType: "TO_GO",
+    orderNumber: 288,
+    status: "PREPARING",
+    headerTime: "11:21 AM",
+    elapsedLabel: "7:00",
+    elapsedMs: 7 * 60 * 1000,
+    items: [{ qty: 1, name: "Chicken wrap", mods: ["Add avocado"] }],
+  },
+  {
+    id: "pv3",
+    orderType: "BAR",
+    orderNumber: 0,
+    tableName: "Bar 7",
+    status: "OPEN",
+    headerTime: "11:14 AM",
+    elapsedLabel: "14:00",
+    elapsedMs: 14 * 60 * 1000,
+    items: [
+      { qty: 2, name: "Margarita" },
+      { qty: 1, name: "IPA Draft" },
+    ],
+  },
+];
 
 function orderHeaderNumber(o: MockOrder): string {
   if (o.orderNumber > 0) return `#${o.orderNumber}`;
@@ -157,127 +146,136 @@ function orderHeaderNumber(o: MockOrder): string {
 
 export function KdsPreview({
   displaySettings,
-  nowMs,
   moduleColorKeys = {},
 }: {
   displaySettings: KdsPreviewDisplaySettings;
-  nowMs: number;
   moduleColorKeys?: Record<string, string>;
 }) {
-  const mockOrders = useMemo(() => buildMockOrders(Date.now()), []);
-
-  /** Sample tickets always stay in one row; real tablets still use [gridColumns] from settings. */
+  const gridColsClass =
+    displaySettings.gridColumns === 3 ? "grid-cols-3" : "grid-cols-2";
   const gridGapClass = displaySettings.gridColumns === 3 ? "gap-2" : "gap-3";
 
   return (
     <div
-      className="w-full max-w-full rounded-2xl border-4 border-slate-300 bg-slate-200/90 shadow-inner"
-      style={{ maxHeight: "min(720px, 72vh)" }}
+      className="w-full max-w-[520px] lg:max-w-none"
+      style={{
+        aspectRatio: "16 / 10",
+        maxHeight: "min(88vh, 920px)",
+      }}
     >
-      <div className="max-h-[inherit] overflow-y-auto overflow-x-auto rounded-xl bg-[#FAFAFA] p-3">
-        <h4
-          className="mb-3 px-1 text-[22px] font-bold leading-tight text-[#1C1B1F]"
-          style={{ fontFamily: "system-ui, sans-serif" }}
-        >
-          Kitchen display
-        </h4>
-        <div
-          className={`grid w-full grid-cols-3 min-w-[520px] sm:min-w-0 ${gridGapClass}`}
-        >
-          {mockOrders.map((order) => {
-            const headerHex = headerColorHex(
-              order.orderType,
-              displaySettings.orderTypeColorsEnabled,
-              moduleColorKeys
-            );
-            const elapsedMs = Math.max(0, nowMs - order.placedAtMs);
-            const elapsedMin = Math.floor(elapsedMs / 60_000);
-            const urgencyBg = getUrgencyBg(elapsedMin);
-            const headerTime = formatKitchenTime(new Date(order.placedAtMs));
-
-            return (
-              <div
-                key={order.id}
-                className="flex min-h-[200px] flex-col overflow-hidden rounded-[20px] bg-white shadow-md"
+      {/* Tablet bezel + screen */}
+      <div className="flex h-full w-full flex-col rounded-[1.75rem] border-[10px] border-[#2a2f36] bg-[#1e2228] shadow-[0_28px_55px_-15px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.05rem] bg-[#cfd2d6] p-1.5 sm:p-2">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-[#f4f4f5] shadow-[inset_0_2px_10px_rgba(0,0,0,0.07)]">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2.5 sm:p-3">
+              <h4
+                className="mb-2.5 px-0.5 text-[clamp(1rem,2.6vw,1.35rem)] font-bold leading-tight text-[#1C1B1F]"
+                style={{ fontFamily: "system-ui, sans-serif" }}
               >
-                <div
-                  className="flex h-[52px] shrink-0 items-center px-3"
-                  style={{
-                    backgroundColor: headerHex,
-                    borderRadius: "20px 20px 0 0",
-                  }}
-                >
-                  <div className="grid w-full grid-cols-3 items-center gap-1 text-[15px] font-bold text-white">
-                    <span className="truncate">
-                      {formatOrderTypeLabel(order.orderType)}
-                    </span>
-                    <span className="truncate text-center">
-                      {orderHeaderNumber(order)}
-                    </span>
-                    <span className="truncate text-right">{headerTime}</span>
-                  </div>
-                </div>
-                <div
-                  className="flex min-h-0 flex-1 flex-col"
-                  style={{
-                    backgroundColor: urgencyBg,
-                    borderRadius: "0 0 20px 20px",
-                  }}
-                >
-                  {displaySettings.showTimers && (
-                    <div className="flex items-center justify-between px-3 py-2">
-                      <span className="text-[13px] font-semibold text-[#64748B]">
-                        Elapsed
-                      </span>
-                      <span
-                        className="text-lg font-bold tabular-nums"
-                        style={{ color: elapsedWarnColor(elapsedMs) }}
+                Kitchen display
+              </h4>
+              <div className={`grid w-full ${gridColsClass} ${gridGapClass}`}>
+                {MOCK_PREVIEW_ORDERS.map((order) => {
+                  const headerHex = headerColorHex(
+                    order.orderType,
+                    displaySettings.orderTypeColorsEnabled,
+                    moduleColorKeys
+                  );
+                  const elapsedMs = order.elapsedMs;
+                  const elapsedMin = Math.floor(elapsedMs / 60_000);
+                  const urgencyBg = getUrgencyBg(elapsedMin);
+                  const headerTime = order.headerTime;
+
+                  return (
+                    <div
+                      key={order.id}
+                      className="flex min-h-[160px] flex-col overflow-hidden rounded-2xl bg-white shadow-md sm:min-h-[180px]"
+                    >
+                      <div
+                        className="flex h-[52px] shrink-0 items-center px-3"
+                        style={{
+                          backgroundColor: headerHex,
+                          borderRadius: "20px 20px 0 0",
+                        }}
                       >
-                        {formatElapsed(elapsedMs)}
-                      </span>
-                    </div>
-                  )}
-                  <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-2 pt-2">
-                    {order.items.map((it, idx) => (
-                      <div key={idx}>
-                        <p className="text-[15px] font-bold leading-snug text-[#212121]">
-                          {it.qty}× {it.name}
-                        </p>
-                        {it.mods?.map((mod, mi) => (
-                          <p
-                            key={mi}
-                            className="mt-1 pl-2 text-[13px] text-[#555555]"
-                          >
-                            • {mod}
-                          </p>
-                        ))}
+                        <div className="grid w-full grid-cols-3 items-center gap-0.5 text-[clamp(11px,2vw,15px)] font-bold text-white">
+                          <span className="truncate">
+                            {formatOrderTypeLabel(order.orderType)}
+                          </span>
+                          <span className="truncate text-center">
+                            {orderHeaderNumber(order)}
+                          </span>
+                          <span className="truncate text-right">
+                            {headerTime}
+                          </span>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                  <div className="shrink-0 px-4 pb-3 pt-1">
-                    {order.status === "OPEN" && (
-                      <button
-                        type="button"
-                        className="w-full rounded-[14px] bg-[#1565C0] py-3 text-center text-[17px] font-bold text-white"
-                        disabled
+                      <div
+                        className="flex min-h-0 flex-1 flex-col"
+                        style={{
+                          backgroundColor: urgencyBg,
+                          borderRadius: "0 0 20px 20px",
+                        }}
                       >
-                        START
-                      </button>
-                    )}
-                    {order.status === "PREPARING" && (
-                      <button
-                        type="button"
-                        className="w-full rounded-[14px] bg-[#2E7D32] py-3 text-center text-[17px] font-bold text-white"
-                        disabled
-                      >
-                        READY
-                      </button>
-                    )}
-                  </div>
-                </div>
+                        {displaySettings.showTimers && (
+                          <div className="flex items-center justify-between px-2.5 py-1.5 sm:px-3 sm:py-2">
+                            <span className="text-[11px] font-semibold text-[#64748B] sm:text-[13px]">
+                              Elapsed
+                            </span>
+                            <span
+                              className="text-base font-bold tabular-nums sm:text-lg"
+                              style={{
+                                color: elapsedWarnColor(elapsedMs),
+                              }}
+                            >
+                              {order.elapsedLabel}
+                            </span>
+                          </div>
+                        )}
+                        <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 pb-2 pt-1.5 sm:space-y-2 sm:px-4 sm:pt-2">
+                          {order.items.map((it, idx) => (
+                            <div key={idx}>
+                              <p className="text-[13px] font-bold leading-snug text-[#212121] sm:text-[15px]">
+                                {it.qty}× {it.name}
+                              </p>
+                              {it.mods?.map((mod, mi) => (
+                                <p
+                                  key={mi}
+                                  className="mt-0.5 pl-1.5 text-[11px] text-[#555555] sm:mt-1 sm:pl-2 sm:text-[13px]"
+                                >
+                                  • {mod}
+                                </p>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="shrink-0 px-3 pb-2.5 pt-1 sm:px-4 sm:pb-3">
+                          {order.status === "OPEN" && (
+                            <button
+                              type="button"
+                              className="w-full rounded-xl bg-[#1565C0] py-2 text-center text-[14px] font-bold text-white sm:rounded-[14px] sm:py-3 sm:text-[17px]"
+                              disabled
+                            >
+                              START
+                            </button>
+                          )}
+                          {order.status === "PREPARING" && (
+                            <button
+                              type="button"
+                              className="w-full rounded-xl bg-[#2E7D32] py-2 text-center text-[14px] font-bold text-white sm:rounded-[14px] sm:py-3 sm:text-[17px]"
+                              disabled
+                            >
+                              READY
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+          </div>
         </div>
       </div>
     </div>
