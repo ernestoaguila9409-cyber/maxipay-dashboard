@@ -707,8 +707,8 @@ export default function KdsSettingsPage() {
 
         {/* RIGHT — live KDS preview (35%), tablet-style */}
         <aside className="flex w-full min-w-0 flex-col lg:sticky lg:top-20 lg:w-[35%] lg:shrink-0">
-          <div className="flex min-h-0 flex-1 flex-col rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 via-white to-slate-50/80 p-4 shadow-sm sm:p-5 lg:min-h-[calc(100vh-5.5rem)]">
-            <div className="shrink-0 border-b border-slate-100/80 pb-4">
+          <div className="flex min-h-0 flex-col rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 via-white to-slate-50/80 p-4 shadow-sm sm:p-5">
+            <div className="shrink-0 border-b border-slate-100/80 pb-3">
               <h2 className="text-lg font-semibold text-slate-800">
                 Live preview
               </h2>
@@ -720,7 +720,7 @@ export default function KdsSettingsPage() {
                 tickets per row.
               </p>
             </div>
-            <div className="flex min-h-[420px] flex-1 items-center justify-center px-1 py-4 sm:min-h-[480px] sm:px-2 sm:py-6">
+            <div className="mt-3 flex justify-center px-0 pb-1 pt-0 sm:px-1 sm:pb-2">
               <KdsPreview
                 displaySettings={displaySettings}
                 moduleColorKeys={dashboardColorKeys}
