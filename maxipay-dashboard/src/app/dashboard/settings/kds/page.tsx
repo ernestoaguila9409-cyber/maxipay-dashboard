@@ -494,9 +494,8 @@ export default function KdsSettingsPage() {
     <>
       <Header title="KDS" />
       <div className="p-6">
-        <div className="mx-auto flex max-w-[1600px] flex-col gap-8 xl:flex-row xl:items-start">
-          <div className="min-w-0 flex-1 space-y-6">
-        {/* Section 1 — Devices */}
+        <div className="mx-auto flex max-w-[1600px] flex-col gap-8">
+        {/* Section 1 — Devices (full width) */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -610,6 +609,8 @@ export default function KdsSettingsPage() {
           )}
         </div>
 
+        <div className="flex flex-col gap-8 xl:flex-row xl:items-start xl:gap-8">
+          <div className="min-w-0 flex-1">
         {/* Section 3 — Display settings */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
           <div className="flex items-center gap-2 mb-1">
@@ -703,18 +704,18 @@ export default function KdsSettingsPage() {
         </div>
           </div>
 
-          <aside className="w-full shrink-0 xl:sticky xl:top-6 xl:w-[440px] xl:max-w-[440px] xl:self-start">
+          <aside className="w-full shrink-0 xl:sticky xl:top-6 xl:w-[min(520px,calc(100%-24px))] xl:max-w-[520px] xl:self-start">
             <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold text-slate-800">
                 Live preview
               </h2>
               <p className="mt-1 text-sm text-slate-500">
                 Sample orders (dine-in, to-go, bar). Updates instantly when you
-                change settings below. Header colors use your dashboard palette
+                change settings here. Header colors use your dashboard palette
                 when <span className="font-medium">Order type colors</span> is
                 on.
               </p>
-              <div className="mt-4 flex justify-center border-t border-slate-100 pt-4">
+              <div className="mt-4 border-t border-slate-100 pt-4">
                 <KdsPreview
                   displaySettings={displaySettings}
                   nowMs={nowMs}
@@ -723,6 +724,7 @@ export default function KdsSettingsPage() {
               </div>
             </div>
           </aside>
+        </div>
         </div>
       </div>
 

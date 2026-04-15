@@ -166,24 +166,24 @@ export function KdsPreview({
 }) {
   const mockOrders = useMemo(() => buildMockOrders(Date.now()), []);
 
-  const gridClass =
-    displaySettings.gridColumns === 3
-      ? "grid grid-cols-3 gap-2"
-      : "grid grid-cols-2 gap-3";
+  /** Sample tickets always stay in one row; real tablets still use [gridColumns] from settings. */
+  const gridGapClass = displaySettings.gridColumns === 3 ? "gap-2" : "gap-3";
 
   return (
     <div
-      className="mx-auto w-full max-w-[400px] rounded-2xl border-4 border-slate-300 bg-slate-200/90 shadow-inner"
+      className="w-full max-w-full rounded-2xl border-4 border-slate-300 bg-slate-200/90 shadow-inner"
       style={{ maxHeight: "min(720px, 72vh)" }}
     >
-      <div className="max-h-[inherit] overflow-y-auto overflow-x-hidden rounded-xl bg-[#FAFAFA] p-3">
+      <div className="max-h-[inherit] overflow-y-auto overflow-x-auto rounded-xl bg-[#FAFAFA] p-3">
         <h4
           className="mb-3 px-1 text-[22px] font-bold leading-tight text-[#1C1B1F]"
           style={{ fontFamily: "system-ui, sans-serif" }}
         >
           Kitchen display
         </h4>
-        <div className={gridClass}>
+        <div
+          className={`grid w-full grid-cols-3 min-w-[520px] sm:min-w-0 ${gridGapClass}`}
+        >
           {mockOrders.map((order) => {
             const headerHex = headerColorHex(
               order.orderType,
