@@ -194,6 +194,7 @@ export default function KdsSettingsPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<KdsDevice | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [savingDisplay, setSavingDisplay] = useState(false);
 
@@ -380,13 +381,17 @@ export default function KdsSettingsPage() {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
+    setDeleteError(null);
     try {
       await deleteDoc(doc(db, KDS_DEVICES_COLLECTION, deleteTarget.id));
+      setDeleteTarget(null);
     } catch (err) {
       console.error("[KDS] delete device failed:", err);
+      setDeleteError(
+        "Could not delete this device. Check your connection and Firestore rules."
+      );
     } finally {
       setDeleting(false);
-      setDeleteTarget(null);
     }
   };
 
@@ -549,7 +554,10 @@ export default function KdsSettingsPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setDeleteTarget(d)}
+                          onClick={() => {
+                            setDeleteError(null);
+                            setDeleteTarget(d);
+                          }}
                           className="p-2 rounded-lg text-slate-500 hover:bg-white hover:text-red-600 border border-transparent hover:border-slate-200 transition-all"
                           aria-label="Delete device"
                         >
@@ -927,12 +935,21 @@ export default function KdsSettingsPage() {
             <h3 className="font-semibold text-slate-800">Remove device?</h3>
             <p className="text-sm text-slate-600 mt-2">
               Delete <strong>{deleteTarget.name}</strong> from KDS devices? This
-              cannot be undone.
+              cannot be undone. The tablet will stop heartbeating and must pair
+              again to reconnect.
             </p>
+            {deleteError && (
+              <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mt-3">
+                {deleteError}
+              </p>
+            )}
             <div className="flex justify-end gap-2 mt-6">
               <button
                 type="button"
-                onClick={() => setDeleteTarget(null)}
+                onClick={() => {
+                  setDeleteTarget(null);
+                  setDeleteError(null);
+                }}
                 className="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
               >
                 Cancel
