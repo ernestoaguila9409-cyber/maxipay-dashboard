@@ -2,7 +2,7 @@
 
 export interface KdsPreviewDisplaySettings {
   orderTypeColorsEnabled: boolean;
-  gridColumns: 2 | 3;
+  gridColumns?: 2 | 3;
   showTimers: boolean;
 }
 
@@ -151,30 +151,20 @@ export function KdsPreview({
   displaySettings: KdsPreviewDisplaySettings;
   moduleColorKeys?: Record<string, string>;
 }) {
-  const gridColsClass =
-    displaySettings.gridColumns === 3 ? "grid-cols-3" : "grid-cols-2";
-  const gridGapClass = displaySettings.gridColumns === 3 ? "gap-2" : "gap-3";
-
   return (
-    <div
-      className="w-full max-w-[520px] lg:max-w-none"
-      style={{
-        aspectRatio: "16 / 10",
-        maxHeight: "min(88vh, 920px)",
-      }}
-    >
+    <div className="flex h-full w-full flex-col">
       {/* Tablet bezel + screen */}
-      <div className="flex h-full w-full flex-col rounded-[1.75rem] border-[10px] border-[#2a2f36] bg-[#1e2228] shadow-[0_28px_55px_-15px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.05rem] bg-[#cfd2d6] p-1.5 sm:p-2">
+      <div className="flex min-h-0 w-full flex-1 flex-col rounded-[1.5rem] border-[8px] border-[#2a2f36] bg-[#1e2228] shadow-[0_28px_55px_-15px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[0.9rem] bg-[#cfd2d6] p-1.5">
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-[#f4f4f5] shadow-[inset_0_2px_10px_rgba(0,0,0,0.07)]">
-            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2.5 sm:p-3">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4">
               <h4
                 className="mb-2.5 px-0.5 text-[clamp(1rem,2.6vw,1.35rem)] font-bold leading-tight text-[#1C1B1F]"
                 style={{ fontFamily: "system-ui, sans-serif" }}
               >
                 Kitchen display
               </h4>
-              <div className={`grid w-full ${gridColsClass} ${gridGapClass}`}>
+              <div className="grid w-full grid-cols-3 gap-2.5 sm:gap-3">
                 {MOCK_PREVIEW_ORDERS.map((order) => {
                   const headerHex = headerColorHex(
                     order.orderType,

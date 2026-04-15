@@ -104,7 +104,7 @@ interface KdsDisplaySettings {
 
 const defaultDisplaySettings: KdsDisplaySettings = {
   orderTypeColorsEnabled: true,
-  gridColumns: 2,
+  gridColumns: 3,
   showTimers: true,
 };
 
@@ -301,7 +301,7 @@ export default function KdsSettingsPage() {
         setDisplaySettings({
           orderTypeColorsEnabled:
             data.orderTypeColorsEnabled !== false,
-          gridColumns: data.gridColumns === 3 ? 3 : 2,
+          gridColumns: 3,
           showTimers: data.showTimers !== false,
         });
         setDisplayLoading(false);
@@ -496,8 +496,8 @@ export default function KdsSettingsPage() {
       {/* Left-aligned (no mx-auto) so content sits near the sidebar; max-w keeps 65/35 proportions unchanged */}
       <div className="p-4 sm:p-6">
         <div className="flex w-full max-w-[1800px] min-h-0 flex-col gap-6 lg:min-h-[calc(100vh-5.5rem)] lg:flex-row lg:items-stretch lg:gap-8">
-        {/* LEFT — control panel (65%): devices + display settings */}
-        <div className="flex w-full min-w-0 flex-col gap-6 lg:w-[65%] lg:shrink-0">
+        {/* LEFT — control panel: devices + display settings */}
+        <div className="flex w-full min-w-0 flex-col gap-6 lg:w-[50%] lg:shrink-0">
         {/* KDS devices */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 sm:p-6">
           <div className="flex items-center justify-between mb-4">
@@ -659,27 +659,6 @@ export default function KdsSettingsPage() {
                 />
               </label>
 
-              <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50">
-                <p className="font-medium text-slate-800 mb-3">Grid columns</p>
-                <div className="flex gap-3">
-                  {([2, 3] as const).map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => updateDisplay({ gridColumns: n })}
-                      disabled={savingDisplay}
-                      className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all ${
-                        displaySettings.gridColumns === n
-                          ? "bg-blue-600 text-white border-blue-600"
-                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      {n} columns
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               <label className="flex items-center justify-between gap-4 p-4 rounded-xl border border-slate-100 bg-slate-50/50 cursor-pointer">
                 <div className="flex items-center gap-3">
                   <Timer size={20} className="text-slate-500" />
@@ -705,22 +684,20 @@ export default function KdsSettingsPage() {
         </div>
         </div>
 
-        {/* RIGHT — live KDS preview (35%), tablet-style */}
-        <aside className="flex w-full min-w-0 flex-col lg:sticky lg:top-20 lg:w-[35%] lg:shrink-0">
-          <div className="flex min-h-0 flex-col rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 via-white to-slate-50/80 p-4 shadow-sm sm:p-5">
-            <div className="shrink-0 border-b border-slate-100/80 pb-3">
+        {/* RIGHT — live KDS preview, tablet-style */}
+        <aside className="flex w-full min-w-0 flex-col lg:sticky lg:top-20 lg:w-[50%] lg:shrink-0">
+          <div className="flex min-h-0 flex-1 flex-col rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 via-white to-slate-50/80 p-4 shadow-sm sm:p-5">
+            <div className="shrink-0 pb-3">
               <h2 className="text-lg font-semibold text-slate-800">
                 Live preview
               </h2>
               <p className="mt-1 text-sm leading-relaxed text-slate-500">
                 Sample tickets mirror your{" "}
                 <span className="font-medium text-slate-600">Display settings</span>{" "}
-                in real time. On the tablet,{" "}
-                <span className="font-medium">2 columns</span> wraps after two
-                tickets per row.
+                in real time.
               </p>
             </div>
-            <div className="mt-3 flex justify-center px-0 pb-1 pt-0 sm:px-1 sm:pb-2">
+            <div className="mt-1 flex flex-1">
               <KdsPreview
                 displaySettings={displaySettings}
                 moduleColorKeys={dashboardColorKeys}
