@@ -24,6 +24,7 @@ import {
   CreditCard,
   Package,
   LayoutTemplate,
+  Monitor,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
@@ -73,6 +74,7 @@ const navItems: NavItem[] = [
       { label: "Table Layout", href: "/dashboard/settings/table-layout", icon: LayoutTemplate },
       { label: "Taxes", href: "/dashboard/taxes", icon: Receipt },
       { label: "Discounts", href: "/dashboard/discounts", icon: Tags },
+      { label: "KDS", href: "/dashboard/settings/kds", icon: Monitor },
       { label: "Customize Dashboard", href: "/dashboard/settings/customize-dashboard", icon: LayoutGrid },
     ],
   },
