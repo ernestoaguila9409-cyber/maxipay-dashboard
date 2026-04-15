@@ -132,6 +132,22 @@ function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
   };
 }
 
+/**
+ * Old KDS builds used ANDROID_ID as the Firestore document id (often 16 hex chars) and
+ * `set(merge)` heartbeats, so deleting the dashboard-registered row left a second doc that
+ * looked like the same tablet. Hide those from the list so they don't "come back."
+ */
+function shouldHideLegacyKdsAutoDevice(
+  id: string,
+  data: Record<string, unknown>
+): boolean {
+  if (data.registeredFromWeb === true) return false;
+  const pc = data.pairingCode;
+  if (typeof pc === "string" && /^\d{6}$/.test(pc)) return false;
+  if (data.isPaired === true) return false;
+  return /^[a-f0-9]{16}$/i.test(id);
+}
+
 async function allocateUniquePairingCode(): Promise<string> {
   for (let attempt = 0; attempt < 24; attempt++) {
     const code = String(Math.floor(Math.random() * 1_000_000)).padStart(
@@ -241,7 +257,9 @@ export default function KdsSettingsPage() {
       (snap) => {
         const list: KdsDevice[] = [];
         snap.forEach((d) => {
-          list.push(parseDevice(d.id, d.data()));
+          const raw = d.data();
+          if (shouldHideLegacyKdsAutoDevice(d.id, raw)) return;
+          list.push(parseDevice(d.id, raw));
         });
         list.sort((a, b) => {
           const ta = a.createdAt?.getTime() ?? 0;
@@ -349,6 +367,7 @@ export default function KdsSettingsPage() {
           name: trimmed,
           stationId,
           station: deleteField(),
+          registeredFromWeb: true,
           updatedAt: serverTimestamp(),
         });
         setModalOpen(false);
@@ -364,6 +383,7 @@ export default function KdsSettingsPage() {
           isPaired: false,
           deviceType: "",
           isActive: true,
+          registeredFromWeb: true,
           createdAt: serverTimestamp(),
           station: deleteField(),
         });
@@ -454,6 +474,13 @@ export default function KdsSettingsPage() {
               tablet, enter the code once to link. Status:{" "}
               <strong>Online</strong> when <code className="text-xs bg-white/80 px-1 rounded border border-blue-100">lastSeen</code> is under 10s;{" "}
               <strong>Offline</strong> otherwise (including after 30s idle).
+            </p>
+            <p className="text-slate-600 mt-2 text-xs leading-relaxed">
+              If a row reappeared after delete, an older app may have created a
+              second Firestore document (16-character id). Those are hidden here;
+              remove any extra <code className="text-[11px] bg-white/80 px-1 rounded border border-blue-100">kds_devices</code>{" "}
+              entries in the Firebase console if needed. Reinstall/update the KDS
+              app so it only heartbeats the paired document.
             </p>
           </div>
         </div>
