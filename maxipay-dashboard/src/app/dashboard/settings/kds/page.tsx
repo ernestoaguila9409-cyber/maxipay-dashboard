@@ -10,11 +10,8 @@ import {
   serverTimestamp,
   setDoc,
   deleteField,
-  query,
-  where,
-  getDocs,
-  limit,
 } from "firebase/firestore";
+import { FirebaseError } from "firebase/app";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
@@ -148,21 +145,9 @@ function shouldHideLegacyKdsAutoDevice(
   return /^[a-f0-9]{16}$/i.test(id);
 }
 
-async function allocateUniquePairingCode(): Promise<string> {
-  for (let attempt = 0; attempt < 24; attempt++) {
-    const code = String(Math.floor(Math.random() * 1_000_000)).padStart(
-      6,
-      "0"
-    );
-    const q = query(
-      collection(db, KDS_DEVICES_COLLECTION),
-      where("pairingCode", "==", code),
-      limit(1)
-    );
-    const snap = await getDocs(q);
-    if (snap.empty) return code;
-  }
-  throw new Error("Could not allocate a unique pairing code");
+/** 6-digit code; generated locally (no Firestore query — avoids index/rules issues on read). */
+function generatePairingCode(): string {
+  return String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
 }
 
 function parseStation(docId: string, data: Record<string, unknown>): KitchenStation {
@@ -202,6 +187,7 @@ export default function KdsSettingsPage() {
   const [deviceName, setDeviceName] = useState("");
   const [stationId, setStationId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deviceSaveError, setDeviceSaveError] = useState<string | null>(null);
 
   const [createStationOpen, setCreateStationOpen] = useState(false);
   const [newStationName, setNewStationName] = useState("");
@@ -307,11 +293,13 @@ export default function KdsSettingsPage() {
   const openAdd = () => {
     setEditing(null);
     setDeviceName("");
+    setDeviceSaveError(null);
     setStationId(stations[0]?.id ?? "");
     setModalOpen(true);
   };
 
   const openEdit = (d: KdsDevice) => {
+    setDeviceSaveError(null);
     setEditing(d);
     setDeviceName(d.name);
     setStationId(
@@ -357,9 +345,20 @@ export default function KdsSettingsPage() {
   };
 
   const handleSaveDevice = async () => {
+    setDeviceSaveError(null);
     const trimmed = deviceName.trim();
-    if (!trimmed) return;
-    if (stations.length === 0 || !stationId) return;
+    if (!trimmed) {
+      setDeviceSaveError("Enter a device name.");
+      return;
+    }
+    if (stations.length === 0) {
+      setDeviceSaveError("Add at least one station first.");
+      return;
+    }
+    if (!stationId) {
+      setDeviceSaveError("Select a station from the list.");
+      return;
+    }
     setSaving(true);
     try {
       if (editing) {
@@ -372,7 +371,7 @@ export default function KdsSettingsPage() {
         });
         setModalOpen(false);
       } else {
-        const pairingCode = await allocateUniquePairingCode();
+        const pairingCode = generatePairingCode();
         const colRef = collection(db, KDS_DEVICES_COLLECTION);
         const docRef = doc(colRef);
         await setDoc(docRef, {
@@ -385,7 +384,6 @@ export default function KdsSettingsPage() {
           isActive: true,
           registeredFromWeb: true,
           createdAt: serverTimestamp(),
-          station: deleteField(),
         });
         setModalOpen(false);
         setPairingCreated({ code: pairingCode, deviceName: trimmed });
@@ -393,6 +391,13 @@ export default function KdsSettingsPage() {
       }
     } catch (err) {
       console.error("[KDS] save device failed:", err);
+      const msg =
+        err instanceof FirebaseError
+          ? `${err.code}: ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : "Could not save. Check your connection and Firestore rules.";
+      setDeviceSaveError(msg);
     } finally {
       setSaving(false);
     }
@@ -465,26 +470,6 @@ export default function KdsSettingsPage() {
     <>
       <Header title="KDS" />
       <div className="p-6 space-y-6 max-w-4xl">
-        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex gap-3">
-          <Monitor className="text-blue-600 shrink-0 mt-0.5" size={22} />
-          <div className="text-sm text-slate-700">
-            <p className="font-medium text-slate-800">Kitchen Display System</p>
-            <p className="text-slate-600 mt-1">
-              Add a device to get a <strong>6-digit pairing code</strong>. On the
-              tablet, enter the code once to link. Status:{" "}
-              <strong>Online</strong> when <code className="text-xs bg-white/80 px-1 rounded border border-blue-100">lastSeen</code> is under 10s;{" "}
-              <strong>Offline</strong> otherwise (including after 30s idle).
-            </p>
-            <p className="text-slate-600 mt-2 text-xs leading-relaxed">
-              If a row reappeared after delete, an older app may have created a
-              second Firestore document (16-character id). Those are hidden here;
-              remove any extra <code className="text-[11px] bg-white/80 px-1 rounded border border-blue-100">kds_devices</code>{" "}
-              entries in the Firebase console if needed. Reinstall/update the KDS
-              app so it only heartbeats the paired document.
-            </p>
-          </div>
-        </div>
-
         {/* Section 1 — Devices */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
           <div className="flex items-center justify-between mb-4">
@@ -710,7 +695,10 @@ export default function KdsSettingsPage() {
               </h3>
               <button
                 type="button"
-                onClick={() => setModalOpen(false)}
+                onClick={() => {
+                  setDeviceSaveError(null);
+                  setModalOpen(false);
+                }}
                 className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                 aria-label="Close"
               >
@@ -725,7 +713,10 @@ export default function KdsSettingsPage() {
                 <input
                   type="text"
                   value={deviceName}
-                  onChange={(e) => setDeviceName(e.target.value)}
+                  onChange={(e) => {
+                    setDeviceSaveError(null);
+                    setDeviceName(e.target.value);
+                  }}
                   placeholder="e.g. Kitchen Screen 1"
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
@@ -745,7 +736,10 @@ export default function KdsSettingsPage() {
                 ) : (
                   <select
                     value={stationId}
-                    onChange={(e) => setStationId(e.target.value)}
+                    onChange={(e) => {
+                      setDeviceSaveError(null);
+                      setStationId(e.target.value);
+                    }}
                     className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Select station…</option>
@@ -779,10 +773,20 @@ export default function KdsSettingsPage() {
                   </div>
                 )}
             </div>
+            {deviceSaveError && (
+              <div className="px-5 pb-2">
+                <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+                  {deviceSaveError}
+                </p>
+              </div>
+            )}
             <div className="flex justify-end gap-2 px-5 py-4 bg-slate-50 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setModalOpen(false)}
+                onClick={() => {
+                  setDeviceSaveError(null);
+                  setModalOpen(false);
+                }}
                 className="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-200/80 transition-colors"
               >
                 Cancel
