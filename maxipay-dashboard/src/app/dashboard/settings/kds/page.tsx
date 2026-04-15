@@ -38,6 +38,43 @@ interface KdsDevice {
   station: string;
   isActive: boolean;
   createdAt: Date | null;
+  /** Heartbeat from the KDS app (Firestore Timestamp). */
+  lastSeen: Date | null;
+}
+
+type LiveStatus = "online" | "stale" | "offline";
+
+const ONLINE_MAX_MS = 10_000;
+const OFFLINE_MIN_MS = 30_000;
+
+function parseFirestoreDate(value: unknown): Date | null {
+  if (value && typeof (value as { toDate?: () => Date }).toDate === "function") {
+    return (value as { toDate: () => Date }).toDate();
+  }
+  return null;
+}
+
+function getLiveStatus(lastSeen: Date | null, nowMs: number): LiveStatus {
+  if (!lastSeen) return "offline";
+  const age = nowMs - lastSeen.getTime();
+  if (age < ONLINE_MAX_MS) return "online";
+  if (age > OFFLINE_MIN_MS) return "offline";
+  return "stale";
+}
+
+/** Relative label for last heartbeat (updates with `nowMs`). */
+function formatLastSeenAgo(lastSeen: Date | null, nowMs: number): string {
+  if (!lastSeen) return "Never";
+  const sec = Math.floor((nowMs - lastSeen.getTime()) / 1000);
+  if (sec < 0) return "Just now";
+  if (sec < 5) return "Just now";
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return min === 1 ? "1 min ago" : `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return hr === 1 ? "1 hr ago" : `${hr} hr ago`;
+  const days = Math.floor(hr / 24);
+  return days === 1 ? "1 day ago" : `${days} days ago`;
 }
 
 interface KdsDisplaySettings {
@@ -53,17 +90,16 @@ const defaultDisplaySettings: KdsDisplaySettings = {
 };
 
 function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
-  const created = data.createdAt;
-  let createdAt: Date | null = null;
-  if (created && typeof (created as { toDate?: () => Date }).toDate === "function") {
-    createdAt = (created as { toDate: () => Date }).toDate();
-  }
+  const createdAt = parseFirestoreDate(data.createdAt);
+  const lastSeen =
+    parseFirestoreDate(data.lastSeen) ?? createdAt;
   return {
     id,
     name: String(data.name ?? ""),
     station: String(data.station ?? "Grill"),
     isActive: data.isActive !== false,
     createdAt,
+    lastSeen,
   };
 }
 
@@ -86,6 +122,13 @@ export default function KdsSettingsPage() {
   const [deleting, setDeleting] = useState(false);
 
   const [savingDisplay, setSavingDisplay] = useState(false);
+
+  /** Re-render status / “Xs ago” labels every second without extra Firestore reads. */
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -174,6 +217,7 @@ export default function KdsSettingsPage() {
           station,
           isActive: true,
           createdAt: serverTimestamp(),
+          lastSeen: serverTimestamp(),
         });
       }
       setModalOpen(false);
@@ -227,11 +271,30 @@ export default function KdsSettingsPage() {
     void persistDisplaySettings(next);
   };
 
-  const statusLabel = (d: KdsDevice) =>
-    d.isActive ? "Online" : "Offline";
-
-  const statusDotClass = (d: KdsDevice) =>
-    d.isActive ? "bg-emerald-500" : "bg-slate-300";
+  const statusBadge = (live: LiveStatus) => {
+    switch (live) {
+      case "online":
+        return {
+          label: "Online",
+          emoji: String.fromCodePoint(0x1f7e2),
+          className:
+            "bg-emerald-50 text-emerald-800 border-emerald-200 ring-1 ring-emerald-100",
+        };
+      case "stale":
+        return {
+          label: "Idle",
+          emoji: String.fromCodePoint(0x1f7e1),
+          className:
+            "bg-amber-50 text-amber-900 border-amber-200 ring-1 ring-amber-100",
+        };
+      default:
+        return {
+          label: "Offline",
+          emoji: String.fromCodePoint(0x1f534),
+          className: "bg-red-50 text-red-800 border-red-200 ring-1 ring-red-100",
+        };
+    }
+  };
 
   return (
     <>
@@ -242,12 +305,14 @@ export default function KdsSettingsPage() {
           <div className="text-sm text-slate-700">
             <p className="font-medium text-slate-800">Kitchen Display System</p>
             <p className="text-slate-600 mt-1">
-              Register screens by station. The Android KDS app can use this list
-              to filter tickets (integration can read{" "}
+              Register screens by station. Devices show <strong>Online</strong> when
+              the app sends a recent <code className="text-xs bg-white/80 px-1 rounded border border-blue-100">lastSeen</code> heartbeat (under 10s). After 30s
+              without a heartbeat they appear <strong>Offline</strong>. The KDS app
+              should update its document in{" "}
               <code className="text-xs bg-white/80 px-1 rounded border border-blue-100">
                 {KDS_DEVICES_COLLECTION}
               </code>
-              ).
+              .
             </p>
           </div>
         </div>
@@ -260,7 +325,8 @@ export default function KdsSettingsPage() {
                 KDS devices
               </h2>
               <p className="text-sm text-slate-500 mt-0.5">
-                Name each screen and assign a station
+                Live status from <span className="font-medium">lastSeen</span>{" "}
+                (real-time)
               </p>
             </div>
             <button
@@ -285,50 +351,62 @@ export default function KdsSettingsPage() {
             </div>
           ) : (
             <ul className="space-y-2">
-              {devices.map((d) => (
-                <li
-                  key={d.id}
-                  className="flex items-center gap-4 p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors"
-                >
-                  <div className="p-2 rounded-lg bg-white border border-slate-100 shadow-sm">
-                    <Monitor size={20} className="text-slate-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-slate-800 truncate">
-                      {d.name || "Unnamed device"}
-                    </p>
-                    <p className="text-sm text-slate-500">
-                      Station:{" "}
-                      <span className="text-slate-700">{d.station}</span>
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600 shrink-0">
-                    <span
-                      className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(d)}`}
-                      aria-hidden
-                    />
-                    {statusLabel(d)}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(d)}
-                      className="p-2 rounded-lg text-slate-500 hover:bg-white hover:text-blue-600 border border-transparent hover:border-slate-200 transition-all"
-                      aria-label="Edit device"
-                    >
-                      <Pencil size={18} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDeleteTarget(d)}
-                      className="p-2 rounded-lg text-slate-500 hover:bg-white hover:text-red-600 border border-transparent hover:border-slate-200 transition-all"
-                      aria-label="Delete device"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                </li>
-              ))}
+              {devices.map((d) => {
+                const live = getLiveStatus(d.lastSeen, nowMs);
+                const badge = statusBadge(live);
+                const ago = formatLastSeenAgo(d.lastSeen, nowMs);
+                return (
+                  <li
+                    key={d.id}
+                    className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div className="p-2 rounded-lg bg-white border border-slate-100 shadow-sm shrink-0">
+                        <Monitor size={20} className="text-slate-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-slate-800 truncate">
+                          {d.name || "Unnamed device"}
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          Station:{" "}
+                          <span className="text-slate-700">{d.station}</span>
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Last seen:{" "}
+                          <span className="font-medium text-slate-700">{ago}</span>
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 sm:shrink-0 pl-11 sm:pl-0">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${badge.className}`}
+                      >
+                        <span aria-hidden>{badge.emoji}</span>
+                        {badge.label}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openEdit(d)}
+                          className="p-2 rounded-lg text-slate-500 hover:bg-white hover:text-blue-600 border border-transparent hover:border-slate-200 transition-all"
+                          aria-label="Edit device"
+                        >
+                          <Pencil size={18} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteTarget(d)}
+                          className="p-2 rounded-lg text-slate-500 hover:bg-white hover:text-red-600 border border-transparent hover:border-slate-200 transition-all"
+                          aria-label="Delete device"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
