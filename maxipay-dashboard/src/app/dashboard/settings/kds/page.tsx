@@ -493,8 +493,9 @@ export default function KdsSettingsPage() {
   return (
     <>
       <Header title="KDS" />
+      {/* Left-aligned (no mx-auto) so content sits near the sidebar; max-w keeps 65/35 proportions unchanged */}
       <div className="p-4 sm:p-6">
-        <div className="mx-auto flex w-full max-w-[1800px] min-h-0 flex-col gap-6 lg:min-h-[calc(100vh-5.5rem)] lg:flex-row lg:items-stretch lg:gap-8">
+        <div className="flex w-full max-w-[1800px] min-h-0 flex-col gap-6 lg:min-h-[calc(100vh-5.5rem)] lg:flex-row lg:items-stretch lg:gap-8">
         {/* LEFT — control panel (65%): devices + display settings */}
         <div className="flex w-full min-w-0 flex-col gap-6 lg:w-[65%] lg:shrink-0">
         {/* KDS devices */}
