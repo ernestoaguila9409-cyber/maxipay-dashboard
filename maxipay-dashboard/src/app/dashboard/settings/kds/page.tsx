@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   collection,
-  addDoc,
   updateDoc,
   deleteDoc,
   doc,
@@ -11,6 +10,10 @@ import {
   serverTimestamp,
   setDoc,
   deleteField,
+  query,
+  where,
+  getDocs,
+  limit,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
@@ -24,6 +27,8 @@ import {
   LayoutGrid,
   Palette,
   Timer,
+  Copy,
+  Check,
 } from "lucide-react";
 
 const KDS_DEVICES_COLLECTION = "kds_devices";
@@ -45,16 +50,19 @@ interface KdsDevice {
   stationId: string;
   /** Legacy field when devices only stored a display name in `station`. */
   legacyStationName?: string;
+  /** Six-digit code for tablet pairing; removed from doc after pair. */
+  pairingCode: string | null;
+  isPaired: boolean;
+  deviceType: string;
   isActive: boolean;
   createdAt: Date | null;
   /** Heartbeat from the KDS app (Firestore Timestamp). */
   lastSeen: Date | null;
 }
 
-type LiveStatus = "online" | "stale" | "offline";
+type LiveStatus = "online" | "offline";
 
 const ONLINE_MAX_MS = 10_000;
-const OFFLINE_MIN_MS = 30_000;
 
 function parseFirestoreDate(value: unknown): Date | null {
   if (value && typeof (value as { toDate?: () => Date }).toDate === "function") {
@@ -67,8 +75,7 @@ function getLiveStatus(lastSeen: Date | null, nowMs: number): LiveStatus {
   if (!lastSeen) return "offline";
   const age = nowMs - lastSeen.getTime();
   if (age < ONLINE_MAX_MS) return "online";
-  if (age > OFFLINE_MIN_MS) return "offline";
-  return "stale";
+  return "offline";
 }
 
 /** Relative label for last heartbeat (updates with `nowMs`). */
@@ -100,22 +107,46 @@ const defaultDisplaySettings: KdsDisplaySettings = {
 
 function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
   const createdAt = parseFirestoreDate(data.createdAt);
-  const lastSeen =
-    parseFirestoreDate(data.lastSeen) ?? createdAt;
+  const lastSeen = parseFirestoreDate(data.lastSeen);
   const stationId = String(data.stationId ?? "");
   const legacy =
     typeof data.station === "string" && data.station.trim() !== ""
       ? data.station.trim()
       : undefined;
+  const rawCode = data.pairingCode;
+  const pairingCode =
+    typeof rawCode === "string" && /^\d{6}$/.test(rawCode) ? rawCode : null;
+  const isPaired =
+    pairingCode != null ? data.isPaired === true : data.isPaired !== false;
   return {
     id,
     name: String(data.name ?? ""),
     stationId,
     legacyStationName: legacy,
+    pairingCode,
+    isPaired,
+    deviceType: String(data.deviceType ?? "").trim(),
     isActive: data.isActive !== false,
     createdAt,
     lastSeen,
   };
+}
+
+async function allocateUniquePairingCode(): Promise<string> {
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const code = String(Math.floor(Math.random() * 1_000_000)).padStart(
+      6,
+      "0"
+    );
+    const q = query(
+      collection(db, KDS_DEVICES_COLLECTION),
+      where("pairingCode", "==", code),
+      limit(1)
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) return code;
+  }
+  throw new Error("Could not allocate a unique pairing code");
 }
 
 function parseStation(docId: string, data: Record<string, unknown>): KitchenStation {
@@ -165,6 +196,12 @@ export default function KdsSettingsPage() {
   const [deleting, setDeleting] = useState(false);
 
   const [savingDisplay, setSavingDisplay] = useState(false);
+
+  const [pairingCreated, setPairingCreated] = useState<{
+    code: string;
+    deviceName: string;
+  } | null>(null);
+  const [pairingCopied, setPairingCopied] = useState(false);
 
   /** Re-render status / “Xs ago” labels every second without extra Firestore reads. */
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -313,16 +350,26 @@ export default function KdsSettingsPage() {
           station: deleteField(),
           updatedAt: serverTimestamp(),
         });
+        setModalOpen(false);
       } else {
-        await addDoc(collection(db, KDS_DEVICES_COLLECTION), {
+        const pairingCode = await allocateUniquePairingCode();
+        const colRef = collection(db, KDS_DEVICES_COLLECTION);
+        const docRef = doc(colRef);
+        await setDoc(docRef, {
+          id: docRef.id,
           name: trimmed,
           stationId,
+          pairingCode,
+          isPaired: false,
+          deviceType: "",
           isActive: true,
           createdAt: serverTimestamp(),
-          lastSeen: serverTimestamp(),
+          station: deleteField(),
         });
+        setModalOpen(false);
+        setPairingCreated({ code: pairingCode, deviceName: trimmed });
+        setPairingCopied(false);
       }
-      setModalOpen(false);
     } catch (err) {
       console.error("[KDS] save device failed:", err);
     } finally {
@@ -374,28 +421,19 @@ export default function KdsSettingsPage() {
   };
 
   const statusBadge = (live: LiveStatus) => {
-    switch (live) {
-      case "online":
-        return {
-          label: "Online",
-          emoji: String.fromCodePoint(0x1f7e2),
-          className:
-            "bg-emerald-50 text-emerald-800 border-emerald-200 ring-1 ring-emerald-100",
-        };
-      case "stale":
-        return {
-          label: "Idle",
-          emoji: String.fromCodePoint(0x1f7e1),
-          className:
-            "bg-amber-50 text-amber-900 border-amber-200 ring-1 ring-amber-100",
-        };
-      default:
-        return {
-          label: "Offline",
-          emoji: String.fromCodePoint(0x1f534),
-          className: "bg-red-50 text-red-800 border-red-200 ring-1 ring-red-100",
-        };
+    if (live === "online") {
+      return {
+        label: "Online",
+        emoji: String.fromCodePoint(0x1f7e2),
+        className:
+          "bg-emerald-50 text-emerald-800 border-emerald-200 ring-1 ring-emerald-100",
+      };
     }
+    return {
+      label: "Offline",
+      emoji: String.fromCodePoint(0x1f534),
+      className: "bg-red-50 text-red-800 border-red-200 ring-1 ring-red-100",
+    };
   };
 
   return (
@@ -407,14 +445,10 @@ export default function KdsSettingsPage() {
           <div className="text-sm text-slate-700">
             <p className="font-medium text-slate-800">Kitchen Display System</p>
             <p className="text-slate-600 mt-1">
-              Register screens by station. Devices show <strong>Online</strong> when
-              the app sends a recent <code className="text-xs bg-white/80 px-1 rounded border border-blue-100">lastSeen</code> heartbeat (under 10s). After 30s
-              without a heartbeat they appear <strong>Offline</strong>. The KDS app
-              should update its document in{" "}
-              <code className="text-xs bg-white/80 px-1 rounded border border-blue-100">
-                {KDS_DEVICES_COLLECTION}
-              </code>
-              .
+              Add a device to get a <strong>6-digit pairing code</strong>. On the
+              tablet, enter the code once to link. Status:{" "}
+              <strong>Online</strong> when <code className="text-xs bg-white/80 px-1 rounded border border-blue-100">lastSeen</code> is under 10s;{" "}
+              <strong>Offline</strong> otherwise (including after 30s idle).
             </p>
           </div>
         </div>
@@ -475,7 +509,22 @@ export default function KdsSettingsPage() {
                           <span className="text-slate-700">
                             {stationDisplayName(d, stations)}
                           </span>
+                          {" · "}
+                          <span className="text-slate-600">
+                            Type:{" "}
+                            <span className="text-slate-700 font-medium">
+                              {d.deviceType || "—"}
+                            </span>
+                          </span>
                         </p>
+                        {!d.isPaired && d.pairingCode && (
+                          <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1 mt-2 inline-block">
+                            Waiting for tablet · code{" "}
+                            <span className="font-mono font-bold tracking-widest">
+                              {d.pairingCode}
+                            </span>
+                          </p>
+                        )}
                         <p className="text-xs text-slate-500 mt-1">
                           Last seen:{" "}
                           <span className="font-medium text-slate-700">{ago}</span>
@@ -681,6 +730,19 @@ export default function KdsSettingsPage() {
                   Add new station
                 </button>
               </div>
+              {editing &&
+                !editing.isPaired &&
+                editing.pairingCode && (
+                  <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
+                    <span className="font-medium">Pairing code: </span>
+                    <span className="font-mono font-bold tracking-widest">
+                      {editing.pairingCode}
+                    </span>
+                    <p className="text-xs text-amber-900/80 mt-1">
+                      Enter on the tablet to complete setup.
+                    </p>
+                  </div>
+                )}
             </div>
             <div className="flex justify-end gap-2 px-5 py-4 bg-slate-50 border-t border-slate-100">
               <button
@@ -703,6 +765,70 @@ export default function KdsSettingsPage() {
                 className="px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pairing code after new device */}
+      {pairingCreated && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center p-4 bg-black/40">
+          <div
+            className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="kds-pairing-reveal-title"
+          >
+            <div className="px-5 py-4 border-b border-slate-100">
+              <h3
+                id="kds-pairing-reveal-title"
+                className="font-semibold text-slate-800"
+              >
+                Device created
+              </h3>
+              <p className="text-sm text-slate-600 mt-1">
+                Enter this code on <strong>{pairingCreated.deviceName}</strong>{" "}
+                (KDS app).
+              </p>
+            </div>
+            <div className="p-5">
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+                Pairing code
+              </p>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 font-mono text-3xl font-bold tracking-[0.35em] text-center text-slate-900 bg-slate-50 border border-slate-200 rounded-xl py-4">
+                  {pairingCreated.code}
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(pairingCreated.code);
+                      setPairingCopied(true);
+                      window.setTimeout(() => setPairingCopied(false), 2000);
+                    } catch {
+                      setPairingCopied(false);
+                    }
+                  }}
+                  className="shrink-0 p-3 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  aria-label="Copy pairing code"
+                >
+                  {pairingCopied ? (
+                    <Check size={22} className="text-emerald-600" />
+                  ) : (
+                    <Copy size={22} />
+                  )}
+                </button>
+              </div>
+            </div>
+            <div className="flex justify-end px-5 py-4 bg-slate-50 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setPairingCreated(null)}
+                className="px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+              >
+                Done
               </button>
             </div>
           </div>
