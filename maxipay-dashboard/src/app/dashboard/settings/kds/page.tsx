@@ -16,6 +16,10 @@ import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import {
+  KdsPreview,
+  parseDashboardModuleColorKeys,
+} from "@/components/KdsPreview";
+import {
   Plus,
   Pencil,
   Trash2,
@@ -51,6 +55,8 @@ interface KdsDevice {
   pairingCode: string | null;
   isPaired: boolean;
   deviceType: string;
+  /** Set by KDS app (Build.MANUFACTURER + MODEL) after pair / heartbeat. */
+  deviceModel: string;
   isActive: boolean;
   createdAt: Date | null;
   /** Heartbeat from the KDS app (Firestore Timestamp). */
@@ -123,6 +129,7 @@ function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
     pairingCode,
     isPaired,
     deviceType: String(data.deviceType ?? "").trim(),
+    deviceModel: String(data.deviceModel ?? "").trim(),
     isActive: data.isActive !== false,
     createdAt,
     lastSeen,
@@ -206,6 +213,10 @@ export default function KdsSettingsPage() {
   } | null>(null);
   const [pairingCopied, setPairingCopied] = useState(false);
 
+  const [dashboardColorKeys, setDashboardColorKeys] = useState<
+    Record<string, string>
+  >({});
+
   /** Re-render status / “Xs ago” labels every second without extra Firestore reads. */
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -259,6 +270,19 @@ export default function KdsSettingsPage() {
         console.error("[KDS] devices listener:", err);
         setLoading(false);
       }
+    );
+    return () => unsub();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(
+      doc(db, SETTINGS_COLLECTION, "dashboard"),
+      (snap) => {
+        const raw = snap.data()?.modules;
+        setDashboardColorKeys(parseDashboardModuleColorKeys(raw));
+      },
+      () => setDashboardColorKeys({})
     );
     return () => unsub();
   }, [user]);
@@ -469,7 +493,9 @@ export default function KdsSettingsPage() {
   return (
     <>
       <Header title="KDS" />
-      <div className="p-6 space-y-6 max-w-4xl">
+      <div className="p-6">
+        <div className="mx-auto flex max-w-[1600px] flex-col gap-8 xl:flex-row xl:items-start">
+          <div className="min-w-0 flex-1 space-y-6">
         {/* Section 1 — Devices */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
           <div className="flex items-center justify-between mb-4">
@@ -528,9 +554,9 @@ export default function KdsSettingsPage() {
                           </span>
                           {" · "}
                           <span className="text-slate-600">
-                            Type:{" "}
+                            Model:{" "}
                             <span className="text-slate-700 font-medium">
-                              {d.deviceType || "—"}
+                              {d.deviceModel || d.deviceType || "—"}
                             </span>
                           </span>
                         </p>
@@ -674,6 +700,29 @@ export default function KdsSettingsPage() {
               </label>
             </div>
           )}
+        </div>
+          </div>
+
+          <aside className="w-full shrink-0 xl:sticky xl:top-6 xl:w-[440px] xl:max-w-[440px] xl:self-start">
+            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-semibold text-slate-800">
+                Live preview
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Sample orders (dine-in, to-go, bar). Updates instantly when you
+                change settings below. Header colors use your dashboard palette
+                when <span className="font-medium">Order type colors</span> is
+                on.
+              </p>
+              <div className="mt-4 flex justify-center border-t border-slate-100 pt-4">
+                <KdsPreview
+                  displaySettings={displaySettings}
+                  nowMs={nowMs}
+                  moduleColorKeys={dashboardColorKeys}
+                />
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
 
