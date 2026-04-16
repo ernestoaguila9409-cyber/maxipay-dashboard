@@ -14,6 +14,8 @@ export interface MenuItemForKds {
   id: string;
   name: string;
   placements: string[];
+  /** [menuSchedules] ids on the item (dashboard Menus / scheduling). */
+  scheduleIds: string[];
 }
 
 /** Build full selection from Firestore fields + current menu catalog. */
@@ -36,6 +38,8 @@ export function deriveSelectedItemIdsFromDevice(
 export interface CategoryRow {
   id: string;
   name: string;
+  /** [menuSchedules] ids; empty = not tied to a scheduled menu. */
+  scheduleIds: string[];
 }
 
 /**
@@ -63,6 +67,72 @@ export function normalizeAssignmentForSave(
     return !it.placements.some((p) => catSaved.has(p));
   });
   return { assignedCategoryIds, assignedItemIds };
+}
+
+/** Section for grouping the KDS assign UI by [menuSchedules]. */
+export interface ScheduleAssignmentSection {
+  id: string;
+  name: string;
+  categories: CategoryRow[];
+  items: MenuItemForKds[];
+}
+
+export const UNSCHEDULED_SECTION_ID = "__unscheduled__";
+
+/**
+ * Split categories/items into one block per schedule (plus “No schedule” when needed).
+ * Items can appear in more than one section if they match multiple schedules.
+ */
+export function buildScheduleAssignmentSections(
+  scheduleDocs: { id: string; name: string }[],
+  categories: CategoryRow[],
+  items: MenuItemForKds[]
+): ScheduleAssignmentSection[] {
+  const sorted = [...scheduleDocs].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  );
+  const out: ScheduleAssignmentSection[] = [];
+
+  for (const sch of sorted) {
+    const secCats = categories.filter((c) => c.scheduleIds.includes(sch.id));
+    const itemIds = new Set<string>();
+    for (const it of items) {
+      if (it.scheduleIds.includes(sch.id)) itemIds.add(it.id);
+      for (const pid of it.placements) {
+        const cat = categories.find((c) => c.id === pid);
+        if (cat?.scheduleIds.includes(sch.id)) itemIds.add(it.id);
+      }
+    }
+    const secItems = items.filter((it) => itemIds.has(it.id));
+    if (secCats.length > 0 || secItems.length > 0) {
+      out.push({
+        id: sch.id,
+        name: sch.name,
+        categories: secCats,
+        items: secItems,
+      });
+    }
+  }
+
+  const unschedCats = categories.filter((c) => c.scheduleIds.length === 0);
+  const unschedItems = items.filter((it) => {
+    if (it.scheduleIds.length > 0) return false;
+    const cats = it.placements
+      .map((pid) => categories.find((c) => c.id === pid))
+      .filter((c): c is CategoryRow => c != null);
+    if (cats.length === 0) return true;
+    return cats.every((c) => c.scheduleIds.length === 0);
+  });
+  if (unschedCats.length > 0 || unschedItems.length > 0) {
+    out.push({
+      id: UNSCHEDULED_SECTION_ID,
+      name: "No schedule",
+      categories: unschedCats,
+      items: unschedItems,
+    });
+  }
+
+  return out;
 }
 
 /** KDS routing: line matches if item in assigned categories OR explicit item id. */

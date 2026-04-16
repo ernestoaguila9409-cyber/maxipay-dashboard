@@ -14,17 +14,20 @@ import Link from "next/link";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import {
+  buildScheduleAssignmentSections,
   deriveSelectedItemIdsFromDevice,
   normalizeAssignmentForSave,
   placementCategoryIds,
   type CategoryRow,
   type MenuItemForKds,
+  type ScheduleAssignmentSection,
 } from "@/lib/kdsMenuAssignment";
-import { ArrowLeft, Search, Layers, UtensilsCrossed } from "lucide-react";
+import { ArrowLeft, Search, Layers, UtensilsCrossed, Calendar } from "lucide-react";
 
 const KDS_DEVICES_COLLECTION = "kds_devices";
 const CATEGORIES_COLLECTION = "Categories";
 const MENU_ITEMS_COLLECTION = "MenuItems";
+const MENU_SCHEDULES_COLLECTION = "menuSchedules";
 
 function parseStringArrayField(data: Record<string, unknown>, key: string): string[] {
   const raw = data[key];
@@ -34,6 +37,14 @@ function parseStringArrayField(data: Record<string, unknown>, key: string): stri
     .filter((x) => x.length > 0);
 }
 
+function parseCategoryRow(id: string, data: Record<string, unknown>): CategoryRow {
+  return {
+    id,
+    name: String(data.name ?? "").trim() || "Category",
+    scheduleIds: parseStringArrayField(data, "scheduleIds"),
+  };
+}
+
 export default function KdsAssignItemsPage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -41,6 +52,7 @@ export default function KdsAssignItemsPage() {
   const deviceId = String(params.deviceId ?? "").trim();
 
   const [deviceName, setDeviceName] = useState("");
+  const [schedules, setSchedules] = useState<{ id: string; name: string }[]>([]);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItemForKds[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,13 +84,8 @@ export default function KdsAssignItemsPage() {
         }
         const data = snap.data() as Record<string, unknown>;
         setDeviceName(String(data.name ?? "").trim() || "KDS device");
-        const cats = parseStringArrayField(data, "assignedCategoryIds");
-        const items = parseStringArrayField(data, "assignedItemIds");
-        setAssignedCategoryIds(cats);
-        setAssignedItemIds(items);
-        if (!dirty) {
-          setSelectedItemIds(new Set()); // placeholder until menuItems load merges in effect
-        }
+        setAssignedCategoryIds(parseStringArrayField(data, "assignedCategoryIds"));
+        setAssignedItemIds(parseStringArrayField(data, "assignedItemIds"));
         setLoadError(null);
       },
       (err) => {
@@ -88,14 +95,29 @@ export default function KdsAssignItemsPage() {
       }
     );
 
+    const unsubSchedules = onSnapshot(
+      collection(db, MENU_SCHEDULES_COLLECTION),
+      (snap) => {
+        const list: { id: string; name: string }[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as Record<string, unknown>;
+          const name = String(data.name ?? "").trim();
+          if (name) list.push({ id: d.id, name });
+        });
+        list.sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+        );
+        setSchedules(list);
+      },
+      (err) => console.error("[KDS assign] schedules:", err)
+    );
+
     const unsubCats = onSnapshot(
       collection(db, CATEGORIES_COLLECTION),
       (snap) => {
         const list: CategoryRow[] = [];
         snap.forEach((d) => {
-          const data = d.data() as Record<string, unknown>;
-          const name = String(data.name ?? "").trim();
-          if (name) list.push({ id: d.id, name });
+          list.push(parseCategoryRow(d.id, d.data() as Record<string, unknown>));
         });
         list.sort((a, b) =>
           a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
@@ -117,6 +139,7 @@ export default function KdsAssignItemsPage() {
             id: d.id,
             name,
             placements: placementCategoryIds(data),
+            scheduleIds: parseStringArrayField(data, "scheduleIds"),
           });
         });
         list.sort((a, b) =>
@@ -133,6 +156,7 @@ export default function KdsAssignItemsPage() {
 
     return () => {
       unsubDevice();
+      unsubSchedules();
       unsubCats();
       unsubItems();
     };
@@ -148,21 +172,54 @@ export default function KdsAssignItemsPage() {
 
   const searchLower = search.trim().toLowerCase();
 
-  const filteredCategories = useMemo(() => {
-    if (!searchLower) return categories;
-    return categories.filter((c) => c.name.toLowerCase().includes(searchLower));
-  }, [categories, searchLower]);
+  const scheduleSections = useMemo((): ScheduleAssignmentSection[] => {
+    if (schedules.length === 0 && categories.length > 0) {
+      return [
+        {
+          id: "all-menu",
+          name: "Menu",
+          categories,
+          items: menuItems,
+        },
+      ];
+    }
+    const built = buildScheduleAssignmentSections(schedules, categories, menuItems);
+    if (
+      built.length === 0 &&
+      (categories.length > 0 || menuItems.length > 0)
+    ) {
+      return [
+        {
+          id: "fallback",
+          name: "Menu",
+          categories,
+          items: menuItems,
+        },
+      ];
+    }
+    return built;
+  }, [schedules, categories, menuItems]);
 
-  const filteredItems = useMemo(() => {
-    if (!searchLower) return menuItems;
-    return menuItems.filter((it) => {
+  const filterCategory = useCallback(
+    (c: CategoryRow) => {
+      if (!searchLower) return true;
+      if (c.name.toLowerCase().includes(searchLower)) return true;
+      return false;
+    },
+    [searchLower]
+  );
+
+  const filterItem = useCallback(
+    (it: MenuItemForKds) => {
+      if (!searchLower) return true;
       if (it.name.toLowerCase().includes(searchLower)) return true;
       return it.placements.some((pid) => {
         const cat = categories.find((c) => c.id === pid);
         return cat?.name.toLowerCase().includes(searchLower);
       });
-    });
-  }, [menuItems, categories, searchLower]);
+    },
+    [categories, searchLower]
+  );
 
   const itemsInCategory = useCallback(
     (categoryId: string) =>
@@ -212,19 +269,10 @@ export default function KdsAssignItemsPage() {
     });
   };
 
-  const filteredItemIds = useMemo(
-    () => new Set(filteredItems.map((it) => it.id)),
-    [filteredItems]
-  );
-
-  const selectAllVisible = () => {
+  const selectAllItems = () => {
     setDirty(true);
     setSaveOk(false);
-    setSelectedItemIds((prev) => {
-      const next = new Set(prev);
-      for (const id of filteredItemIds) next.add(id);
-      return next;
-    });
+    setSelectedItemIds(new Set(menuItems.map((it) => it.id)));
   };
 
   const clearSelection = () => {
@@ -298,7 +346,7 @@ export default function KdsAssignItemsPage() {
               Assign Items to KDS
             </h1>
             <p className="mt-0.5 truncate text-sm text-slate-500">
-              {deviceName || "Loading…"} · updates in real time from Menu
+              {deviceName || "Loading…"} · grouped by schedule · live from Firestore
             </p>
           </div>
         </div>
@@ -331,11 +379,11 @@ export default function KdsAssignItemsPage() {
           <div className="flex shrink-0 flex-wrap gap-2">
             <button
               type="button"
-              onClick={selectAllVisible}
-              disabled={loading || filteredItems.length === 0}
+              onClick={selectAllItems}
+              disabled={loading || menuItems.length === 0}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
             >
-              Select all visible
+              Select all
             </button>
             <button
               type="button"
@@ -372,96 +420,120 @@ export default function KdsAssignItemsPage() {
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
           </div>
         ) : (
-          <div className="grid min-h-[420px] gap-4 lg:grid-cols-2">
-            <section className="flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-              <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/80 px-4 py-3">
-                <Layers className="h-5 w-5 text-slate-500" aria-hidden />
-                <h2 className="font-semibold text-slate-800">Categories</h2>
-                <span className="ml-auto text-xs font-medium text-slate-400">
-                  {filteredCategories.length}
-                </span>
-              </div>
-              <div className="max-h-[min(560px,calc(100vh-16rem))] overflow-y-auto p-3">
-                {filteredCategories.length === 0 ? (
-                  <p className="px-2 py-8 text-center text-sm text-slate-500">
-                    No categories match this search.
-                  </p>
-                ) : (
-                  <ul className="space-y-1">
-                    {filteredCategories.map((c) => {
-                      const { checked, indeterminate } = categoryVisualState(c.id);
-                      return (
-                        <li key={c.id}>
-                          <label className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-800 hover:bg-slate-50">
-                            <input
-                              type="checkbox"
-                              ref={(el) => {
-                                if (el) el.indeterminate = indeterminate;
-                              }}
-                              checked={checked}
-                              onChange={(e) => toggleCategory(c.id, e.target.checked)}
-                              className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className="min-w-0 font-medium">{c.name}</span>
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            </section>
-
-            <section className="flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-              <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/80 px-4 py-3">
-                <UtensilsCrossed className="h-5 w-5 text-slate-500" aria-hidden />
-                <h2 className="font-semibold text-slate-800">Menu items</h2>
-                <span className="ml-auto text-xs font-medium text-slate-400">
-                  {filteredItems.length}
-                </span>
-              </div>
-              <div className="max-h-[min(560px,calc(100vh-16rem))] overflow-y-auto p-3">
-                {filteredItems.length === 0 ? (
-                  <p className="px-2 py-8 text-center text-sm text-slate-500">
-                    No items match this search.
-                  </p>
-                ) : (
-                  <ul className="space-y-1">
-                    {filteredItems.map((it) => {
-                      const checked = selectedItemIds.has(it.id);
-                      const catLabels = it.placements
-                        .map((pid) => categories.find((c) => c.id === pid)?.name)
-                        .filter(Boolean)
-                        .join(" · ");
-                      return (
-                        <li key={it.id}>
-                          <label className="flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2.5 text-sm hover:bg-slate-50">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleItem(it.id)}
-                              className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className="min-w-0 flex-1">
-                              <span className="font-medium text-slate-800">{it.name}</span>
-                              {catLabels ? (
-                                <span className="mt-0.5 block text-xs text-slate-500">
-                                  {catLabels}
-                                </span>
-                              ) : null}
-                            </span>
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            </section>
+          <div className="space-y-8">
+            {scheduleSections.map((section) => {
+              const filteredCats = section.categories.filter(filterCategory);
+              const filteredSecItems = section.items.filter(filterItem);
+              return (
+                <div
+                  key={section.id}
+                  className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                >
+                  <div className="flex items-center gap-2 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white px-4 py-3 sm:px-5">
+                    <Calendar className="h-5 w-5 shrink-0 text-blue-600" aria-hidden />
+                    <h2 className="text-base font-semibold text-slate-900">
+                      {section.name}
+                    </h2>
+                    <span className="ml-auto text-xs font-medium text-slate-400">
+                      {filteredCats.length} cat · {filteredSecItems.length} items
+                    </span>
+                  </div>
+                  <div className="grid min-h-[200px] gap-4 p-4 lg:grid-cols-2 lg:p-5">
+                    <div className="flex min-h-0 flex-col rounded-xl border border-slate-100 bg-slate-50/40">
+                      <div className="flex items-center gap-2 border-b border-slate-100/80 px-3 py-2.5">
+                        <Layers className="h-4 w-4 text-slate-500" aria-hidden />
+                        <span className="text-sm font-semibold text-slate-700">
+                          Categories
+                        </span>
+                      </div>
+                      <div className="max-h-[min(420px,50vh)] overflow-y-auto p-2">
+                        {filteredCats.length === 0 ? (
+                          <p className="px-2 py-6 text-center text-sm text-slate-500">
+                            No categories in this schedule match the search.
+                          </p>
+                        ) : (
+                          <ul className="space-y-0.5">
+                            {filteredCats.map((c) => {
+                              const { checked, indeterminate } =
+                                categoryVisualState(c.id);
+                              return (
+                                <li key={`${section.id}-cat-${c.id}`}>
+                                  <label className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm text-slate-800 hover:bg-white">
+                                    <input
+                                      type="checkbox"
+                                      ref={(el) => {
+                                        if (el) el.indeterminate = indeterminate;
+                                      }}
+                                      checked={checked}
+                                      onChange={(e) =>
+                                        toggleCategory(c.id, e.target.checked)
+                                      }
+                                      className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                    <span className="min-w-0 font-medium">{c.name}</span>
+                                  </label>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex min-h-0 flex-col rounded-xl border border-slate-100 bg-slate-50/40">
+                      <div className="flex items-center gap-2 border-b border-slate-100/80 px-3 py-2.5">
+                        <UtensilsCrossed className="h-4 w-4 text-slate-500" aria-hidden />
+                        <span className="text-sm font-semibold text-slate-700">
+                          Menu items
+                        </span>
+                      </div>
+                      <div className="max-h-[min(420px,50vh)] overflow-y-auto p-2">
+                        {filteredSecItems.length === 0 ? (
+                          <p className="px-2 py-6 text-center text-sm text-slate-500">
+                            No items in this schedule match the search.
+                          </p>
+                        ) : (
+                          <ul className="space-y-0.5">
+                            {filteredSecItems.map((it) => {
+                              const checked = selectedItemIds.has(it.id);
+                              const catLabels = it.placements
+                                .map((pid) => categories.find((c) => c.id === pid)?.name)
+                                .filter(Boolean)
+                                .join(" · ");
+                              return (
+                                <li key={`${section.id}-item-${it.id}`}>
+                                  <label className="flex cursor-pointer items-start gap-3 rounded-lg px-2 py-2 text-sm hover:bg-white">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => toggleItem(it.id)}
+                                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                    <span className="min-w-0 flex-1">
+                                      <span className="font-medium text-slate-800">
+                                        {it.name}
+                                      </span>
+                                      {catLabels ? (
+                                        <span className="mt-0.5 block text-xs text-slate-500">
+                                          {catLabels}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                  </label>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
-        <p className="mt-6 text-center text-xs text-slate-500">
+        <p className="mt-8 text-center text-xs text-slate-500">
           Tickets appear on this KDS if any line&apos;s menu item is in an assigned
           category or explicitly listed. Leave both empty on the device to show all
           tickets.
