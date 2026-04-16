@@ -5,6 +5,8 @@ import {
   collection,
   doc,
   onSnapshot,
+  orderBy,
+  query,
   updateDoc,
   serverTimestamp,
 } from "firebase/firestore";
@@ -14,13 +16,17 @@ import Link from "next/link";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import {
+  activeCategoryListFilterIds,
   buildScheduleAssignmentSections,
   deriveSelectedItemIdsFromDevice,
+  itemsInSectionCategory,
   normalizeAssignmentForSave,
-  placementCategoryIds,
+  parseMenuItemForKds,
+  resolveSubcategoryLabel,
   type CategoryRow,
   type MenuItemForKds,
   type ScheduleAssignmentSection,
+  type SubcategoryRow,
 } from "@/lib/kdsMenuAssignment";
 import {
   ArrowLeft,
@@ -36,6 +42,7 @@ const KDS_DEVICES_COLLECTION = "kds_devices";
 const CATEGORIES_COLLECTION = "Categories";
 const MENU_ITEMS_COLLECTION = "MenuItems";
 const MENU_SCHEDULES_COLLECTION = "menuSchedules";
+const SUBCATEGORIES_COLLECTION = "subcategories";
 
 function parseStringArrayField(data: Record<string, unknown>, key: string): string[] {
   const raw = data[key];
@@ -62,6 +69,7 @@ export default function KdsAssignItemsPage() {
   const [deviceName, setDeviceName] = useState("");
   const [schedules, setSchedules] = useState<{ id: string; name: string }[]>([]);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [subcategories, setSubcategories] = useState<SubcategoryRow[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItemForKds[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -145,15 +153,8 @@ export default function KdsAssignItemsPage() {
       (snap) => {
         const list: MenuItemForKds[] = [];
         snap.forEach((d) => {
-          const data = d.data() as Record<string, unknown>;
-          const name = String(data.name ?? "").trim();
-          if (!name) return;
-          list.push({
-            id: d.id,
-            name,
-            placements: placementCategoryIds(data),
-            scheduleIds: parseStringArrayField(data, "scheduleIds"),
-          });
+          const row = parseMenuItemForKds(d.id, d.data() as Record<string, unknown>);
+          if (row) list.push(row);
         });
         list.sort((a, b) =>
           a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
@@ -167,11 +168,33 @@ export default function KdsAssignItemsPage() {
       }
     );
 
+    const unsubSubcats = onSnapshot(
+      query(collection(db, SUBCATEGORIES_COLLECTION), orderBy("order", "asc")),
+      (snap) => {
+        const list: SubcategoryRow[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as Record<string, unknown>;
+          list.push({
+            id: d.id,
+            name: String(data.name ?? "").trim() || "Subcategory",
+            categoryId: String(data.categoryId ?? "").trim(),
+            order:
+              typeof data.order === "number" && !Number.isNaN(data.order)
+                ? data.order
+                : Number(data.order) || 0,
+          });
+        });
+        setSubcategories(list);
+      },
+      (err) => console.error("[KDS assign] subcategories:", err)
+    );
+
     return () => {
       unsubDevice();
       unsubSchedules();
       unsubCats();
       unsubItems();
+      unsubSubcats();
     };
   }, [user, deviceId]);
 
@@ -240,32 +263,38 @@ export default function KdsAssignItemsPage() {
     (c: CategoryRow) => {
       if (!searchLower) return true;
       if (c.name.toLowerCase().includes(searchLower)) return true;
-      return false;
+      return subcategories.some(
+        (s) => s.categoryId === c.id && s.name.toLowerCase().includes(searchLower)
+      );
     },
-    [searchLower]
+    [searchLower, subcategories]
   );
 
   const filterItem = useCallback(
     (it: MenuItemForKds) => {
       if (!searchLower) return true;
       if (it.name.toLowerCase().includes(searchLower)) return true;
-      return it.placements.some((pid) => {
-        const cat = categories.find((c) => c.id === pid);
-        return cat?.name.toLowerCase().includes(searchLower);
+      const subLabel = resolveSubcategoryLabel(it, subcategories);
+      if (subLabel?.toLowerCase().includes(searchLower)) return true;
+      if (
+        it.placements.some((pid) => {
+          const cat = categories.find((c) => c.id === pid);
+          return cat?.name.toLowerCase().includes(searchLower);
+        })
+      )
+        return true;
+      return subcategories.some((s) => {
+        if (!s.name.toLowerCase().includes(searchLower)) return false;
+        if (it.subcategoryId === s.id) return true;
+        return Object.values(it.subcategoryByCategoryId ?? {}).some((x) => x === s.id);
       });
     },
-    [categories, searchLower]
-  );
-
-  const itemsInCategory = useCallback(
-    (categoryId: string) =>
-      menuItems.filter((it) => it.placements.includes(categoryId)).map((it) => it.id),
-    [menuItems]
+    [categories, searchLower, subcategories]
   );
 
   const categoryVisualState = useCallback(
-    (categoryId: string) => {
-      const ids = itemsInCategory(categoryId);
+    (section: ScheduleAssignmentSection, categoryId: string) => {
+      const ids = itemsInSectionCategory(section, categoryId);
       if (ids.length === 0) return { checked: false, indeterminate: false };
       let n = 0;
       for (const id of ids) if (selectedItemIds.has(id)) n++;
@@ -273,22 +302,23 @@ export default function KdsAssignItemsPage() {
       if (n === ids.length) return { checked: true, indeterminate: false };
       return { checked: false, indeterminate: true };
     },
-    [itemsInCategory, selectedItemIds]
+    [selectedItemIds]
   );
 
-  const toggleCategory = (categoryId: string, turnOn: boolean) => {
+  const toggleCategory = (
+    section: ScheduleAssignmentSection,
+    categoryId: string,
+    turnOn: boolean
+  ) => {
     setDirty(true);
     setSaveOk(false);
     setSelectedItemIds((prev) => {
       const next = new Set(prev);
-      const ids = itemsInCategory(categoryId);
+      const ids = itemsInSectionCategory(section, categoryId);
       if (turnOn) {
         for (const id of ids) next.add(id);
       } else {
-        for (const it of menuItems) {
-          if (!it.placements.includes(categoryId)) continue;
-          next.delete(it.id);
-        }
+        for (const id of ids) next.delete(id);
       }
       return next;
     });
@@ -470,6 +500,16 @@ export default function KdsAssignItemsPage() {
             {scheduleSections.map((section) => {
               const filteredCats = section.categories.filter(filterCategory);
               const filteredSecItems = section.items.filter(filterItem);
+              const activeFilter = activeCategoryListFilterIds(
+                section,
+                categoryVisualState
+              );
+              const itemsToShow =
+                activeFilter == null
+                  ? filteredSecItems
+                  : filteredSecItems.filter((it) =>
+                      it.placements.some((p) => activeFilter.has(p))
+                    );
               const expanded = isSectionExpanded(section.id);
               return (
                 <div
@@ -494,7 +534,7 @@ export default function KdsAssignItemsPage() {
                       {section.name}
                     </h2>
                     <span className="shrink-0 text-xs font-medium text-slate-400">
-                      {filteredCats.length} cat · {filteredSecItems.length} items
+                      {filteredCats.length} cat · {itemsToShow.length} items
                     </span>
                   </button>
                   {expanded ? (
@@ -512,10 +552,19 @@ export default function KdsAssignItemsPage() {
                             No categories in this schedule match the search.
                           </p>
                         ) : (
-                          <ul className="space-y-0.5">
+                          <ul className="space-y-1">
                             {filteredCats.map((c) => {
                               const { checked, indeterminate } =
-                                categoryVisualState(c.id);
+                                categoryVisualState(section, c.id);
+                              const subs = subcategories
+                                .filter((s) => s.categoryId === c.id)
+                                .sort(
+                                  (a, b) =>
+                                    a.order - b.order ||
+                                    a.name.localeCompare(b.name, undefined, {
+                                      sensitivity: "base",
+                                    })
+                                );
                               return (
                                 <li key={`${section.id}-cat-${c.id}`}>
                                   <label className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm text-slate-800 hover:bg-white">
@@ -526,12 +575,28 @@ export default function KdsAssignItemsPage() {
                                       }}
                                       checked={checked}
                                       onChange={(e) =>
-                                        toggleCategory(c.id, e.target.checked)
+                                        toggleCategory(
+                                          section,
+                                          c.id,
+                                          e.target.checked
+                                        )
                                       }
                                       className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                     />
                                     <span className="min-w-0 font-medium">{c.name}</span>
                                   </label>
+                                  {subs.length > 0 ? (
+                                    <ul className="ml-9 space-y-0.5 border-l border-slate-200 py-0.5 pl-3">
+                                      {subs.map((s) => (
+                                        <li
+                                          key={`${section.id}-sub-${c.id}-${s.id}`}
+                                          className="text-xs text-slate-500"
+                                        >
+                                          {s.name}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
                                 </li>
                               );
                             })}
@@ -551,14 +616,23 @@ export default function KdsAssignItemsPage() {
                           <p className="px-2 py-6 text-center text-sm text-slate-500">
                             No items in this schedule match the search.
                           </p>
+                        ) : itemsToShow.length === 0 ? (
+                          <p className="px-2 py-6 text-center text-sm text-slate-500">
+                            No items in the selected categories. Uncheck categories on
+                            the left to see all items, or adjust the search.
+                          </p>
                         ) : (
                           <ul className="space-y-0.5">
-                            {filteredSecItems.map((it) => {
+                            {itemsToShow.map((it) => {
                               const checked = selectedItemIds.has(it.id);
                               const catLabels = it.placements
                                 .map((pid) => categories.find((c) => c.id === pid)?.name)
                                 .filter(Boolean)
                                 .join(" · ");
+                              const subLabel = resolveSubcategoryLabel(
+                                it,
+                                subcategories
+                              );
                               return (
                                 <li key={`${section.id}-item-${it.id}`}>
                                   <label className="flex cursor-pointer items-start gap-3 rounded-lg px-2 py-2 text-sm hover:bg-white">
@@ -575,6 +649,11 @@ export default function KdsAssignItemsPage() {
                                       {catLabels ? (
                                         <span className="mt-0.5 block text-xs text-slate-500">
                                           {catLabels}
+                                        </span>
+                                      ) : null}
+                                      {subLabel ? (
+                                        <span className="mt-0.5 block text-xs text-slate-400">
+                                          {subLabel}
                                         </span>
                                       ) : null}
                                     </span>

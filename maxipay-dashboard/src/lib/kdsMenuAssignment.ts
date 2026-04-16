@@ -1,3 +1,11 @@
+function parseStringArrayField(data: Record<string, unknown>, key: string): string[] {
+  const raw = data[key];
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x) => String(x ?? "").trim())
+    .filter((x) => x.length > 0);
+}
+
 /** Category placements for a menu item (matches POS / Menu page). */
 export function placementCategoryIds(data: Record<string, unknown>): string[] {
   const rawList = data.categoryIds as unknown;
@@ -16,6 +24,46 @@ export interface MenuItemForKds {
   placements: string[];
   /** [menuSchedules] ids on the item (dashboard Menus / scheduling). */
   scheduleIds: string[];
+  /** Primary category doc id (POS). */
+  categoryId: string;
+  /** [subcategories] doc id for default placement. */
+  subcategoryId: string;
+  /** Per–category subcategory when item spans multiple categories. */
+  subcategoryByCategoryId?: Record<string, string>;
+}
+
+export function parseSubcategoryByCategoryId(
+  data: Record<string, unknown>
+): Record<string, string> | undefined {
+  const raw = data.subcategoryByCategoryId;
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const id = String(v ?? "").trim();
+    if (id) out[String(k).trim()] = id;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** One [MenuItems] row for KDS assignment (dashboard). */
+export function parseMenuItemForKds(
+  id: string,
+  data: Record<string, unknown>
+): MenuItemForKds | null {
+  const name = String(data.name ?? "").trim();
+  if (!name) return null;
+  const placements = placementCategoryIds(data);
+  const categoryId =
+    String(data.categoryId ?? "").trim() || (placements[0] ?? "") || "";
+  return {
+    id,
+    name,
+    placements,
+    scheduleIds: parseStringArrayField(data, "scheduleIds"),
+    categoryId,
+    subcategoryId: String(data.subcategoryId ?? "").trim(),
+    subcategoryByCategoryId: parseSubcategoryByCategoryId(data),
+  };
 }
 
 /** Build full selection from Firestore fields + current menu catalog. */
@@ -40,6 +88,33 @@ export interface CategoryRow {
   name: string;
   /** [menuSchedules] ids; empty = not tied to a scheduled menu. */
   scheduleIds: string[];
+}
+
+export interface SubcategoryRow {
+  id: string;
+  name: string;
+  categoryId: string;
+  order: number;
+}
+
+/** Human-readable subcategory line for KDS assign / item rows. */
+export function resolveSubcategoryLabel(
+  item: MenuItemForKds,
+  subcategories: SubcategoryRow[]
+): string | null {
+  const byId = (id: string) =>
+    subcategories.find((s) => s.id === id)?.name?.trim() || null;
+  const sid = item.subcategoryId?.trim();
+  if (sid) {
+    const n = byId(sid);
+    if (n) return n;
+  }
+  const map = item.subcategoryByCategoryId;
+  if (!map || Object.keys(map).length === 0) return null;
+  const names = [...new Set(Object.values(map))]
+    .map((id) => byId(String(id)))
+    .filter((x): x is string => Boolean(x));
+  return names.length > 0 ? names.join(", ") : null;
 }
 
 /**
@@ -146,4 +221,32 @@ export function menuItemMatchesAssignment(
   if (!id) return false;
   if (assignedItemIds.has(id)) return true;
   return placements.some((p) => assignedCategoryIds.has(p));
+}
+
+export function itemsInSectionCategory(
+  section: ScheduleAssignmentSection,
+  categoryId: string
+): string[] {
+  return section.items
+    .filter((it) => it.placements.includes(categoryId))
+    .map((it) => it.id);
+}
+
+/**
+ * When non-null, the assign-items list should only show items placed in at least one
+ * of these categories. Derived from category rows that are checked or indeterminate.
+ */
+export function activeCategoryListFilterIds(
+  section: ScheduleAssignmentSection,
+  categoryVisualState: (
+    sec: ScheduleAssignmentSection,
+    categoryId: string
+  ) => { checked: boolean; indeterminate: boolean }
+): Set<string> | null {
+  const ids = new Set<string>();
+  for (const c of section.categories) {
+    const v = categoryVisualState(section, c.id);
+    if (v.checked || v.indeterminate) ids.add(c.id);
+  }
+  return ids.size > 0 ? ids : null;
 }
