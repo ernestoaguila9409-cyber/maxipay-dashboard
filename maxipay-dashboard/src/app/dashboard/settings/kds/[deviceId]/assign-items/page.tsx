@@ -16,10 +16,11 @@ import Link from "next/link";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import {
-  activeCategoryListFilterIds,
   buildScheduleAssignmentSections,
   deriveSelectedItemIdsFromDevice,
   itemsInSectionCategory,
+  itemsInSectionSubcategory,
+  menuItemMatchesSubcategory,
   normalizeAssignmentForSave,
   parseMenuItemForKds,
   resolveSubcategoryLabel,
@@ -60,6 +61,11 @@ function parseCategoryRow(id: string, data: Record<string, unknown>): CategoryRo
   };
 }
 
+/** Browses the menu list on the right; independent of assignment checkboxes. */
+type SectionListFilter =
+  | { kind: "category"; categoryId: string }
+  | { kind: "subcategory"; subcategoryId: string };
+
 export default function KdsAssignItemsPage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -88,6 +94,11 @@ export default function KdsAssignItemsPage() {
   const [sectionExpanded, setSectionExpanded] = useState<Record<string, boolean>>(
     {}
   );
+
+  /** Per section: filter menu list by category/subcategory name click (not selection). */
+  const [sectionListFilter, setSectionListFilter] = useState<
+    Record<string, SectionListFilter>
+  >({});
 
   useEffect(() => {
     if (!user || !deviceId) {
@@ -245,6 +256,17 @@ export default function KdsAssignItemsPage() {
     });
   }, [scheduleSections]);
 
+  useEffect(() => {
+    setSectionListFilter((prev) => {
+      const ids = new Set(scheduleSections.map((s) => s.id));
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        if (!ids.has(key)) delete next[key];
+      }
+      return next;
+    });
+  }, [scheduleSections]);
+
   const searchLower = search.trim().toLowerCase();
 
   const isSectionExpanded = useCallback(
@@ -315,6 +337,68 @@ export default function KdsAssignItemsPage() {
     setSelectedItemIds((prev) => {
       const next = new Set(prev);
       const ids = itemsInSectionCategory(section, categoryId);
+      if (turnOn) {
+        for (const id of ids) next.add(id);
+      } else {
+        for (const id of ids) next.delete(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleListFilterCategory = (
+    sectionId: string,
+    categoryId: string
+  ) => {
+    setSectionListFilter((prev) => {
+      const cur = prev[sectionId];
+      if (cur?.kind === "category" && cur.categoryId === categoryId) {
+        const next = { ...prev };
+        delete next[sectionId];
+        return next;
+      }
+      return { ...prev, [sectionId]: { kind: "category", categoryId } };
+    });
+  };
+
+  const toggleListFilterSubcategory = (
+    sectionId: string,
+    subcategoryId: string
+  ) => {
+    setSectionListFilter((prev) => {
+      const cur = prev[sectionId];
+      if (cur?.kind === "subcategory" && cur.subcategoryId === subcategoryId) {
+        const next = { ...prev };
+        delete next[sectionId];
+        return next;
+      }
+      return { ...prev, [sectionId]: { kind: "subcategory", subcategoryId } };
+    });
+  };
+
+  const subcategoryVisualState = useCallback(
+    (section: ScheduleAssignmentSection, subcategoryId: string) => {
+      const ids = itemsInSectionSubcategory(section, subcategoryId);
+      if (ids.length === 0) return { checked: false, indeterminate: false };
+      let n = 0;
+      for (const id of ids) if (selectedItemIds.has(id)) n++;
+      if (n === 0) return { checked: false, indeterminate: false };
+      if (n === ids.length) return { checked: true, indeterminate: false };
+      return { checked: false, indeterminate: true };
+    },
+    [selectedItemIds]
+  );
+
+  const toggleSubcategory = (
+    section: ScheduleAssignmentSection,
+    subcategoryId: string,
+    turnOn: boolean
+  ) => {
+    setDirty(true);
+    setSaveOk(false);
+    setSelectedItemIds((prev) => {
+      const next = new Set(prev);
+      const ids = itemsInSectionSubcategory(section, subcategoryId);
       if (turnOn) {
         for (const id of ids) next.add(id);
       } else {
@@ -500,16 +584,17 @@ export default function KdsAssignItemsPage() {
             {scheduleSections.map((section) => {
               const filteredCats = section.categories.filter(filterCategory);
               const filteredSecItems = section.items.filter(filterItem);
-              const activeFilter = activeCategoryListFilterIds(
-                section,
-                categoryVisualState
-              );
+              const listFilter = sectionListFilter[section.id];
               const itemsToShow =
-                activeFilter == null
-                  ? filteredSecItems
-                  : filteredSecItems.filter((it) =>
-                      it.placements.some((p) => activeFilter.has(p))
-                    );
+                listFilter?.kind === "category"
+                  ? filteredSecItems.filter((it) =>
+                      it.placements.includes(listFilter.categoryId)
+                    )
+                  : listFilter?.kind === "subcategory"
+                    ? filteredSecItems.filter((it) =>
+                        menuItemMatchesSubcategory(it, listFilter.subcategoryId)
+                      )
+                    : filteredSecItems;
               const expanded = isSectionExpanded(section.id);
               return (
                 <div
@@ -565,11 +650,15 @@ export default function KdsAssignItemsPage() {
                                       sensitivity: "base",
                                     })
                                 );
+                              const categoryFilterOn =
+                                listFilter?.kind === "category" &&
+                                listFilter.categoryId === c.id;
                               return (
                                 <li key={`${section.id}-cat-${c.id}`}>
-                                  <label className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm text-slate-800 hover:bg-white">
+                                  <div className="flex items-center gap-3 rounded-lg px-2 py-2 text-sm text-slate-800 hover:bg-white">
                                     <input
                                       type="checkbox"
+                                      id={`${section.id}-cat-cb-${c.id}`}
                                       ref={(el) => {
                                         if (el) el.indeterminate = indeterminate;
                                       }}
@@ -581,20 +670,78 @@ export default function KdsAssignItemsPage() {
                                           e.target.checked
                                         )
                                       }
-                                      className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                      className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                      aria-label={`Select all items in ${c.name}`}
                                     />
-                                    <span className="min-w-0 font-medium">{c.name}</span>
-                                  </label>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        toggleListFilterCategory(section.id, c.id)
+                                      }
+                                      className={`min-w-0 text-left font-medium hover:underline ${
+                                        categoryFilterOn
+                                          ? "text-blue-600"
+                                          : "text-slate-800"
+                                      }`}
+                                    >
+                                      {c.name}
+                                    </button>
+                                  </div>
                                   {subs.length > 0 ? (
-                                    <ul className="ml-9 space-y-0.5 border-l border-slate-200 py-0.5 pl-3">
-                                      {subs.map((s) => (
-                                        <li
-                                          key={`${section.id}-sub-${c.id}-${s.id}`}
-                                          className="text-xs text-slate-500"
-                                        >
-                                          {s.name}
-                                        </li>
-                                      ))}
+                                    <ul className="ml-2 space-y-0.5 border-l border-slate-200 py-0.5 pl-2 sm:ml-9 sm:pl-3">
+                                      {subs.map((s) => {
+                                        const subVs = subcategoryVisualState(
+                                          section,
+                                          s.id
+                                        );
+                                        const subFilterOn =
+                                          listFilter?.kind === "subcategory" &&
+                                          listFilter.subcategoryId === s.id;
+                                        return (
+                                          <li
+                                            key={`${section.id}-sub-${c.id}-${s.id}`}
+                                            className="rounded-md pl-1"
+                                          >
+                                            <div className="flex items-center gap-2 py-0.5 text-xs">
+                                              <input
+                                                type="checkbox"
+                                                id={`${section.id}-sub-cb-${s.id}`}
+                                                ref={(el) => {
+                                                  if (el)
+                                                    el.indeterminate =
+                                                      subVs.indeterminate;
+                                                }}
+                                                checked={subVs.checked}
+                                                onChange={(e) =>
+                                                  toggleSubcategory(
+                                                    section,
+                                                    s.id,
+                                                    e.target.checked
+                                                  )
+                                                }
+                                                className="h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                                aria-label={`Select all items in ${s.name}`}
+                                              />
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  toggleListFilterSubcategory(
+                                                    section.id,
+                                                    s.id
+                                                  )
+                                                }
+                                                className={`text-left hover:underline ${
+                                                  subFilterOn
+                                                    ? "font-medium text-blue-600"
+                                                    : "text-slate-500"
+                                                }`}
+                                              >
+                                                {s.name}
+                                              </button>
+                                            </div>
+                                          </li>
+                                        );
+                                      })}
                                     </ul>
                                   ) : null}
                                 </li>
@@ -618,8 +765,9 @@ export default function KdsAssignItemsPage() {
                           </p>
                         ) : itemsToShow.length === 0 ? (
                           <p className="px-2 py-6 text-center text-sm text-slate-500">
-                            No items in the selected categories. Uncheck categories on
-                            the left to see all items, or adjust the search.
+                            No items match this filter. Click the same category or
+                            subcategory name again to show all items, or adjust the
+                            search.
                           </p>
                         ) : (
                           <ul className="space-y-0.5">

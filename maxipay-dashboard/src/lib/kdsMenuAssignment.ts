@@ -232,21 +232,24 @@ export function itemsInSectionCategory(
     .map((it) => it.id);
 }
 
-/**
- * When non-null, the assign-items list should only show items placed in at least one
- * of these categories. Derived from category rows that are checked or indeterminate.
- */
-export function activeCategoryListFilterIds(
+/** True if the menu item is assigned to this [subcategories] row (POS fields). */
+export function menuItemMatchesSubcategory(
+  item: MenuItemForKds,
+  subcategoryId: string
+): boolean {
+  const sid = subcategoryId.trim();
+  if (!sid) return false;
+  if (item.subcategoryId?.trim() === sid) return true;
+  const map = item.subcategoryByCategoryId;
+  if (!map) return false;
+  return Object.values(map).some((v) => String(v).trim() === sid);
+}
+
+export function itemsInSectionSubcategory(
   section: ScheduleAssignmentSection,
-  categoryVisualState: (
-    sec: ScheduleAssignmentSection,
-    categoryId: string
-  ) => { checked: boolean; indeterminate: boolean }
-): Set<string> | null {
-  const ids = new Set<string>();
-  for (const c of section.categories) {
-    const v = categoryVisualState(section, c.id);
-    if (v.checked || v.indeterminate) ids.add(c.id);
-  }
-  return ids.size > 0 ? ids : null;
+  subcategoryId: string
+): string[] {
+  return section.items
+    .filter((it) => menuItemMatchesSubcategory(it, subcategoryId))
+    .map((it) => it.id);
 }
