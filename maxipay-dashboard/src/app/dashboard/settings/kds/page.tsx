@@ -29,6 +29,7 @@ import {
   Palette,
   Timer,
   AlarmClock,
+  Layers,
   Copy,
   Check,
 } from "lucide-react";
@@ -37,6 +38,7 @@ const KDS_DEVICES_COLLECTION = "kds_devices";
 const KDS_SETTINGS_DOC = "kds";
 const SETTINGS_COLLECTION = "Settings";
 const STATIONS_COLLECTION = "stations";
+const CATEGORIES_COLLECTION = "Categories";
 
 /** Kitchen station (Firestore `stations` collection). Document id is canonical [id]. */
 interface KitchenStation {
@@ -62,6 +64,16 @@ interface KdsDevice {
   createdAt: Date | null;
   /** Heartbeat from the KDS app (Firestore Timestamp). */
   lastSeen: Date | null;
+  /**
+   * [Categories] document ids — tablet shows orders that include a line item from any of these categories.
+   * Empty = all orders (same as no filter).
+   */
+  assignedCategoryIds: string[];
+}
+
+interface MenuCategoryRow {
+  id: string;
+  name: string;
 }
 
 type LiveStatus = "online" | "offline";
@@ -138,6 +150,14 @@ const defaultDisplaySettings: KdsDisplaySettings = {
   ticketRedAfterMinutes: DEFAULT_TICKET_RED_AFTER_MINUTES,
 };
 
+function parseAssignedCategoryIds(data: Record<string, unknown>): string[] {
+  const raw = data.assignedCategoryIds;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x) => String(x ?? "").trim())
+    .filter((x) => x.length > 0);
+}
+
 function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
   const createdAt = parseFirestoreDate(data.createdAt);
   const lastSeen = parseFirestoreDate(data.lastSeen);
@@ -163,6 +183,7 @@ function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
     isActive: data.isActive !== false,
     createdAt,
     lastSeen,
+    assignedCategoryIds: parseAssignedCategoryIds(data),
   };
 }
 
@@ -223,8 +244,13 @@ export default function KdsSettingsPage() {
   const [editing, setEditing] = useState<KdsDevice | null>(null);
   const [deviceName, setDeviceName] = useState("");
   const [stationId, setStationId] = useState("");
+  const [modalAssignedCategoryIds, setModalAssignedCategoryIds] = useState<
+    string[]
+  >([]);
   const [saving, setSaving] = useState(false);
   const [deviceSaveError, setDeviceSaveError] = useState<string | null>(null);
+
+  const [menuCategories, setMenuCategories] = useState<MenuCategoryRow[]>([]);
 
   const [createStationOpen, setCreateStationOpen] = useState(false);
   const [newStationName, setNewStationName] = useState("");
@@ -272,6 +298,30 @@ export default function KdsSettingsPage() {
       (err) => {
         console.error("[KDS] stations listener:", err);
         setStationsLoading(false);
+      }
+    );
+    return () => unsub();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(
+      collection(db, CATEGORIES_COLLECTION),
+      (snap) => {
+        const list: MenuCategoryRow[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as Record<string, unknown>;
+          const name = String(data.name ?? "").trim();
+          if (name) list.push({ id: d.id, name });
+        });
+        list.sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+        );
+        setMenuCategories(list);
+      },
+      (err) => {
+        console.error("[KDS] categories listener:", err);
+        setMenuCategories([]);
       }
     );
     return () => unsub();
@@ -359,6 +409,7 @@ export default function KdsSettingsPage() {
     setDeviceName("");
     setDeviceSaveError(null);
     setStationId(stations[0]?.id ?? "");
+    setModalAssignedCategoryIds([]);
     setModalOpen(true);
   };
 
@@ -366,6 +417,7 @@ export default function KdsSettingsPage() {
     setDeviceSaveError(null);
     setEditing(d);
     setDeviceName(d.name);
+    setModalAssignedCategoryIds([...d.assignedCategoryIds]);
     setStationId(
       d.stationId ||
         (d.legacyStationName
@@ -431,6 +483,7 @@ export default function KdsSettingsPage() {
           stationId,
           station: deleteField(),
           registeredFromWeb: true,
+          assignedCategoryIds: modalAssignedCategoryIds,
           updatedAt: serverTimestamp(),
         });
         setModalOpen(false);
@@ -447,6 +500,7 @@ export default function KdsSettingsPage() {
           deviceType: "",
           isActive: true,
           registeredFromWeb: true,
+          assignedCategoryIds: modalAssignedCategoryIds,
           createdAt: serverTimestamp(),
         });
         setModalOpen(false);
@@ -621,6 +675,22 @@ export default function KdsSettingsPage() {
                           Last seen:{" "}
                           <span className="font-medium text-slate-700">{ago}</span>
                         </p>
+                        {d.assignedCategoryIds.length > 0 ? (
+                          <p className="text-xs text-slate-500 mt-1">
+                            Menu categories:{" "}
+                            <span className="font-medium text-slate-700">
+                              {d.assignedCategoryIds.length} selected
+                            </span>{" "}
+                            (only matching tickets on this KDS)
+                          </p>
+                        ) : (
+                          <p className="text-xs text-slate-500 mt-1">
+                            Menu categories:{" "}
+                            <span className="font-medium text-slate-700">
+                              All
+                            </span>
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-3 sm:shrink-0 pl-11 sm:pl-0">
@@ -918,6 +988,67 @@ export default function KdsSettingsPage() {
                   Add new station
                 </button>
               </div>
+
+              <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                <div className="flex items-start gap-3">
+                  <Layers
+                    size={20}
+                    className="text-slate-500 shrink-0 mt-0.5"
+                    aria-hidden
+                  />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div>
+                      <p className="font-medium text-slate-800">
+                        Categories on this KDS
+                      </p>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        Select one or more menu categories. This tablet will
+                        only show tickets that include at least one item from
+                        those categories. Leave none selected to show{" "}
+                        <span className="font-medium text-slate-600">
+                          all
+                        </span>{" "}
+                        tickets.
+                      </p>
+                    </div>
+                    {menuCategories.length === 0 ? (
+                      <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                        No categories found. Create categories and menu items
+                        under <span className="font-medium">Menu</span> first.
+                      </p>
+                    ) : (
+                      <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white px-2 py-2 space-y-1.5">
+                        {menuCategories.map((c) => {
+                          const checked = modalAssignedCategoryIds.includes(
+                            c.id
+                          );
+                          return (
+                            <label
+                              key={c.id}
+                              className="flex items-center gap-2.5 cursor-pointer rounded-md px-2 py-1.5 hover:bg-slate-50 text-sm text-slate-800"
+                            >
+                              <input
+                                type="checkbox"
+                                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                                checked={checked}
+                                onChange={() => {
+                                  setModalAssignedCategoryIds((prev) =>
+                                    checked
+                                      ? prev.filter((x) => x !== c.id)
+                                      : [...prev, c.id]
+                                  );
+                                }}
+                              />
+                              <span className="min-w-0">{c.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {editing &&
                 !editing.isPaired &&
                 editing.pairingCode && (
