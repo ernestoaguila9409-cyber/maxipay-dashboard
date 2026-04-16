@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   collection,
   updateDoc,
@@ -38,7 +39,6 @@ const KDS_DEVICES_COLLECTION = "kds_devices";
 const KDS_SETTINGS_DOC = "kds";
 const SETTINGS_COLLECTION = "Settings";
 const STATIONS_COLLECTION = "stations";
-const CATEGORIES_COLLECTION = "Categories";
 
 /** Kitchen station (Firestore `stations` collection). Document id is canonical [id]. */
 interface KitchenStation {
@@ -65,15 +65,12 @@ interface KdsDevice {
   /** Heartbeat from the KDS app (Firestore Timestamp). */
   lastSeen: Date | null;
   /**
-   * [Categories] document ids — tablet shows orders that include a line item from any of these categories.
-   * Empty = all orders (same as no filter).
+   * [Categories] document ids — tablet routing OR with [assignedItemIds].
+   * Empty with empty item ids = show all tickets.
    */
   assignedCategoryIds: string[];
-}
-
-interface MenuCategoryRow {
-  id: string;
-  name: string;
+  /** Explicit [MenuItems] ids — tablet routing OR with categories. */
+  assignedItemIds: string[];
 }
 
 type LiveStatus = "online" | "offline";
@@ -158,6 +155,14 @@ function parseAssignedCategoryIds(data: Record<string, unknown>): string[] {
     .filter((x) => x.length > 0);
 }
 
+function parseAssignedItemIds(data: Record<string, unknown>): string[] {
+  const raw = data.assignedItemIds;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x) => String(x ?? "").trim())
+    .filter((x) => x.length > 0);
+}
+
 function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
   const createdAt = parseFirestoreDate(data.createdAt);
   const lastSeen = parseFirestoreDate(data.lastSeen);
@@ -184,6 +189,7 @@ function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
     createdAt,
     lastSeen,
     assignedCategoryIds: parseAssignedCategoryIds(data),
+    assignedItemIds: parseAssignedItemIds(data),
   };
 }
 
@@ -231,6 +237,7 @@ function stationDisplayName(
 
 export default function KdsSettingsPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const [stations, setStations] = useState<KitchenStation[]>([]);
   const [stationsLoading, setStationsLoading] = useState(true);
   const [devices, setDevices] = useState<KdsDevice[]>([]);
@@ -244,13 +251,8 @@ export default function KdsSettingsPage() {
   const [editing, setEditing] = useState<KdsDevice | null>(null);
   const [deviceName, setDeviceName] = useState("");
   const [stationId, setStationId] = useState("");
-  const [modalAssignedCategoryIds, setModalAssignedCategoryIds] = useState<
-    string[]
-  >([]);
   const [saving, setSaving] = useState(false);
   const [deviceSaveError, setDeviceSaveError] = useState<string | null>(null);
-
-  const [menuCategories, setMenuCategories] = useState<MenuCategoryRow[]>([]);
 
   const [createStationOpen, setCreateStationOpen] = useState(false);
   const [newStationName, setNewStationName] = useState("");
@@ -298,30 +300,6 @@ export default function KdsSettingsPage() {
       (err) => {
         console.error("[KDS] stations listener:", err);
         setStationsLoading(false);
-      }
-    );
-    return () => unsub();
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
-    const unsub = onSnapshot(
-      collection(db, CATEGORIES_COLLECTION),
-      (snap) => {
-        const list: MenuCategoryRow[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as Record<string, unknown>;
-          const name = String(data.name ?? "").trim();
-          if (name) list.push({ id: d.id, name });
-        });
-        list.sort((a, b) =>
-          a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
-        );
-        setMenuCategories(list);
-      },
-      (err) => {
-        console.error("[KDS] categories listener:", err);
-        setMenuCategories([]);
       }
     );
     return () => unsub();
@@ -409,7 +387,6 @@ export default function KdsSettingsPage() {
     setDeviceName("");
     setDeviceSaveError(null);
     setStationId(stations[0]?.id ?? "");
-    setModalAssignedCategoryIds([]);
     setModalOpen(true);
   };
 
@@ -417,7 +394,6 @@ export default function KdsSettingsPage() {
     setDeviceSaveError(null);
     setEditing(d);
     setDeviceName(d.name);
-    setModalAssignedCategoryIds([...d.assignedCategoryIds]);
     setStationId(
       d.stationId ||
         (d.legacyStationName
@@ -483,7 +459,6 @@ export default function KdsSettingsPage() {
           stationId,
           station: deleteField(),
           registeredFromWeb: true,
-          assignedCategoryIds: modalAssignedCategoryIds,
           updatedAt: serverTimestamp(),
         });
         setModalOpen(false);
@@ -500,7 +475,8 @@ export default function KdsSettingsPage() {
           deviceType: "",
           isActive: true,
           registeredFromWeb: true,
-          assignedCategoryIds: modalAssignedCategoryIds,
+          assignedCategoryIds: [],
+          assignedItemIds: [],
           createdAt: serverTimestamp(),
         });
         setModalOpen(false);
@@ -675,19 +651,26 @@ export default function KdsSettingsPage() {
                           Last seen:{" "}
                           <span className="font-medium text-slate-700">{ago}</span>
                         </p>
-                        {d.assignedCategoryIds.length > 0 ? (
+                        {d.assignedCategoryIds.length > 0 ||
+                        d.assignedItemIds.length > 0 ? (
                           <p className="text-xs text-slate-500 mt-1">
-                            Menu categories:{" "}
+                            Assignment:{" "}
                             <span className="font-medium text-slate-700">
-                              {d.assignedCategoryIds.length} selected
+                              {d.assignedCategoryIds.length} categor
+                              {d.assignedCategoryIds.length === 1 ? "y" : "ies"}
+                            </span>
+                            {", "}
+                            <span className="font-medium text-slate-700">
+                              {d.assignedItemIds.length} item
+                              {d.assignedItemIds.length === 1 ? "" : "s"}
                             </span>{" "}
-                            (only matching tickets on this KDS)
+                            (filtered on tablet)
                           </p>
                         ) : (
                           <p className="text-xs text-slate-500 mt-1">
-                            Menu categories:{" "}
+                            Assignment:{" "}
                             <span className="font-medium text-slate-700">
-                              All
+                              All menu items
                             </span>
                           </p>
                         )}
@@ -996,54 +979,61 @@ export default function KdsSettingsPage() {
                     className="text-slate-500 shrink-0 mt-0.5"
                     aria-hidden
                   />
-                  <div className="min-w-0 flex-1 space-y-2">
+                  <div className="min-w-0 flex-1 space-y-3">
                     <div>
                       <p className="font-medium text-slate-800">
-                        Categories on this KDS
+                        Menu assignment
                       </p>
                       <p className="text-sm text-slate-500 mt-0.5">
-                        Select one or more menu categories. This tablet will
-                        only show tickets that include at least one item from
-                        those categories. Leave none selected to show{" "}
-                        <span className="font-medium text-slate-600">
-                          all
-                        </span>{" "}
-                        tickets.
+                        Choose which categories and items this tablet should
+                        receive. Full categories select every item inside; you
+                        can still toggle individual items on the assignment
+                        screen.
                       </p>
                     </div>
-                    {menuCategories.length === 0 ? (
-                      <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                        No categories found. Create categories and menu items
-                        under <span className="font-medium">Menu</span> first.
-                      </p>
+                    {editing ? (
+                      <>
+                        <p className="text-xs text-slate-600">
+                          Current:{" "}
+                          <span className="font-semibold text-slate-800">
+                            {editing.assignedCategoryIds.length}
+                          </span>{" "}
+                          categor
+                          {editing.assignedCategoryIds.length === 1 ? "y" : "ies"}
+                          ,{" "}
+                          <span className="font-semibold text-slate-800">
+                            {editing.assignedItemIds.length}
+                          </span>{" "}
+                          explicit item
+                          {editing.assignedItemIds.length === 1 ? "" : "s"}
+                          {(editing.assignedCategoryIds.length === 0 &&
+                            editing.assignedItemIds.length === 0) ? (
+                            <span className="text-slate-500">
+                              {" "}
+                              (all tickets)
+                            </span>
+                          ) : null}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalOpen(false);
+                            router.push(
+                              `/dashboard/settings/kds/${editing.id}/assign-items`
+                            );
+                          }}
+                          className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
+                        >
+                          Assign Items
+                        </button>
+                      </>
                     ) : (
-                      <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white px-2 py-2 space-y-1.5">
-                        {menuCategories.map((c) => {
-                          const checked = modalAssignedCategoryIds.includes(
-                            c.id
-                          );
-                          return (
-                            <label
-                              key={c.id}
-                              className="flex items-center gap-2.5 cursor-pointer rounded-md px-2 py-1.5 hover:bg-slate-50 text-sm text-slate-800"
-                            >
-                              <input
-                                type="checkbox"
-                                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
-                                checked={checked}
-                                onChange={() => {
-                                  setModalAssignedCategoryIds((prev) =>
-                                    checked
-                                      ? prev.filter((x) => x !== c.id)
-                                      : [...prev, c.id]
-                                  );
-                                }}
-                              />
-                              <span className="min-w-0">{c.name}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
+                      <p className="text-xs text-slate-600 bg-white/80 border border-slate-200 rounded-lg px-3 py-2">
+                        After you save this device, open{" "}
+                        <span className="font-medium">Edit</span> and use{" "}
+                        <span className="font-medium">Assign Items</span> to
+                        configure categories and menu lines.
+                      </p>
                     )}
                   </div>
                 </div>
