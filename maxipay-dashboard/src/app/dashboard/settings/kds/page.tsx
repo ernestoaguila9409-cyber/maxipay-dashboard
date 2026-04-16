@@ -28,6 +28,7 @@ import {
   LayoutGrid,
   Palette,
   Timer,
+  AlarmClock,
   Copy,
   Check,
 } from "lucide-react";
@@ -100,12 +101,41 @@ interface KdsDisplaySettings {
   orderTypeColorsEnabled: boolean;
   gridColumns: 2 | 3;
   showTimers: boolean;
+  ticketYellowAfterMinutes: number;
+  ticketRedAfterMinutes: number;
+}
+
+const MAX_TICKET_URGENCY_MINUTES = 24 * 60;
+const DEFAULT_TICKET_YELLOW_AFTER_MINUTES = 5;
+const DEFAULT_TICKET_RED_AFTER_MINUTES = 10;
+
+function parseFirestoreTicketMinutes(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.round(value);
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = parseInt(value, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
+function normalizeTicketUrgencyForState(
+  yellow: number,
+  red: number
+): Pick<KdsDisplaySettings, "ticketYellowAfterMinutes" | "ticketRedAfterMinutes"> {
+  let y = Math.max(0, Math.min(MAX_TICKET_URGENCY_MINUTES, Math.round(yellow)));
+  let r = Math.max(0, Math.min(MAX_TICKET_URGENCY_MINUTES, Math.round(red)));
+  if (r < y) r = y;
+  return { ticketYellowAfterMinutes: y, ticketRedAfterMinutes: r };
 }
 
 const defaultDisplaySettings: KdsDisplaySettings = {
   orderTypeColorsEnabled: true,
   gridColumns: 3,
   showTimers: true,
+  ticketYellowAfterMinutes: DEFAULT_TICKET_YELLOW_AFTER_MINUTES,
+  ticketRedAfterMinutes: DEFAULT_TICKET_RED_AFTER_MINUTES,
 };
 
 function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
@@ -298,11 +328,21 @@ export default function KdsSettingsPage() {
           return;
         }
         const data = snap.data();
+        const rawY = parseFirestoreTicketMinutes(
+          data?.ticketYellowAfterMinutes,
+          DEFAULT_TICKET_YELLOW_AFTER_MINUTES
+        );
+        const rawR = parseFirestoreTicketMinutes(
+          data?.ticketRedAfterMinutes,
+          DEFAULT_TICKET_RED_AFTER_MINUTES
+        );
+        const urgency = normalizeTicketUrgencyForState(rawY, rawR);
         setDisplaySettings({
           orderTypeColorsEnabled:
             data.orderTypeColorsEnabled !== false,
           gridColumns: 3,
           showTimers: data.showTimers !== false,
+          ...urgency,
         });
         setDisplayLoading(false);
       },
@@ -455,6 +495,8 @@ export default function KdsSettingsPage() {
             orderTypeColorsEnabled: next.orderTypeColorsEnabled,
             gridColumns: next.gridColumns,
             showTimers: next.showTimers,
+            ticketYellowAfterMinutes: next.ticketYellowAfterMinutes,
+            ticketRedAfterMinutes: next.ticketRedAfterMinutes,
             updatedAt: serverTimestamp(),
           },
           { merge: true }
@@ -469,7 +511,12 @@ export default function KdsSettingsPage() {
   );
 
   const updateDisplay = (partial: Partial<KdsDisplaySettings>) => {
-    const next = { ...displaySettings, ...partial };
+    const merged = { ...displaySettings, ...partial };
+    const urgency = normalizeTicketUrgencyForState(
+      merged.ticketYellowAfterMinutes,
+      merged.ticketRedAfterMinutes
+    );
+    const next = { ...merged, ...urgency };
     setDisplaySettings(next);
     void persistDisplaySettings(next);
   };
@@ -679,6 +726,87 @@ export default function KdsSettingsPage() {
                   disabled={savingDisplay}
                 />
               </label>
+
+              <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                <div className="flex items-start gap-3">
+                  <AlarmClock
+                    size={20}
+                    className="text-slate-500 shrink-0 mt-0.5"
+                    aria-hidden
+                  />
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <div>
+                      <p className="font-medium text-slate-800">
+                        Ticket urgency (elapsed time)
+                      </p>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        Incoming tickets start with a white body, then turn
+                        yellow, then red. Red is never earlier than yellow.
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                      <div className="flex-1 min-w-0">
+                        <label
+                          htmlFor="kds-ticket-yellow-after"
+                          className="block text-xs font-medium text-slate-600 mb-1"
+                        >
+                          Yellow after (minutes)
+                        </label>
+                        <input
+                          id="kds-ticket-yellow-after"
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          max={MAX_TICKET_URGENCY_MINUTES}
+                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                          value={displaySettings.ticketYellowAfterMinutes}
+                          onChange={(e) => {
+                            const t = e.target.value;
+                            if (t === "") {
+                              updateDisplay({
+                                ticketYellowAfterMinutes: 0,
+                              });
+                              return;
+                            }
+                            const n = parseInt(t, 10);
+                            if (!Number.isFinite(n)) return;
+                            updateDisplay({ ticketYellowAfterMinutes: n });
+                          }}
+                          disabled={savingDisplay}
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <label
+                          htmlFor="kds-ticket-red-after"
+                          className="block text-xs font-medium text-slate-600 mb-1"
+                        >
+                          Red after (minutes)
+                        </label>
+                        <input
+                          id="kds-ticket-red-after"
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          max={MAX_TICKET_URGENCY_MINUTES}
+                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                          value={displaySettings.ticketRedAfterMinutes}
+                          onChange={(e) => {
+                            const t = e.target.value;
+                            if (t === "") {
+                              updateDisplay({ ticketRedAfterMinutes: 0 });
+                              return;
+                            }
+                            const n = parseInt(t, 10);
+                            if (!Number.isFinite(n)) return;
+                            updateDisplay({ ticketRedAfterMinutes: n });
+                          }}
+                          disabled={savingDisplay}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>

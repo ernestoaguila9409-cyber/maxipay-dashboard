@@ -4,6 +4,24 @@ export interface KdsPreviewDisplaySettings {
   orderTypeColorsEnabled: boolean;
   gridColumns?: 2 | 3;
   showTimers: boolean;
+  /** Minutes elapsed before ticket body turns yellow (default 5). */
+  ticketYellowAfterMinutes?: number;
+  /** Minutes elapsed before ticket body turns red (default 10; never before yellow). */
+  ticketRedAfterMinutes?: number;
+}
+
+const DEFAULT_YELLOW_AFTER = 5;
+const DEFAULT_RED_AFTER = 10;
+const MAX_URGENCY_MINUTES = 24 * 60;
+
+function normalizedTicketUrgencyMinutes(
+  yellow: number,
+  red: number
+): { yellow: number; red: number } {
+  let y = Math.max(0, Math.min(MAX_URGENCY_MINUTES, Math.round(yellow)));
+  let r = Math.max(0, Math.min(MAX_URGENCY_MINUTES, Math.round(red)));
+  if (r < y) r = y;
+  return { yellow: y, red: r };
 }
 
 /** Mirrors Android [KdsColorPalette]. */
@@ -72,9 +90,13 @@ function formatOrderTypeLabel(type: string): string {
   return type;
 }
 
-function getUrgencyBg(minutes: number): string {
-  if (minutes >= 10) return "#FFCDD2";
-  if (minutes >= 5) return "#FFF9C4";
+function getUrgencyBg(
+  minutes: number,
+  yellowAfter: number,
+  redAfter: number
+): string {
+  if (minutes >= redAfter) return "#FFCDD2";
+  if (minutes >= yellowAfter) return "#FFF9C4";
   return "#FFFFFF";
 }
 
@@ -151,6 +173,11 @@ export function KdsPreview({
   displaySettings: KdsPreviewDisplaySettings;
   moduleColorKeys?: Record<string, string>;
 }) {
+  const { yellow: yellowAfter, red: redAfter } = normalizedTicketUrgencyMinutes(
+    displaySettings.ticketYellowAfterMinutes ?? DEFAULT_YELLOW_AFTER,
+    displaySettings.ticketRedAfterMinutes ?? DEFAULT_RED_AFTER
+  );
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       {/* Tablet bezel + screen */}
@@ -173,7 +200,11 @@ export function KdsPreview({
                   );
                   const elapsedMs = order.elapsedMs;
                   const elapsedMin = Math.floor(elapsedMs / 60_000);
-                  const urgencyBg = getUrgencyBg(elapsedMin);
+                  const urgencyBg = getUrgencyBg(
+                    elapsedMin,
+                    yellowAfter,
+                    redAfter
+                  );
                   const headerTime = order.headerTime;
 
                   return (
