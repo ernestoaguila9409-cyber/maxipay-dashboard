@@ -22,7 +22,15 @@ import {
   type MenuItemForKds,
   type ScheduleAssignmentSection,
 } from "@/lib/kdsMenuAssignment";
-import { ArrowLeft, Search, Layers, UtensilsCrossed, Calendar } from "lucide-react";
+import {
+  ArrowLeft,
+  Search,
+  Layers,
+  UtensilsCrossed,
+  Calendar,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 
 const KDS_DEVICES_COLLECTION = "kds_devices";
 const CATEGORIES_COLLECTION = "Categories";
@@ -67,6 +75,11 @@ export default function KdsAssignItemsPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveOk, setSaveOk] = useState(false);
+
+  /** Per schedule card: expanded (default true). */
+  const [sectionExpanded, setSectionExpanded] = useState<Record<string, boolean>>(
+    {}
+  );
 
   useEffect(() => {
     if (!user || !deviceId) {
@@ -170,8 +183,6 @@ export default function KdsAssignItemsPage() {
     );
   }, [assignedCategoryIds, assignedItemIds, menuItems, dirty]);
 
-  const searchLower = search.trim().toLowerCase();
-
   const scheduleSections = useMemo((): ScheduleAssignmentSection[] => {
     if (schedules.length === 0 && categories.length > 0) {
       return [
@@ -199,6 +210,34 @@ export default function KdsAssignItemsPage() {
     }
     return built;
   }, [schedules, categories, menuItems]);
+
+  useEffect(() => {
+    setSectionExpanded((prev) => {
+      const next = { ...prev };
+      const ids = new Set(scheduleSections.map((s) => s.id));
+      for (const s of scheduleSections) {
+        if (next[s.id] === undefined) next[s.id] = true;
+      }
+      for (const key of Object.keys(next)) {
+        if (!ids.has(key)) delete next[key];
+      }
+      return next;
+    });
+  }, [scheduleSections]);
+
+  const searchLower = search.trim().toLowerCase();
+
+  const isSectionExpanded = useCallback(
+    (sectionId: string) => sectionExpanded[sectionId] !== false,
+    [sectionExpanded]
+  );
+
+  const toggleSectionExpanded = (sectionId: string) => {
+    setSectionExpanded((prev) => ({
+      ...prev,
+      [sectionId]: !(prev[sectionId] !== false),
+    }));
+  };
 
   const filterCategory = useCallback(
     (c: CategoryRow) => {
@@ -272,7 +311,17 @@ export default function KdsAssignItemsPage() {
   const selectAllItems = () => {
     setDirty(true);
     setSaveOk(false);
-    setSelectedItemIds(new Set(menuItems.map((it) => it.id)));
+    const allIds = new Set<string>();
+    for (const it of menuItems) allIds.add(it.id);
+    for (const sec of scheduleSections) {
+      for (const it of sec.items) allIds.add(it.id);
+    }
+    setSelectedItemIds(allIds);
+    setSectionExpanded((prev) => {
+      const next = { ...prev };
+      for (const s of scheduleSections) next[s.id] = true;
+      return next;
+    });
   };
 
   const clearSelection = () => {
@@ -424,20 +473,34 @@ export default function KdsAssignItemsPage() {
             {scheduleSections.map((section) => {
               const filteredCats = section.categories.filter(filterCategory);
               const filteredSecItems = section.items.filter(filterItem);
+              const expanded = isSectionExpanded(section.id);
               return (
                 <div
                   key={section.id}
                   className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
                 >
-                  <div className="flex items-center gap-2 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white px-4 py-3 sm:px-5">
+                  <button
+                    type="button"
+                    onClick={() => toggleSectionExpanded(section.id)}
+                    className="flex w-full items-center gap-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white px-4 py-3 text-left transition-colors hover:bg-slate-100/60 sm:px-5"
+                    aria-expanded={expanded}
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600">
+                      {expanded ? (
+                        <ChevronDown className="h-4 w-4" aria-hidden />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" aria-hidden />
+                      )}
+                    </span>
                     <Calendar className="h-5 w-5 shrink-0 text-blue-600" aria-hidden />
-                    <h2 className="text-base font-semibold text-slate-900">
+                    <h2 className="min-w-0 flex-1 text-base font-semibold text-slate-900">
                       {section.name}
                     </h2>
-                    <span className="ml-auto text-xs font-medium text-slate-400">
+                    <span className="shrink-0 text-xs font-medium text-slate-400">
                       {filteredCats.length} cat · {filteredSecItems.length} items
                     </span>
-                  </div>
+                  </button>
+                  {expanded ? (
                   <div className="grid min-h-[200px] gap-4 p-4 lg:grid-cols-2 lg:p-5">
                     <div className="flex min-h-0 flex-col rounded-xl border border-slate-100 bg-slate-50/40">
                       <div className="flex items-center gap-2 border-b border-slate-100/80 px-3 py-2.5">
@@ -527,6 +590,7 @@ export default function KdsAssignItemsPage() {
                       </div>
                     </div>
                   </div>
+                  ) : null}
                 </div>
               );
             })}
