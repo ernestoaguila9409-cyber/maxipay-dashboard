@@ -76,7 +76,7 @@ export default function KdsAssignItemsPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveOk, setSaveOk] = useState(false);
 
-  /** Per schedule card: expanded (default true). */
+  /** Per schedule card: only `true` means expanded (default collapsed). */
   const [sectionExpanded, setSectionExpanded] = useState<Record<string, boolean>>(
     {}
   );
@@ -215,9 +215,6 @@ export default function KdsAssignItemsPage() {
     setSectionExpanded((prev) => {
       const next = { ...prev };
       const ids = new Set(scheduleSections.map((s) => s.id));
-      for (const s of scheduleSections) {
-        if (next[s.id] === undefined) next[s.id] = true;
-      }
       for (const key of Object.keys(next)) {
         if (!ids.has(key)) delete next[key];
       }
@@ -228,14 +225,14 @@ export default function KdsAssignItemsPage() {
   const searchLower = search.trim().toLowerCase();
 
   const isSectionExpanded = useCallback(
-    (sectionId: string) => sectionExpanded[sectionId] !== false,
+    (sectionId: string) => sectionExpanded[sectionId] === true,
     [sectionExpanded]
   );
 
   const toggleSectionExpanded = (sectionId: string) => {
     setSectionExpanded((prev) => ({
       ...prev,
-      [sectionId]: !(prev[sectionId] !== false),
+      [sectionId]: !(prev[sectionId] === true),
     }));
   };
 
