@@ -10,7 +10,6 @@ import {
   onSnapshot,
   serverTimestamp,
   setDoc,
-  deleteField,
 } from "firebase/firestore";
 import { FirebaseError } from "firebase/app";
 import { db } from "@/firebase/firebaseConfig";
@@ -38,22 +37,9 @@ import {
 const KDS_DEVICES_COLLECTION = "kds_devices";
 const KDS_SETTINGS_DOC = "kds";
 const SETTINGS_COLLECTION = "Settings";
-const STATIONS_COLLECTION = "stations";
-
-/** Kitchen station (Firestore `stations` collection). Document id is canonical [id]. */
-interface KitchenStation {
-  id: string;
-  name: string;
-  color: string;
-  createdAt: Date | null;
-}
-
 interface KdsDevice {
   id: string;
   name: string;
-  stationId: string;
-  /** Legacy field when devices only stored a display name in `station`. */
-  legacyStationName?: string;
   /** Six-digit code for tablet pairing; removed from doc after pair. */
   pairingCode: string | null;
   isPaired: boolean;
@@ -166,11 +152,6 @@ function parseAssignedItemIds(data: Record<string, unknown>): string[] {
 function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
   const createdAt = parseFirestoreDate(data.createdAt);
   const lastSeen = parseFirestoreDate(data.lastSeen);
-  const stationId = String(data.stationId ?? "");
-  const legacy =
-    typeof data.station === "string" && data.station.trim() !== ""
-      ? data.station.trim()
-      : undefined;
   const rawCode = data.pairingCode;
   const pairingCode =
     typeof rawCode === "string" && /^\d{6}$/.test(rawCode) ? rawCode : null;
@@ -179,8 +160,6 @@ function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
   return {
     id,
     name: String(data.name ?? ""),
-    stationId,
-    legacyStationName: legacy,
     pairingCode,
     isPaired,
     deviceType: String(data.deviceType ?? "").trim(),
@@ -214,32 +193,9 @@ function generatePairingCode(): string {
   return String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
 }
 
-function parseStation(docId: string, data: Record<string, unknown>): KitchenStation {
-  return {
-    id: String(data.id ?? docId),
-    name: String(data.name ?? "").trim() || "Unnamed station",
-    color: String(data.color ?? "").trim() || "#94a3b8",
-    createdAt: parseFirestoreDate(data.createdAt),
-  };
-}
-
-function stationDisplayName(
-  device: KdsDevice,
-  stations: KitchenStation[]
-): string {
-  if (device.stationId) {
-    const s = stations.find((x) => x.id === device.stationId);
-    if (s) return s.name;
-    return "Unknown station";
-  }
-  return device.legacyStationName ?? "—";
-}
-
 export default function KdsSettingsPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const [stations, setStations] = useState<KitchenStation[]>([]);
-  const [stationsLoading, setStationsLoading] = useState(true);
   const [devices, setDevices] = useState<KdsDevice[]>([]);
   const [loading, setLoading] = useState(true);
   const [displaySettings, setDisplaySettings] = useState<KdsDisplaySettings>(
@@ -250,14 +206,8 @@ export default function KdsSettingsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<KdsDevice | null>(null);
   const [deviceName, setDeviceName] = useState("");
-  const [stationId, setStationId] = useState("");
   const [saving, setSaving] = useState(false);
   const [deviceSaveError, setDeviceSaveError] = useState<string | null>(null);
-
-  const [createStationOpen, setCreateStationOpen] = useState(false);
-  const [newStationName, setNewStationName] = useState("");
-  const [newStationColor, setNewStationColor] = useState("#94a3b8");
-  const [savingStation, setSavingStation] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<KdsDevice | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -281,29 +231,6 @@ export default function KdsSettingsPage() {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
-
-  useEffect(() => {
-    if (!user) return;
-    const unsub = onSnapshot(
-      collection(db, STATIONS_COLLECTION),
-      (snap) => {
-        const list: KitchenStation[] = [];
-        snap.forEach((d) => {
-          list.push(parseStation(d.id, d.data() as Record<string, unknown>));
-        });
-        list.sort((a, b) =>
-          a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
-        );
-        setStations(list);
-        setStationsLoading(false);
-      },
-      (err) => {
-        console.error("[KDS] stations listener:", err);
-        setStationsLoading(false);
-      }
-    );
-    return () => unsub();
-  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -386,7 +313,6 @@ export default function KdsSettingsPage() {
     setEditing(null);
     setDeviceName("");
     setDeviceSaveError(null);
-    setStationId(stations[0]?.id ?? "");
     setModalOpen(true);
   };
 
@@ -394,46 +320,7 @@ export default function KdsSettingsPage() {
     setDeviceSaveError(null);
     setEditing(d);
     setDeviceName(d.name);
-    setStationId(
-      d.stationId ||
-        (d.legacyStationName
-          ? stations.find(
-              (s) =>
-                s.name.toLowerCase() === d.legacyStationName!.toLowerCase()
-            )?.id ?? ""
-          : "")
-    );
     setModalOpen(true);
-  };
-
-  const openCreateStation = () => {
-    setNewStationName("");
-    setNewStationColor("#94a3b8");
-    setCreateStationOpen(true);
-  };
-
-  const handleSaveNewStation = async () => {
-    const trimmed = newStationName.trim();
-    if (!trimmed) return;
-    setSavingStation(true);
-    try {
-      const colRef = collection(db, STATIONS_COLLECTION);
-      const docRef = doc(colRef);
-      let hex = newStationColor.trim().replace(/^#/, "");
-      if (!/^[0-9A-Fa-f]{6}$/.test(hex)) hex = "94a3b8";
-      await setDoc(docRef, {
-        id: docRef.id,
-        name: trimmed,
-        color: `#${hex}`,
-        createdAt: serverTimestamp(),
-      });
-      setStationId(docRef.id);
-      setCreateStationOpen(false);
-    } catch (err) {
-      console.error("[KDS] create station failed:", err);
-    } finally {
-      setSavingStation(false);
-    }
   };
 
   const handleSaveDevice = async () => {
@@ -443,21 +330,11 @@ export default function KdsSettingsPage() {
       setDeviceSaveError("Enter a device name.");
       return;
     }
-    if (stations.length === 0) {
-      setDeviceSaveError("Add at least one station first.");
-      return;
-    }
-    if (!stationId) {
-      setDeviceSaveError("Select a station from the list.");
-      return;
-    }
     setSaving(true);
     try {
       if (editing) {
         await updateDoc(doc(db, KDS_DEVICES_COLLECTION, editing.id), {
           name: trimmed,
-          stationId,
-          station: deleteField(),
           registeredFromWeb: true,
           updatedAt: serverTimestamp(),
         });
@@ -469,7 +346,6 @@ export default function KdsSettingsPage() {
         await setDoc(docRef, {
           id: docRef.id,
           name: trimmed,
-          stationId,
           pairingCode,
           isPaired: false,
           deviceType: "",
@@ -627,16 +503,9 @@ export default function KdsSettingsPage() {
                           {d.name || "Unnamed device"}
                         </p>
                         <p className="text-sm text-slate-500">
-                          Station:{" "}
-                          <span className="text-slate-700">
-                            {stationDisplayName(d, stations)}
-                          </span>
-                          {" · "}
-                          <span className="text-slate-600">
-                            Model:{" "}
-                            <span className="text-slate-700 font-medium">
-                              {d.deviceModel || d.deviceType || "—"}
-                            </span>
+                          Model:{" "}
+                          <span className="text-slate-700 font-medium">
+                            {d.deviceModel || d.deviceType || "—"}
                           </span>
                         </p>
                         {!d.isPaired && d.pairingCode && (
@@ -933,45 +802,6 @@ export default function KdsSettingsPage() {
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Station
-                </label>
-                {stationsLoading ? (
-                  <div className="flex justify-center py-6">
-                    <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin" />
-                  </div>
-                ) : stations.length === 0 ? (
-                  <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2.5">
-                    No stations yet. Add one below to link this device.
-                  </p>
-                ) : (
-                  <select
-                    value={stationId}
-                    onChange={(e) => {
-                      setDeviceSaveError(null);
-                      setStationId(e.target.value);
-                    }}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">Select station…</option>
-                    {stations.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <button
-                  type="button"
-                  onClick={openCreateStation}
-                  className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-dashed border-slate-300 text-sm font-medium text-blue-700 hover:bg-blue-50/80 transition-colors"
-                >
-                  <Plus size={16} />
-                  Add new station
-                </button>
-              </div>
-
               <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
                 <div className="flex items-start gap-3">
                   <Layers
@@ -1074,13 +904,7 @@ export default function KdsSettingsPage() {
               <button
                 type="button"
                 onClick={handleSaveDevice}
-                disabled={
-                  saving ||
-                  !deviceName.trim() ||
-                  stationsLoading ||
-                  stations.length === 0 ||
-                  !stationId
-                }
+                disabled={saving || !deviceName.trim()}
                 className="px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {saving ? "Saving…" : "Save"}
@@ -1148,91 +972,6 @@ export default function KdsSettingsPage() {
                 className="px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
               >
                 Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Create station (from device modal) */}
-      {createStationOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
-          <div
-            className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="kds-new-station-title"
-          >
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <h3
-                id="kds-new-station-title"
-                className="font-semibold text-slate-800"
-              >
-                New station
-              </h3>
-              <button
-                type="button"
-                onClick={() => setCreateStationOpen(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                aria-label="Close"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Station name
-                </label>
-                <input
-                  type="text"
-                  value={newStationName}
-                  onChange={(e) => setNewStationName(e.target.value)}
-                  placeholder="e.g. Grill, Expo"
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Color <span className="font-normal text-slate-500">(optional)</span>
-                </label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="color"
-                    value={
-                      newStationColor.startsWith("#")
-                        ? newStationColor
-                        : `#${newStationColor}`
-                    }
-                    onChange={(e) => setNewStationColor(e.target.value)}
-                    className="h-10 w-14 rounded-lg border border-slate-200 cursor-pointer bg-white shrink-0"
-                    aria-label="Station color"
-                  />
-                  <input
-                    type="text"
-                    value={newStationColor}
-                    onChange={(e) => setNewStationColor(e.target.value)}
-                    placeholder="#94a3b8"
-                    className="flex-1 min-w-0 px-3 py-2.5 rounded-xl border border-slate-200 text-slate-800 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 px-5 py-4 bg-slate-50 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setCreateStationOpen(false)}
-                className="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-200/80 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveNewStation}
-                disabled={savingStation || !newStationName.trim()}
-                className="px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {savingStation ? "Saving…" : "Save station"}
               </button>
             </div>
           </div>
