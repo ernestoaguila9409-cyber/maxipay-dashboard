@@ -20,6 +20,11 @@ import {
   parseDashboardModuleColorKeys,
 } from "@/components/KdsPreview";
 import {
+  effectiveAssignedMenuItemCount,
+  parseMenuItemForKds,
+  type MenuItemForKds,
+} from "@/lib/kdsMenuAssignment";
+import {
   Plus,
   Pencil,
   Trash2,
@@ -37,6 +42,7 @@ import {
 const KDS_DEVICES_COLLECTION = "kds_devices";
 const KDS_SETTINGS_DOC = "kds";
 const SETTINGS_COLLECTION = "Settings";
+const MENU_ITEMS_COLLECTION = "MenuItems";
 interface KdsDevice {
   id: string;
   name: string;
@@ -198,6 +204,9 @@ export default function KdsSettingsPage() {
   const router = useRouter();
   const [devices, setDevices] = useState<KdsDevice[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Used to show correct “N items” when assignment uses full categories (compact Firestore). */
+  const [menuItemsCatalog, setMenuItemsCatalog] = useState<MenuItemForKds[]>([]);
+  const [menuCatalogReady, setMenuCatalogReady] = useState(false);
   const [displaySettings, setDisplaySettings] = useState<KdsDisplaySettings>(
     defaultDisplaySettings
   );
@@ -254,6 +263,31 @@ export default function KdsSettingsPage() {
       (err) => {
         console.error("[KDS] devices listener:", err);
         setLoading(false);
+      }
+    );
+    return () => unsub();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setMenuItemsCatalog([]);
+      setMenuCatalogReady(false);
+      return;
+    }
+    const unsub = onSnapshot(
+      collection(db, MENU_ITEMS_COLLECTION),
+      (snap) => {
+        const list: MenuItemForKds[] = [];
+        snap.forEach((d) => {
+          const row = parseMenuItemForKds(d.id, d.data() as Record<string, unknown>);
+          if (row) list.push(row);
+        });
+        setMenuItemsCatalog(list);
+        setMenuCatalogReady(true);
+      },
+      (err) => {
+        console.error("[KDS] menu items (assignment count):", err);
+        setMenuCatalogReady(true);
       }
     );
     return () => unsub();
@@ -443,6 +477,16 @@ export default function KdsSettingsPage() {
     };
   };
 
+  const editModalMenuItemCount =
+    modalOpen && editing
+      ? effectiveAssignedMenuItemCount(
+          editing.assignedCategoryIds,
+          editing.assignedItemIds,
+          menuItemsCatalog,
+          menuCatalogReady
+        )
+      : null;
+
   return (
     <>
       <Header title="KDS" />
@@ -489,6 +533,12 @@ export default function KdsSettingsPage() {
                 const live = getLiveStatus(d.lastSeen, nowMs);
                 const badge = statusBadge(live);
                 const ago = formatLastSeenAgo(d.lastSeen, nowMs);
+                const assignedItemTotal = effectiveAssignedMenuItemCount(
+                  d.assignedCategoryIds,
+                  d.assignedItemIds,
+                  menuItemsCatalog,
+                  menuCatalogReady
+                );
                 return (
                   <li
                     key={d.id}
@@ -530,8 +580,11 @@ export default function KdsSettingsPage() {
                             </span>
                             {", "}
                             <span className="font-medium text-slate-700">
-                              {d.assignedItemIds.length} item
-                              {d.assignedItemIds.length === 1 ? "" : "s"}
+                              {assignedItemTotal === null
+                                ? "…"
+                                : assignedItemTotal}{" "}
+                              menu item
+                              {assignedItemTotal === 1 ? "" : "s"}
                             </span>{" "}
                             (filtered on tablet)
                           </p>
@@ -832,10 +885,12 @@ export default function KdsSettingsPage() {
                           {editing.assignedCategoryIds.length === 1 ? "y" : "ies"}
                           ,{" "}
                           <span className="font-semibold text-slate-800">
-                            {editing.assignedItemIds.length}
+                            {editModalMenuItemCount === null
+                              ? "…"
+                              : editModalMenuItemCount}
                           </span>{" "}
-                          explicit item
-                          {editing.assignedItemIds.length === 1 ? "" : "s"}
+                          menu item
+                          {editModalMenuItemCount === 1 ? "" : "s"}
                           {(editing.assignedCategoryIds.length === 0 &&
                             editing.assignedItemIds.length === 0) ? (
                             <span className="text-slate-500">

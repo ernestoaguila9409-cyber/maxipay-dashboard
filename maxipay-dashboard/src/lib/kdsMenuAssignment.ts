@@ -83,6 +83,27 @@ export function deriveSelectedItemIdsFromDevice(
   return sel;
 }
 
+/**
+ * How many [MenuItems] rows match the device (same expansion as the tablet).
+ * Full categories are stored only in `assignedCategoryIds`; this counts every line included.
+ *
+ * @param menuCatalogReady pass false until the MenuItems listener has fired at least once
+ *        so we do not show "0" while the catalog is still loading.
+ */
+export function effectiveAssignedMenuItemCount(
+  assignedCategoryIds: string[],
+  assignedItemIds: string[],
+  menuItems: MenuItemForKds[],
+  menuCatalogReady: boolean
+): number | null {
+  if (assignedCategoryIds.length > 0 && !menuCatalogReady) return null;
+  return deriveSelectedItemIdsFromDevice(
+    assignedCategoryIds,
+    assignedItemIds,
+    menuItems
+  ).size;
+}
+
 export interface CategoryRow {
   id: string;
   name: string;
