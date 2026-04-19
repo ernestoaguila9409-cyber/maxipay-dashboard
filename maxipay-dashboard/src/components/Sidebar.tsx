@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
+  Activity,
   ClipboardList,
   UtensilsCrossed,
   SlidersHorizontal,
@@ -39,6 +40,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Sales activity", href: "/dashboard/sales-activity", icon: Activity },
   { label: "Orders", href: "/dashboard/orders", icon: ClipboardList },
   {
     label: "Menu",
