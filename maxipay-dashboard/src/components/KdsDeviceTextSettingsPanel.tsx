@@ -87,7 +87,6 @@ function Stepper({
 export function KdsDeviceTextSettingsPanel({ deviceId }: Props) {
   const [ui, setUi] = useState<KdsTextUiSettings>(() => coerceKdsTextUi(parseKdsTextUi(null)));
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -118,7 +117,6 @@ export function KdsDeviceTextSettingsPanel({ deviceId }: Props) {
       const id = deviceId.trim();
       if (!id) return;
       const coerced = coerceKdsTextUi(next);
-      setSaving(true);
       setError(null);
       try {
         await setDoc(
@@ -128,8 +126,6 @@ export function KdsDeviceTextSettingsPanel({ deviceId }: Props) {
       } catch (e) {
         console.error("[KDS text ui save]", e);
         setError("Save failed. Check your connection and Firestore rules.");
-      } finally {
-        setSaving(false);
       }
     },
     [deviceId]
@@ -159,11 +155,6 @@ export function KdsDeviceTextSettingsPanel({ deviceId }: Props) {
     <div className="space-y-4">
       {error && (
         <p className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>
-      )}
-      {saving && (
-        <p className="text-xs font-medium text-slate-500" aria-live="polite">
-          Saving…
-        </p>
       )}
 
       <div className="flex items-center gap-2 text-slate-600">

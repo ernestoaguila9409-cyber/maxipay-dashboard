@@ -200,8 +200,14 @@ export function KdsPreview({
     displaySettings.ticketRedAfterMinutes ?? DEFAULT_RED_AFTER
   );
 
+  /** ~25% smaller preview (layout reflows in Chromium/Safari/Edge). */
+  const previewZoom = 0.75;
+
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
+    <div
+      className="flex h-full min-h-0 w-full flex-col"
+      style={{ zoom: previewZoom }}
+    >
       {/* Tablet bezel + screen */}
       <div className="flex min-h-0 w-full flex-1 flex-col rounded-[1.5rem] border-[8px] border-[#2a2f36] bg-[#1e2228] shadow-[0_28px_55px_-15px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[0.9rem] bg-[#cfd2d6] p-1.5">
