@@ -510,7 +510,7 @@ export default function KdsSettingsPage() {
       <Header title="KDS" />
       {/* Left-aligned (no mx-auto) so content sits near the sidebar; max-w keeps 65/35 proportions unchanged */}
       <div className="p-4 sm:p-6">
-        <div className="flex w-full max-w-[1800px] min-h-0 flex-col gap-6 lg:min-h-[calc(100vh-5.5rem)] lg:flex-row lg:items-stretch lg:gap-8">
+        <div className="flex w-full max-w-[1800px] min-h-0 flex-col gap-6 lg:min-h-[calc(100vh-5.5rem)] lg:flex-row lg:items-start lg:gap-8">
         {/* LEFT — control panel: devices + display settings */}
         <div className="flex w-full min-w-0 flex-col gap-6 lg:w-[50%] lg:shrink-0">
         {/* KDS devices */}
@@ -879,8 +879,8 @@ export default function KdsSettingsPage() {
         </div>
 
         {/* RIGHT — live KDS preview, tablet-style */}
-        <aside className="flex w-full min-w-0 flex-col lg:sticky lg:top-20 lg:w-[50%] lg:shrink-0">
-          <div className="flex min-h-0 flex-1 flex-col rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 via-white to-slate-50/80 p-4 shadow-sm sm:p-5">
+        <aside className="flex w-full min-w-0 flex-col lg:sticky lg:top-20 lg:w-[50%] lg:shrink-0 lg:self-start">
+          <div className="flex flex-col rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 via-white to-slate-50/80 p-4 shadow-sm sm:p-5">
             <div className="shrink-0 pb-3">
               <h2 className="text-lg font-semibold text-slate-800">
                 Live preview
@@ -891,7 +891,7 @@ export default function KdsSettingsPage() {
                 in real time.
               </p>
             </div>
-            <div className="mt-1 flex min-h-0 flex-1 flex-col">
+            <div className="mt-1 flex shrink-0 flex-col">
               <KdsPreview
                 displaySettings={displaySettings}
                 moduleColorKeys={dashboardColorKeys}

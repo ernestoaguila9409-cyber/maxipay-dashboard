@@ -205,21 +205,21 @@ export function KdsPreview({
 
   return (
     <div
-      className="flex h-full min-h-0 w-full flex-col"
+      className="flex w-full shrink-0 flex-col"
       style={{ zoom: previewZoom }}
     >
-      {/* Tablet bezel + screen */}
-      <div className="flex min-h-0 w-full flex-1 flex-col rounded-[1.5rem] border-[8px] border-[#2a2f36] bg-[#1e2228] shadow-[0_28px_55px_-15px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[0.9rem] bg-[#cfd2d6] p-1.5">
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-[#f4f4f5] shadow-[inset_0_2px_10px_rgba(0,0,0,0.07)]">
-            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden p-3 sm:p-4">
+      {/* Tablet bezel + screen — fixed intrinsic height so opening left-panel accordions does not stretch cards */}
+      <div className="flex w-full shrink-0 flex-col rounded-[1.5rem] border-[8px] border-[#2a2f36] bg-[#1e2228] shadow-[0_28px_55px_-15px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <div className="flex w-full shrink-0 flex-col overflow-hidden rounded-[0.9rem] bg-[#cfd2d6] p-1.5">
+          <div className="flex w-full shrink-0 flex-col overflow-hidden rounded-lg bg-[#f4f4f5] shadow-[inset_0_2px_10px_rgba(0,0,0,0.07)]">
+            <div className="flex w-full shrink-0 flex-col overflow-x-hidden p-3 sm:p-4">
               <h4
                 className="mb-2.5 shrink-0 px-0.5 text-[clamp(1rem,2.6vw,1.35rem)] font-bold leading-tight text-[#1C1B1F]"
                 style={{ fontFamily: "system-ui, sans-serif" }}
               >
                 Kitchen display
               </h4>
-              <div className="flex min-h-[220px] flex-1 gap-2.5 sm:min-h-[280px] sm:gap-3">
+              <div className="flex h-[240px] w-full shrink-0 gap-2.5 sm:h-[256px] sm:gap-3">
                 {MOCK_PREVIEW_ORDERS.map((order, cardIndex) => {
                   const headerHex = headerColorHex(
                     order.orderType,
@@ -249,7 +249,7 @@ export function KdsPreview({
                   return (
                     <div
                       key={order.id}
-                      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-md"
+                      className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-md"
                     >
                       <div
                         className="flex h-[56px] shrink-0 items-center px-3 sm:h-[60px]"
