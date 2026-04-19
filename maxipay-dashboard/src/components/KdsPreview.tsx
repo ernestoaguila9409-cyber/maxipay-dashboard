@@ -95,9 +95,41 @@ function getUrgencyBg(
   yellowAfter: number,
   redAfter: number
 ): string {
+  if (minutes < 0) return "#FFFFFF";
   if (minutes >= redAfter) return "#FFCDD2";
   if (minutes >= yellowAfter) return "#FFF9C4";
   return "#FFFFFF";
+}
+
+/**
+ * Pick elapsed minutes so the three preview cards always illustrate white → yellow → red
+ * for the current yellow/red thresholds (unlike fixed mock times, which can all land in red).
+ */
+function demoElapsedMinutesForCard(
+  cardIndex: number,
+  yellowAfter: number,
+  redAfter: number
+): number {
+  const y = yellowAfter;
+  const r = redAfter;
+  if (cardIndex === 0) {
+    return y > 0 ? y - 1 : -1;
+  }
+  if (cardIndex === 1) {
+    if (r > y) {
+      return y + Math.max(0, Math.floor((r - y) / 2));
+    }
+    return y;
+  }
+  return r + Math.max(2, Math.floor((r - y) / 2) + 1);
+}
+
+function formatElapsedLabel(totalMinutes: number): string {
+  const m = Math.max(0, totalMinutes);
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  if (h <= 0) return `${min}:00`;
+  return `${h}:${min.toString().padStart(2, "0")}`;
 }
 
 function elapsedWarnColor(elapsedMs: number): string {
@@ -115,10 +147,6 @@ type MockOrder = {
   items: { qty: number; name: string; mods?: string[] }[];
   /** Fixed header clock (preview only; does not tick). */
   headerTime: string;
-  /** Fixed elapsed label (preview only; does not tick). */
-  elapsedLabel: string;
-  /** For urgency background / warn color only. */
-  elapsedMs: number;
 };
 
 const MOCK_PREVIEW_ORDERS: MockOrder[] = [
@@ -128,8 +156,6 @@ const MOCK_PREVIEW_ORDERS: MockOrder[] = [
     orderNumber: 142,
     status: "OPEN",
     headerTime: "11:26 AM",
-    elapsedLabel: "2:00",
-    elapsedMs: 2 * 60 * 1000,
     items: [
       { qty: 2, name: "Burger", mods: ["No onion", "Extra pickle"] },
       { qty: 1, name: "Fries" },
@@ -141,8 +167,6 @@ const MOCK_PREVIEW_ORDERS: MockOrder[] = [
     orderNumber: 288,
     status: "PREPARING",
     headerTime: "11:21 AM",
-    elapsedLabel: "7:00",
-    elapsedMs: 7 * 60 * 1000,
     items: [{ qty: 1, name: "Chicken wrap", mods: ["Add avocado"] }],
   },
   {
@@ -152,8 +176,6 @@ const MOCK_PREVIEW_ORDERS: MockOrder[] = [
     tableName: "Bar 7",
     status: "OPEN",
     headerTime: "11:14 AM",
-    elapsedLabel: "14:00",
-    elapsedMs: 14 * 60 * 1000,
     items: [
       { qty: 2, name: "Margarita" },
       { qty: 1, name: "IPA Draft" },
@@ -192,19 +214,30 @@ export function KdsPreview({
                 Kitchen display
               </h4>
               <div className="flex min-h-[220px] flex-1 gap-2.5 sm:min-h-[280px] sm:gap-3">
-                {MOCK_PREVIEW_ORDERS.map((order) => {
+                {MOCK_PREVIEW_ORDERS.map((order, cardIndex) => {
                   const headerHex = headerColorHex(
                     order.orderType,
                     displaySettings.orderTypeColorsEnabled,
                     moduleColorKeys
                   );
-                  const elapsedMs = order.elapsedMs;
-                  const elapsedMin = Math.floor(elapsedMs / 60_000);
-                  const urgencyBg = getUrgencyBg(
+                  const elapsedMin = demoElapsedMinutesForCard(
+                    cardIndex,
+                    yellowAfter,
+                    redAfter
+                  );
+                  let urgencyBg = getUrgencyBg(
                     elapsedMin,
                     yellowAfter,
                     redAfter
                   );
+                  if (redAfter === yellowAfter && cardIndex === 1) {
+                    urgencyBg = "#FFF9C4";
+                  }
+                  if (redAfter === yellowAfter && cardIndex === 2) {
+                    urgencyBg = "#FFCDD2";
+                  }
+                  const elapsedMs = Math.max(0, elapsedMin) * 60_000;
+                  const elapsedLabel = formatElapsedLabel(elapsedMin);
                   const headerTime = order.headerTime;
 
                   return (
@@ -249,7 +282,7 @@ export function KdsPreview({
                                 color: elapsedWarnColor(elapsedMs),
                               }}
                             >
-                              {order.elapsedLabel}
+                              {elapsedLabel}
                             </span>
                           </div>
                         )}
