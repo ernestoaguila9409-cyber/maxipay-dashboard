@@ -19,6 +19,7 @@ import {
   KdsPreview,
   parseDashboardModuleColorKeys,
 } from "@/components/KdsPreview";
+import { KdsDeviceTextSettingsPanel } from "@/components/KdsDeviceTextSettingsPanel";
 import {
   effectiveAssignedMenuItemCount,
   parseMenuItemForKds,
@@ -37,6 +38,9 @@ import {
   Layers,
   Copy,
   Check,
+  ChevronDown,
+  ChevronRight,
+  Type,
 } from "lucide-react";
 
 const KDS_DEVICES_COLLECTION = "kds_devices";
@@ -224,6 +228,10 @@ export default function KdsSettingsPage() {
 
   const [savingDisplay, setSavingDisplay] = useState(false);
 
+  /** Per-device ticket fonts / modifier colors (`kds_devices/{id}/settings/ui`). */
+  const [textUiOpen, setTextUiOpen] = useState(false);
+  const [textUiDeviceId, setTextUiDeviceId] = useState("");
+
   const [pairingCreated, setPairingCreated] = useState<{
     code: string;
     deviceName: string;
@@ -342,6 +350,16 @@ export default function KdsSettingsPage() {
     );
     return () => unsub();
   }, [user]);
+
+  useEffect(() => {
+    if (devices.length === 0) {
+      setTextUiDeviceId("");
+      return;
+    }
+    if (!textUiDeviceId || !devices.some((d) => d.id === textUiDeviceId)) {
+      setTextUiDeviceId(devices[0].id);
+    }
+  }, [devices, textUiDeviceId]);
 
   const openAdd = () => {
     setEditing(null);
@@ -781,6 +799,79 @@ export default function KdsSettingsPage() {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Per-tablet text & modifier colors (same as KDS app settings) */}
+              <div className="overflow-hidden rounded-xl border border-slate-100 bg-slate-50/50">
+                <button
+                  type="button"
+                  onClick={() => setTextUiOpen((open) => !open)}
+                  className="flex w-full items-center justify-between gap-3 p-4 text-left transition-colors hover:bg-slate-100/60"
+                  aria-expanded={textUiOpen}
+                >
+                  <div className="flex min-w-0 flex-1 items-start gap-3">
+                    <Type
+                      size={20}
+                      className="mt-0.5 shrink-0 text-slate-500"
+                      aria-hidden
+                    />
+                    <div className="min-w-0">
+                      <p className="font-medium text-slate-800">
+                        KDS display settings
+                      </p>
+                      <p className="mt-0.5 text-sm text-slate-500">
+                        Font sizes and modifier colors for a kitchen tablet — same
+                        options as in the KDS app (stored per device).
+                      </p>
+                    </div>
+                  </div>
+                  {textUiOpen ? (
+                    <ChevronDown
+                      size={22}
+                      className="shrink-0 text-slate-400"
+                      aria-hidden
+                    />
+                  ) : (
+                    <ChevronRight
+                      size={22}
+                      className="shrink-0 text-slate-400"
+                      aria-hidden
+                    />
+                  )}
+                </button>
+                {textUiOpen && (
+                  <div className="border-t border-slate-200 bg-white px-4 pb-4 pt-3 sm:px-5">
+                    {devices.length === 0 ? (
+                      <p className="text-sm text-slate-500">
+                        Add a KDS device above to configure fonts and colors.
+                      </p>
+                    ) : (
+                      <>
+                        <label
+                          htmlFor="kds-text-ui-device"
+                          className="mb-1 block text-xs font-medium text-slate-600"
+                        >
+                          Device
+                        </label>
+                        <select
+                          id="kds-text-ui-device"
+                          className="mb-4 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          value={textUiDeviceId}
+                          onChange={(e) => setTextUiDeviceId(e.target.value)}
+                        >
+                          {devices.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name?.trim() || "Unnamed device"}
+                            </option>
+                          ))}
+                        </select>
+                        {textUiDeviceId ? (
+                          <KdsDeviceTextSettingsPanel deviceId={textUiDeviceId} />
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
