@@ -200,26 +200,20 @@ export function KdsPreview({
     displaySettings.ticketRedAfterMinutes ?? DEFAULT_RED_AFTER
   );
 
-  /** ~25% smaller preview (layout reflows in Chromium/Safari/Edge). */
-  const previewZoom = 0.75;
-
   return (
-    <div
-      className="flex w-full shrink-0 flex-col"
-      style={{ zoom: previewZoom }}
-    >
+    <div className="flex w-full shrink-0 flex-col">
       {/* Tablet bezel + screen — fixed intrinsic height so opening left-panel accordions does not stretch cards */}
       <div className="flex w-full shrink-0 flex-col rounded-[1.5rem] border-[8px] border-[#2a2f36] bg-[#1e2228] shadow-[0_28px_55px_-15px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
         <div className="flex w-full shrink-0 flex-col overflow-hidden rounded-[0.9rem] bg-[#cfd2d6] p-1.5">
           <div className="flex w-full shrink-0 flex-col overflow-hidden rounded-lg bg-[#f4f4f5] shadow-[inset_0_2px_10px_rgba(0,0,0,0.07)]">
-            <div className="flex w-full shrink-0 flex-col overflow-x-hidden p-3 sm:p-4">
+            <div className="flex w-full shrink-0 flex-col overflow-x-hidden p-3.5 sm:p-5">
               <h4
-                className="mb-2.5 shrink-0 px-0.5 text-[clamp(1rem,2.6vw,1.35rem)] font-bold leading-tight text-[#1C1B1F]"
+                className="mb-3 shrink-0 px-0.5 text-[clamp(1.05rem,2.8vw,1.45rem)] font-bold leading-tight text-[#1C1B1F]"
                 style={{ fontFamily: "system-ui, sans-serif" }}
               >
                 Kitchen display
               </h4>
-              <div className="flex h-[240px] w-full shrink-0 gap-2.5 sm:h-[256px] sm:gap-3">
+              <div className="flex h-[min(380px,52vh)] w-full shrink-0 gap-3 sm:h-[min(420px,55vh)] sm:gap-4">
                 {MOCK_PREVIEW_ORDERS.map((order, cardIndex) => {
                   const headerHex = headerColorHex(
                     order.orderType,
@@ -252,13 +246,13 @@ export function KdsPreview({
                       className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-md"
                     >
                       <div
-                        className="flex h-[56px] shrink-0 items-center px-3 sm:h-[60px]"
+                        className="flex h-[62px] shrink-0 items-center px-3.5 sm:h-[70px] sm:px-4"
                         style={{
                           backgroundColor: headerHex,
                           borderRadius: "20px 20px 0 0",
                         }}
                       >
-                        <div className="grid w-full grid-cols-3 items-center gap-0.5 text-[clamp(12px,2.1vw,16px)] font-bold text-white">
+                        <div className="grid w-full grid-cols-3 items-center gap-0.5 text-[clamp(13px,2.2vw,17px)] font-bold text-white">
                           <span className="truncate">
                             {formatOrderTypeLabel(order.orderType)}
                           </span>
@@ -278,12 +272,12 @@ export function KdsPreview({
                         }}
                       >
                         {displaySettings.showTimers && (
-                          <div className="flex shrink-0 items-center justify-between px-3 py-2 sm:px-4 sm:py-2.5">
-                            <span className="text-[12px] font-semibold text-[#64748B] sm:text-[14px]">
+                          <div className="flex shrink-0 items-center justify-between px-3.5 py-2.5 sm:px-4 sm:py-3">
+                            <span className="text-[13px] font-semibold text-[#64748B] sm:text-[15px]">
                               Elapsed
                             </span>
                             <span
-                              className="text-lg font-bold tabular-nums sm:text-xl"
+                              className="text-xl font-bold tabular-nums sm:text-2xl"
                               style={{
                                 color: elapsedWarnColor(elapsedMs),
                               }}
@@ -292,16 +286,16 @@ export function KdsPreview({
                             </span>
                           </div>
                         )}
-                        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-2 pt-2 sm:space-y-2.5 sm:px-4 sm:pb-3 sm:pt-2.5">
+                        <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3.5 pb-2 pt-2.5 sm:space-y-3 sm:px-4 sm:pb-3 sm:pt-3">
                           {order.items.map((it, idx) => (
                             <div key={idx}>
-                              <p className="text-[14px] font-bold leading-snug text-[#212121] sm:text-[16px]">
+                              <p className="text-[15px] font-bold leading-snug text-[#212121] sm:text-[17px]">
                                 {it.qty}× {it.name}
                               </p>
                               {it.mods?.map((mod, mi) => (
                                 <p
                                   key={mi}
-                                  className="mt-1 pl-2 text-[12px] text-[#555555] sm:mt-1.5 sm:pl-2.5 sm:text-[14px]"
+                                  className="mt-1.5 pl-2 text-[13px] text-[#555555] sm:mt-2 sm:pl-2.5 sm:text-[15px]"
                                 >
                                   • {mod}
                                 </p>
@@ -309,11 +303,11 @@ export function KdsPreview({
                             </div>
                           ))}
                         </div>
-                        <div className="mt-auto shrink-0 px-3 pb-3 pt-1 sm:px-4 sm:pb-3.5 sm:pt-1.5">
+                        <div className="mt-auto shrink-0 px-3.5 pb-3.5 pt-1.5 sm:px-4 sm:pb-4 sm:pt-2">
                           {order.status === "OPEN" && (
                             <button
                               type="button"
-                              className="w-full rounded-xl bg-[#1565C0] py-2.5 text-center text-[15px] font-bold text-white sm:rounded-[14px] sm:py-3.5 sm:text-[18px]"
+                              className="w-full rounded-xl bg-[#1565C0] py-3 text-center text-[16px] font-bold text-white sm:rounded-[14px] sm:py-4 sm:text-[19px]"
                               disabled
                             >
                               START
@@ -322,7 +316,7 @@ export function KdsPreview({
                           {order.status === "PREPARING" && (
                             <button
                               type="button"
-                              className="w-full rounded-xl bg-[#2E7D32] py-2.5 text-center text-[15px] font-bold text-white sm:rounded-[14px] sm:py-3.5 sm:text-[18px]"
+                              className="w-full rounded-xl bg-[#2E7D32] py-3 text-center text-[16px] font-bold text-white sm:rounded-[14px] sm:py-4 sm:text-[19px]"
                               disabled
                             >
                               READY
