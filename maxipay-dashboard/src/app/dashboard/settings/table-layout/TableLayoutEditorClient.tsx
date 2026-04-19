@@ -12,6 +12,10 @@ import {
   Upload,
 } from "lucide-react";
 import Header from "@/components/Header";
+import {
+  ReservationTimingCard,
+  RESERVATION_TIMING_STEPPER_MAX,
+} from "@/components/ReservationTimingCard";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -24,7 +28,6 @@ import {
   deleteTableLayout,
   emptyTable,
   importLegacyTablesLayout,
-  MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES,
   SECTIONS_COLLECTION,
   setDefaultTableLayout,
   subscribeLayoutTables,
@@ -101,6 +104,11 @@ export default function TableLayoutEditorClient() {
   useEffect(() => {
     tablesRef.current = tables;
   }, [tables]);
+
+  const layoutsRef = useRef(layouts);
+  useEffect(() => {
+    layoutsRef.current = layouts;
+  }, [layouts]);
 
   const mergedSectionNames = useMemo(() => {
     const s = new Set<string>();
@@ -456,6 +464,47 @@ export default function TableLayoutEditorClient() {
       setSaveState("error");
     }
   }, [layoutId, layouts]);
+
+  const persistReservationTiming = useCallback(async (nextHoldBefore: number, nextGraceAfter: number) => {
+    if (!layoutId) return;
+    const l = layoutsRef.current.find((x) => x.id === layoutId);
+    if (!l) return;
+    const hold = Math.max(
+      0,
+      Math.min(Math.round(nextHoldBefore), RESERVATION_TIMING_STEPPER_MAX)
+    );
+    const grace = Math.max(
+      0,
+      Math.min(Math.round(nextGraceAfter), RESERVATION_TIMING_STEPPER_MAX)
+    );
+    setLayouts((prev) =>
+      prev.map((x) =>
+        x.id === layoutId
+          ? {
+              ...x,
+              data: {
+                ...x.data,
+                reservationHoldStartsMinutesBeforeSlot: hold,
+                reservationGraceAfterSlotMinutes: grace,
+              },
+            }
+          : x
+      )
+    );
+    setSaveState("saving");
+    try {
+      await updateTableLayoutMeta(db, layoutId, {
+        canvasWidth: l.data.canvasWidth,
+        canvasHeight: l.data.canvasHeight,
+        reservationHoldStartsMinutesBeforeSlot: hold,
+        reservationGraceAfterSlotMinutes: grace,
+      });
+      setSaveState("saved");
+      setTimeout(() => setSaveState("idle"), 1200);
+    } catch {
+      setSaveState("error");
+    }
+  }, [layoutId]);
 
   const renderInspector = () => {
     if (!selected) return null;
@@ -855,83 +904,25 @@ export default function TableLayoutEditorClient() {
                         />
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
-                      <div className="min-w-0">
-                        <label className="mb-1 block min-h-[3.25rem] text-xs leading-snug text-slate-500">
-                          Show reserved on Dine-In (minutes before slot)
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES}
-                          className="w-28 rounded-lg border border-slate-200 px-2 py-1.5"
-                          value={layout?.reservationHoldStartsMinutesBeforeSlot ?? 0}
-                          onChange={(e) => {
-                            const v = Math.round(Number(e.target.value));
-                            if (!layoutId || !Number.isFinite(v)) return;
-                            const clamped = Math.max(
-                              0,
-                              Math.min(v, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
-                            );
-                            setLayouts((prev) =>
-                              prev.map((l) =>
-                                l.id === layoutId
-                                  ? {
-                                      ...l,
-                                      data: {
-                                        ...l.data,
-                                        reservationHoldStartsMinutesBeforeSlot: clamped,
-                                      },
-                                    }
-                                  : l
-                              )
-                            );
-                          }}
-                          onBlur={saveCanvasSize}
-                        />
-                        <p className="mt-1 text-[11px] leading-snug text-slate-500">
-                          Dine-In floor only: tables look RESERVED starting this many minutes before
-                          the booking time (e.g. 15 = 6:45 PM for a 7:00 PM reservation). Does not
-                          change table status in Firestore early. Max{" "}
-                          {MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES} min.
-                        </p>
-                      </div>
-                      <div className="min-w-0">
-                        <label className="mb-1 block min-h-[3.25rem] text-xs leading-snug text-slate-500">
-                          Extra reserved time after slot (minutes)
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES}
-                          className="w-28 rounded-lg border border-slate-200 px-2 py-1.5"
-                          value={layout?.reservationGraceAfterSlotMinutes ?? 0}
-                          onChange={(e) => {
-                            const v = Math.round(Number(e.target.value));
-                            if (!layoutId || !Number.isFinite(v)) return;
-                            const clamped = Math.max(
-                              0,
-                              Math.min(v, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
-                            );
-                            setLayouts((prev) =>
-                              prev.map((l) =>
-                                l.id === layoutId
-                                  ? {
-                                      ...l,
-                                      data: { ...l.data, reservationGraceAfterSlotMinutes: clamped },
-                                    }
-                                  : l
-                              )
-                            );
-                          }}
-                          onBlur={saveCanvasSize}
-                        />
-                        <p className="mt-1 text-[11px] leading-snug text-slate-500">
-                          After the reservation time, the table stays RESERVED for this many extra
-                          minutes before the POS frees it (0 = free as soon as the slot time passes).
-                          Max {MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES} min (1 week).
-                        </p>
-                      </div>
+                    <div className="flex justify-center pb-1">
+                      <ReservationTimingCard
+                        beforeMinutes={layout?.reservationHoldStartsMinutesBeforeSlot ?? 0}
+                        afterMinutes={layout?.reservationGraceAfterSlotMinutes ?? 0}
+                        disabled={!layoutId}
+                        maxMinutes={RESERVATION_TIMING_STEPPER_MAX}
+                        onBeforeChange={(next) => {
+                          const g =
+                            layoutsRef.current.find((x) => x.id === layoutId)?.data
+                              .reservationGraceAfterSlotMinutes ?? 0;
+                          void persistReservationTiming(next, g);
+                        }}
+                        onAfterChange={(next) => {
+                          const h =
+                            layoutsRef.current.find((x) => x.id === layoutId)?.data
+                              .reservationHoldStartsMinutesBeforeSlot ?? 0;
+                          void persistReservationTiming(h, next);
+                        }}
+                      />
                     </div>
                   </div>
                   <div
