@@ -3,17 +3,22 @@ package com.ernesto.myapplication
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Typeface
 import android.net.Uri
 import android.text.InputType
 import android.os.*
+import android.view.Gravity
 import android.view.View
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Source
 import okhttp3.*
@@ -34,6 +39,9 @@ import com.ernesto.myapplication.engine.SplitReceiptPayload
 import android.util.Log
 import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
+import com.ernesto.myapplication.ui.kds.KdsStatusIcon
+import com.ernesto.myapplication.ui.kds.hasKdsStatusIndicator
+import java.text.SimpleDateFormat
 
 class PaymentActivity : AppCompatActivity() {
 
@@ -102,6 +110,16 @@ class PaymentActivity : AppCompatActivity() {
     private lateinit var txtAppliedDiscount: TextView
     private lateinit var btnRemoveDiscount: TextView
     private var selectedManualDiscountId: String? = null
+
+    /** Same-name line groups on payment (multiple Firestore lines) — tap header to expand KDS per send. */
+    private val paymentExpandedLineGroups = mutableSetOf<String>()
+
+    /** Single Firestore line with multiple [OrderLineKdsStatus.FIELD_KDS_SEND_BATCHES] entries. */
+    private val paymentExpandedKdsBatchLineIds = mutableSetOf<String>()
+
+    private val paymentKdsTimeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+
+    private val paymentBatchRowTimeFormat = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
 
     private var lastCashTenderedCents: Long = 0L
     private var lastCashChangeCents: Long = 0L
@@ -354,70 +372,34 @@ class PaymentActivity : AppCompatActivity() {
                 container.removeAllViews()
 
                 val docs = itemsSnap.documents
-                for ((index, doc) in docs.withIndex()) {
-                    if (index > 0) {
+                val keyOrder = docs.map { paymentLineGroupKey(it) }.distinct()
+                val byKey = docs.groupBy { paymentLineGroupKey(it) }
+                paymentExpandedLineGroups.retainAll(
+                    keyOrder.filter { k -> (byKey[k]?.size ?: 0) > 1 }.toSet(),
+                )
+                paymentExpandedKdsBatchLineIds.retainAll(docs.map { it.id }.toSet())
+
+                var blockIndex = 0
+                for (key in keyOrder) {
+                    val groupDocs = byKey[key] ?: continue
+                    if (blockIndex > 0) {
                         container.addView(makeSummarySpacer(8))
                     }
-
-                    val name = doc.getString("name")
-                        ?: doc.getString("itemName")
-                        ?: "Item"
-                    val qty = (doc.getLong("qty")
-                        ?: doc.getLong("quantity")
-                        ?: 1L).toInt()
-                    val lineTotalCents = doc.getLong("lineTotalInCents") ?: 0L
-                    val lineKey = doc.id
-
-                    container.addView(
-                        makeSummaryRow(
-                            "$name (Qty: $qty)",
-                            "",
-                            13f,
-                            0xEEFFFFFF.toInt(),
-                            boldLeft = true
-                        )
-                    )
-
-                    val mods = doc.get("modifiers") as? List<*> ?: emptyList<Any>()
-                    fun addModRows(items: List<*>, indent: String = "") {
-                        for (m in items) {
-                            val map = m as? Map<*, *> ?: continue
-                            val action = map["action"]?.toString() ?: "ADD"
-                            val modName = map["name"]?.toString()
-                                ?: map["first"]?.toString()
-                                ?: continue
-                            val label = if (action == "REMOVE") "${indent}\u2022 No $modName" else "${indent}\u2022 $modName"
-                            container.addView(makeSummaryRow(label, "", 11f, 0xBBFFFFFF.toInt()))
-                            val children = map["children"] as? List<*>
-                            if (children != null) addModRows(children, "$indent    \u21B3 ")
-                        }
-                    }
-                    addModRows(mods)
-
-                    val lineDiscounts = orderAppliedDiscounts.filter { ad ->
-                        (ad["lineKey"]?.toString()?.trim().orEmpty()) == lineKey
-                    }
-                    // Order- / manual-scope discounts (empty lineKey) show only under Subtotal, not repeated per line.
-                    for (ad in lineDiscounts) {
-                        container.addView(
-                            makeSummaryRow(
-                                DiscountDisplay.formatBulletFromFirestoreMap(ad),
-                                "",
-                                11f,
-                                0xBBFFFFFF.toInt()
+                    blockIndex++
+                    if (groupDocs.size == 1) {
+                        val only = groupDocs.first()
+                        if (OrderLineKdsStatus.parseKdsSendBatches(only).size > 1) {
+                            addPaymentSingleLineWithKdsBatchesExpandable(
+                                container,
+                                only,
+                                orderAppliedDiscounts,
                             )
-                        )
+                        } else {
+                            addPaymentSingleLineBlock(container, only, orderAppliedDiscounts)
+                        }
+                    } else {
+                        addPaymentExpandableSameNameBlock(container, key, groupDocs, orderAppliedDiscounts)
                     }
-
-                    container.addView(
-                        makeSummaryRow(
-                            "Line Total: ${MoneyUtils.centsToDisplay(lineTotalCents)}",
-                            "",
-                            13f,
-                            0xFF81C784.toInt(),
-                            boldLeft = true
-                        )
-                    )
                 }
 
                 val totalsContainer = findViewById<LinearLayout>(R.id.totalsSummaryContainer)
@@ -484,7 +466,10 @@ class PaymentActivity : AppCompatActivity() {
                             val map = m as? Map<*, *> ?: continue
                             val action = map["action"]?.toString() ?: "ADD"
                             val modName = map["name"]?.toString() ?: map["first"]?.toString() ?: continue
-                            result.add(if (action == "REMOVE") "${prefix}No $modName" else "$prefix$modName")
+                            result.add(
+                                if (action == "REMOVE") "${prefix}${ModifierRemoveDisplay.cartLine(modName)}"
+                                else "$prefix$modName"
+                            )
                             val children = map["children"] as? List<*>
                             if (children != null) result.addAll(flattenModNames(children, "$prefix  \u21B3 "))
                         }
@@ -528,6 +513,553 @@ class PaymentActivity : AppCompatActivity() {
                     custSummary
                 )
             }
+    }
+
+    private fun paymentLineDisplayName(doc: DocumentSnapshot): String =
+        doc.getString("name") ?: doc.getString("itemName") ?: "Item"
+
+    private fun paymentLineGroupKey(doc: DocumentSnapshot): String {
+        val g = (doc.getLong("guestNumber") ?: 0L).toInt()
+        return "$g|${paymentLineDisplayName(doc)}"
+    }
+
+    private fun paymentLineQty(doc: DocumentSnapshot): Int =
+        (doc.getLong("qty") ?: doc.getLong("quantity") ?: 1L).toInt().coerceAtLeast(1)
+
+    private fun paymentLineCreatedAtMillis(doc: DocumentSnapshot): Long {
+        doc.getTimestamp("createdAt")?.toDate()?.time?.let { return it }
+        doc.getDate("createdAt")?.time?.let { return it }
+        doc.getTimestamp("updatedAt")?.toDate()?.time?.let { return it }
+        return 0L
+    }
+
+    private fun paymentLatestDocForCollapsedKdsStatus(docs: List<DocumentSnapshot>): DocumentSnapshot =
+        docs.maxWith(compareBy({ paymentLineCreatedAtMillis(it) }, { it.id }))
+
+    private fun paymentKdsStatusSummary(raw: String?): String {
+        val s = raw?.trim()?.uppercase(Locale.US).orEmpty()
+        return when (s) {
+            OrderLineKdsStatus.SENT -> "Sent to kitchen"
+            OrderLineKdsStatus.PREPARING -> "Preparing"
+            OrderLineKdsStatus.READY -> "Ready"
+            else -> raw?.trim()?.takeIf { it.isNotEmpty() } ?: "—"
+        }
+    }
+
+    private fun paymentKdsStartedAtSuffix(doc: DocumentSnapshot): String {
+        val ts = doc.getTimestamp("kdsStartedAt") ?: return ""
+        return " · Started ${paymentKdsTimeFormat.format(ts.toDate())}"
+    }
+
+    private fun addPaymentTitleRowWithKds(
+        container: LinearLayout,
+        title: String,
+        kdsSourceDoc: DocumentSnapshot,
+        chevronText: String?,
+    ) {
+        val dp = resources.displayMetrics.density
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        if (chevronText != null) {
+            row.addView(
+                TextView(this).apply {
+                    text = chevronText
+                    textSize = 12f
+                    setTextColor(0xBBFFFFFF.toInt())
+                    setPadding(0, 0, (8 * dp).toInt(), 0)
+                },
+            )
+        }
+        row.addView(
+            TextView(this).apply {
+                text = title
+                textSize = 13f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(0xEEFFFFFF.toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f,
+                )
+            },
+        )
+        if (KdsActiveCache.hasActiveKds) {
+            val kds =
+                OrderLineKdsStatus.latestBatchKdsStatusForLine(kdsSourceDoc)
+                    ?: kdsSourceDoc.getString(OrderLineKdsStatus.FIELD)
+            if (hasKdsStatusIndicator(kds)) {
+                row.addView(
+                    ComposeView(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        )
+                        setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                        setContent {
+                            KdsStatusIcon(status = kds) { msg ->
+                                Toast.makeText(this@PaymentActivity, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                )
+            }
+        }
+        container.addView(row)
+    }
+
+    private fun addPaymentModifierRows(
+        container: LinearLayout,
+        doc: DocumentSnapshot,
+        indentDp: Int,
+    ) {
+        val mods = doc.get("modifiers") as? List<*> ?: emptyList<Any>()
+        val pad = (indentDp * resources.displayMetrics.density).toInt()
+        fun addModRows(items: List<*>, indent: String = "") {
+            for (m in items) {
+                val map = m as? Map<*, *> ?: continue
+                val action = map["action"]?.toString() ?: "ADD"
+                val modName = map["name"]?.toString()
+                    ?: map["first"]?.toString()
+                    ?: continue
+                val label = if (action == "REMOVE") {
+                    "${indent}\u2022 ${ModifierRemoveDisplay.cartLine(modName)}"
+                } else {
+                    "${indent}\u2022 $modName"
+                }
+                container.addView(
+                    makeSummaryRow(label, "", 11f, 0xBBFFFFFF.toInt()).apply {
+                        if (pad > 0) setPadding(pad, 0, 0, 0)
+                    },
+                )
+                val children = map["children"] as? List<*>
+                if (children != null) addModRows(children, "$indent    \u21B3 ")
+            }
+        }
+        addModRows(mods)
+    }
+
+    private fun addPaymentLineDiscountRows(
+        container: LinearLayout,
+        lineKey: String,
+        orderAppliedDiscounts: List<Map<String, Any>>,
+        indentDp: Int,
+    ) {
+        val pad = (indentDp * resources.displayMetrics.density).toInt()
+        val lineDiscounts = orderAppliedDiscounts.filter { ad ->
+            (ad["lineKey"]?.toString()?.trim().orEmpty()) == lineKey
+        }
+        for (ad in lineDiscounts) {
+            container.addView(
+                makeSummaryRow(
+                    DiscountDisplay.formatBulletFromFirestoreMap(ad),
+                    "",
+                    11f,
+                    0xBBFFFFFF.toInt(),
+                ).apply {
+                    if (pad > 0) setPadding(pad, 0, 0, 0)
+                },
+            )
+        }
+    }
+
+    private fun addPaymentSingleLineBlock(
+        container: LinearLayout,
+        doc: DocumentSnapshot,
+        orderAppliedDiscounts: List<Map<String, Any>>,
+    ) {
+        val name = paymentLineDisplayName(doc)
+        val qty = paymentLineQty(doc)
+        addPaymentTitleRowWithKds(container, "$name (Qty: $qty)", doc, chevronText = null)
+        addPaymentModifierRows(container, doc, indentDp = 0)
+        addPaymentLineDiscountRows(container, doc.id, orderAppliedDiscounts, indentDp = 0)
+        container.addView(
+            makeSummaryRow(
+                "Line Total: ${MoneyUtils.centsToDisplay(doc.getLong("lineTotalInCents") ?: 0L)}",
+                "",
+                13f,
+                0xFF81C784.toInt(),
+                boldLeft = true,
+            ),
+        )
+    }
+
+    /**
+     * One Firestore line with multiple kitchen sends ([OrderLineKdsStatus.FIELD_KDS_SEND_BATCHES]).
+     * Tap header to expand each send (time + qty + status); collapsed header icon = latest batch state.
+     */
+    private fun addPaymentSingleLineWithKdsBatchesExpandable(
+        container: LinearLayout,
+        doc: DocumentSnapshot,
+        orderAppliedDiscounts: List<Map<String, Any>>,
+    ) {
+        val lineId = doc.id
+        val batches = OrderLineKdsStatus.parseKdsSendBatches(doc)
+        if (batches.size <= 1 || !KdsActiveCache.hasActiveKds) {
+            addPaymentSingleLineBlock(container, doc, orderAppliedDiscounts)
+            return
+        }
+        val name = paymentLineDisplayName(doc)
+        val qty = paymentLineQty(doc)
+        val lineTotalCents = doc.getLong("lineTotalInCents") ?: 0L
+        val expanded = lineId in paymentExpandedKdsBatchLineIds
+        val kds =
+            OrderLineKdsStatus.latestBatchKdsStatusForLine(doc)
+                ?: doc.getString(OrderLineKdsStatus.FIELD)
+        val dp = resources.displayMetrics.density
+
+        val chevron = TextView(this).apply {
+            text = if (expanded) "▼" else "▶"
+            textSize = 12f
+            setTextColor(0xBBFFFFFF.toInt())
+            setPadding(0, 0, (8 * dp).toInt(), 0)
+        }
+        val title = TextView(this).apply {
+            text = "$name (Qty: $qty)"
+            textSize = 13f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(0xEEFFFFFF.toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f,
+            )
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, (4 * dp).toInt(), 0, (4 * dp).toInt())
+            isClickable = true
+        }
+        header.addView(chevron)
+        header.addView(title)
+        if (KdsActiveCache.hasActiveKds && hasKdsStatusIndicator(kds)) {
+            header.addView(
+                ComposeView(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    )
+                    setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                    setContent {
+                        KdsStatusIcon(status = kds) { msg ->
+                            Toast.makeText(this@PaymentActivity, msg, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+            )
+        }
+
+        val childContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+            visibility = if (expanded) View.VISIBLE else View.GONE
+        }
+
+        fun fillBatchRows() {
+            childContainer.removeAllViews()
+            val padH = (20 * dp).toInt()
+            batches.forEachIndexed { idx, batch ->
+                val timeStr = if (batch.sentAtMillis > 0L) {
+                    paymentBatchRowTimeFormat.format(Date(batch.sentAtMillis))
+                } else {
+                    "—"
+                }
+                val label = buildString {
+                    append("KDS send ${idx + 1} · Qty ${batch.quantity} · $timeStr")
+                    append("\n")
+                    append(paymentKdsStatusSummary(batch.kdsStatus))
+                }
+                val row = LinearLayout(this@PaymentActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(padH, (6 * dp).toInt(), 0, (4 * dp).toInt())
+                }
+                row.addView(
+                    TextView(this@PaymentActivity).apply {
+                        text = label
+                        textSize = 12f
+                        setTextColor(0xCCFFFFFF.toInt())
+                        layoutParams = LinearLayout.LayoutParams(
+                            0,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            1f,
+                        )
+                    },
+                )
+                if (KdsActiveCache.hasActiveKds && hasKdsStatusIndicator(batch.kdsStatus)) {
+                    row.addView(
+                        ComposeView(this@PaymentActivity).apply {
+                            layoutParams = LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.WRAP_CONTENT,
+                                LinearLayout.LayoutParams.WRAP_CONTENT,
+                            )
+                            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                            setContent {
+                                KdsStatusIcon(status = batch.kdsStatus) { msg ->
+                                    Toast.makeText(this@PaymentActivity, msg, Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                    )
+                }
+                childContainer.addView(row)
+            }
+        }
+        if (expanded) {
+            fillBatchRows()
+        }
+
+        val toggle = View.OnClickListener {
+            val now = if (lineId in paymentExpandedKdsBatchLineIds) {
+                paymentExpandedKdsBatchLineIds.remove(lineId)
+                false
+            } else {
+                paymentExpandedKdsBatchLineIds.add(lineId)
+                true
+            }
+            chevron.text = if (now) "▼" else "▶"
+            childContainer.visibility = if (now) View.VISIBLE else View.GONE
+            if (now && childContainer.childCount == 0) {
+                fillBatchRows()
+            }
+            if (!now) {
+                childContainer.removeAllViews()
+            }
+        }
+        header.setOnClickListener(toggle)
+        chevron.setOnClickListener(toggle)
+        title.setOnClickListener(toggle)
+
+        container.addView(header)
+        addPaymentModifierRows(container, doc, indentDp = 0)
+        addPaymentLineDiscountRows(container, doc.id, orderAppliedDiscounts, indentDp = 0)
+        container.addView(
+            makeSummaryRow(
+                "Line Total: ${MoneyUtils.centsToDisplay(lineTotalCents)}",
+                "",
+                13f,
+                0xFF81C784.toInt(),
+                boldLeft = true,
+            ).apply {
+                setPadding((20 * dp).toInt(), 0, 0, 0)
+            },
+        )
+        container.addView(childContainer)
+    }
+
+    private fun addPaymentKdsSendDetailBlock(
+        container: LinearLayout,
+        sendIndex: Int,
+        doc: DocumentSnapshot,
+        orderAppliedDiscounts: List<Map<String, Any>>,
+        indentDp: Int,
+    ) {
+        val q = paymentLineQty(doc)
+        val st =
+            OrderLineKdsStatus.latestBatchKdsStatusForLine(doc)
+                ?: doc.getString(OrderLineKdsStatus.FIELD)
+        val lineTotal = doc.getLong("lineTotalInCents") ?: 0L
+        val label = buildString {
+            append("KDS send $sendIndex · Qty $q · ")
+            append(paymentKdsStatusSummary(st))
+            append(paymentKdsStartedAtSuffix(doc))
+            append(" · ")
+            append(MoneyUtils.centsToDisplay(lineTotal))
+        }
+        val dp = resources.displayMetrics.density
+        val padH = (indentDp * dp).toInt()
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(padH, (6 * dp).toInt(), 0, (4 * dp).toInt())
+        }
+        row.addView(
+            TextView(this).apply {
+                text = label
+                textSize = 12f
+                setTextColor(0xCCFFFFFF.toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f,
+                )
+            },
+        )
+        if (KdsActiveCache.hasActiveKds && hasKdsStatusIndicator(st)) {
+            row.addView(
+                ComposeView(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    )
+                    setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                    setContent {
+                        KdsStatusIcon(status = st) { msg ->
+                            Toast.makeText(this@PaymentActivity, msg, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+            )
+        }
+        container.addView(row)
+        addPaymentModifierRows(container, doc, indentDp = indentDp + 4)
+        addPaymentLineDiscountRows(container, doc.id, orderAppliedDiscounts, indentDp = indentDp + 4)
+    }
+
+    private fun addPaymentExpandableSameNameBlock(
+        container: LinearLayout,
+        stableKey: String,
+        docs: List<DocumentSnapshot>,
+        orderAppliedDiscounts: List<Map<String, Any>>,
+    ) {
+        val sorted = docs.sortedWith(
+            compareBy<DocumentSnapshot>({ paymentLineCreatedAtMillis(it) }, { it.id }),
+        )
+        val displayName = paymentLineDisplayName(sorted.first())
+        val totalQty = sorted.sumOf { paymentLineQty(it) }
+        val totalCents = sorted.sumOf { it.getLong("lineTotalInCents") ?: 0L }
+        val expanded = stableKey in paymentExpandedLineGroups
+        val statusDoc = paymentLatestDocForCollapsedKdsStatus(sorted)
+        val dp = resources.displayMetrics.density
+
+        val chevron = TextView(this).apply {
+            text = if (expanded) "▼" else "▶"
+            textSize = 12f
+            setTextColor(0xBBFFFFFF.toInt())
+            setPadding(0, 0, (8 * dp).toInt(), 0)
+        }
+        val title = TextView(this).apply {
+            text = "$displayName (Qty: $totalQty)"
+            textSize = 13f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(0xEEFFFFFF.toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f,
+            )
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, (4 * dp).toInt(), 0, (4 * dp).toInt())
+            isClickable = true
+        }
+        header.addView(chevron)
+        header.addView(title)
+        if (KdsActiveCache.hasActiveKds) {
+            val kds =
+                OrderLineKdsStatus.latestBatchKdsStatusForLine(statusDoc)
+                    ?: statusDoc.getString(OrderLineKdsStatus.FIELD)
+            if (hasKdsStatusIndicator(kds)) {
+                header.addView(
+                    ComposeView(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        )
+                        setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                        setContent {
+                            KdsStatusIcon(status = kds) { msg ->
+                                Toast.makeText(this@PaymentActivity, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                )
+            }
+        }
+
+        val childContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+            visibility = if (expanded) View.VISIBLE else View.GONE
+        }
+        if (expanded) {
+            val childIndent = 20
+            sorted.forEachIndexed { idx, doc ->
+                addPaymentKdsSendDetailBlock(
+                    childContainer,
+                    sendIndex = idx + 1,
+                    doc,
+                    orderAppliedDiscounts,
+                    indentDp = childIndent,
+                )
+                if (idx < sorted.lastIndex) {
+                    childContainer.addView(makeSummarySpacer(4))
+                }
+            }
+        }
+
+        val toggle = View.OnClickListener {
+            val now = if (stableKey in paymentExpandedLineGroups) {
+                paymentExpandedLineGroups.remove(stableKey)
+                false
+            } else {
+                paymentExpandedLineGroups.add(stableKey)
+                true
+            }
+            chevron.text = if (now) "▼" else "▶"
+            childContainer.visibility = if (now) View.VISIBLE else View.GONE
+            if (now && childContainer.childCount == 0) {
+                val childIndent = 20
+                sorted.forEachIndexed { idx, doc ->
+                    addPaymentKdsSendDetailBlock(
+                        childContainer,
+                        sendIndex = idx + 1,
+                        doc,
+                        orderAppliedDiscounts,
+                        indentDp = childIndent,
+                    )
+                    if (idx < sorted.lastIndex) {
+                        childContainer.addView(makeSummarySpacer(4))
+                    }
+                }
+            }
+            if (!now) {
+                childContainer.removeAllViews()
+            }
+        }
+        header.setOnClickListener(toggle)
+        chevron.setOnClickListener(toggle)
+        title.setOnClickListener(toggle)
+
+        container.addView(header)
+        container.addView(
+            makeSummaryRow(
+                "Line Total: ${MoneyUtils.centsToDisplay(totalCents)}",
+                "",
+                13f,
+                0xFF81C784.toInt(),
+                boldLeft = true,
+            ).apply {
+                setPadding((20 * dp).toInt(), 0, 0, 0)
+            },
+        )
+        container.addView(childContainer)
     }
 
     private fun makeSummarySpacer(heightDp: Int): View {

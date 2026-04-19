@@ -19,7 +19,7 @@ class KitchenOrderConfigurationActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_kitchen_order_configuration)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Kitchen Order Configuration"
+        supportActionBar?.title = getString(R.string.kitchen_kds_config_title)
 
         findViewById<RadioGroup>(R.id.printTriggerRadioGroup).setOnCheckedChangeListener { _, checkedId ->
             if (applyingRemotePrintingSettings) return@setOnCheckedChangeListener

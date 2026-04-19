@@ -274,10 +274,7 @@ object KitchenTicketBuilder {
         for (m in mods) {
             val isRemove = m.action.trim().uppercase(Locale.US) == "REMOVE"
             val text = when {
-                isRemove -> {
-                    val n = m.name.trim()
-                    if (n.uppercase(Locale.US).startsWith("NO")) n else "No $n"
-                }
+                isRemove -> ModifierRemoveDisplay.cartLine(m.name)
                 else -> m.name.trim()
             }
             out.add(ModifierLineRow("$prefix$text", redOnStar = isRemove))

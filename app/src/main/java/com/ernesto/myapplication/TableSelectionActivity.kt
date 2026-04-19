@@ -693,8 +693,12 @@ class TableSelectionActivity : AppCompatActivity() {
                     }
                     return@setOnClickListener
                 }
-                if (groupIds.any { tableStatuses[it]?.trim()?.uppercase().orEmpty() == "OCCUPIED" }) {
-                    Toast.makeText(this, "This table is occupied. Try another table.", Toast.LENGTH_LONG).show()
+                val docOnlyOccupied =
+                    groupIds.any { tableStatuses[it]?.trim()?.uppercase().orEmpty() == "OCCUPIED" }
+                if (docOnlyOccupied) {
+                    // Table doc still says OCCUPIED but there is no OPEN Dine-In order — common after a
+                    // partial failure or manual DB edits; offer to clear so staff can seat again.
+                    showClearStaleTableOccupancyDialog(groupIds)
                     return@setOnClickListener
                 }
                 showGuestCountDialog(id)
@@ -704,7 +708,11 @@ class TableSelectionActivity : AppCompatActivity() {
         tableView.setOnLongClickListener {
             val groupIds = resolvedJoinedGroup(id)
             val info = groupIds.mapNotNull { occupiedTableData[it] }.firstOrNull()
-            if (info != null) showDeoccupyDialog(id, info)
+            when {
+                info != null -> showDeoccupyDialog(id, info)
+                groupIds.any { tableStatuses[it]?.trim()?.uppercase().orEmpty() == "OCCUPIED" } ->
+                    showClearStaleTableOccupancyDialog(groupIds)
+            }
             true
         }
 
@@ -1148,6 +1156,28 @@ class TableSelectionActivity : AppCompatActivity() {
             }
         }
         dialog.show()
+    }
+
+    /**
+     * Clears [status] on table doc(s) when they still read OCCUPIED but no OPEN Dine-In order is linked
+     * in [occupiedTableData] (stale occupancy).
+     */
+    private fun showClearStaleTableOccupancyDialog(groupIds: List<String>) {
+        val tableName = if (groupIds.size > 1) {
+            groupIds.joinToString(" · ") { tableNames[it] ?: "Table" }
+        } else {
+            tableNames[groupIds.firstOrNull().orEmpty()] ?: "Table"
+        }
+        val layoutId = if (useTableLayouts && activeLayoutId.isNotBlank()) activeLayoutId else null
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.table_clear_stale_occupied_title, tableName))
+            .setMessage(R.string.table_clear_stale_occupied_message)
+            .setPositiveButton(R.string.table_clear_stale_occupied_confirm) { _, _ ->
+                TableFirestoreHelper.clearDineInJoinedTablesStatus(db, groupIds, layoutId)
+                Toast.makeText(this, R.string.table_clear_stale_occupied_done, Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun showDeoccupyDialog(tableId: String, info: OccupiedTableInfo) {

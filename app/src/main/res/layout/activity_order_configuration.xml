@@ -65,7 +65,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Kitchen Order Configuration"
+            android:text="@string/order_config_kitchen_kds_option"
             android:textSize="16sp"
             android:textStyle="bold" />
 

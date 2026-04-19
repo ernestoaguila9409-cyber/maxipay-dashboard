@@ -14,7 +14,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Kitchen Order Configuration"
+            android:text="@string/kitchen_kds_config_title"
             android:textSize="20sp"
             android:textStyle="bold"
             android:paddingBottom="8dp" />
@@ -22,7 +22,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Controls when kitchen tickets are automatically printed"
+            android:text="@string/kitchen_kds_config_subtitle"
             android:textSize="14sp"
             android:textColor="@android:color/darker_gray"
             android:paddingBottom="20dp" />
@@ -37,7 +37,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="When should tickets be printed?"
+                android:text="@string/kitchen_kds_when_heading"
                 android:textSize="16sp"
                 android:textStyle="bold"
                 android:paddingBottom="12dp" />
@@ -54,7 +54,7 @@
                     android:layout_height="wrap_content"
                     android:paddingTop="4dp"
                     android:paddingBottom="4dp"
-                    android:text="When Send to Kitchen is clicked" />
+                    android:text="@string/kitchen_kds_when_send" />
 
                 <RadioButton
                     android:id="@+id/radioPrintTriggerOnPayment"
@@ -62,7 +62,7 @@
                     android:layout_height="wrap_content"
                     android:paddingTop="4dp"
                     android:paddingBottom="4dp"
-                    android:text="When Payment is completed" />
+                    android:text="@string/kitchen_kds_when_payment" />
 
                 <RadioButton
                     android:id="@+id/radioPrintTriggerFirstEvent"
@@ -70,7 +70,7 @@
                     android:layout_height="wrap_content"
                     android:paddingTop="4dp"
                     android:paddingBottom="4dp"
-                    android:text="When Send OR Payment (whichever comes first)" />
+                    android:text="@string/kitchen_kds_when_first" />
             </RadioGroup>
         </LinearLayout>
 
@@ -85,7 +85,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Which items should be printed?"
+                android:text="@string/kitchen_kds_items_heading"
                 android:textSize="16sp"
                 android:textStyle="bold"
                 android:paddingBottom="8dp" />
@@ -93,7 +93,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Use labels to route items to specific printers (kitchen, bar, etc.)"
+                android:text="@string/kitchen_kds_items_hint"
                 android:textSize="14sp"
                 android:textColor="@android:color/darker_gray"
                 android:paddingBottom="12dp" />
@@ -110,7 +110,7 @@
                     android:layout_height="wrap_content"
                     android:paddingTop="4dp"
                     android:paddingBottom="4dp"
-                    android:text="Print all items" />
+                    android:text="@string/kitchen_kds_items_all" />
 
                 <RadioButton
                     android:id="@+id/radioPrintItemFilterByLabel"
@@ -118,7 +118,7 @@
                     android:layout_height="wrap_content"
                     android:paddingTop="4dp"
                     android:paddingBottom="4dp"
-                    android:text="Print items based on labels" />
+                    android:text="@string/kitchen_kds_items_by_label" />
             </RadioGroup>
         </LinearLayout>
     </LinearLayout>

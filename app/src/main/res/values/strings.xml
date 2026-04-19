@@ -163,6 +163,20 @@
     <string name="cart_nothing_new_kitchen">Nothing new to send to the kitchen.</string>
     <string name="cart_kitchen_items_load_failed">Could not load items for kitchen print.</string>
     <string name="cart_sending_kitchen">Sending…</string>
+    <string name="cart_order_in_process">Order already in process</string>
+
+    <!-- Kitchen + KDS (Settings/printing; same rules for LAN kitchen printers and KDS) -->
+    <string name="order_config_kitchen_kds_option">Kitchen display &amp; printers</string>
+    <string name="kitchen_kds_config_title">Kitchen display &amp; printers</string>
+    <string name="kitchen_kds_config_subtitle">Controls when orders appear on the KDS and when kitchen tickets print to LAN printers.</string>
+    <string name="kitchen_kds_when_heading">When should orders go to the kitchen?</string>
+    <string name="kitchen_kds_when_send">When Send to Kitchen is clicked</string>
+    <string name="kitchen_kds_when_payment">When payment is completed</string>
+    <string name="kitchen_kds_when_first">When Send or payment (whichever comes first)</string>
+    <string name="kitchen_kds_items_heading">Which items should be included?</string>
+    <string name="kitchen_kds_items_hint">Use labels to route items to specific printers (kitchen, bar, etc.). The KDS uses the same labels synced under Printers in Firestore.</string>
+    <string name="kitchen_kds_items_all">All items</string>
+    <string name="kitchen_kds_items_by_label">Items with a matching printer label only</string>
 
     <!-- Modifier option dialogs -->
     <string name="modifier_dialog_option_name_hint">Option name (e.g. Small)</string>
@@ -234,6 +248,10 @@
     <string name="table_status_order_open">Order open</string>
     <string name="table_status_reserved">Reserved</string>
     <string name="table_status_occupied">Occupied</string>
+    <string name="table_clear_stale_occupied_title">Clear %1$s?</string>
+    <string name="table_clear_stale_occupied_message">This table is marked occupied, but there is no open Dine-In order on it. You can clear the table so guests can be seated again.</string>
+    <string name="table_clear_stale_occupied_confirm">Clear table</string>
+    <string name="table_clear_stale_occupied_done">Table cleared</string>
 
     <plurals name="table_shape_party_of">
         <item quantity="one">Party of %d</item>

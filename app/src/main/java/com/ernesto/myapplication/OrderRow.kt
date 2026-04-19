@@ -12,7 +12,9 @@ data class OrderRow(
     val customerName: String = "",
     val createdAt: Timestamp,
     val orderType: String = "",
-    val preAuthAmountCents: Long = 0L
+    val preAuthAmountCents: Long = 0L,
+    /** Aggregated kitchen phase for list icon; null = hide. */
+    val kdsAggregateStatus: String? = null,
 ) {
     val netCents: Long get() = (totalCents - totalRefundedInCents).coerceAtLeast(0L)
 

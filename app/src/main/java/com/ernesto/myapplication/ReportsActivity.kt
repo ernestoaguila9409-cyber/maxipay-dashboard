@@ -35,6 +35,7 @@ import com.ernesto.myapplication.engine.TaxByTaxName
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -46,6 +47,7 @@ import kotlin.math.roundToInt
 class ReportsActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
+    private var dashboardListener: ListenerRegistration? = null
     private val reportEngine = ReportEngine(db)
     private val menuPerfEngine = MenuPerformanceEngine(db)
     private val currencyFmt = NumberFormat.getCurrencyInstance()
@@ -182,7 +184,20 @@ class ReportsActivity : AppCompatActivity() {
         setupPreviewCard(findViewById(R.id.headerEmployee), ReportPreviewActivity.TYPE_EMPLOYEE)
         setupPreviewCard(findViewById(R.id.headerMenuPerformance), ReportPreviewActivity.TYPE_MENU_PERFORMANCE)
 
+        dashboardListener = DashboardConfigManager.listenConfig(
+            db,
+            onUpdate = { modules ->
+                OrderTypeColorResolver.updateFromDashboard(modules)
+            },
+        )
+
         loadAllReports()
+    }
+
+    override fun onDestroy() {
+        dashboardListener?.remove()
+        dashboardListener = null
+        super.onDestroy()
     }
 
     /** Converts local date to UTC millis for MaterialDatePicker (expects UTC midnight). */
@@ -641,13 +656,6 @@ class ReportsActivity : AppCompatActivity() {
     // HOURLY SALES BY ORDER TYPE
     // =========================================================
 
-    private val orderTypeColors = mapOf(
-        "DINE_IN" to "#1565C0",
-        "TO_GO" to "#E65100",
-        "BAR" to "#6A1B9A",
-        "BAR_TAB" to "#6A1B9A"
-    )
-
     private fun orderTypeDisplayName(raw: String): String = when (raw) {
         "DINE_IN" -> "Dine-In"
         "TO_GO" -> "To-Go"
@@ -782,7 +790,7 @@ class ReportsActivity : AppCompatActivity() {
             }
 
             for (ot in hourSale.orderTypes) {
-                val color = orderTypeColors[ot.orderType] ?: "#757575"
+                val color = OrderTypeColorResolver.colorHexForOrderType(ot.orderType)
                 val otRow = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL

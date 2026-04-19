@@ -1,12 +1,16 @@
 package com.ernesto.myapplication.engine
 
+import com.ernesto.myapplication.KitchenPrintHelper
+import com.ernesto.myapplication.OrderLineKdsStatus
 import com.ernesto.myapplication.OrderModifier
 import com.ernesto.myapplication.OrderNumberGenerator
+import com.ernesto.myapplication.PrintingSettingsFirestore
 import com.ernesto.myapplication.TableFirestoreHelper
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import java.util.Date
+import java.util.Locale
 
 class OrderEngine(private val db: FirebaseFirestore) {
 
@@ -180,7 +184,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
             "lineTotalInCents" to lineTotalInCents,
             "modifiers" to modifierMaps,
             "taxMode" to input.taxMode,
-            "updatedAt" to Date()
+            "updatedAt" to Date(),
         )
         if (input.taxIds.isNotEmpty()) itemMap["taxIds"] = input.taxIds
         if (input.guestNumber > 0) itemMap["guestNumber"] = input.guestNumber
@@ -188,16 +192,78 @@ class OrderEngine(private val db: FirebaseFirestore) {
         if (!pl.isNullOrEmpty()) itemMap["printerLabel"] = pl
 
         val orderRef = db.collection("Orders").document(orderId)
+        val lineRef = orderRef.collection("items").document(lineKey)
 
-        if (isNewLine) {
-            orderRef.update("itemsCount", FieldValue.increment(1))
+        if (!isNewLine) {
+            pendingWrites++
+            fun finishOk() {
+                pendingWrites--
+                drainFlushCallbacks()
+                onSuccess()
+            }
+            fun finishErr(e: Exception) {
+                pendingWrites--
+                drainFlushCallbacks()
+                onFailure(e)
+            }
+            lineRef.get()
+                .addOnSuccessListener { snap ->
+                    val merged = LinkedHashMap(itemMap)
+                    if (snap.exists()) {
+                        val oldQty = snap.getLong("quantity") ?: 0L
+                        val kds = snap.getString(OrderLineKdsStatus.FIELD)
+                            ?.trim()?.uppercase(Locale.US).orEmpty()
+                        if (input.quantity > oldQty && kds == OrderLineKdsStatus.READY) {
+                            val existingCovered = snap.getLong(OrderLineKdsStatus.FIELD_READY_COVERS_QTY)
+                            if (existingCovered == null) {
+                                merged[OrderLineKdsStatus.FIELD_READY_COVERS_QTY] = oldQty
+                            }
+                        }
+                    }
+                    lineRef.set(merged, SetOptions.merge())
+                        .addOnSuccessListener {
+                            orderRef.update("updatedAt", Date())
+                                .addOnSuccessListener { finishOk() }
+                                .addOnFailureListener { e -> finishErr(e) }
+                        }
+                        .addOnFailureListener { e -> finishErr(e) }
+                }
+                .addOnFailureListener { e -> finishErr(e) }
+            return
         }
 
+        /**
+         * Dine-in keeps the same Firestore order after the cart is cleared. When the first
+         * line is added again, reset [createdAt] and kitchen fields so KDS elapsed time
+         * starts fresh (same order #, new ticket).
+         */
         pendingWrites++
-
-        orderRef.collection("items")
-            .document(lineKey)
-            .set(itemMap, SetOptions.merge())
+        db.runTransaction { tx ->
+            val snap = tx.get(orderRef)
+            val count = snap.getLong("itemsCount") ?: 0L
+            val orderUpdates = hashMapOf<String, Any>(
+                "itemsCount" to FieldValue.increment(1),
+                "updatedAt" to Date(),
+            )
+            if (count == 0L) {
+                orderUpdates["createdAt"] = Date()
+                orderUpdates["kitchenStartedAt"] = FieldValue.delete()
+                orderUpdates["kitchenStatus"] = FieldValue.delete()
+                orderUpdates["lastKitchenSentAt"] = FieldValue.delete()
+                orderUpdates[KitchenPrintHelper.KITCHEN_SENT_BY_LINE_MAP_FIELD] = FieldValue.delete()
+                orderUpdates[KitchenPrintHelper.KITCHEN_NOTES_LAST_PRINTED_BY_PRINTER_IP] =
+                    FieldValue.delete()
+                orderUpdates[PrintingSettingsFirestore.FIELD_KITCHEN_CHITS_PRINTED_AT] =
+                    FieldValue.delete()
+            }
+            tx.update(orderRef, orderUpdates)
+            val newLinePayload = LinkedHashMap(itemMap).apply {
+                /** First write of this line doc; preserved on later merges (see non-new path). */
+                put("createdAt", Date())
+            }
+            tx.set(lineRef, newLinePayload, SetOptions.merge())
+            null
+        }
             .addOnSuccessListener {
                 pendingWrites--
                 drainFlushCallbacks()

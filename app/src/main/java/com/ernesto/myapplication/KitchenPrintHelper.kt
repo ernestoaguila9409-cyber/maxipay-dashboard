@@ -1,6 +1,7 @@
 package com.ernesto.myapplication
 
 import android.content.Context
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -8,6 +9,7 @@ import com.google.firebase.firestore.QuerySnapshot
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 /**
  * Resolves kitchen printers from [PrintingSettingsCache], groups [KitchenTicketLineInput] into
@@ -73,7 +75,30 @@ object KitchenPrintHelper {
                     if (notesPrintedByIp != null) {
                         update[KITCHEN_NOTES_LAST_PRINTED_BY_PRINTER_IP] = notesPrintedByIp
                     }
-                    orderRef.update(update)
+                    val wb = db.batch()
+                    wb.update(orderRef, update)
+                    val prevSent = effectiveSentWithLegacyOrderMap(orderDoc, itemsSnap)
+                    val kitchenSendGroupId = UUID.randomUUID().toString()
+                    for ((lineKey, newHigh) in qtyUpdates) {
+                        val prev = prevSent[lineKey] ?: 0
+                        val delta = newHigh - prev
+                        if (delta > 0) {
+                            val entry = hashMapOf<String, Any>(
+                                OrderLineKdsStatus.BATCH_SUBFIELD_ID to UUID.randomUUID().toString(),
+                                OrderLineKdsStatus.BATCH_SUBFIELD_SEND_GROUP_ID to kitchenSendGroupId,
+                                "sentAt" to Timestamp.now(),
+                                "quantity" to delta.toLong(),
+                                OrderLineKdsStatus.BATCH_SUBFIELD_KDS_STATUS to OrderLineKdsStatus.SENT,
+                            )
+                            wb.update(
+                                orderRef.collection("items").document(lineKey),
+                                mapOf(
+                                    OrderLineKdsStatus.FIELD_KDS_SEND_BATCHES to FieldValue.arrayUnion(entry),
+                                ),
+                            )
+                        }
+                    }
+                    wb.commit()
                 }
             }
         }

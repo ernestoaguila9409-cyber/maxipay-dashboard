@@ -1,5 +1,6 @@
 package com.ernesto.myapplication.engine
 
+import com.ernesto.myapplication.ModifierRemoveDisplay
 import com.google.firebase.firestore.DocumentSnapshot
 
 /**
@@ -23,7 +24,7 @@ object SplitReceiptCalculator {
                         ?: item["first"]?.toString()
                         ?: return
                     lines.add(
-                        if (action == "REMOVE") "${indent}\u2022 No $modName"
+                        if (action == "REMOVE") "${indent}\u2022 ${ModifierRemoveDisplay.cartLine(modName)}"
                         else "${indent}\u2022 $modName"
                     )
                     val children = item["children"] as? List<*>

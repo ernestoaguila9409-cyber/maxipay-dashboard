@@ -15,6 +15,7 @@ import com.google.android.material.button.MaterialButton
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -89,6 +90,9 @@ class OrderDetailActivity : AppCompatActivity() {
     private var currentBatchId: String? = null
     private var orderType: String = ""
     private var saleTransactionId: String? = null
+    private var lastOrderStatusForBadge: String = ""
+    private var dashboardListener: ListenerRegistration? = null
+    private var orderItemsListener: ListenerRegistration? = null
 
     private enum class ReceiptContentType { ORIGINAL, REFUND, VOID }
 
@@ -180,7 +184,25 @@ class OrderDetailActivity : AppCompatActivity() {
         })
 
         loadHeader()
-        loadItems()
+        attachOrderItemsRealtimeListener()
+
+        dashboardListener = DashboardConfigManager.listenConfig(
+            db,
+            onUpdate = { modules ->
+                OrderTypeColorResolver.updateFromDashboard(modules)
+                if (lastOrderStatusForBadge.isNotEmpty()) {
+                    runOnUiThread { updateOrderTypeBadge(lastOrderStatusForBadge) }
+                }
+            },
+        )
+    }
+
+    override fun onDestroy() {
+        dashboardListener?.remove()
+        dashboardListener = null
+        orderItemsListener?.remove()
+        orderItemsListener = null
+        super.onDestroy()
     }
 
     override fun onResume() {
@@ -262,6 +284,7 @@ class OrderDetailActivity : AppCompatActivity() {
                 saleTransactionId = doc.getString("saleTransactionId") ?: doc.getString("transactionId")
 
                 displayOrderSummary(doc, status)
+                lastOrderStatusForBadge = status
                 updateOrderTypeBadge(status)
                 refreshSplitBanner(saleTransactionId)
 
@@ -854,7 +877,6 @@ class OrderDetailActivity : AppCompatActivity() {
         }.addOnSuccessListener {
             Toast.makeText(this, "Tip adjusted successfully", Toast.LENGTH_SHORT).show()
             loadHeader()
-            loadItems()
         }.addOnFailureListener { e ->
             Log.e("TIP_ADJUST", "Firestore transaction failed", e)
             AlertDialog.Builder(this)
@@ -1003,13 +1025,13 @@ class OrderDetailActivity : AppCompatActivity() {
 
         txtOrderType.visibility = View.VISIBLE
         val label = if (orderType == "TO_GO") "TO-GO" else "DINE IN"
-        val bgColor = if (orderType == "TO_GO") "#FF9800" else "#4CAF50"
+        val bgArgb = OrderTypeColorResolver.colorArgbForOrderType(orderType)
 
         txtOrderType.text = if (status == "OPEN") "$label  ✎" else label
         txtOrderType.setTextColor(android.graphics.Color.WHITE)
 
         val bg = android.graphics.drawable.GradientDrawable()
-        bg.setColor(android.graphics.Color.parseColor(bgColor))
+        bg.setColor(bgArgb)
         bg.cornerRadius = 16f
         txtOrderType.background = bg
 
@@ -1107,52 +1129,93 @@ class OrderDetailActivity : AppCompatActivity() {
 
     private var guestNames: List<String> = emptyList()
 
-    private fun loadItems() {
-        db.collection("Orders").document(orderId).get()
-            .addOnSuccessListener { orderDoc ->
-                @Suppress("UNCHECKED_CAST")
-                guestNames = (orderDoc.get("guestNames") as? List<String>) ?: emptyList()
-                @Suppress("UNCHECKED_CAST")
-                val orderAppliedDiscounts =
-                    (orderDoc.get("appliedDiscounts") as? List<Map<String, Any>>) ?: emptyList()
-                adapter.setAppliedDiscounts(orderAppliedDiscounts)
+    private fun orderLineDisplayName(doc: DocumentSnapshot): String =
+        doc.getString("name") ?: doc.getString("itemName") ?: "Item"
 
-                db.collection("Orders").document(orderId)
-                    .collection("items")
-                    .get()
-                    .addOnSuccessListener { docs ->
-                        itemDocs.clear()
-                        itemDocs.addAll(docs.documents)
-
-                        listItems.clear()
-
-                        val hasGuests = orderType == "DINE_IN" &&
-                            itemDocs.any { (it.getLong("guestNumber") ?: 0L) > 0L }
-
-                        if (hasGuests) {
-                            val grouped = itemDocs.groupBy { (it.getLong("guestNumber") ?: 0L).toInt() }
-                            for (guestNum in grouped.keys.sorted()) {
-                                if (guestNum > 0) {
-                                    val name = guestNames.getOrNull(guestNum - 1)?.takeIf { it.isNotBlank() }
-                                    listItems.add(OrderListItem.GuestHeader(guestNum, name))
-                                }
-                                grouped[guestNum]?.forEach { listItems.add(OrderListItem.Item(it)) }
-                            }
-                        } else {
-                            itemDocs.forEach { listItems.add(OrderListItem.Item(it)) }
-                        }
-
-                        adapter.notifyDataSetChanged()
-
-                        if (listItems.isEmpty()) {
-                            txtEmptyItems.visibility = View.VISIBLE
-                            recycler.visibility = View.GONE
-                        } else {
-                            txtEmptyItems.visibility = View.GONE
-                            recycler.visibility = View.VISIBLE
-                        }
-                    }
+    /**
+     * Visual-only grouping for Order Details: same display name → one row (expandable if 2+ line docs).
+     * [guestNumberKey] is 0 when not using guest sections; otherwise the guest # for stable expansion keys.
+     */
+    private fun appendGroupedOrderLinesByName(
+        docs: List<DocumentSnapshot>,
+        guestNumberKey: Int,
+        into: MutableList<OrderListItem>,
+    ) {
+        if (docs.isEmpty()) return
+        val byName = docs.groupBy { orderLineDisplayName(it) }
+        val nameOrder = docs.map { orderLineDisplayName(it) }.distinct()
+        for (name in nameOrder) {
+            val group = byName[name] ?: continue
+            if (group.size == 1) {
+                into.add(OrderListItem.Item(group.first()))
+            } else {
+                into.add(OrderListItem.NamedGroup(name, guestNumberKey, group))
             }
+        }
+    }
+
+    /** Real-time line items (modifiers, [kdsStatus], payments on line, etc.). */
+    private fun attachOrderItemsRealtimeListener() {
+        orderItemsListener?.remove()
+        val orderRef = db.collection("Orders").document(orderId)
+        val itemsRef = orderRef.collection("items")
+        orderItemsListener = itemsRef.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                Log.w("OrderDetail", "items snapshot", error)
+                return@addSnapshotListener
+            }
+            val docs = snapshot?.documents ?: emptyList()
+            orderRef.get()
+                .addOnSuccessListener { orderDoc ->
+                    if (isDestroyed) return@addOnSuccessListener
+                    if (!orderDoc.exists()) return@addOnSuccessListener
+                    applyOrderItemsToUi(orderDoc, docs)
+                }
+        }
+    }
+
+    private fun applyOrderItemsToUi(orderDoc: DocumentSnapshot, itemDocuments: List<DocumentSnapshot>) {
+        if (isDestroyed) return
+        @Suppress("UNCHECKED_CAST")
+        guestNames = (orderDoc.get("guestNames") as? List<String>) ?: emptyList()
+        @Suppress("UNCHECKED_CAST")
+        val orderAppliedDiscounts =
+            (orderDoc.get("appliedDiscounts") as? List<Map<String, Any>>) ?: emptyList()
+        adapter.setAppliedDiscounts(orderAppliedDiscounts)
+
+        itemDocs.clear()
+        itemDocs.addAll(itemDocuments)
+
+        listItems.clear()
+
+        val hasGuests = orderType == "DINE_IN" &&
+            itemDocs.any { (it.getLong("guestNumber") ?: 0L) > 0L }
+
+        if (hasGuests) {
+            val grouped = itemDocs.groupBy { (it.getLong("guestNumber") ?: 0L).toInt() }
+            for (guestNum in grouped.keys.sorted()) {
+                if (guestNum > 0) {
+                    val name = guestNames.getOrNull(guestNum - 1)?.takeIf { it.isNotBlank() }
+                    listItems.add(OrderListItem.GuestHeader(guestNum, name))
+                }
+                appendGroupedOrderLinesByName(grouped[guestNum].orEmpty(), guestNum, listItems)
+            }
+        } else {
+            appendGroupedOrderLinesByName(itemDocs, 0, listItems)
+        }
+
+        val validGroupKeys = listItems.mapNotNull { (it as? OrderListItem.NamedGroup)?.stableKey() }.toSet()
+        adapter.retainExpandedGroupsOnly(validGroupKeys)
+        adapter.retainExpandedBatchLineIdsOnly(itemDocs.map { it.id }.toSet())
+        adapter.notifyDataSetChanged()
+
+        if (listItems.isEmpty()) {
+            txtEmptyItems.visibility = View.VISIBLE
+            recycler.visibility = View.GONE
+        } else {
+            txtEmptyItems.visibility = View.GONE
+            recycler.visibility = View.VISIBLE
+        }
     }
 
     // ===============================
@@ -1461,7 +1524,6 @@ class OrderDetailActivity : AppCompatActivity() {
                 if (!orderDoc.exists()) return@addOnSuccessListener
                 val status = orderDoc.getString("status") ?: ""
                 if (status != "CLOSED" && status != "REFUNDED") {
-                    Toast.makeText(this, "Refund is only available for closed orders.", Toast.LENGTH_SHORT).show()
                     return@addOnSuccessListener
                 }
                 val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
@@ -2090,7 +2152,7 @@ class OrderDetailActivity : AppCompatActivity() {
                     val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
                     val modCents = kotlin.math.round(modPrice * 100).toLong()
                     when {
-                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("${indent}  NO $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("${indent}  ${ModifierRemoveDisplay.receiptNoLine(modName)}", bold = rs.boldItems, fontSize = rs.fontSizeItems)
                         modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("${indent}  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
                         else -> segs += EscPosPrinter.Segment("${indent}  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
                     }
@@ -2510,7 +2572,7 @@ class OrderDetailActivity : AppCompatActivity() {
                     val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
                     val modCents = kotlin.math.round(modPrice * 100).toLong()
                     when {
-                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("${indent}  NO $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("${indent}  ${ModifierRemoveDisplay.receiptNoLine(modName)}", bold = rs.boldItems, fontSize = rs.fontSizeItems)
                         modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("${indent}  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
                         else -> segs += EscPosPrinter.Segment("${indent}  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
                     }
@@ -2689,7 +2751,7 @@ class OrderDetailActivity : AppCompatActivity() {
                                                 ReceiptPromptHelper.promptForReceipt(
                                                     this, ReceiptPromptHelper.ReceiptType.REFUND, orderId, originalTransactionId
                                                 ) {
-                                                    if (finishAfter) finish() else { loadHeader(); loadItems() }
+                                                    if (finishAfter) finish() else { loadHeader() }
                                                 }
                                             }
                                     }

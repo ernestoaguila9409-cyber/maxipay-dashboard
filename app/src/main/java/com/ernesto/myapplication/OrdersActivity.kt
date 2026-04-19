@@ -21,13 +21,19 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.chip.ChipGroup
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.QuerySnapshot
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import java.util.Calendar
 
 class OrdersActivity : AppCompatActivity() {
@@ -47,6 +53,10 @@ class OrdersActivity : AppCompatActivity() {
     private val allOrders = mutableListOf<OrderRow>() // unfiltered for status/date filter
 
     private var listener: ListenerRegistration? = null
+    private var dashboardListener: ListenerRegistration? = null
+
+    /** orderId → SENT / PREPARING / READY for list-row icon (orders released to kitchen only). */
+    private val kitchenAggregateByOrderId = ConcurrentHashMap<String, String>()
 
     // Filters: "ALL", "OPEN", "CLOSED" (chips) — kept for quick tabs
     private var filter: String = "ALL"
@@ -70,6 +80,7 @@ class OrdersActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_orders)
+        KdsActiveCache.start(db)
         currentEmployeeName = intent.getStringExtra("employeeName") ?: ""
         currentOrderView = intent.getBooleanExtra("CURRENT_ORDER", false)
         filterBatchId = intent.getStringExtra("BATCH_ID")?.takeIf { it.isNotBlank() }
@@ -175,6 +186,14 @@ class OrdersActivity : AppCompatActivity() {
         super.onStart()
         loadEmployeeNames()
         startListening()
+        dashboardListener?.remove()
+        dashboardListener = DashboardConfigManager.listenConfig(
+            db,
+            onUpdate = { modules ->
+                OrderTypeColorResolver.updateFromDashboard(modules)
+                runOnUiThread { adapter.notifyDataSetChanged() }
+            },
+        )
     }
 
     private fun loadEmployeeNames() {
@@ -189,11 +208,58 @@ class OrdersActivity : AppCompatActivity() {
         super.onStop()
         listener?.remove()
         listener = null
+        dashboardListener?.remove()
+        dashboardListener = null
+    }
+
+    /**
+     * Refetches line [kdsStatus] for orders touched in this snapshot so list icons stay in sync
+     * (line writes alone do not include line data on the order document).
+     */
+    private suspend fun refreshKitchenAggregates(snap: QuerySnapshot) {
+        val changes = snap.documentChanges
+        val idsToRefresh = linkedSetOf<String>()
+        if (changes.isEmpty()) {
+            for (doc in snap.documents) {
+                if (OrderListKdsAggregator.orderReleasedToKitchen(doc)) {
+                    idsToRefresh.add(doc.id)
+                }
+            }
+        } else {
+            for (ch in changes) {
+                when (ch.type) {
+                    DocumentChange.Type.REMOVED -> kitchenAggregateByOrderId.remove(ch.document.id)
+                    else -> {
+                        val d = ch.document
+                        if (OrderListKdsAggregator.orderReleasedToKitchen(d)) {
+                            idsToRefresh.add(d.id)
+                        } else {
+                            kitchenAggregateByOrderId.remove(d.id)
+                        }
+                    }
+                }
+            }
+        }
+        coroutineScope {
+            idsToRefresh.map { id ->
+                async {
+                    val doc = snap.documents.find { it.id == id } ?: return@async
+                    val qs = doc.reference.collection("items").get().await()
+                    val phase = OrderListKdsAggregator.aggregatePhase(qs.documents)
+                    if (phase != null) {
+                        kitchenAggregateByOrderId[id] = phase
+                    } else {
+                        kitchenAggregateByOrderId.remove(id)
+                    }
+                }
+            }.awaitAll()
+        }
     }
 
     private fun startListening() {
         listener?.remove()
         listener = null
+        kitchenAggregateByOrderId.clear()
 
         var query: Query = db.collection("Orders")
 
@@ -219,6 +285,11 @@ class OrdersActivity : AppCompatActivity() {
             if (snap == null) return@addSnapshotListener
 
             lifecycleScope.launch {
+                if (KdsActiveCache.hasActiveKds) {
+                    withContext(Dispatchers.IO) {
+                        refreshKitchenAggregates(snap)
+                    }
+                }
                 val parsed = withContext(Dispatchers.Default) {
                     val result = mutableListOf<OrderRow>()
                     for (doc in snap.documents) {
@@ -238,6 +309,11 @@ class OrdersActivity : AppCompatActivity() {
                         val orderType = doc.getString("orderType") ?: ""
                         val preAuthAmount = doc.getDouble("preAuthAmount") ?: 0.0
                         val preAuthAmountCents = Math.round(preAuthAmount * 100)
+                        val kdsAgg = if (KdsActiveCache.hasActiveKds && OrderListKdsAggregator.orderReleasedToKitchen(doc)) {
+                            kitchenAggregateByOrderId[id]
+                        } else {
+                            null
+                        }
                         result.add(
                             OrderRow(
                                 id = id,
@@ -249,7 +325,8 @@ class OrdersActivity : AppCompatActivity() {
                                 customerName = customerName,
                                 createdAt = createdAt,
                                 orderType = orderType,
-                                preAuthAmountCents = preAuthAmountCents
+                                preAuthAmountCents = preAuthAmountCents,
+                                kdsAggregateStatus = kdsAgg,
                             )
                         )
                     }

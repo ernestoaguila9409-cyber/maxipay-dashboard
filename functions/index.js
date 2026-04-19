@@ -171,6 +171,15 @@ function row(label, value) {
   </tr>`;
 }
 
+/** Avoid "No NO LETTUCE" when the stored label is already NO-prefixed (same rule as POS cart lines). */
+function removeModifierCartLine(name) {
+  const t = String(name ?? "").trim();
+  if (!t) return t;
+  const u = t.toUpperCase();
+  if (u.startsWith("NO ") || u === "NO") return t;
+  return `No ${t}`;
+}
+
 function itemsTableHtml(items, strikethrough, appliedDiscounts) {
   const strike = strikethrough ? "text-decoration:line-through;color:#999;" : "";
   const discounts = Array.isArray(appliedDiscounts) ? appliedDiscounts : [];
@@ -189,7 +198,7 @@ function itemsTableHtml(items, strikethrough, appliedDiscounts) {
       item.modifiers.forEach((mod) => {
         if (mod.action === "REMOVE") {
           rows += `<tr>
-            <td colspan="3" style="padding:2px 0 2px 20px;color:#D32F2F;font-size:13px;font-weight:bold;${strike}">No ${escapeHtml(mod.name)}</td>
+            <td colspan="3" style="padding:2px 0 2px 20px;color:#D32F2F;font-size:13px;font-weight:bold;${strike}">${escapeHtml(removeModifierCartLine(mod.name))}</td>
           </tr>`;
         } else {
           const modPrice = (mod.priceInCents / 100).toFixed(2);

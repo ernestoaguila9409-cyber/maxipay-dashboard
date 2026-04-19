@@ -10,14 +10,39 @@
     android:paddingTop="10dp"
     android:paddingBottom="10dp">
 
-    <!-- 1. Item name (Qty: n) — full width, bold -->
-    <TextView
-        android:id="@+id/txtItemNameQty"
+    <!-- 1. Chevron (multi kitchen send) + item name + KDS status -->
+    <LinearLayout
+        android:id="@+id/itemNameKdsRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textStyle="bold"
-        android:textSize="14sp"
-        android:textColor="#222222"/>
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/txtItemBatchChevron"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="▶"
+            android:textSize="12sp"
+            android:textColor="#666666"
+            android:paddingEnd="8dp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/txtItemNameQty"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:textColor="#222222"/>
+
+        <androidx.compose.ui.platform.ComposeView
+            android:id="@+id/kdsStatusCompose"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"/>
+    </LinearLayout>
 
     <!-- 2. Modifiers (bullets), optional -->
     <TextView
@@ -48,6 +73,14 @@
         android:textSize="13sp"
         android:textColor="#1B5E20"
         android:layout_marginTop="6dp"/>
+
+    <LinearLayout
+        android:id="@+id/kdsBatchChildContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="6dp"
+        android:visibility="gone" />
 
     <!-- Hidden: base (compat) -->
     <TextView

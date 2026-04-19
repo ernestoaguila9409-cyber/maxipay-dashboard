@@ -378,7 +378,7 @@ object ReceiptPromptHelper {
                     val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
                     val modCents = kotlin.math.round(modPrice * 100).toLong()
                     when {
-                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("${indent}  NO $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("${indent}  ${ModifierRemoveDisplay.receiptNoLine(modName)}", bold = rs.boldItems, fontSize = rs.fontSizeItems)
                         modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("${indent}  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
                         else -> segs += EscPosPrinter.Segment("${indent}  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
                     }

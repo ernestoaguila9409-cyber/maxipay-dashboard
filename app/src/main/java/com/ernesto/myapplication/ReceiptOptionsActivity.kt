@@ -319,7 +319,7 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                     val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
                     val modCents = kotlin.math.round(modPrice * 100).toLong()
                     if (modAction == "REMOVE") {
-                        item("${indent}  NO $modName")
+                        item("${indent}  ${ModifierRemoveDisplay.receiptNoLine(modName)}")
                     } else if (modCents > 0) {
                         item(formatLine("${indent}  + $modName", MoneyUtils.centsToDisplay(modCents), lwi))
                     } else {

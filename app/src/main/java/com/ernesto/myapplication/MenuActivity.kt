@@ -31,6 +31,8 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.Filter
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.QuerySnapshot
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
@@ -89,6 +91,12 @@ class MenuActivity : AppCompatActivity() {
 
     /** True if this order has had at least one explicit kitchen send (Firestore `lastKitchenSentAt`). */
     private var kitchenSentForOrder = false
+
+    /**
+     * Any line [kdsStatus] **PREPARING** (KDS START) blocks line deletes from the cart.
+     */
+    private var orderKitchenInProcess = false
+    private var orderKitchenStatusListener: ListenerRegistration? = null
     private var isSendingToKitchen = false
     private var isCheckoutPending = false
     private var isCaptureFlowActive = false
@@ -143,6 +151,7 @@ class MenuActivity : AppCompatActivity() {
                     deductStockTransaction(
                         onSuccess = {
                             clearCart()
+                            detachOrderKitchenStatusListener()
                             currentOrderId = null
                             Toast.makeText(this, "Stock updated successfully", Toast.LENGTH_SHORT).show()
 
@@ -156,6 +165,7 @@ class MenuActivity : AppCompatActivity() {
                     )
                 } else {
                     clearCart()
+                    detachOrderKitchenStatusListener()
                     currentOrderId = null
                     currentCategoryId?.let { loadItems(it) }
                 }
@@ -338,6 +348,34 @@ class MenuActivity : AppCompatActivity() {
         discountEngine.loadDiscounts { refreshCart() }
     }
 
+    override fun onDestroy() {
+        detachOrderKitchenStatusListener()
+        super.onDestroy()
+    }
+
+    private fun applyKitchenInProcessFromItemsSnapshot(snap: QuerySnapshot?) {
+        val anyPreparing = snap?.documents?.any { doc ->
+            doc.getString(OrderLineKdsStatus.FIELD)?.trim()?.equals(OrderLineKdsStatus.PREPARING, ignoreCase = true) == true
+        } == true
+        orderKitchenInProcess = anyPreparing
+    }
+
+    /** Subscribes to line [kdsStatus] so POS reacts when any KDS taps START (split stations). */
+    private fun attachOrderKitchenStatusListener(orderId: String) {
+        detachOrderKitchenStatusListener()
+        orderKitchenStatusListener = db.collection("Orders").document(orderId)
+            .collection("items")
+            .addSnapshotListener { snap, _ ->
+                applyKitchenInProcessFromItemsSnapshot(snap)
+            }
+    }
+
+    private fun detachOrderKitchenStatusListener() {
+        orderKitchenStatusListener?.remove()
+        orderKitchenStatusListener = null
+        orderKitchenInProcess = false
+    }
+
     private fun loadAllTaxes() {
         db.collection("Taxes")
             .get()
@@ -359,6 +397,7 @@ class MenuActivity : AppCompatActivity() {
     // ----------------------------
 
     private fun loadExistingOrderIntoCart(orderId: String) {
+        attachOrderKitchenStatusListener(orderId)
 
         db.collection("Orders").document(orderId)
             .get()
@@ -1898,8 +1937,9 @@ class MenuActivity : AppCompatActivity() {
                     customerName = customerName,
                     customerPhone = customerPhone,
                     customerEmail = customerEmail,
-                    onSuccess = { oid ->
+                        onSuccess = { oid ->
                         currentOrderId = oid
+                        attachOrderKitchenStatusListener(oid)
                         saveKitchenNotesToFirestore()
                         syncAllCartLinesToFirestore(oid) {
                             orderEngine.waitForPendingWrites {
@@ -1979,6 +2019,7 @@ class MenuActivity : AppCompatActivity() {
                         trigger: String,
                         qtyUpdates: Map<String, Int>?,
                         notesPrintedByPrinterIp: Map<String, String>?,
+                        itemsSnapForEffectiveSent: QuerySnapshot? = null,
                     ) {
                         val updates = hashMapOf<String, Any>("lastKitchenSentAt" to Date())
                         if (shouldPrintKitchen && trigger == PrintingSettingsFirestore.FIRST_EVENT) {
@@ -1994,9 +2035,42 @@ class MenuActivity : AppCompatActivity() {
                             updates[KitchenPrintHelper.KITCHEN_NOTES_LAST_PRINTED_BY_PRINTER_IP] =
                                 notesPrintedByPrinterIp
                         }
-                        orderRef
-                            .update(updates)
+                        val wb = db.batch()
+                        wb.update(orderRef, updates)
+                        if (!qtyUpdates.isNullOrEmpty()) {
+                            val prevSent = if (itemsSnapForEffectiveSent != null) {
+                                KitchenPrintHelper.effectiveSentWithLegacyOrderMap(
+                                    orderSnap,
+                                    itemsSnapForEffectiveSent,
+                                )
+                            } else {
+                                KitchenPrintHelper.kitchenSentByLineFromOrder(orderSnap)
+                            }
+                            val kitchenSendGroupId = UUID.randomUUID().toString()
+                            for ((lineKey, newHigh) in qtyUpdates) {
+                                val prev = prevSent[lineKey] ?: 0
+                                val delta = newHigh - prev
+                                if (delta > 0) {
+                                    val entry = hashMapOf<String, Any>(
+                                        OrderLineKdsStatus.BATCH_SUBFIELD_ID to UUID.randomUUID().toString(),
+                                        OrderLineKdsStatus.BATCH_SUBFIELD_SEND_GROUP_ID to kitchenSendGroupId,
+                                        "sentAt" to Timestamp.now(),
+                                        "quantity" to delta.toLong(),
+                                        OrderLineKdsStatus.BATCH_SUBFIELD_KDS_STATUS to OrderLineKdsStatus.SENT,
+                                    )
+                                    val lineRef = orderRef.collection("items").document(lineKey)
+                                    wb.update(
+                                        lineRef,
+                                        mapOf(
+                                            OrderLineKdsStatus.FIELD_KDS_SEND_BATCHES to FieldValue.arrayUnion(entry),
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                        wb.commit()
                             .addOnSuccessListener {
+                                OrderLineKdsStatus.markSentOnKitchenAfterSend(db, orderId)
                                 runOnUiThread {
                                     kitchenSentForOrder = true
                                     isSendingToKitchen = false
@@ -2049,6 +2123,7 @@ class MenuActivity : AppCompatActivity() {
                                                     trigger,
                                                     qtyUpdates,
                                                     notesMap,
+                                                    itemsSnap,
                                                 )
                                             }
                                         } else {
@@ -2120,6 +2195,7 @@ class MenuActivity : AppCompatActivity() {
                                                 orderRef
                                                     .update("lastKitchenSentAt", Date())
                                                     .addOnSuccessListener {
+                                                        OrderLineKdsStatus.markSentOnKitchenAfterSend(db, orderId)
                                                         runOnUiThread {
                                                             kitchenSentForOrder = true
                                                             isSendingToKitchen = false
@@ -2153,6 +2229,7 @@ class MenuActivity : AppCompatActivity() {
                                             orderRef
                                                 .update("lastKitchenSentAt", Date())
                                                 .addOnSuccessListener {
+                                                    OrderLineKdsStatus.markSentOnKitchenAfterSend(db, orderId)
                                                     runOnUiThread {
                                                         kitchenSentForOrder = true
                                                         isSendingToKitchen = false
@@ -2183,6 +2260,7 @@ class MenuActivity : AppCompatActivity() {
                                 orderRef
                                     .update("lastKitchenSentAt", Date())
                                     .addOnSuccessListener {
+                                        OrderLineKdsStatus.markSentOnKitchenAfterSend(db, orderId)
                                         runOnUiThread {
                                             kitchenSentForOrder = true
                                             isSendingToKitchen = false
@@ -2311,6 +2389,7 @@ class MenuActivity : AppCompatActivity() {
 
                 isCreatingOrder = false
                 currentOrderId = oid
+                attachOrderKitchenStatusListener(oid)
 
                 val guest = selectedGuest
                 val lineKey = cartKey(itemId, modifiers, guest)
@@ -2692,7 +2771,11 @@ class MenuActivity : AppCompatActivity() {
         val lines = cartMap.entries.map { (_, item) ->
             fun flattenModStrings(mods: List<OrderModifier>, prefix: String = ""): List<String> {
                 return mods.flatMap { mod ->
-                    val label = if (mod.action == "REMOVE") "${prefix}• No ${mod.name}" else "${prefix}• ${mod.name}"
+                    val label = if (mod.action == "REMOVE") {
+                        "${prefix}• ${ModifierRemoveDisplay.cartLine(mod.name)}"
+                    } else {
+                        "${prefix}• ${mod.name}"
+                    }
                     listOf(label) + if (mod.children.isNotEmpty()) flattenModStrings(mod.children, "$prefix    ") else emptyList()
                 }
             }
@@ -2793,7 +2876,7 @@ class MenuActivity : AppCompatActivity() {
                     textSize = 12f
                     setTextColor(Color.parseColor("#666666"))
                     if (modifier.action == "REMOVE") {
-                        text = "${indent}• No ${modifier.name}"
+                        text = "${indent}• ${ModifierRemoveDisplay.cartLine(modifier.name)}"
                         setTextColor(Color.parseColor("#C62828"))
                     } else {
                         text = "${indent}• ${modifier.name}"
@@ -2900,6 +2983,10 @@ class MenuActivity : AppCompatActivity() {
     }
 
     private fun removeCartItem(lineKey: String) {
+        if (orderKitchenInProcess) {
+            Toast.makeText(this, getString(R.string.cart_order_in_process), Toast.LENGTH_SHORT).show()
+            return
+        }
         cartMap.remove(lineKey)
         refreshCart()
 
@@ -3137,6 +3224,7 @@ class MenuActivity : AppCompatActivity() {
                         .document(orderId)
                         .delete()
                         .addOnSuccessListener {
+                            detachOrderKitchenStatusListener()
                             currentOrderId = null
                         }
                 }
@@ -3263,6 +3351,7 @@ class MenuActivity : AppCompatActivity() {
                 hideCaptureLoading()
                 val afterCapture = {
                     clearCart()
+                    detachOrderKitchenStatusListener()
                     currentOrderId = null
                     Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_SHORT).show()
                     val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
@@ -3319,6 +3408,7 @@ class MenuActivity : AppCompatActivity() {
                 hideCaptureLoading()
                 val afterCapture = {
                     clearCart()
+                    detachOrderKitchenStatusListener()
                     currentOrderId = null
                     Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_SHORT).show()
                     val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {

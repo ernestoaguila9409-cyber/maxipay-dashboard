@@ -19,6 +19,7 @@ import com.google.android.material.card.MaterialCardView
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -70,6 +71,7 @@ class CustomerProfileActivity : AppCompatActivity() {
 
     private var customerId: String = ""
     private var customerName: String = ""
+    private var dashboardListener: ListenerRegistration? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -136,6 +138,24 @@ class CustomerProfileActivity : AppCompatActivity() {
         loadCustomerInfo()
         loadReservationHistory()
         loadOrderHistory()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        dashboardListener?.remove()
+        dashboardListener = DashboardConfigManager.listenConfig(
+            db,
+            onUpdate = { modules ->
+                OrderTypeColorResolver.updateFromDashboard(modules)
+                runOnUiThread { orderHistoryAdapter.notifyDataSetChanged() }
+            },
+        )
+    }
+
+    override fun onStop() {
+        dashboardListener?.remove()
+        dashboardListener = null
+        super.onStop()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -508,25 +528,12 @@ class OrderHistoryAdapter(
             }
             txtOrderType.text = typeLabel
 
-            val bgColor = when (item.orderType) {
-                "DINE_IN" -> "#E8F5E9"
-                "TO_GO" -> "#E3F2FD"
-                "BAR_TAB", "BAR" -> "#FFF3E0"
-                else -> "#F5F5F5"
-            }
-            val textColor = when (item.orderType) {
-                "DINE_IN" -> "#2E7D32"
-                "TO_GO" -> "#1565C0"
-                "BAR_TAB", "BAR" -> "#E65100"
-                else -> "#555555"
-            }
-
             val badge = GradientDrawable().apply {
-                setColor(Color.parseColor(bgColor))
+                setColor(OrderTypeColorResolver.colorArgbForOrderType(item.orderType))
                 cornerRadius = 12f
             }
             txtOrderType.background = badge
-            txtOrderType.setTextColor(Color.parseColor(textColor))
+            txtOrderType.setTextColor(Color.WHITE)
 
             itemView.setOnClickListener { onOrderClick(item.orderId) }
         }

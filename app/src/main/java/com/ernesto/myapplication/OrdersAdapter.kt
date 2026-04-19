@@ -8,9 +8,14 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
 import com.ernesto.myapplication.engine.MoneyUtils
+import com.ernesto.myapplication.ui.kds.KdsStatusIcon
+import com.ernesto.myapplication.ui.kds.hasKdsStatusIndicator
 
 class OrdersAdapter(
     private val onOrderClick: (OrderRow) -> Unit,
@@ -64,6 +69,13 @@ class OrdersAdapter(
         private val txtTime: TextView = itemView.findViewById(R.id.txtTime)
         private val txtOrderType: TextView = itemView.findViewById(R.id.txtOrderType)
         private val imgSelected: ImageView = itemView.findViewById(R.id.imgSelected)
+        private val kdsCompose: ComposeView = itemView.findViewById(R.id.kdsOrderListCompose)
+
+        init {
+            kdsCompose.setViewCompositionStrategy(
+                ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed,
+            )
+        }
 
         fun bind(order: OrderRow, isSelected: Boolean) {
             val label = buildString {
@@ -101,6 +113,19 @@ class OrdersAdapter(
             txtTime.text = formatTime(order.createdAt.toDate().time)
 
             bindOrderTypeBadge(order.orderType)
+
+            val kds = order.kdsAggregateStatus
+            if (KdsActiveCache.hasActiveKds && hasKdsStatusIndicator(kds)) {
+                kdsCompose.visibility = View.VISIBLE
+                kdsCompose.setContent {
+                    KdsStatusIcon(status = kds) { msg ->
+                        Toast.makeText(itemView.context, msg, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } else {
+                kdsCompose.visibility = View.GONE
+                kdsCompose.setContent { }
+            }
 
             imgSelected.visibility = if (isSelected) View.VISIBLE else View.GONE
             card.alpha = if (isSelected) 0.85f else 1f
@@ -154,11 +179,7 @@ class OrdersAdapter(
                 else -> "TO-GO"
             }
 
-            val bgColor = when (orderType) {
-                "DINE_IN" -> Color.parseColor("#2E7D32")
-                "BAR", "BAR_TAB" -> Color.parseColor("#00897B")
-                else -> Color.parseColor("#E65100")
-            }
+            val bgColor = OrderTypeColorResolver.colorArgbForOrderType(orderType)
 
             val badge = GradientDrawable().apply {
                 setColor(bgColor)

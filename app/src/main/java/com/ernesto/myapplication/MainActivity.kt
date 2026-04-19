@@ -56,6 +56,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        KdsActiveCache.start()
+
         employeeName = intent.getStringExtra("employeeName") ?: ""
         employeeRole = intent.getStringExtra("employeeRole") ?: ""
         if (employeeName.isNotBlank()) {
