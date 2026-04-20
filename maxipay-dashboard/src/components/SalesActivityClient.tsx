@@ -173,12 +173,12 @@ export default function SalesActivityClient() {
       )
     );
 
+    // Date range OR batch (not both): with a batch selected, load everything for that batch;
+    // with "All batches", constrain by createdAt only.
     const ordersQ = batchId
       ? query(
           collection(db, "Orders"),
           where("batchId", "==", batchId),
-          where("createdAt", ">=", tsStart),
-          where("createdAt", "<", tsEnd),
           orderBy("createdAt", "desc"),
           limit(400)
         )
@@ -194,8 +194,6 @@ export default function SalesActivityClient() {
       ? query(
           collection(db, "Transactions"),
           where("batchId", "==", batchId),
-          where("createdAt", ">=", tsStart),
-          where("createdAt", "<", tsEnd),
           orderBy("createdAt", "desc"),
           limit(900)
         )
@@ -242,13 +240,20 @@ export default function SalesActivityClient() {
         )
       );
 
-      const cashQ = query(
-        collection(db, "cashLogs"),
-        where("createdAt", ">=", tsStart),
-        where("createdAt", "<", tsEnd),
-        orderBy("createdAt", "desc"),
-        limit(400)
-      );
+      const cashQ = batchId
+        ? query(
+            collection(db, "cashLogs"),
+            where("batchId", "==", batchId),
+            orderBy("createdAt", "desc"),
+            limit(400)
+          )
+        : query(
+            collection(db, "cashLogs"),
+            where("createdAt", ">=", tsStart),
+            where("createdAt", "<", tsEnd),
+            orderBy("createdAt", "desc"),
+            limit(400)
+          );
       unsubs.push(
         onSnapshot(
           cashQ,
@@ -462,7 +467,8 @@ export default function SalesActivityClient() {
       if (t !== "CASH_ADD" && t !== "PAID_OUT") return;
       if (batchId && String(data.batchId ?? "") !== batchId) return;
       const ts = docDate(data);
-      if (!ts || ts < start || ts >= endExclusive) return;
+      if (!ts) return;
+      if (!batchId && (ts < start || ts >= endExclusive)) return;
       if (qLower) {
         const blob = `${t} ${data.note ?? ""} ${data.userId ?? ""}`.toLowerCase();
         if (!blob.includes(qLower)) return;
@@ -521,13 +527,20 @@ export default function SalesActivityClient() {
         ) : null}
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-4">
+          <p className="text-xs text-slate-500">
+            Use <span className="font-medium text-slate-700">date range</span> or{" "}
+            <span className="font-medium text-slate-700">a specific batch</span> — not both. Choosing
+            a batch loads all orders, transactions, and cash log rows for that batch.
+          </p>
           <div className="flex flex-wrap gap-3 items-end">
             <div>
               <label className="text-xs text-slate-500 block mb-1">Date range</label>
               <select
                 value={datePreset}
                 onChange={(e) => setDatePreset(e.target.value as DatePreset)}
-                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                disabled={!!batchId}
+                title={batchId ? "Clear batch selection to filter by date" : undefined}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="today">Today</option>
                 <option value="yesterday">Yesterday</option>
@@ -541,14 +554,18 @@ export default function SalesActivityClient() {
                   type="date"
                   value={customStart}
                   onChange={(e) => setCustomStart(e.target.value)}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  disabled={!!batchId}
+                  title={batchId ? "Clear batch selection to filter by date" : undefined}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 />
                 <span className="text-slate-400">to</span>
                 <input
                   type="date"
                   value={customEnd}
                   onChange={(e) => setCustomEnd(e.target.value)}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  disabled={!!batchId}
+                  title={batchId ? "Clear batch selection to filter by date" : undefined}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               </div>
             ) : null}
