@@ -17,6 +17,7 @@ import {
   onSnapshot,
   serverTimestamp,
   setDoc,
+  type DocumentReference,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
@@ -42,7 +43,6 @@ import {
   Layers,
   ArrowRightLeft,
   ChevronDown,
-  ListFilter,
   Printer,
 } from "lucide-react";
 import type * as XLSXType from "xlsx";
@@ -284,6 +284,89 @@ interface TaxEntry {
   enabled: boolean;
 }
 
+const FIRESTORE_BATCH_LIMIT = 450;
+
+/**
+ * Deletes one category document, its subcategories, and all menu items that use it as the
+ * primary category. Items in `categoryIds` are updated to drop this category or deleted if
+ * it was their only placement. Commits in chunks under Firestore's batch limit.
+ */
+async function purgeCategoryFromFirestore(categoryId: string): Promise<void> {
+  const subSnap = await getDocs(
+    query(collection(db, "subcategories"), where("categoryId", "==", categoryId))
+  );
+  const deletedSubIds = new Set<string>();
+  subSnap.forEach((d) => deletedSubIds.add(d.id));
+
+  const itemPrimarySnap = await getDocs(
+    query(collection(db, "MenuItems"), where("categoryId", "==", categoryId))
+  );
+  const itemMultiSnap = await getDocs(
+    query(collection(db, "MenuItems"), where("categoryIds", "array-contains", categoryId))
+  );
+
+  const primaryDeleteIds = new Set(itemPrimarySnap.docs.map((d) => d.id));
+
+  type Op =
+    | { k: "del"; ref: DocumentReference }
+    | { k: "upd"; ref: DocumentReference; data: Record<string, unknown> };
+
+  const ops: Op[] = [];
+
+  itemPrimarySnap.forEach((d) => ops.push({ k: "del", ref: d.ref }));
+
+  itemMultiSnap.forEach((d) => {
+    if (primaryDeleteIds.has(d.id)) return;
+    const data = d.data();
+    const rawIds = Array.isArray(data.categoryIds)
+      ? (data.categoryIds as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0)
+      : [];
+    const remaining = rawIds.filter((id) => id !== categoryId);
+    if (remaining.length === 0) {
+      ops.push({ k: "del", ref: d.ref });
+    } else {
+      const newPrimary = remaining[0];
+      const rawMap = data.subcategoryByCategoryId;
+      const subMap: Record<string, string> = {};
+      if (rawMap && typeof rawMap === "object" && rawMap !== null) {
+        for (const [k, v] of Object.entries(rawMap as Record<string, unknown>)) {
+          if (k !== categoryId && typeof v === "string") subMap[k] = v;
+        }
+      }
+      let newSubId = typeof data.subcategoryId === "string" ? data.subcategoryId : "";
+      if (newSubId && deletedSubIds.has(newSubId)) newSubId = "";
+      const updateData: Record<string, unknown> = {
+        categoryId: newPrimary,
+        categoryIds: remaining,
+        subcategoryId: newSubId,
+      };
+      if (Object.keys(subMap).length > 0) {
+        updateData.subcategoryByCategoryId = subMap;
+      } else {
+        updateData.subcategoryByCategoryId = deleteField();
+      }
+      ops.push({ k: "upd", ref: d.ref, data: updateData });
+    }
+  });
+
+  subSnap.forEach((d) => ops.push({ k: "del", ref: d.ref }));
+  ops.push({ k: "del", ref: doc(db, "Categories", categoryId) });
+
+  let batch = writeBatch(db);
+  let count = 0;
+  for (const op of ops) {
+    if (op.k === "del") batch.delete(op.ref);
+    else batch.update(op.ref, op.data);
+    count++;
+    if (count >= FIRESTORE_BATCH_LIMIT) {
+      await batch.commit();
+      batch = writeBatch(db);
+      count = 0;
+    }
+  }
+  if (count > 0) await batch.commit();
+}
+
 export default function MenuPage() {
   const { user } = useAuth();
   const [categories, setCategories] = useState<Category[]>([]);
@@ -388,6 +471,8 @@ export default function MenuPage() {
   const [filterSubcategoryIds, setFilterSubcategoryIds] = useState<string[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [bulkCategoriesDeleteConfirm, setBulkCategoriesDeleteConfirm] = useState(false);
+  const [bulkCategoriesDeleting, setBulkCategoriesDeleting] = useState(false);
 
   const [transferMode, setTransferMode] = useState(false);
   const [transferItems, setTransferItems] = useState<Set<string>>(new Set());
@@ -1221,6 +1306,23 @@ export default function MenuPage() {
     }
   };
 
+  const handleBulkDeleteCategories = async () => {
+    const ids = [...filterCategoryIds];
+    if (ids.length === 0) return;
+    setBulkCategoriesDeleting(true);
+    try {
+      for (const categoryId of ids) {
+        await purgeCategoryFromFirestore(categoryId);
+      }
+      exitCategoryFilterMode();
+    } catch (err) {
+      console.error("Failed to bulk delete categories:", err);
+    } finally {
+      setBulkCategoriesDeleting(false);
+      setBulkCategoriesDeleteConfirm(false);
+    }
+  };
+
   // ── Edit ──
 
   async function mergeKitchenLabelToSettings(label: string) {
@@ -1448,22 +1550,7 @@ export default function MenuPage() {
     if (!deleteCategoryTarget) return;
     setDeletingCategory(true);
     try {
-      const batch = writeBatch(db);
-
-      batch.delete(doc(db, "Categories", deleteCategoryTarget.id));
-
-      const itemSnap = await getDocs(
-        query(collection(db, "MenuItems"), where("categoryId", "==", deleteCategoryTarget.id))
-      );
-      itemSnap.forEach((d) => batch.delete(d.ref));
-
-      const subSnap = await getDocs(
-        query(collection(db, "subcategories"), where("categoryId", "==", deleteCategoryTarget.id))
-      );
-      subSnap.forEach((d) => batch.delete(d.ref));
-
-      await batch.commit();
-
+      await purgeCategoryFromFirestore(deleteCategoryTarget.id);
       if (activeCategory === deleteCategoryTarget.id) setActiveCategory(null);
       setDeleteCategoryTarget(null);
     } catch (err) {
@@ -1925,6 +2012,17 @@ export default function MenuPage() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => setBulkCategoriesDeleteConfirm(true)}
+                  disabled={filterCategoryIds.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Permanently delete selected categories, their subcategories, and all menu items in those categories"
+                >
+                  <Trash2 size={14} />
+                  Delete categories
+                  {filterCategoryIds.length > 0 ? ` (${filterCategoryIds.length})` : ""}
+                </button>
+                <button
+                  type="button"
                   onClick={exitCategoryFilterMode}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
                 >
@@ -1991,16 +2089,6 @@ export default function MenuPage() {
               </>
             ) : (
               <>
-                <button
-                  type="button"
-                  onClick={enterCategoryFilterMode}
-                  disabled={categories.length === 0 || selectMode || transferMode}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Select multiple categories to filter items"
-                >
-                  <ListFilter size={14} />
-                  <span className="hidden lg:inline">Filter categories</span>
-                </button>
                 <button
                   onClick={() => setSelectMode(true)}
                   disabled={items.length === 0 || categoryFilterMode}
@@ -2095,7 +2183,9 @@ export default function MenuPage() {
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Categories</p>
                     {categoryFilterMode && (
                       <p className="text-[11px] text-slate-500 mt-1.5 leading-snug">
-                        Select one or more categories or subcategories. The list shows items from any selection.
+                        Check categories (and optionally subcategories) to filter the list. Use{" "}
+                        <span className="font-medium text-slate-600">Delete categories</span> in the toolbar to remove
+                        selected categories — all items in those categories are deleted too.
                       </p>
                     )}
                   </div>
@@ -2312,7 +2402,7 @@ export default function MenuPage() {
               <div className="lg:hidden flex flex-col gap-2 pb-1 -mt-1 mb-1 w-full">
                 {categoryFilterMode && (
                   <p className="text-[11px] text-slate-500 px-0.5 leading-snug">
-                    Tap categories to include them in the filter. Use Done in the toolbar when finished.
+                    Select categories to filter. Use Delete categories in the toolbar to remove them (and their items).
                   </p>
                 )}
                 <div className="flex gap-2 overflow-x-auto">
@@ -2980,7 +3070,9 @@ export default function MenuPage() {
 
               {(() => {
                 const itemCount = items.filter(
-                  (i) => i.categoryId === deleteCategoryTarget.id
+                  (i) =>
+                    i.categoryId === deleteCategoryTarget.id ||
+                    (Array.isArray(i.categoryIds) && i.categoryIds.includes(deleteCategoryTarget.id))
                 ).length;
                 return (
                   <p className="text-sm text-slate-500 text-center">
@@ -3029,6 +3121,74 @@ export default function MenuPage() {
           </div>
         </div>
       )}
+
+      {/* ── Bulk delete categories (selection mode) ── */}
+      {bulkCategoriesDeleteConfirm &&
+        (() => {
+          const nCat = filterCategoryIds.length;
+          const touchedItems = items.filter((i) =>
+            filterCategoryIds.some(
+              (cid) =>
+                i.categoryId === cid || (Array.isArray(i.categoryIds) && i.categoryIds.includes(cid))
+            )
+          );
+          const itemTouchCount = touchedItems.length;
+          const names = filterCategoryIds
+            .map((id) => categories.find((c) => c.id === id)?.name ?? id.slice(0, 6))
+            .join(", ");
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center">
+              <div
+                className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+                onClick={() => !bulkCategoriesDeleting && setBulkCategoriesDeleteConfirm(false)}
+              />
+              <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+                <div className="px-6 py-5 space-y-4">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center">
+                      <AlertTriangle size={24} className="text-red-500" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-slate-800 text-center">
+                      Delete {nCat} {nCat === 1 ? "category" : "categories"}?
+                    </h3>
+                  </div>
+                  <p className="text-sm text-slate-500 text-center leading-relaxed">
+                    This permanently removes <strong className="text-slate-800">{names}</strong>, every
+                    subcategory under them, and deletes or updates menu items tied to them (about{" "}
+                    <strong className="text-slate-800">{itemTouchCount}</strong> row
+                    {itemTouchCount !== 1 ? "s" : ""} in your current list). Items that also belong to
+                    another category are updated, not removed. This cannot be undone.
+                  </p>
+                  <div className="flex gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setBulkCategoriesDeleteConfirm(false)}
+                      disabled={bulkCategoriesDeleting}
+                      className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleBulkDeleteCategories}
+                      disabled={bulkCategoriesDeleting}
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {bulkCategoriesDeleting ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          Deleting…
+                        </>
+                      ) : (
+                        "Delete all"
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       {/* ── Bulk delete confirmation modal ── */}
       {bulkDeleteConfirm && (
