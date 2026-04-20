@@ -26,6 +26,7 @@ import {
   Package,
   LayoutTemplate,
   Monitor,
+  Contact,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
@@ -51,6 +52,7 @@ const navItems: NavItem[] = [
     ],
   },
   { label: "Employees", href: "/dashboard/employees", icon: Users },
+  { label: "Customers", href: "/dashboard/customers", icon: Contact },
   { label: "Printers", href: "/dashboard/printers", icon: Printer },
   {
     label: "Reports",
