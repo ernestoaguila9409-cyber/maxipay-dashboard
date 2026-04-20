@@ -13,8 +13,10 @@ import {
   where,
   type DocumentData,
 } from "firebase/firestore";
+import { getApp } from "firebase/app";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/firebase/firebaseConfig";
-import { Banknote, CreditCard, Layers, Plus, Search, X } from "lucide-react";
+import { Banknote, CreditCard, Layers, Loader2, Plus, Search, X } from "lucide-react";
 import { startOfLocalDay } from "@/lib/dashboardFinance";
 
 function fmtMoney(cents: number): string {
@@ -107,6 +109,26 @@ function inFinancialTx(data: DocumentData): boolean {
   return ["SALE", "CAPTURE", "PRE_AUTH", "REFUND"].includes(type);
 }
 
+type ReceiptKind = "standard" | "void" | "refund";
+
+function receiptKindForTransaction(data: DocumentData): {
+  receiptKind: ReceiptKind;
+  saleTransactionId: string;
+} {
+  const t = String(data.type ?? "");
+  const voided = data.voided === true;
+  if (t === "REFUND") {
+    return {
+      receiptKind: "refund",
+      saleTransactionId: String(data.originalReferenceId ?? "").trim(),
+    };
+  }
+  if (voided && (t === "SALE" || t === "CAPTURE" || t === "PRE_AUTH")) {
+    return { receiptKind: "void", saleTransactionId: "" };
+  }
+  return { receiptKind: "standard", saleTransactionId: "" };
+}
+
 export default function SalesActivityClient() {
   const [tab, setTab] = useState<TabId>("orders");
   const [datePreset, setDatePreset] = useState<DatePreset>("today");
@@ -127,12 +149,23 @@ export default function SalesActivityClient() {
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
   const [txModal, setTxModal] = useState<{ id: string; data: DocumentData } | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<{
+    html: string;
+    orderId: string;
+  } | null>(null);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptErr, setReceiptErr] = useState<string | null>(null);
   const [cashPickOpen, setCashPickOpen] = useState(false);
   const [cashModal, setCashModal] = useState<"IN" | "OUT" | "START" | "DROP" | null>(null);
 
   useEffect(() => {
     if (tab !== "cash") setCashPickOpen(false);
   }, [tab]);
+
+  useEffect(() => {
+    setReceiptPreview(null);
+    setReceiptErr(null);
+  }, [txModal?.id]);
   const [cashAmount, setCashAmount] = useState("");
   const [cashReason, setCashReason] = useState("");
   const [cashSaving, setCashSaving] = useState(false);
@@ -527,6 +560,37 @@ export default function SalesActivityClient() {
     }
   }, [cashModal, cashAmount, cashReason, batchId]);
 
+  const openReceiptPreview = useCallback(async () => {
+    if (!txModal) return;
+    const orderId = String(txModal.data.orderId ?? "").trim();
+    if (!orderId) return;
+    const { receiptKind, saleTransactionId } = receiptKindForTransaction(txModal.data);
+    setReceiptLoading(true);
+    setReceiptErr(null);
+    try {
+      // If your v2 functions use a non-default region, set NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION (e.g. us-central1).
+      const region = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION;
+      const app = getApp();
+      const functions = region ? getFunctions(app, region) : getFunctions(app);
+      const call = httpsCallable(functions, "getReceiptEmailPreview");
+      const res = await call({
+        orderId,
+        receiptKind,
+        ...(saleTransactionId ? { saleTransactionId } : {}),
+      });
+      const out = res.data as { success?: boolean; html?: string; error?: string };
+      if (!out.success || !out.html) {
+        setReceiptErr(out.error ?? "Could not load receipt preview.");
+        return;
+      }
+      setReceiptPreview({ html: out.html, orderId });
+    } catch (e) {
+      setReceiptErr((e as Error).message ?? String(e));
+    } finally {
+      setReceiptLoading(false);
+    }
+  }, [txModal]);
+
   return (
     <>
       <div className="p-6 space-y-6 max-w-[1600px]">
@@ -894,7 +958,15 @@ export default function SalesActivityClient() {
           <div className="bg-white rounded-2xl max-w-md w-full shadow-xl p-6 space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-semibold">Transaction</h3>
-              <button type="button" onClick={() => setTxModal(null)} className="p-2 rounded-lg hover:bg-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setReceiptPreview(null);
+                  setReceiptErr(null);
+                  setTxModal(null);
+                }}
+                className="p-2 rounded-lg hover:bg-slate-100"
+              >
                 <X size={20} />
               </button>
             </div>
@@ -912,17 +984,61 @@ export default function SalesActivityClient() {
               </div>
             </dl>
             {String(txModal.data.orderId ?? "").trim() ? (
-              <Link
-                href={`/dashboard/orders/${txModal.data.orderId}`}
-                className="block text-center py-2 rounded-xl bg-violet-600 text-white text-sm font-medium hover:bg-violet-700"
-              >
-                View order
-              </Link>
+              <div className="space-y-2">
+                <Link
+                  href={`/dashboard/orders/${txModal.data.orderId}`}
+                  className="block text-center py-2 rounded-xl bg-violet-600 text-white text-sm font-medium hover:bg-violet-700"
+                >
+                  View order
+                </Link>
+                <button
+                  type="button"
+                  disabled={receiptLoading}
+                  onClick={() => void openReceiptPreview()}
+                  className="w-full text-center py-2 rounded-xl border border-slate-200 bg-white text-slate-800 text-sm font-medium hover:bg-slate-50 disabled:opacity-60 inline-flex items-center justify-center gap-2"
+                >
+                  {receiptLoading ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin shrink-0" />
+                      Loading receipt…
+                    </>
+                  ) : (
+                    "View receipt"
+                  )}
+                </button>
+              </div>
+            ) : null}
+            {receiptErr ? (
+              <p className="text-xs text-red-600">{receiptErr}</p>
             ) : null}
             <p className="text-xs text-slate-500">
               Void, partial refund, and full refund are performed on the POS terminal or payment app
               connected to Firestore—not in this web dashboard.
             </p>
+          </div>
+        </div>
+      ) : null}
+
+      {receiptPreview ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] shadow-xl flex flex-col overflow-hidden">
+            <div className="flex justify-between items-center px-4 py-3 border-b border-slate-200 shrink-0">
+              <h3 className="text-lg font-semibold">Receipt</h3>
+              <button
+                type="button"
+                onClick={() => setReceiptPreview(null)}
+                className="p-2 rounded-lg hover:bg-slate-100"
+                aria-label="Close receipt"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <iframe
+              title="Email receipt preview"
+              srcDoc={receiptPreview.html}
+              sandbox="allow-same-origin"
+              className="w-full flex-1 min-h-[min(70vh,560px)] border-0 bg-[#f4f4f4]"
+            />
           </div>
         </div>
       ) : null}
