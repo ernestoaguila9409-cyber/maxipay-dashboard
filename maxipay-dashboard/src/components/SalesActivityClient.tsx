@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Timestamp,
@@ -155,6 +155,8 @@ export default function SalesActivityClient() {
   } | null>(null);
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [receiptErr, setReceiptErr] = useState<string | null>(null);
+  const receiptIframeRef = useRef<HTMLIFrameElement>(null);
+  const receiptResizeObserverRef = useRef<ResizeObserver | null>(null);
   const [cashPickOpen, setCashPickOpen] = useState(false);
   const [cashModal, setCashModal] = useState<"IN" | "OUT" | "START" | "DROP" | null>(null);
 
@@ -166,6 +168,43 @@ export default function SalesActivityClient() {
     setReceiptPreview(null);
     setReceiptErr(null);
   }, [txModal?.id]);
+
+  useEffect(() => {
+    if (!receiptPreview) {
+      receiptResizeObserverRef.current?.disconnect();
+      receiptResizeObserverRef.current = null;
+    }
+  }, [receiptPreview]);
+
+  const applyReceiptIframeHeight = useCallback(() => {
+    const iframe = receiptIframeRef.current;
+    const doc = iframe?.contentDocument;
+    if (!iframe || !doc?.documentElement) return;
+    const h = Math.max(
+      doc.documentElement.scrollHeight,
+      doc.body?.scrollHeight ?? 0
+    );
+    iframe.style.height = `${Math.ceil(h + 12)}px`;
+  }, []);
+
+  const attachReceiptIframeSizing = useCallback(() => {
+    const iframe = receiptIframeRef.current;
+    const doc = iframe?.contentDocument;
+    if (!iframe || !doc?.body) return;
+    applyReceiptIframeHeight();
+    receiptResizeObserverRef.current?.disconnect();
+    const ro = new ResizeObserver(() => applyReceiptIframeHeight());
+    ro.observe(doc.body);
+    if (doc.documentElement) ro.observe(doc.documentElement);
+    receiptResizeObserverRef.current = ro;
+  }, [applyReceiptIframeHeight]);
+
+  useLayoutEffect(() => {
+    return () => {
+      receiptResizeObserverRef.current?.disconnect();
+      receiptResizeObserverRef.current = null;
+    };
+  }, []);
   const [cashAmount, setCashAmount] = useState("");
   const [cashReason, setCashReason] = useState("");
   const [cashSaving, setCashSaving] = useState(false);
@@ -1020,9 +1059,9 @@ export default function SalesActivityClient() {
       ) : null}
 
       {receiptPreview ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] shadow-xl flex flex-col overflow-hidden">
-            <div className="flex justify-between items-center px-4 py-3 border-b border-slate-200 shrink-0">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 p-4 flex items-start justify-center">
+          <div className="bg-white rounded-2xl max-w-lg w-full my-6 sm:my-10 shadow-xl flex flex-col overflow-visible">
+            <div className="flex justify-between items-center px-4 py-3 border-b border-slate-200 shrink-0 sticky top-0 bg-white rounded-t-2xl z-10">
               <h3 className="text-lg font-semibold">Receipt</h3>
               <button
                 type="button"
@@ -1034,10 +1073,13 @@ export default function SalesActivityClient() {
               </button>
             </div>
             <iframe
+              ref={receiptIframeRef}
               title="Email receipt preview"
               srcDoc={receiptPreview.html}
               sandbox="allow-same-origin"
-              className="w-full flex-1 min-h-[min(70vh,560px)] border-0 bg-[#f4f4f4]"
+              onLoad={attachReceiptIframeSizing}
+              className="block w-full border-0 bg-[#f4f4f4] min-h-[120px]"
+              style={{ height: "auto" }}
             />
           </div>
         </div>
