@@ -175,11 +175,12 @@ export default function SalesActivityClient() {
 
     // Date range OR batch (not both): with a batch selected, load everything for that batch;
     // with "All batches", constrain by createdAt only.
+    // NOTE: When filtering by batchId we intentionally omit server-side orderBy so the query
+    // doesn't require a (batchId, createdAt) composite index. Results are sorted client-side.
     const ordersQ = batchId
       ? query(
           collection(db, "Orders"),
           where("batchId", "==", batchId),
-          orderBy("createdAt", "desc"),
           limit(400)
         )
       : query(
@@ -194,7 +195,6 @@ export default function SalesActivityClient() {
       ? query(
           collection(db, "Transactions"),
           where("batchId", "==", batchId),
-          orderBy("createdAt", "desc"),
           limit(900)
         )
       : query(
@@ -205,6 +205,15 @@ export default function SalesActivityClient() {
           limit(900)
         );
 
+    const byCreatedAtDesc = (
+      a: { data: DocumentData },
+      b: { data: DocumentData }
+    ): number => {
+      const ad = docDate(a.data)?.getTime() ?? 0;
+      const bd = docDate(b.data)?.getTime() ?? 0;
+      return bd - ad;
+    };
+
     try {
       unsubs.push(
         onSnapshot(
@@ -213,6 +222,7 @@ export default function SalesActivityClient() {
             setLoadErr(null);
             const rows: { id: string; data: DocumentData }[] = [];
             snap.forEach((d) => rows.push({ id: d.id, data: d.data() }));
+            rows.sort(byCreatedAtDesc);
             setOrderDocs(rows);
           },
           (e) => {
@@ -230,6 +240,7 @@ export default function SalesActivityClient() {
             setLoadErr(null);
             const rows: { id: string; data: DocumentData }[] = [];
             snap.forEach((d) => rows.push({ id: d.id, data: d.data() }));
+            rows.sort(byCreatedAtDesc);
             setTxDocs(rows);
           },
           (e) => {
@@ -244,7 +255,6 @@ export default function SalesActivityClient() {
         ? query(
             collection(db, "cashLogs"),
             where("batchId", "==", batchId),
-            orderBy("createdAt", "desc"),
             limit(400)
           )
         : query(
@@ -260,6 +270,7 @@ export default function SalesActivityClient() {
           (snap) => {
             const rows: { id: string; data: DocumentData }[] = [];
             snap.forEach((d) => rows.push({ id: d.id, data: d.data() }));
+            rows.sort(byCreatedAtDesc);
             setCashLogDocs(rows);
           },
           () => setCashLogDocs([])
