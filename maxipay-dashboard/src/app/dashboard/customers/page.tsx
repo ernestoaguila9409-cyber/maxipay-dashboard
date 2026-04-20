@@ -5,6 +5,7 @@ import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
+import CustomerDetailModal from "@/components/CustomerDetailModal";
 import { Contact, Search } from "lucide-react";
 
 /** Matches POS Customers list display rules. */
@@ -40,6 +41,7 @@ export default function CustomersPage() {
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -70,7 +72,9 @@ export default function CustomersPage() {
             visitCount,
           });
         });
-        list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+        list.sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+        );
         setCustomers(list);
         setLoading(false);
       },
@@ -98,7 +102,8 @@ export default function CustomersPage() {
       <div className="p-6 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <p className="text-slate-500 text-sm">
-            {customers.length} customer{customers.length !== 1 ? "s" : ""} registered
+            {customers.length} customer{customers.length !== 1 ? "s" : ""}{" "}
+            registered
             {query.trim() ? ` · ${filtered.length} shown` : ""}
           </p>
           <div className="relative max-w-md w-full sm:w-72">
@@ -131,49 +136,79 @@ export default function CustomersPage() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((c) => {
-              const showStar = c.visitCount > 5;
-              const displayName = c.name.trim() || "No name";
-              return (
-                <div
-                  key={c.id}
-                  className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md transition-shadow"
-                >
-                  <div className="flex items-start gap-2 min-w-0">
-                    <h3 className="font-semibold text-slate-900 text-base flex-1 min-w-0 break-words">
-                      {displayName}
-                    </h3>
-                    {showStar && (
-                      <span
-                        className="flex-shrink-0 text-[22px] leading-none text-[#F5B700] font-normal pl-2"
-                        title="Frequent visitor: more than five visits"
-                        aria-label="Frequent visitor: more than five visits"
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm text-left">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                    <th className="px-4 py-3 font-semibold whitespace-nowrap">
+                      Customer
+                    </th>
+                    <th className="px-4 py-3 font-semibold whitespace-nowrap min-w-[140px]">
+                      Phone
+                    </th>
+                    <th className="px-4 py-3 font-semibold min-w-[200px]">Email</th>
+                    <th className="px-4 py-3 font-semibold text-center w-16">
+                      Frequent
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filtered.map((c) => {
+                    const showStar = c.visitCount > 5;
+                    const displayName = c.name.trim() || "No name";
+                    return (
+                      <tr
+                        key={c.id}
+                        className="hover:bg-violet-50/40 cursor-pointer transition-colors"
+                        onClick={() => setSelectedId(c.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setSelectedId(c.id);
+                          }
+                        }}
+                        tabIndex={0}
+                        role="button"
                       >
-                        ★
-                      </span>
-                    )}
-                  </div>
-                  {c.phone.trim() ? (
-                    <p className="text-sm text-slate-500 mt-3">
-                      Phone:{" "}
-                      <span className="text-slate-700">{formatPhone(c.phone)}</span>
-                    </p>
-                  ) : null}
-                  {c.email.trim() ? (
-                    <p
-                      className={`text-sm text-slate-500 ${c.phone.trim() ? "mt-1.5" : "mt-3"}`}
-                    >
-                      Email:{" "}
-                      <span className="text-slate-700 break-all">{c.email.trim()}</span>
-                    </p>
-                  ) : null}
-                  {!c.phone.trim() && !c.email.trim() ? (
-                    <p className="text-sm text-slate-400 mt-3">No phone or email on file</p>
-                  ) : null}
-                </div>
-              );
-            })}
+                        <td className="px-4 py-3 font-medium text-slate-900">
+                          {displayName}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                          {c.phone.trim() ? (
+                            <span className="tabular-nums">
+                              {formatPhone(c.phone)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 break-all max-w-md">
+                          {c.email.trim() ? (
+                            c.email.trim()
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center text-lg">
+                          {showStar ? (
+                            <span className="text-[#F5B700]" aria-hidden>
+                              ★
+                            </span>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="px-4 py-2 text-xs text-slate-500 border-t border-slate-100 bg-slate-50/80">
+              Tap a row for order history and reservation history (same as the
+              POS customer profile).
+            </p>
           </div>
         )}
 
@@ -183,6 +218,11 @@ export default function CustomersPage() {
           </p>
         )}
       </div>
+
+      <CustomerDetailModal
+        customerId={selectedId}
+        onClose={() => setSelectedId(null)}
+      />
     </>
   );
 }
