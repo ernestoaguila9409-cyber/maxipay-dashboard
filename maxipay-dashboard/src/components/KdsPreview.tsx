@@ -195,6 +195,7 @@ export function KdsPreview({
   displaySettings: KdsPreviewDisplaySettings;
   moduleColorKeys?: Record<string, string>;
 }) {
+  const timersOn = displaySettings.showTimers;
   const { yellow: yellowAfter, red: redAfter } = normalizedTicketUrgencyMinutes(
     displaySettings.ticketYellowAfterMinutes ?? DEFAULT_YELLOW_AFTER,
     displaySettings.ticketRedAfterMinutes ?? DEFAULT_RED_AFTER
@@ -220,24 +221,31 @@ export function KdsPreview({
                     displaySettings.orderTypeColorsEnabled,
                     moduleColorKeys
                   );
-                  const elapsedMin = demoElapsedMinutesForCard(
-                    cardIndex,
-                    yellowAfter,
-                    redAfter
-                  );
-                  let urgencyBg = getUrgencyBg(
-                    elapsedMin,
-                    yellowAfter,
-                    redAfter
-                  );
-                  if (redAfter === yellowAfter && cardIndex === 1) {
-                    urgencyBg = "#FFF9C4";
+                  const elapsedMin = timersOn
+                    ? demoElapsedMinutesForCard(
+                        cardIndex,
+                        yellowAfter,
+                        redAfter
+                      )
+                    : 0;
+                  let urgencyBg = "#FFFFFF";
+                  if (timersOn) {
+                    urgencyBg = getUrgencyBg(
+                      elapsedMin,
+                      yellowAfter,
+                      redAfter
+                    );
+                    if (redAfter === yellowAfter && cardIndex === 1) {
+                      urgencyBg = "#FFF9C4";
+                    }
+                    if (redAfter === yellowAfter && cardIndex === 2) {
+                      urgencyBg = "#FFCDD2";
+                    }
                   }
-                  if (redAfter === yellowAfter && cardIndex === 2) {
-                    urgencyBg = "#FFCDD2";
-                  }
-                  const elapsedMs = Math.max(0, elapsedMin) * 60_000;
-                  const elapsedLabel = formatElapsedLabel(elapsedMin);
+                  const elapsedMs = timersOn ? Math.max(0, elapsedMin) * 60_000 : 0;
+                  const elapsedLabel = timersOn
+                    ? formatElapsedLabel(elapsedMin)
+                    : "";
                   const headerTime = order.headerTime;
 
                   return (
@@ -271,7 +279,7 @@ export function KdsPreview({
                           borderRadius: "0 0 20px 20px",
                         }}
                       >
-                        {displaySettings.showTimers && (
+                        {timersOn && (
                           <div className="flex shrink-0 items-center justify-between px-3.5 py-2.5 sm:px-4 sm:py-3">
                             <span className="text-[13px] font-semibold text-[#64748B] sm:text-[15px]">
                               Elapsed
