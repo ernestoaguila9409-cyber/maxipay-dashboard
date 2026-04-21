@@ -21,6 +21,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { collectActivePrinterRoutingLabels } from "@/lib/printerStatusUtils";
 import Header from "@/components/Header";
 import MenuUploadModal from "@/components/MenuUploadModal";
 import {
@@ -402,8 +403,8 @@ export default function MenuPage() {
   const [addTaxesExpanded, setAddTaxesExpanded] = useState(false);
   const [addLabelExpanded, setAddLabelExpanded] = useState(false);
   const [stockCountingEnabled, setStockCountingEnabled] = useState(true);
-  /** Synced with POS: Settings/kitchenRoutingLabels.labels */
-  const [kitchenRoutingLabels, setKitchenRoutingLabels] = useState<string[]>([]);
+  /** From Firestore `Printers`: labels on active printers only (excludes isActive === false). */
+  const [activePrinterRoutingLabels, setActivePrinterRoutingLabels] = useState<string[]>([]);
   const [addPrinterLabel, setAddPrinterLabel] = useState("");
   const [editPrinterLabel, setEditPrinterLabel] = useState("");
 
@@ -765,19 +766,15 @@ export default function MenuPage() {
       (err) => console.error("[Menu] subcategories onSnapshot error:", err.code, err.message)
     );
 
-    const unsubKitchenLabels = onSnapshot(
-      doc(db, "Settings", "kitchenRoutingLabels"),
+    const unsubPrintersForLabels = onSnapshot(
+      collection(db, "Printers"),
       (snap) => {
-        const data = snap.data();
-        const raw = data?.labels;
-        const list = Array.isArray(raw)
-          ? raw.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0)
-          : [];
-        list.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-        setKitchenRoutingLabels(list);
+        const rows: Record<string, unknown>[] = [];
+        snap.forEach((d) => rows.push(d.data() as Record<string, unknown>));
+        setActivePrinterRoutingLabels(collectActivePrinterRoutingLabels(rows));
       },
       (err) =>
-        console.error("[Menu] kitchenRoutingLabels onSnapshot error:", err.code, err.message)
+        console.error("[Menu] Printers (routing labels) onSnapshot error:", err.code, err.message)
     );
 
     return () => {
@@ -790,7 +787,7 @@ export default function MenuPage() {
       unsubTaxes();
       unsubMenuEntities();
       unsubSubcategories();
-      unsubKitchenLabels();
+      unsubPrintersForLabels();
       bothReady.current = { cats: false, items: false };
     };
   }, [user, subscriptionKey]);
@@ -806,6 +803,27 @@ export default function MenuPage() {
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [items.length, loading, user]);
+
+  /** POS printers only; include current draft value so picks stay visible (legacy / orphan labels). */
+  const addAssignableLabelOptions = useMemo(() => {
+    const cur = addPrinterLabel.trim();
+    const norms = new Set(activePrinterRoutingLabels.map((x) => x.toLowerCase()));
+    const merged =
+      cur && !norms.has(cur.toLowerCase())
+        ? [...activePrinterRoutingLabels, cur]
+        : activePrinterRoutingLabels;
+    return [...merged].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [activePrinterRoutingLabels, addPrinterLabel]);
+
+  const editAssignableLabelOptions = useMemo(() => {
+    const cur = editPrinterLabel.trim();
+    const norms = new Set(activePrinterRoutingLabels.map((x) => x.toLowerCase()));
+    const merged =
+      cur && !norms.has(cur.toLowerCase())
+        ? [...activePrinterRoutingLabels, cur]
+        : activePrinterRoutingLabels;
+    return [...merged].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [activePrinterRoutingLabels, editPrinterLabel]);
 
   // ── Filter + group (per–menu-filter category placement for multi-menu items) ──
 
@@ -3811,13 +3829,7 @@ export default function MenuPage() {
                           className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
                         >
                           <option value="">(None)</option>
-                          {[
-                            ...new Set(
-                              [...kitchenRoutingLabels, addPrinterLabel.trim()].filter(Boolean)
-                            ),
-                          ]
-                            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-                            .map((lbl) => (
+                          {addAssignableLabelOptions.map((lbl) => (
                               <option key={lbl} value={lbl}>
                                 {lbl}
                               </option>
@@ -4277,13 +4289,7 @@ export default function MenuPage() {
                           className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
                         >
                           <option value="">(None)</option>
-                          {[
-                            ...new Set(
-                              [...kitchenRoutingLabels, editPrinterLabel.trim()].filter(Boolean)
-                            ),
-                          ]
-                            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-                            .map((lbl) => (
+                          {editAssignableLabelOptions.map((lbl) => (
                               <option key={lbl} value={lbl}>
                                 {lbl}
                               </option>

@@ -100,6 +100,36 @@ function parseLabels(raw: unknown): string[] {
   return [];
 }
 
+function isPrinterFirestoreActive(data: Record<string, unknown>): boolean {
+  if (!Object.prototype.hasOwnProperty.call(data, "isActive")) return true;
+  return data.isActive !== false;
+}
+
+/**
+ * Distinct routing labels from `Printers` documents that are still active (`isActive !== false`).
+ * Matches POS [SelectedPrinterPrefs.allRoutingLabelsFromSavedPrinters]: every saved kitchen and
+ * receipt LAN printer contributes its label list (receipt printers with no labels add none).
+ */
+export function collectActivePrinterRoutingLabels(
+  printerDataList: Record<string, unknown>[]
+): string[] {
+  const seenNorm = new Set<string>();
+  const out: string[] = [];
+  for (const data of printerDataList) {
+    if (!isPrinterFirestoreActive(data)) continue;
+    for (const lbl of parseLabels(data.labels)) {
+      const t = lbl.trim();
+      if (!t) continue;
+      const k = t.toLowerCase();
+      if (seenNorm.has(k)) continue;
+      seenNorm.add(k);
+      out.push(t);
+    }
+  }
+  out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  return out;
+}
+
 export function mapPrinterDocument(
   id: string,
   data: Record<string, unknown>
