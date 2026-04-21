@@ -277,6 +277,18 @@ export default function SalesActivityClient() {
     return () => unsub();
   }, [voidCmdId]);
 
+  // Auto-close the transaction modal a beat after a remote void finishes successfully.
+  // We wait ~1.2s so the merchant can see the "completed" confirmation before the modal vanishes.
+  useEffect(() => {
+    if (voidCmdStatus !== "completed") return;
+    const t = window.setTimeout(() => {
+      setReceiptPreview(null);
+      setReceiptErr(null);
+      setTxModal(null);
+    }, 1200);
+    return () => window.clearTimeout(t);
+  }, [voidCmdStatus]);
+
   const { start, endExclusive } = useMemo(
     () => rangeFromPreset(datePreset, customStart, customEnd),
     [datePreset, customStart, customEnd]
@@ -955,7 +967,6 @@ export default function SalesActivityClient() {
                   }
                   const last4 = paymentsLast4s(data)[0] ?? String(data.last4 ?? "");
                   const ts = docDate(data) ?? new Date();
-                  const oid = String(data.orderId ?? "").trim();
                   return (
                     <button
                       key={id}
@@ -975,15 +986,6 @@ export default function SalesActivityClient() {
                           <p className="text-sm text-slate-600 mt-1">
                             {last4 ? `•••• ${last4}` : "—"} · {type}
                           </p>
-                          {oid ? (
-                            <Link
-                              href={`/dashboard/orders/${oid}`}
-                              className="text-sm text-violet-600 hover:underline mt-1 inline-block"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              Open order
-                            </Link>
-                          ) : null}
                           <p className="text-xs text-slate-400 mt-1">{ts.toLocaleString()}</p>
                         </div>
                       </div>
