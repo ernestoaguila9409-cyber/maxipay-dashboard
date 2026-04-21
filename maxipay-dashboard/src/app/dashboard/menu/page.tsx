@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  arrayRemove,
   arrayUnion,
   collection,
   deleteField,
@@ -22,6 +23,12 @@ import {
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import { collectActivePrinterRoutingLabels } from "@/lib/printerStatusUtils";
+import {
+  KDS_DEVICES_COLLECTION,
+  parseKdsDevicePickerRow,
+  shouldHideLegacyKdsAutoDevice,
+  type KdsDevicePickerRow,
+} from "@/lib/kdsDeviceFirestore";
 import Header from "@/components/Header";
 import MenuUploadModal from "@/components/MenuUploadModal";
 import {
@@ -44,6 +51,7 @@ import {
   Layers,
   ArrowRightLeft,
   ChevronDown,
+  Monitor,
   Printer,
 } from "lucide-react";
 import type * as XLSXType from "xlsx";
@@ -402,6 +410,13 @@ export default function MenuPage() {
   const [addModifiersExpanded, setAddModifiersExpanded] = useState(false);
   const [addTaxesExpanded, setAddTaxesExpanded] = useState(false);
   const [addLabelExpanded, setAddLabelExpanded] = useState(false);
+  const [addKdsExpanded, setAddKdsExpanded] = useState(false);
+  const [addKdsDeviceId, setAddKdsDeviceId] = useState("");
+  const [editKdsExpanded, setEditKdsExpanded] = useState(false);
+  const [editKdsDeviceId, setEditKdsDeviceId] = useState("");
+  const [kdsPickerDevices, setKdsPickerDevices] = useState<KdsDevicePickerRow[]>([]);
+  const kdsPickerRowsRef = useRef<KdsDevicePickerRow[]>([]);
+  const editKdsTouchedRef = useRef(false);
   const [stockCountingEnabled, setStockCountingEnabled] = useState(true);
   /** From Firestore `Printers`: labels on active printers only (excludes isActive === false). */
   const [activePrinterRoutingLabels, setActivePrinterRoutingLabels] = useState<string[]>([]);
@@ -777,6 +792,22 @@ export default function MenuPage() {
         console.error("[Menu] Printers (routing labels) onSnapshot error:", err.code, err.message)
     );
 
+    const unsubKdsPicker = onSnapshot(
+      collection(db, KDS_DEVICES_COLLECTION),
+      (snap) => {
+        const rows: KdsDevicePickerRow[] = [];
+        snap.forEach((d) => {
+          const raw = d.data() as Record<string, unknown>;
+          if (shouldHideLegacyKdsAutoDevice(d.id, raw)) return;
+          rows.push(parseKdsDevicePickerRow(d.id, raw));
+        });
+        rows.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+        setKdsPickerDevices(rows);
+      },
+      (err) =>
+        console.error("[Menu] kds_devices (picker) onSnapshot error:", err.code, err.message)
+    );
+
     return () => {
       console.log("[Menu] Cleaning up Firestore listeners");
       unsubCats();
@@ -788,6 +819,7 @@ export default function MenuPage() {
       unsubMenuEntities();
       unsubSubcategories();
       unsubPrintersForLabels();
+      unsubKdsPicker();
       bothReady.current = { cats: false, items: false };
     };
   }, [user, subscriptionKey]);
@@ -824,6 +856,40 @@ export default function MenuPage() {
         : activePrinterRoutingLabels;
     return [...merged].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   }, [activePrinterRoutingLabels, editPrinterLabel]);
+
+  useEffect(() => {
+    kdsPickerRowsRef.current = kdsPickerDevices;
+  }, [kdsPickerDevices]);
+
+  const activeKdsSelectOptions = useMemo(
+    () =>
+      kdsPickerDevices
+        .filter((d) => d.isActive)
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
+    [kdsPickerDevices]
+  );
+
+  const editKdsSelectOptions = useMemo(() => {
+    const base = [...activeKdsSelectOptions];
+    const sel = editKdsDeviceId.trim();
+    if (sel && !base.some((d) => d.id === sel)) {
+      const row = kdsPickerDevices.find((d) => d.id === sel);
+      if (row) base.push(row);
+    }
+    return base.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+    );
+  }, [activeKdsSelectOptions, editKdsDeviceId, kdsPickerDevices]);
+
+  /** If KDS list loads after the edit modal opens, pre-select a device that lists this item. */
+  useEffect(() => {
+    if (!editTarget || editKdsTouchedRef.current) return;
+    const found = kdsPickerDevices
+      .filter((d) => d.assignedItemIds.includes(editTarget.id))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))[0];
+    if (!found) return;
+    setEditKdsDeviceId((cur) => (cur ? cur : found.id));
+  }, [editTarget?.id, kdsPickerDevices]);
 
   // ── Filter + group (per–menu-filter category placement for multi-menu items) ──
 
@@ -1357,6 +1423,34 @@ export default function MenuPage() {
     }
   }
 
+  /** Updates `kds_devices.assignedItemIds` so at most one device explicitly lists [itemId] (picker choice). */
+  async function syncMenuItemKdsDeviceAssignment(
+    itemId: string,
+    selectedDeviceId: string,
+    devices: KdsDevicePickerRow[]
+  ) {
+    const id = itemId.trim();
+    if (!id) return;
+    const sel = selectedDeviceId.trim();
+    for (const d of devices) {
+      const had = d.assignedItemIds.includes(id);
+      const want = sel !== "" && d.id === sel;
+      if (had === want) continue;
+      const ref = doc(db, KDS_DEVICES_COLLECTION, d.id);
+      if (want) {
+        await updateDoc(ref, {
+          assignedItemIds: arrayUnion(id),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(ref, {
+          assignedItemIds: arrayRemove(id),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+  }
+
   const openEdit = (item: MenuItem) => {
     setEditTarget(item);
     const priceStrings: Record<string, string> = {};
@@ -1416,6 +1510,14 @@ export default function MenuPage() {
     setEditTaxes(txs);
     setEditPrinterLabel(item.printerLabel?.trim() ?? "");
     setEditLabelExpanded(false);
+    editKdsTouchedRef.current = false;
+    const kdsMatch = kdsPickerRowsRef.current
+      .filter((d) => d.assignedItemIds.includes(item.id))
+      .sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+      )[0];
+    setEditKdsDeviceId(kdsMatch?.id ?? "");
+    setEditKdsExpanded(false);
     setEditModifiersExpanded(false);
     setEditTaxesExpanded(false);
   };
@@ -1493,6 +1595,15 @@ export default function MenuPage() {
       }
 
       await updateDoc(doc(db, "MenuItems", editTarget.id), update);
+      try {
+        await syncMenuItemKdsDeviceAssignment(
+          editTarget.id,
+          editKdsDeviceId,
+          kdsPickerDevices
+        );
+      } catch (kdsErr) {
+        console.error("[Menu] KDS assignment sync after edit:", kdsErr);
+      }
     } catch (err) {
       console.error("Failed to update item:", err);
     } finally {
@@ -1523,6 +1634,8 @@ export default function MenuPage() {
     setAddTaxesExpanded(false);
     setAddLabelExpanded(false);
     setAddPrinterLabel("");
+    setAddKdsExpanded(false);
+    setAddKdsDeviceId("");
   };
 
   // ── Add Category ──
@@ -1817,7 +1930,18 @@ export default function MenuPage() {
         await mergeKitchenLabelToSettings(addPl);
       }
 
-      await addDoc(collection(db, "MenuItems"), data);
+      const newRef = await addDoc(collection(db, "MenuItems"), data);
+      const kdsPick = addKdsDeviceId.trim();
+      if (kdsPick) {
+        try {
+          await updateDoc(doc(db, KDS_DEVICES_COLLECTION, kdsPick), {
+            assignedItemIds: arrayUnion(newRef.id),
+            updatedAt: serverTimestamp(),
+          });
+        } catch (kdsErr) {
+          console.error("[Menu] KDS assignment after add item:", kdsErr);
+        }
+      }
 
       resetAddForm();
       setAddOpen(false);
@@ -3840,6 +3964,60 @@ export default function MenuPage() {
                   </div>
                 </div>
 
+                {/* ── Add KDS (collapsible) ── */}
+                <div className="rounded-xl border border-slate-200/80 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setAddKdsExpanded((v) => !v)}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left bg-slate-50/90 hover:bg-slate-100/90 transition-colors"
+                  >
+                    <span className="flex items-center gap-2 min-w-0 text-sm font-medium text-slate-700">
+                      <Monitor size={15} className="text-slate-500 shrink-0" />
+                      <span className="truncate">Add KDS</span>
+                      {addKdsDeviceId.trim().length > 0 && (
+                        <span className="text-xs font-semibold text-blue-600 tabular-nums shrink-0 truncate max-w-[140px]">
+                          (
+                          {kdsPickerDevices.find((d) => d.id === addKdsDeviceId)?.name ??
+                            addKdsDeviceId}
+                          )
+                        </span>
+                      )}
+                    </span>
+                    <ChevronDown
+                      size={18}
+                      className={`text-slate-400 shrink-0 transition-transform duration-200 ${
+                        addKdsExpanded ? "rotate-180" : ""
+                      }`}
+                    />
+                  </button>
+                  <div
+                    className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+                      addKdsExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                    }`}
+                  >
+                    <div className="min-h-0 overflow-hidden">
+                      <div className="px-3 py-3 space-y-1.5 border-t border-slate-100">
+                        <p className="text-[10px] text-slate-400">
+                          Active KDS devices only. Adds this item to the device&apos;s explicit item list
+                          (same as Settings → KDS → Assign items). (None) = no link from this screen.
+                        </p>
+                        <select
+                          value={addKdsDeviceId}
+                          onChange={(e) => setAddKdsDeviceId(e.target.value)}
+                          className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                        >
+                          <option value="">(None)</option>
+                          {activeKdsSelectOptions.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* ── Assign Modifiers (collapsible) ── */}
                 {modifierGroups.length > 0 && (() => {
                   const nestedIds = new Set<string>();
@@ -4294,6 +4472,65 @@ export default function MenuPage() {
                                 {lbl}
                               </option>
                             ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Add KDS (collapsible) ── */}
+                <div className="rounded-xl border border-slate-200/80 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setEditKdsExpanded((v) => !v)}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left bg-slate-50/90 hover:bg-slate-100/90 transition-colors"
+                  >
+                    <span className="flex items-center gap-2 min-w-0 text-sm font-medium text-slate-700">
+                      <Monitor size={15} className="text-slate-500 shrink-0" />
+                      <span className="truncate">Add KDS</span>
+                      {editKdsDeviceId.trim().length > 0 && (
+                        <span className="text-xs font-semibold text-blue-600 tabular-nums shrink-0 truncate max-w-[140px]">
+                          (
+                          {kdsPickerDevices.find((d) => d.id === editKdsDeviceId)?.name ??
+                            editKdsDeviceId}
+                          )
+                        </span>
+                      )}
+                    </span>
+                    <ChevronDown
+                      size={18}
+                      className={`text-slate-400 shrink-0 transition-transform duration-200 ${
+                        editKdsExpanded ? "rotate-180" : ""
+                      }`}
+                    />
+                  </button>
+                  <div
+                    className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+                      editKdsExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                    }`}
+                  >
+                    <div className="min-h-0 overflow-hidden">
+                      <div className="px-3 py-3 space-y-1.5 border-t border-slate-100">
+                        <p className="text-[10px] text-slate-400">
+                          Active KDS devices only. Updates this item on the device&apos;s explicit item
+                          list. (None) removes the item from every device&apos;s explicit list (category-based
+                          routing is unchanged).
+                        </p>
+                        <select
+                          value={editKdsDeviceId}
+                          onChange={(e) => {
+                            editKdsTouchedRef.current = true;
+                            setEditKdsDeviceId(e.target.value);
+                          }}
+                          className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                        >
+                          <option value="">(None)</option>
+                          {editKdsSelectOptions.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name}
+                              {!d.isActive ? " (inactive)" : ""}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </div>

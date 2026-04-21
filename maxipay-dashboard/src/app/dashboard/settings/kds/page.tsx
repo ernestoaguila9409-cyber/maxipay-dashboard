@@ -26,6 +26,12 @@ import {
   type MenuItemForKds,
 } from "@/lib/kdsMenuAssignment";
 import {
+  KDS_DEVICES_COLLECTION,
+  parseAssignedCategoryIds,
+  parseAssignedItemIds,
+  shouldHideLegacyKdsAutoDevice,
+} from "@/lib/kdsDeviceFirestore";
+import {
   Plus,
   Pencil,
   Trash2,
@@ -43,7 +49,6 @@ import {
   Type,
 } from "lucide-react";
 
-const KDS_DEVICES_COLLECTION = "kds_devices";
 const KDS_SETTINGS_DOC = "kds";
 const SETTINGS_COLLECTION = "Settings";
 const MENU_ITEMS_COLLECTION = "MenuItems";
@@ -143,22 +148,6 @@ const defaultDisplaySettings: KdsDisplaySettings = {
   ticketRedAfterMinutes: DEFAULT_TICKET_RED_AFTER_MINUTES,
 };
 
-function parseAssignedCategoryIds(data: Record<string, unknown>): string[] {
-  const raw = data.assignedCategoryIds;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((x) => String(x ?? "").trim())
-    .filter((x) => x.length > 0);
-}
-
-function parseAssignedItemIds(data: Record<string, unknown>): string[] {
-  const raw = data.assignedItemIds;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((x) => String(x ?? "").trim())
-    .filter((x) => x.length > 0);
-}
-
 function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
   const createdAt = parseFirestoreDate(data.createdAt);
   const lastSeen = parseFirestoreDate(data.lastSeen);
@@ -180,22 +169,6 @@ function parseDevice(id: string, data: Record<string, unknown>): KdsDevice {
     assignedCategoryIds: parseAssignedCategoryIds(data),
     assignedItemIds: parseAssignedItemIds(data),
   };
-}
-
-/**
- * Old KDS builds used ANDROID_ID as the Firestore document id (often 16 hex chars) and
- * `set(merge)` heartbeats, so deleting the dashboard-registered row left a second doc that
- * looked like the same tablet. Hide those from the list so they don't "come back."
- */
-function shouldHideLegacyKdsAutoDevice(
-  id: string,
-  data: Record<string, unknown>
-): boolean {
-  if (data.registeredFromWeb === true) return false;
-  const pc = data.pairingCode;
-  if (typeof pc === "string" && /^\d{6}$/.test(pc)) return false;
-  if (data.isPaired === true) return false;
-  return /^[a-f0-9]{16}$/i.test(id);
 }
 
 /** 6-digit code; generated locally (no Firestore query — avoids index/rules issues on read). */
