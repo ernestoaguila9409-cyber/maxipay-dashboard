@@ -6,16 +6,19 @@ import {
   Timestamp,
   addDoc,
   collection,
+  doc,
   limit,
   onSnapshot,
   orderBy,
   query,
+  serverTimestamp,
   where,
   type DocumentData,
 } from "firebase/firestore";
 import { getApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/firebase/firebaseConfig";
+import { useAuth } from "@/context/AuthContext";
 import { Banknote, CreditCard, Layers, Loader2, Plus, Search, X } from "lucide-react";
 import { startOfLocalDay } from "@/lib/dashboardFinance";
 
@@ -101,6 +104,31 @@ function paymentsLast4s(data: DocumentData): string[] {
     .filter(Boolean);
 }
 
+const REMOTE_PAYMENT_COMMANDS = "RemotePaymentCommands";
+
+function transactionHasCashTender(data: DocumentData): boolean {
+  const pays = data.payments as unknown[] | undefined;
+  if (!Array.isArray(pays)) return false;
+  for (const p of pays) {
+    const o = p as Record<string, unknown>;
+    const pt = String(o.paymentType ?? "").trim().toLowerCase();
+    const cents = Number(o.amountInCents ?? 0);
+    if (pt === "cash" && cents > 0) return true;
+  }
+  return false;
+}
+
+/** Card-only unsettled sales suitable for dashboard → POS void queue. */
+function canRequestRemoteVoid(data: DocumentData): boolean {
+  if (!inFinancialTx(data)) return false;
+  const type = String(data.type ?? "");
+  if (!["SALE", "CAPTURE", "PRE_AUTH"].includes(type)) return false;
+  if (data.voided === true) return false;
+  if (data.settled === true) return false;
+  if (transactionHasCashTender(data)) return false;
+  return true;
+}
+
 function inFinancialTx(data: DocumentData): boolean {
   const type = String(data.type ?? "");
   if (type === "CASH_ADD" || type === "PAID_OUT") return false;
@@ -130,6 +158,7 @@ function receiptKindForTransaction(data: DocumentData): {
 }
 
 export default function SalesActivityClient() {
+  const { user } = useAuth();
   const [tab, setTab] = useState<TabId>("orders");
   const [datePreset, setDatePreset] = useState<DatePreset>("today");
   const [customStart, setCustomStart] = useState(() => {
@@ -208,6 +237,45 @@ export default function SalesActivityClient() {
   const [cashAmount, setCashAmount] = useState("");
   const [cashReason, setCashReason] = useState("");
   const [cashSaving, setCashSaving] = useState(false);
+
+  const [voidCmdId, setVoidCmdId] = useState<string | null>(null);
+  const [voidSubmitting, setVoidSubmitting] = useState(false);
+  const [voidSubmitErr, setVoidSubmitErr] = useState<string | null>(null);
+  const [voidCmdStatus, setVoidCmdStatus] = useState<string | null>(null);
+  const [voidCmdDetail, setVoidCmdDetail] = useState<string | null>(null);
+
+  useEffect(() => {
+    setVoidCmdId(null);
+    setVoidSubmitErr(null);
+    setVoidCmdStatus(null);
+    setVoidCmdDetail(null);
+  }, [txModal?.id]);
+
+  useEffect(() => {
+    if (!voidCmdId || !db) {
+      setVoidCmdStatus(null);
+      setVoidCmdDetail(null);
+      return;
+    }
+    const ref = doc(db, REMOTE_PAYMENT_COMMANDS, voidCmdId);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setVoidCmdStatus(null);
+          setVoidCmdDetail(null);
+          return;
+        }
+        const d = snap.data();
+        setVoidCmdStatus(String(d?.status ?? ""));
+        const err = typeof d?.errorMessage === "string" ? d.errorMessage : "";
+        const ok = typeof d?.resultMessage === "string" ? d.resultMessage : "";
+        setVoidCmdDetail(err || ok || null);
+      },
+      (e) => console.error("[SalesActivity] void command", e)
+    );
+    return () => unsub();
+  }, [voidCmdId]);
 
   const { start, endExclusive } = useMemo(
     () => rangeFromPreset(datePreset, customStart, customEnd),
@@ -1050,9 +1118,70 @@ export default function SalesActivityClient() {
             {receiptErr ? (
               <p className="text-xs text-red-600">{receiptErr}</p>
             ) : null}
+
+            {txModal && canRequestRemoteVoid(txModal.data) ? (
+              <div className="rounded-xl border border-amber-100 bg-amber-50/80 px-3 py-3 space-y-2">
+                <p className="text-xs font-medium text-amber-900">Remote card void</p>
+                <p className="text-[11px] text-amber-800/90 leading-snug">
+                  Queues a void for the signed-in POS (Dejavoo / SpinPOS). The store tablet must be online
+                  with MaxiPay open; mixed cash + card must still be voided on the POS.
+                </p>
+                {!user ? (
+                  <p className="text-xs text-amber-900">Sign in to request a void.</p>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={voidSubmitting}
+                      onClick={async () => {
+                        if (!user || !txModal) return;
+                        setVoidSubmitting(true);
+                        setVoidSubmitErr(null);
+                        try {
+                          const ref = await addDoc(collection(db, REMOTE_PAYMENT_COMMANDS), {
+                            type: "voidTransaction",
+                            transactionId: txModal.id,
+                            status: "pending",
+                            requestedByUid: user.uid,
+                            requestedByEmail: user.email ?? "",
+                            voidedByLabel: `Dashboard: ${user.email ?? user.uid}`,
+                            requestedAt: serverTimestamp(),
+                          });
+                          setVoidCmdId(ref.id);
+                        } catch (err) {
+                          console.error("[SalesActivity] remote void queue", err);
+                          setVoidSubmitErr(
+                            err instanceof Error ? err.message : "Could not queue void request"
+                          );
+                        } finally {
+                          setVoidSubmitting(false);
+                        }
+                      }}
+                      className="w-full py-2.5 rounded-xl bg-amber-700 text-white text-sm font-semibold hover:bg-amber-800 disabled:opacity-60"
+                    >
+                      {voidSubmitting ? "Queueing…" : "Request void on POS"}
+                    </button>
+                    {voidSubmitErr ? (
+                      <p className="text-xs text-red-700">{voidSubmitErr}</p>
+                    ) : null}
+                    {voidCmdStatus ? (
+                      <div className="text-xs text-amber-950 space-y-0.5">
+                        <p>
+                          <span className="font-semibold">Status:</span> {voidCmdStatus}
+                        </p>
+                        {voidCmdDetail ? (
+                          <p className="text-amber-900/90 break-words">{voidCmdDetail}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ) : null}
+
             <p className="text-xs text-slate-500">
-              Void, partial refund, and full refund are performed on the POS terminal or payment app
-              connected to Firestore—not in this web dashboard.
+              Partial and full refunds (and voids that include cash) are done on the POS. Card-only voids
+              can also be queued above when the POS is online.
             </p>
           </div>
         </div>
