@@ -41,6 +41,7 @@ export interface KdsDevicePickerRow {
   id: string;
   name: string;
   isActive: boolean;
+  assignedCategoryIds: string[];
   assignedItemIds: string[];
 }
 
@@ -52,6 +53,7 @@ export function parseKdsDevicePickerRow(
     id,
     name: String(data.name ?? "").trim() || "KDS device",
     isActive: data.isActive !== false,
+    assignedCategoryIds: parseAssignedCategoryIds(data),
     assignedItemIds: parseAssignedItemIds(data),
   };
 }

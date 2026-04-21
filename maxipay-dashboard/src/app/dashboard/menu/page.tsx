@@ -29,6 +29,7 @@ import {
   shouldHideLegacyKdsAutoDevice,
   type KdsDevicePickerRow,
 } from "@/lib/kdsDeviceFirestore";
+import { kdsDeviceRoutesMenuItemLine } from "@/lib/kdsMenuAssignment";
 import Header from "@/components/Header";
 import MenuUploadModal from "@/components/MenuUploadModal";
 import {
@@ -162,6 +163,30 @@ function placementCategoryIds(item: Pick<MenuItem, "categoryId" | "categoryIds">
   if (item.categoryIds && item.categoryIds.length > 0) return item.categoryIds;
   if (item.categoryId) return [item.categoryId];
   return [];
+}
+
+function sortKdsDevicesByName(devices: KdsDevicePickerRow[]): KdsDevicePickerRow[] {
+  return [...devices].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  );
+}
+
+/** KDS devices that would show this item (explicit ids, assigned categories, or no filter). */
+function kdsDevicesThatRouteMenuItem(
+  item: Pick<MenuItem, "id" | "categoryId" | "categoryIds">,
+  devices: KdsDevicePickerRow[]
+): KdsDevicePickerRow[] {
+  const placements = placementCategoryIds(item);
+  return sortKdsDevicesByName(
+    devices.filter((d) =>
+      kdsDeviceRoutesMenuItemLine(
+        d.assignedCategoryIds,
+        d.assignedItemIds,
+        item.id,
+        placements
+      )
+    )
+  );
 }
 
 /** Row in the menu list with category resolved for the active menu filter. */
@@ -881,12 +906,10 @@ export default function MenuPage() {
     );
   }, [activeKdsSelectOptions, editKdsDeviceId, kdsPickerDevices]);
 
-  /** If KDS list loads after the edit modal opens, pre-select a device that lists this item. */
+  /** If KDS list loads after the edit modal opens, pre-select a device that routes this item. */
   useEffect(() => {
     if (!editTarget || editKdsTouchedRef.current) return;
-    const found = kdsPickerDevices
-      .filter((d) => d.assignedItemIds.includes(editTarget.id))
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))[0];
+    const found = kdsDevicesThatRouteMenuItem(editTarget, kdsPickerDevices)[0];
     if (!found) return;
     setEditKdsDeviceId((cur) => (cur ? cur : found.id));
   }, [editTarget?.id, kdsPickerDevices]);
@@ -1511,12 +1534,8 @@ export default function MenuPage() {
     setEditPrinterLabel(item.printerLabel?.trim() ?? "");
     setEditLabelExpanded(false);
     editKdsTouchedRef.current = false;
-    const kdsMatch = kdsPickerRowsRef.current
-      .filter((d) => d.assignedItemIds.includes(item.id))
-      .sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
-      )[0];
-    setEditKdsDeviceId(kdsMatch?.id ?? "");
+    const kdsRoutingMatches = kdsDevicesThatRouteMenuItem(item, kdsPickerRowsRef.current);
+    setEditKdsDeviceId(kdsRoutingMatches[0]?.id ?? "");
     setEditKdsExpanded(false);
     setEditModifiersExpanded(false);
     setEditTaxesExpanded(false);
@@ -4512,9 +4531,9 @@ export default function MenuPage() {
                     <div className="min-h-0 overflow-hidden">
                       <div className="px-3 py-3 space-y-1.5 border-t border-slate-100">
                         <p className="text-[10px] text-slate-400">
-                          Active KDS devices only. Updates this item on the device&apos;s explicit item
-                          list. (None) removes the item from every device&apos;s explicit list (category-based
-                          routing is unchanged).
+                          Active KDS devices only. The selection reflects how the item already reaches a
+                          KDS (explicit item list or assigned categories). Saving updates the explicit item
+                          list; (None) clears explicit ids on every device (category assignments unchanged).
                         </p>
                         <select
                           value={editKdsDeviceId}

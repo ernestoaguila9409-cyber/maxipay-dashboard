@@ -244,6 +244,27 @@ export function menuItemMatchesAssignment(
   return placements.some((p) => assignedCategoryIds.has(p));
 }
 
+/**
+ * Whether a menu item appears on this KDS given `kds_devices` assignment fields.
+ * Matches KDS Android: both lists empty ⇒ no filter (all kitchen orders / all items).
+ */
+export function kdsDeviceRoutesMenuItemLine(
+  assignedCategoryIds: string[],
+  assignedItemIds: string[],
+  itemId: string,
+  placementCategoryIds: string[]
+): boolean {
+  if (assignedCategoryIds.length === 0 && assignedItemIds.length === 0) {
+    return true;
+  }
+  return menuItemMatchesAssignment(
+    itemId,
+    placementCategoryIds,
+    new Set(assignedCategoryIds),
+    new Set(assignedItemIds)
+  );
+}
+
 export function itemsInSectionCategory(
   section: ScheduleAssignmentSection,
   categoryId: string
