@@ -28,8 +28,13 @@ class KdsDevicePresence(
         appContext.getSharedPreferences(KdsDevicePrefs.PREFS_NAME, Context.MODE_PRIVATE)
     }
 
-    suspend fun heartbeatOnce(): HeartbeatOutcome {
-        val docId = prefs.getString(KdsDevicePrefs.KEY_DEVICE_DOC_ID, null)?.trim().orEmpty()
+    /**
+     * @param deviceDocIdHint Same id as in-memory pairing state; used when prefs are briefly
+     * empty after pair ([SharedPreferences.apply]) so the heartbeat loop does not exit forever.
+     */
+    suspend fun heartbeatOnce(deviceDocIdHint: String = ""): HeartbeatOutcome {
+        val fromPrefs = prefs.getString(KdsDevicePrefs.KEY_DEVICE_DOC_ID, null)?.trim().orEmpty()
+        val docId = fromPrefs.ifBlank { deviceDocIdHint.trim() }
         if (docId.isEmpty()) return HeartbeatOutcome.NoDeviceConfigured
         val ref = db.collection(KDS_DEVICES_COLLECTION).document(docId)
         return try {

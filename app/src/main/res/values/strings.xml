@@ -149,6 +149,19 @@
     <string name="item_detail_add_label">+ Add Label</string>
     <string name="item_detail_add_label_title">Assign Labels</string>
     <string name="item_detail_no_labels_available">No labels available. Add labels on kitchen printers first.</string>
+    <string name="item_detail_kds_heading">KDS stations</string>
+    <string name="item_detail_no_kds_assigned">No KDS stations assigned for this item.</string>
+    <string name="item_detail_add_kds">+ Add KDS</string>
+    <string name="item_detail_add_kds_title">Assign KDS stations</string>
+    <string name="item_detail_no_kds_devices">No KDS devices found. Add a kitchen display in the web dashboard first.</string>
+    <string name="item_detail_no_kds_active_devices">No active paired KDS devices. Check the web dashboard or pair a tablet first.</string>
+    <string name="item_detail_kds_hint">Tickets for this item appear on the selected kitchen displays (same as web dashboard routing).</string>
+    <string name="item_added_short">%1$s added</string>
+    <string name="category_assign_kds_title">Assign KDS stations</string>
+    <string name="category_kds_hint">All menu items in this category—including every subcategory—route to the kitchen displays you select (same as the web dashboard).</string>
+    <string name="category_no_kds_devices">No KDS devices found. Add them in the web dashboard first.</string>
+    <string name="category_no_kds_active_devices">No active paired KDS devices. Check the web dashboard or pair a tablet first.</string>
+    <string name="category_kds_saved">KDS assignment updated</string>
     <string name="item_detail_delete">Delete item</string>
     <string name="item_detail_delete_title">Delete %1$s?</string>
     <string name="item_detail_delete_message">This will permanently remove this item.</string>
@@ -267,4 +280,5 @@
     <string name="customer_profile_load_reservations_failed">Could not load reservations</string>
     <string name="customer_profile_section_expand_collapse">Expand or collapse section</string>
 
+    <string name="customers_frequent_visitor_star_cd">Frequent visitor: more than five visits</string>
 </resources>

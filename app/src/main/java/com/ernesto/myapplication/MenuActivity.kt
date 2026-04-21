@@ -124,6 +124,9 @@ class MenuActivity : AppCompatActivity() {
     private var customerPhone: String? = null
     private var customerEmail: String? = null
 
+    private lateinit var repeatSuggestion: CustomerRepeatSuggestionController
+    private val customerHistoryRepo = CustomerOrderHistoryRepository()
+
     private lateinit var paymentService: PaymentService
     private var preAuthReferenceId: String? = null
     private var preAuthAuthCode: String? = null
@@ -147,9 +150,13 @@ class MenuActivity : AppCompatActivity() {
     private val paymentLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
+                val closedOrderId = currentOrderId
                 if (stockCountingEnabled) {
                     deductStockTransaction(
                         onSuccess = {
+                            if (!closedOrderId.isNullOrBlank()) {
+                                customerHistoryRepo.updateAfterOrderClosed(closedOrderId)
+                            }
                             clearCart()
                             detachOrderKitchenStatusListener()
                             currentOrderId = null
@@ -164,6 +171,9 @@ class MenuActivity : AppCompatActivity() {
                         }
                     )
                 } else {
+                    if (!closedOrderId.isNullOrBlank()) {
+                        customerHistoryRepo.updateAfterOrderClosed(closedOrderId)
+                    }
                     clearCart()
                     detachOrderKitchenStatusListener()
                     currentOrderId = null
@@ -243,6 +253,25 @@ class MenuActivity : AppCompatActivity() {
         btnCheckout = findViewById(R.id.btnCheckout)
         updateSendKitchenButtonLabel()
         btnSendKitchen.setOnClickListener { sendToKitchen() }
+
+        repeatSuggestion = CustomerRepeatSuggestionController(findViewById(R.id.repeatSuggestionCard))
+        repeatSuggestion.init(
+            cartIsEmpty = { cartMap.isEmpty() },
+            confirmReplace = CustomerRepeatSuggestionController.CartNonEmptyConfirm { onConfirmed ->
+                AlertDialog.Builder(this)
+                    .setTitle("Replace current cart?")
+                    .setMessage("Starting a repeat order will clear the items currently in the cart.")
+                    .setPositiveButton("Replace") { _, _ -> onConfirmed() }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            },
+            applier = CustomerRepeatSuggestionController.RepeatApplier { pattern ->
+                applyRepeatPattern(pattern)
+            },
+            editApplier = CustomerRepeatSuggestionController.RepeatApplier { pattern ->
+                startEditSuggestedOrderFlow(pattern)
+            },
+        )
 
         findViewById<View>(R.id.btnKitchenNotes).setOnClickListener { showKitchenNotesDialog() }
 
@@ -466,6 +495,7 @@ class MenuActivity : AppCompatActivity() {
                 customerPhone = orderDoc.getString("customerPhone")?.takeIf { it.isNotBlank() }
                 customerEmail = orderDoc.getString("customerEmail")?.takeIf { it.isNotBlank() }
                 updateCustomerDisplay()
+                repeatSuggestion.onCustomerChanged(customerId)
 
                 db.collection("Orders")
                     .document(orderId)
@@ -530,6 +560,7 @@ class MenuActivity : AppCompatActivity() {
                 customerPhone = info.phone.takeIf { it.isNotBlank() }
                 customerEmail = info.email.takeIf { it.isNotBlank() }
                 updateCustomerDisplay()
+                repeatSuggestion.onCustomerChanged(customerId)
 
                 val oid = currentOrderId
                 if (!oid.isNullOrBlank()) {
@@ -598,6 +629,7 @@ class MenuActivity : AppCompatActivity() {
                         db.collection("Orders").document(oid)
                             .update("customerId", docRef.id)
                     }
+                    repeatSuggestion.onCustomerChanged(customerId)
                 }
                 .addOnFailureListener { e ->
                     android.util.Log.e("MenuActivity", "Failed to save customer to Customers collection", e)
@@ -619,6 +651,7 @@ class MenuActivity : AppCompatActivity() {
                         db.collection("Orders").document(oid)
                             .update("customerId", doc.id)
                     }
+                    repeatSuggestion.onCustomerChanged(customerId)
                 }
             }
     }
@@ -1273,9 +1306,18 @@ class MenuActivity : AppCompatActivity() {
         taxMode: String = "INHERIT",
         taxIds: List<String> = emptyList(),
         printerLabel: String? = null,
+        preselectedModifiers: List<SummaryModifier> = emptyList(),
+        titlePrefix: String? = null,
+        primaryButtonLabel: String? = null,
+        quantityOverride: Int = 1,
+        onConfirmed: (() -> Unit)? = null,
+        onCancelled: (() -> Unit)? = null,
     ) {
         if (groupIds.isEmpty()) {
-            addToCart(itemId, name, basePrice, stock, emptyList(), taxMode, taxIds, printerLabel)
+            repeat(quantityOverride.coerceAtLeast(1)) {
+                addToCart(itemId, name, basePrice, stock, emptyList(), taxMode, taxIds, printerLabel)
+            }
+            onConfirmed?.invoke()
             return
         }
 
@@ -1357,6 +1399,12 @@ class MenuActivity : AppCompatActivity() {
                         itemId, name, basePrice, stock,
                         allGroupInfos, orderIndex, triggeredGroupIds,
                         taxMode, taxIds, printerLabel,
+                        preselectedModifiers = preselectedModifiers,
+                        titlePrefix = titlePrefix,
+                        primaryButtonLabel = primaryButtonLabel,
+                        quantityOverride = quantityOverride,
+                        onConfirmed = onConfirmed,
+                        onCancelled = onCancelled,
                     )
                 }
             }
@@ -1396,11 +1444,18 @@ class MenuActivity : AppCompatActivity() {
         taxMode: String,
         taxIds: List<String>,
         printerLabel: String? = null,
+        preselectedModifiers: List<SummaryModifier> = emptyList(),
+        titlePrefix: String? = null,
+        primaryButtonLabel: String? = null,
+        quantityOverride: Int = 1,
+        onConfirmed: (() -> Unit)? = null,
+        onCancelled: (() -> Unit)? = null,
     ) {
         val selectedOptionsPerGroup = mutableMapOf<String, MutableList<SelectedOption>>()
         val groupContainers = mutableMapOf<String, LinearLayout>()
         val visibleGroupIds = mutableSetOf<String>()
         val radioGroupPreviousTriggers = mutableMapOf<String, List<String>>()
+        val optionViewsByGroup = mutableMapOf<String, MutableMap<String, CompoundButton>>()
 
         val topLevelGroupIds = orderIndex.keys.filter { it !in triggeredGroupIds }
         val topLevelGroups = topLevelGroupIds
@@ -1507,7 +1562,8 @@ class MenuActivity : AppCompatActivity() {
                 group.options, group, container, selectedOptionsPerGroup,
                 radioGroupPreviousTriggers,
                 { showTriggeredGroups(it) },
-                { hideTriggeredGroups(it) }
+                { hideTriggeredGroups(it) },
+                optionViewsByGroup,
             )
 
             return container
@@ -1548,14 +1604,23 @@ class MenuActivity : AppCompatActivity() {
             }
         }
 
+        val dialogTitle = if (!titlePrefix.isNullOrBlank()) "$titlePrefix: $name" else "Select Options"
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Select Options")
+            .setTitle(dialogTitle)
             .setView(ScrollView(this).apply { addView(mainLayout) })
-            .setPositiveButton("Add to Cart", null)
+            .setPositiveButton(primaryButtonLabel ?: "Add to Cart", null)
             .setNegativeButton("Cancel", null)
             .create()
 
+        var confirmedOnce = false
         dialog.setOnShowListener {
+            applyModifierPreselection(
+                preselected = preselectedModifiers,
+                allGroupInfos = allGroupInfos,
+                optionViewsByGroup = optionViewsByGroup,
+                visibleGroupIds = visibleGroupIds,
+            )
+
             val addButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             addButton.setOnClickListener {
                 for ((gId, gInfo) in allGroupInfos) {
@@ -1576,12 +1641,105 @@ class MenuActivity : AppCompatActivity() {
                     topLevelGroupIds, allGroupInfos,
                     selectedOptionsPerGroup, visibleGroupIds
                 )
-                addToCart(itemId, name, basePrice, stock, modifiers, taxMode, taxIds, printerLabel)
+                val units = quantityOverride.coerceAtLeast(1)
+                repeat(units) {
+                    addToCart(itemId, name, basePrice, stock, modifiers, taxMode, taxIds, printerLabel)
+                }
+                confirmedOnce = true
                 dialog.dismiss()
+                onConfirmed?.invoke()
             }
         }
 
+        dialog.setOnDismissListener {
+            if (!confirmedOnce) onCancelled?.invoke()
+        }
+
         dialog.show()
+    }
+
+    /**
+     * Walks the provided saved [preselected] leaves and programmatically clicks the matching
+     * option views so the existing listeners fire (including triggered-group activation).
+     *
+     * We match by (optionId or case-insensitive name) and by effective action (ADD/REMOVE).
+     * Multiple passes are executed because a click on a parent option can reveal a triggered
+     * group whose child option must also be preselected.
+     */
+    private fun applyModifierPreselection(
+        preselected: List<SummaryModifier>,
+        allGroupInfos: Map<String, GroupInfo>,
+        optionViewsByGroup: Map<String, Map<String, CompoundButton>>,
+        visibleGroupIds: Set<String>,
+    ) {
+        if (preselected.isEmpty()) return
+        val leaves = flattenPreselectLeaves(preselected)
+        if (leaves.isEmpty()) return
+
+        val remaining = leaves.toMutableList()
+        val handled = mutableSetOf<Int>()
+        var pass = 0
+        while (pass < 4 && handled.size < remaining.size) {
+            var progressed = false
+            for ((idx, leaf) in remaining.withIndex()) {
+                if (idx in handled) continue
+                val targetName = leaf.name.trim().lowercase(Locale.US)
+                val targetAction = leaf.action.trim().uppercase(Locale.US).ifEmpty { "ADD" }
+                if (targetName.isEmpty()) { handled.add(idx); continue }
+
+                val match = findMatchingOption(
+                    targetName = targetName,
+                    targetAction = targetAction,
+                    allGroupInfos = allGroupInfos,
+                    optionViewsByGroup = optionViewsByGroup,
+                    visibleGroupIds = visibleGroupIds,
+                )
+                if (match != null) {
+                    val (view, isRadio) = match
+                    if (isRadio) {
+                        if (!view.isChecked) view.performClick()
+                    } else {
+                        if (!view.isChecked) view.performClick()
+                    }
+                    handled.add(idx)
+                    progressed = true
+                }
+            }
+            if (!progressed) break
+            pass++
+        }
+    }
+
+    private fun flattenPreselectLeaves(mods: List<SummaryModifier>): List<SummaryModifier> {
+        val out = mutableListOf<SummaryModifier>()
+        for (m in mods) {
+            if (m.children.isEmpty()) out.add(m) else out.addAll(flattenPreselectLeaves(m.children))
+        }
+        return out
+    }
+
+    private fun findMatchingOption(
+        targetName: String,
+        targetAction: String,
+        allGroupInfos: Map<String, GroupInfo>,
+        optionViewsByGroup: Map<String, Map<String, CompoundButton>>,
+        visibleGroupIds: Set<String>,
+    ): Pair<CompoundButton, Boolean>? {
+        for ((gId, gInfo) in allGroupInfos) {
+            if (gId !in visibleGroupIds) continue
+            val effectiveGroupAction = if (gInfo.groupType.trim().uppercase(Locale.US) == "REMOVE") "REMOVE" else null
+            for (opt in gInfo.options) {
+                val optName = opt.name.trim().lowercase(Locale.US)
+                if (optName != targetName) continue
+                val optAction = effectiveGroupAction
+                    ?: (if (opt.action.trim().uppercase(Locale.US) == "REMOVE") "REMOVE" else "ADD")
+                if (optAction != targetAction) continue
+                val view = optionViewsByGroup[gId]?.get(opt.id) ?: continue
+                val isRadio = view is RadioButton
+                return view to isRadio
+            }
+        }
+        return null
     }
 
     private fun resetGroupSelectionUI(container: LinearLayout?) {
@@ -1602,11 +1760,13 @@ class MenuActivity : AppCompatActivity() {
         selectedOptionsPerGroup: MutableMap<String, MutableList<SelectedOption>>,
         radioGroupPreviousTriggers: MutableMap<String, List<String>>,
         onTriggersActivated: (List<String>) -> Unit,
-        onTriggersDeactivated: (List<String>) -> Unit
+        onTriggersDeactivated: (List<String>) -> Unit,
+        optionViewsByGroup: MutableMap<String, MutableMap<String, CompoundButton>>? = null,
     ) {
         val groupId = group.groupId
         val isRemoveGroup = group.groupType == "REMOVE"
         val maxSelection = group.maxSelection
+        val viewMap = optionViewsByGroup?.getOrPut(groupId) { mutableMapOf() }
 
         if (isRemoveGroup) {
             for (opt in options) {
@@ -1615,6 +1775,7 @@ class MenuActivity : AppCompatActivity() {
                     setTextColor(Color.parseColor("#D32F2F"))
                 }
                 groupContainer.addView(checkBox)
+                viewMap?.put(opt.id, checkBox)
 
                 checkBox.setOnCheckedChangeListener { _, isChecked ->
                     if (suppressModifierCallbacks) return@setOnCheckedChangeListener
@@ -1644,6 +1805,7 @@ class MenuActivity : AppCompatActivity() {
                     if (isLineRemove) setTextColor(Color.parseColor("#D32F2F"))
                 }
                 radioGroup.addView(radioButton)
+                viewMap?.put(opt.id, radioButton)
 
                 radioButton.setOnClickListener {
                     if (suppressModifierCallbacks) return@setOnClickListener
@@ -1672,6 +1834,7 @@ class MenuActivity : AppCompatActivity() {
                     if (isLineRemove) setTextColor(Color.parseColor("#D32F2F"))
                 }
                 groupContainer.addView(checkBox)
+                viewMap?.put(opt.id, checkBox)
 
                 checkBox.setOnCheckedChangeListener { _, isChecked ->
                     if (suppressModifierCallbacks) return@setOnCheckedChangeListener
@@ -3230,6 +3393,267 @@ class MenuActivity : AppCompatActivity() {
                 }
             }
     }
+    /**
+     * Apply a detected [RepeatPattern] to the current cart. Clears any in-progress cart first
+     * (both local state and Firestore line docs), ensures an order exists (so [addToCart]'s
+     * internal ensureOrder short-circuits synchronously during the loop and units don't race),
+     * then re-adds each item sequentially from fresh MenuItem reads so current price / stock /
+     * routing are used — while keeping the customer's stored modifiers + quantities from the
+     * previous order.
+     */
+    private fun applyRepeatPattern(pattern: RepeatPattern) {
+        if (pattern.isEmpty) return
+        if (orderKitchenInProcess) {
+            Toast.makeText(this, getString(R.string.cart_order_in_process), Toast.LENGTH_SHORT).show()
+            return
+        }
+        val existingKeys = cartMap.keys.toList()
+        for (k in existingKeys) removeCartItem(k)
+
+        if (currentOrderId == null) isCreatingOrder = true
+        orderEngine.ensureOrder(
+            currentOrderId = currentOrderId,
+            employeeName = employeeName,
+            orderType = orderType,
+            tableId = tableId,
+            tableLayoutId = tableLayoutId,
+            tableName = tableName,
+            sectionId = sectionId,
+            sectionName = sectionName,
+            guestCount = if (guestCount > 0) guestCount else null,
+            guestNames = if (guestNames.isNotEmpty()) guestNames else null,
+            customerId = customerId,
+            customerName = customerName,
+            customerPhone = customerPhone,
+            customerEmail = customerEmail,
+            onSuccess = { oid ->
+                isCreatingOrder = false
+                currentOrderId = oid
+                attachOrderKitchenStatusListener(oid)
+                addRepeatItemsSequentially(pattern.items.toMutableList())
+            },
+            onFailure = { e ->
+                isCreatingOrder = false
+                Toast.makeText(this, e.message ?: "Couldn't start order", Toast.LENGTH_SHORT).show()
+            },
+        )
+    }
+
+    private fun addRepeatItemsSequentially(queue: MutableList<SummaryItem>) {
+        if (queue.isEmpty()) return
+        val next = queue.removeAt(0)
+        db.collection("MenuItems").document(next.itemId).get()
+            .addOnSuccessListener { itemDoc ->
+                if (!itemDoc.exists()) {
+                    Toast.makeText(this, "${next.name} is no longer available", Toast.LENGTH_SHORT).show()
+                    addRepeatItemsSequentially(queue)
+                    return@addOnSuccessListener
+                }
+
+                val pricingRaw = itemDoc.get("pricing") as? Map<*, *>
+                val pricingPos = (pricingRaw?.get("pos") as? Number)?.toDouble()
+                val pricesRaw = itemDoc.get("prices") as? Map<*, *>
+                val pricesFirst = (pricesRaw?.values?.firstOrNull() as? Number)?.toDouble()
+                val basePrice = pricingPos
+                    ?: pricesFirst
+                    ?: itemDoc.getDouble("price")
+                    ?: (next.basePriceInCents / 100.0)
+
+                val stock = itemDoc.getLong("stock") ?: 0L
+                val effectiveStock = if (stockCountingEnabled) stock else Long.MAX_VALUE
+
+                val taxMode = itemDoc.getString("taxMode") ?: "INHERIT"
+                @Suppress("UNCHECKED_CAST")
+                val taxIds = (itemDoc.get("taxIds") as? List<String>) ?: emptyList()
+
+                val itemLabel = MenuItemRoutingLabel.fromMenuItemDoc(itemDoc)
+                val itemSubId = itemDoc.getString("subcategoryId").orEmpty()
+                val itemCatId = itemDoc.getString("categoryId").orEmpty()
+                val subLabel = allSubcategories.firstOrNull { it.id == itemSubId }?.kitchenLabel
+                val catLabel = categoryKitchenLabels[itemCatId]
+                val printerLabel = MenuItemRoutingLabel.resolve(itemLabel, subLabel, catLabel)
+
+                val modifiers = next.modifiers.map { it.toOrderModifier() }
+                val name = itemDoc.getString("name")?.takeIf { it.isNotBlank() } ?: next.name
+
+                val units = next.quantity.coerceAtLeast(1)
+                repeat(units) {
+                    addToCart(
+                        itemId = next.itemId,
+                        name = name,
+                        basePrice = basePrice,
+                        stock = effectiveStock,
+                        modifiers = modifiers,
+                        taxMode = taxMode,
+                        taxIds = taxIds,
+                        printerLabel = printerLabel,
+                    )
+                }
+                addRepeatItemsSequentially(queue)
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Couldn't load ${next.name}", Toast.LENGTH_SHORT).show()
+                addRepeatItemsSequentially(queue)
+            }
+    }
+
+    /**
+     * Guided "Edit" flow for the "Same as usual?" suggestion. Unlike [applyRepeatPattern], this
+     * walks through every suggested item that has modifiers one at a time, pre-selecting the
+     * saved modifiers so the merchant can tweak them before the item actually lands in the cart.
+     *
+     * Items with no modifier groups are added silently; items with modifier groups open the
+     * existing modifier dialog with `"Item X of Y"` progress in the title and a `Confirm` button
+     * that advances the flow.
+     */
+    private fun startEditSuggestedOrderFlow(pattern: RepeatPattern) {
+        if (pattern.isEmpty) return
+        if (orderKitchenInProcess) {
+            Toast.makeText(this, getString(R.string.cart_order_in_process), Toast.LENGTH_SHORT).show()
+            return
+        }
+        val existingKeys = cartMap.keys.toList()
+        for (k in existingKeys) removeCartItem(k)
+
+        if (currentOrderId == null) isCreatingOrder = true
+        orderEngine.ensureOrder(
+            currentOrderId = currentOrderId,
+            employeeName = employeeName,
+            orderType = orderType,
+            tableId = tableId,
+            tableLayoutId = tableLayoutId,
+            tableName = tableName,
+            sectionId = sectionId,
+            sectionName = sectionName,
+            guestCount = if (guestCount > 0) guestCount else null,
+            guestNames = if (guestNames.isNotEmpty()) guestNames else null,
+            customerId = customerId,
+            customerName = customerName,
+            customerPhone = customerPhone,
+            customerEmail = customerEmail,
+            onSuccess = { oid ->
+                isCreatingOrder = false
+                currentOrderId = oid
+                attachOrderKitchenStatusListener(oid)
+                val items = pattern.items.toMutableList()
+                processNextEditItem(items, currentIndex = 1, total = items.size)
+            },
+            onFailure = { e ->
+                isCreatingOrder = false
+                Toast.makeText(this, e.message ?: "Couldn't start order", Toast.LENGTH_SHORT).show()
+            },
+        )
+    }
+
+    private fun processNextEditItem(
+        queue: MutableList<SummaryItem>,
+        currentIndex: Int,
+        total: Int,
+    ) {
+        if (queue.isEmpty()) return
+        val next = queue.removeAt(0)
+        db.collection("MenuItems").document(next.itemId).get()
+            .addOnSuccessListener { itemDoc ->
+                if (!itemDoc.exists()) {
+                    Toast.makeText(this, "${next.name} is no longer available", Toast.LENGTH_SHORT).show()
+                    processNextEditItem(queue, currentIndex + 1, total)
+                    return@addOnSuccessListener
+                }
+
+                val pricingRaw = itemDoc.get("pricing") as? Map<*, *>
+                val pricingPos = (pricingRaw?.get("pos") as? Number)?.toDouble()
+                val pricesRaw = itemDoc.get("prices") as? Map<*, *>
+                val pricesFirst = (pricesRaw?.values?.firstOrNull() as? Number)?.toDouble()
+                val basePrice = pricingPos
+                    ?: pricesFirst
+                    ?: itemDoc.getDouble("price")
+                    ?: (next.basePriceInCents / 100.0)
+
+                val stock = itemDoc.getLong("stock") ?: 0L
+                val effectiveStock = if (stockCountingEnabled) stock else Long.MAX_VALUE
+
+                val taxMode = itemDoc.getString("taxMode") ?: "INHERIT"
+                @Suppress("UNCHECKED_CAST")
+                val taxIds = (itemDoc.get("taxIds") as? List<String>) ?: emptyList()
+
+                val itemLabel = MenuItemRoutingLabel.fromMenuItemDoc(itemDoc)
+                val itemSubId = itemDoc.getString("subcategoryId").orEmpty()
+                val itemCatId = itemDoc.getString("categoryId").orEmpty()
+                val subLabel = allSubcategories.firstOrNull { it.id == itemSubId }?.kitchenLabel
+                val catLabel = categoryKitchenLabels[itemCatId]
+                val printerLabel = MenuItemRoutingLabel.resolve(itemLabel, subLabel, catLabel)
+
+                val displayName = itemDoc.getString("name")?.takeIf { it.isNotBlank() } ?: next.name
+                val units = next.quantity.coerceAtLeast(1)
+                val advance: () -> Unit = { processNextEditItem(queue, currentIndex + 1, total) }
+                val cancelStep: () -> Unit = {
+                    Toast.makeText(this, "Edit cancelled", Toast.LENGTH_SHORT).show()
+                }
+
+                @Suppress("UNCHECKED_CAST")
+                val embedded = (itemDoc.get("modifierGroupIds") as? List<String>)
+                    ?.filter { it.isNotBlank() } ?: emptyList()
+                @Suppress("UNCHECKED_CAST")
+                val assigned = (itemDoc.get("assignedModifierGroupIds") as? List<String>)
+                    ?.filter { it.isNotBlank() } ?: emptyList()
+                val merged = (embedded + assigned).distinct()
+
+                val openStep: (List<String>) -> Unit = { groupIds ->
+                    showModifierDialog(
+                        itemId = next.itemId,
+                        name = displayName,
+                        basePrice = basePrice,
+                        stock = effectiveStock,
+                        groupIds = groupIds,
+                        taxMode = taxMode,
+                        taxIds = taxIds,
+                        printerLabel = printerLabel,
+                        preselectedModifiers = next.modifiers,
+                        titlePrefix = "Item $currentIndex of $total",
+                        primaryButtonLabel = "Confirm",
+                        quantityOverride = units,
+                        onConfirmed = advance,
+                        onCancelled = cancelStep,
+                    )
+                }
+
+                val addSilentlyAndAdvance: () -> Unit = {
+                    val orderMods = next.modifiers.map { it.toOrderModifier() }
+                    repeat(units) {
+                        addToCart(
+                            itemId = next.itemId,
+                            name = displayName,
+                            basePrice = basePrice,
+                            stock = effectiveStock,
+                            modifiers = orderMods,
+                            taxMode = taxMode,
+                            taxIds = taxIds,
+                            printerLabel = printerLabel,
+                        )
+                    }
+                    advance()
+                }
+
+                if (merged.isNotEmpty()) {
+                    openStep(merged)
+                } else {
+                    db.collection("ItemModifierGroups")
+                        .whereEqualTo("itemId", next.itemId)
+                        .orderBy("displayOrder")
+                        .get()
+                        .addOnSuccessListener { documents ->
+                            val legacyIds = documents.mapNotNull { it.getString("groupId") }
+                            if (legacyIds.isNotEmpty()) openStep(legacyIds) else addSilentlyAndAdvance()
+                        }
+                        .addOnFailureListener { addSilentlyAndAdvance() }
+                }
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Couldn't load ${next.name}", Toast.LENGTH_SHORT).show()
+                processNextEditItem(queue, currentIndex + 1, total)
+            }
+    }
+
     private fun clearCart() {
         cartMap.clear()
         kitchenNotesByLabel.clear()
@@ -3246,6 +3670,7 @@ class MenuActivity : AppCompatActivity() {
         cartTaxSummary.removeAllViews()
         txtTotal.text = "Total: $0.00"
         updateCustomerDisplay()
+        if (::repeatSuggestion.isInitialized) repeatSuggestion.onCustomerChanged(null)
         CustomerDisplayManager.setIdle(this, ReceiptSettings.load(this).businessName)
         kitchenSentForOrder = false
         updateSendKitchenButtonLabel()
@@ -3349,6 +3774,7 @@ class MenuActivity : AppCompatActivity() {
                 batch.update(orderRef, orderUpdates)
             }.addOnSuccessListener {
                 hideCaptureLoading()
+                customerHistoryRepo.updateAfterOrderClosed(orderId)
                 val afterCapture = {
                     clearCart()
                     detachOrderKitchenStatusListener()
@@ -3406,6 +3832,7 @@ class MenuActivity : AppCompatActivity() {
                 firestoreTxn.update(orderRef, orderUpdates)
             }.addOnSuccessListener {
                 hideCaptureLoading()
+                customerHistoryRepo.updateAfterOrderClosed(orderId)
                 val afterCapture = {
                     clearCart()
                     detachOrderKitchenStatusListener()

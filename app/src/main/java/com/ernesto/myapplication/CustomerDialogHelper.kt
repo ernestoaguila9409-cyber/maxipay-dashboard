@@ -1,23 +1,31 @@
 package com.ernesto.myapplication
 
 import android.app.Activity
+import android.app.Dialog
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.text.InputFilter
 import android.text.InputType
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
+import android.view.WindowManager
 import android.widget.ArrayAdapter
-import android.widget.AutoCompleteTextView
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
+import com.google.android.material.button.MaterialButton
 import com.google.firebase.firestore.FirebaseFirestore
 
 /**
  * Reusable helper for capturing customer information (name, phone, email).
- * Used in Cart for To-Go orders and for email receipts.
+ * Uses the POS-style custom keyboard (same as Bar Seat) so the system IME
+ * is never shown.
  */
 object CustomerDialogHelper {
 
@@ -37,14 +45,6 @@ object CustomerDialogHelper {
         override fun toString(): String = name
     }
 
-    /**
-     * Show a dialog to add or edit customer information.
-     * @param activity The activity context
-     * @param initialName Pre-filled name (optional)
-     * @param initialPhone Pre-filled phone (optional)
-     * @param initialEmail Pre-filled email (optional)
-     * @param onSave Called with CustomerInfo when user taps Save. Name is required.
-     */
     fun showCustomerDialog(
         activity: Activity,
         initialName: String = "",
@@ -54,25 +54,43 @@ object CustomerDialogHelper {
     ) {
         val allCustomers = mutableListOf<SavedCustomer>()
 
-        val searchInput = AutoCompleteTextView(activity).apply {
+        fun dp(v: Float): Int = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, v, activity.resources.displayMetrics,
+        ).toInt()
+
+        val title = TextView(activity).apply {
+            text = "Customer Information"
+            setTypeface(null, Typeface.BOLD)
+            textSize = 18f
+            setTextColor(Color.parseColor("#111827"))
+            setPadding(dp(20f), dp(20f), dp(20f), dp(8f))
+        }
+
+        val searchInput = EditText(activity).apply {
             hint = "Search saved customers..."
-            inputType = InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            setPadding(48, 32, 48, 24)
-            threshold = 1
+            setPadding(dp(16f), dp(14f), dp(16f), dp(14f))
             setTextColor(Color.BLACK)
+            textSize = 15f
+        }
+
+        val suggestionsList = ListView(activity).apply {
+            isVerticalScrollBarEnabled = true
+            visibility = View.GONE
+            setBackgroundColor(Color.parseColor("#FAFAFA"))
+            dividerHeight = 0
         }
 
         val divider = View(activity).apply {
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 1
-            ).also { it.setMargins(48, 8, 48, 8) }
-            setBackgroundColor(Color.parseColor("#CCCCCC"))
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(1f),
+            ).also { it.setMargins(dp(16f), dp(8f), dp(16f), dp(4f)) }
+            setBackgroundColor(Color.parseColor("#E5E7EB"))
         }
 
         val sectionLabel = TextView(activity).apply {
             text = "Customer Details"
             setTypeface(null, Typeface.BOLD)
-            setPadding(48, 16, 48, 8)
+            setPadding(dp(16f), dp(8f), dp(16f), dp(4f))
             setTextColor(Color.parseColor("#555555"))
             textSize = 13f
         }
@@ -80,38 +98,73 @@ object CustomerDialogHelper {
         val nameInput = EditText(activity).apply {
             hint = "Customer Name (required)"
             setText(initialName)
-            inputType = InputType.TYPE_TEXT_VARIATION_PERSON_NAME
-            setPadding(48, 32, 48, 24)
+            setPadding(dp(16f), dp(12f), dp(16f), dp(12f))
+            textSize = 15f
         }
 
         val phoneInput = EditText(activity).apply {
             hint = "Phone (optional)"
             setText(initialPhone)
-            inputType = InputType.TYPE_CLASS_PHONE
-            setPadding(48, 16, 48, 24)
+            setPadding(dp(16f), dp(12f), dp(16f), dp(12f))
+            textSize = 15f
         }
 
         val emailInput = EditText(activity).apply {
             hint = "Email (optional)"
             setText(initialEmail)
-            inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-            setPadding(48, 16, 48, 32)
+            setPadding(dp(16f), dp(12f), dp(16f), dp(12f))
+            textSize = 15f
         }
 
-        val container = LinearLayout(activity).apply {
+        val formContent = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            addView(searchInput)
+            setBackgroundColor(Color.WHITE)
+            setPadding(dp(4f), 0, dp(4f), dp(8f))
+            addView(title)
+            addView(
+                searchInput,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { setMargins(dp(12f), dp(4f), dp(12f), dp(4f)) },
+            )
+            addView(
+                suggestionsList,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    dp(180f),
+                ).apply { setMargins(dp(12f), 0, dp(12f), dp(4f)) },
+            )
             addView(divider)
             addView(sectionLabel)
-            addView(nameInput)
-            addView(phoneInput)
-            addView(emailInput)
+            addView(
+                nameInput,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { setMargins(dp(12f), dp(4f), dp(12f), dp(4f)) },
+            )
+            addView(
+                phoneInput,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { setMargins(dp(12f), dp(4f), dp(12f), dp(4f)) },
+            )
+            addView(
+                emailInput,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { setMargins(dp(12f), dp(4f), dp(12f), dp(4f)) },
+            )
         }
 
+        val visibleCustomers = mutableListOf<SavedCustomer>()
         val adapter = object : ArrayAdapter<SavedCustomer>(
             activity,
             android.R.layout.simple_list_item_1,
-            allCustomers
+            visibleCustomers,
         ) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                 val view = super.getView(position, convertView, parent) as TextView
@@ -123,57 +176,166 @@ object CustomerDialogHelper {
                 view.text = display
                 view.setTextColor(Color.BLACK)
                 view.textSize = 14f
-                view.setPadding(48, 24, 48, 24)
+                view.setPadding(dp(16f), dp(12f), dp(16f), dp(12f))
                 return view
             }
         }
-        searchInput.setAdapter(adapter)
+        suggestionsList.adapter = adapter
+
+        fun refreshSuggestions() {
+            val raw = searchInput.text?.toString()?.trim().orEmpty()
+            val query = raw.lowercase()
+            val digitsQuery = raw.filter { it.isDigit() }
+            val matches = if (query.isEmpty()) {
+                emptyList()
+            } else {
+                allCustomers.filter { c ->
+                    c.name.lowercase().contains(query) ||
+                        (digitsQuery.isNotEmpty() &&
+                            c.phone.replace(Regex("\\D"), "").contains(digitsQuery))
+                }
+            }
+            visibleCustomers.clear()
+            visibleCustomers.addAll(matches.take(50))
+            adapter.notifyDataSetChanged()
+            suggestionsList.visibility =
+                if (visibleCustomers.isNotEmpty()) View.VISIBLE else View.GONE
+        }
+
+        searchInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { refreshSuggestions() }
+        })
 
         var selectedCustomerId: String? = null
 
-        searchInput.setOnItemClickListener { _, _, position, _ ->
+        suggestionsList.setOnItemClickListener { _, _, position, _ ->
             val selected = adapter.getItem(position) ?: return@setOnItemClickListener
             selectedCustomerId = selected.id
             nameInput.setText(selected.name)
             phoneInput.setText(selected.phone)
             emailInput.setText(selected.email)
             searchInput.setText("")
+            suggestionsList.visibility = View.GONE
             searchInput.clearFocus()
             nameInput.requestFocus()
         }
 
-        val dialog = AlertDialog.Builder(activity)
-            .setTitle("Customer Information")
-            .setView(container)
-            .setPositiveButton("Save", null)
-            .setNegativeButton("Cancel", null)
-            .create()
+        val cancelBtn = MaterialButton(
+            activity,
+            null,
+            com.google.android.material.R.attr.materialButtonOutlinedStyle,
+        ).apply {
+            text = "Cancel"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        }
+        val saveBtn = MaterialButton(activity).apply {
+            text = "Save"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        }
+        val actionBar = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            setBackgroundColor(Color.WHITE)
+            setPadding(dp(16f), dp(8f), dp(16f), dp(8f))
+            addView(
+                cancelBtn,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { marginEnd = dp(8f) },
+            )
+            addView(saveBtn)
+        }
+
+        val wrapped = BarSeatOrderKeypad.wrapFormWithKeypads(
+            context = activity,
+            formContent = formContent,
+            actionBar = actionBar,
+            alphaFields = listOf(searchInput, nameInput, emailInput),
+            phoneFields = listOf(phoneInput),
+        )
+
+        phoneInput.filters = arrayOf(
+            InputFilter { source, _, _, _, _, _ ->
+                val filtered = source.filter { it.isDigit() }
+                when {
+                    filtered.length == source.length -> null
+                    filtered.isEmpty() -> ""
+                    else -> filtered
+                }
+            },
+        )
+
+        searchInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        nameInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+        emailInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+        phoneInput.inputType = InputType.TYPE_CLASS_NUMBER
+
+        val dialog = Dialog(activity, android.R.style.Theme_Translucent_NoTitleBar)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+
+        val dim = View(activity).apply {
+            setBackgroundColor(Color.parseColor("#80000000"))
+            setOnClickListener { /* consume — don't dismiss on outside tap */ }
+        }
+
+        val root = android.widget.FrameLayout(activity).apply {
+            addView(
+                dim,
+                android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            addView(
+                wrapped,
+                android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+        }
+
+        formContent.background = ColorDrawable(Color.WHITE)
+
+        dialog.setContentView(root)
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setLayout(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+            )
+        }
+
+        cancelBtn.setOnClickListener { dialog.dismiss() }
+        saveBtn.setOnClickListener {
+            val name = nameInput.text.toString().trim()
+            if (name.isEmpty()) {
+                Toast.makeText(activity, "Customer name is required", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val info = CustomerInfo(
+                id = selectedCustomerId,
+                name = name,
+                phone = phoneInput.text.toString().trim(),
+                email = emailInput.text.toString().trim(),
+            )
+            dialog.dismiss()
+            onSave(info)
+        }
 
         dialog.setOnShowListener {
-            loadSavedCustomers(allCustomers, adapter)
-
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val name = nameInput.text.toString().trim()
-                if (name.isEmpty()) {
-                    Toast.makeText(activity, "Customer name is required", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-                val info = CustomerInfo(
-                    id = selectedCustomerId,
-                    name = name,
-                    phone = phoneInput.text.toString().trim(),
-                    email = emailInput.text.toString().trim()
-                )
-                dialog.dismiss()
-                onSave(info)
-            }
+            loadSavedCustomers(allCustomers) { refreshSuggestions() }
         }
+
         dialog.show()
     }
 
     private fun loadSavedCustomers(
         allCustomers: MutableList<SavedCustomer>,
-        adapter: ArrayAdapter<SavedCustomer>
+        onLoaded: () -> Unit,
     ) {
         FirebaseFirestore.getInstance().collection("Customers")
             .get()
@@ -260,7 +422,7 @@ object CustomerDialogHelper {
 
                 allCustomers.clear()
                 allCustomers.addAll(merged.sortedBy { it.name.lowercase() })
-                adapter.notifyDataSetChanged()
+                onLoaded()
             }
     }
 }

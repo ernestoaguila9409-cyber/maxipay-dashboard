@@ -2,6 +2,8 @@ package com.ernesto.myapplication
 
 import android.app.AlertDialog
 import android.content.Context
+import android.content.DialogInterface
+import android.graphics.Color
 import android.graphics.Typeface
 import android.view.LayoutInflater
 import android.view.View
@@ -11,7 +13,10 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import java.util.Locale
 
 class CategoryAdapter(
     private val categories: List<CategoryModel>,
@@ -145,7 +150,7 @@ class CategoryAdapter(
 
     private fun showCategoryOptions(category: CategoryModel) {
         val labelSuffix = if (category.kitchenLabel.isNotEmpty()) " (${category.kitchenLabel})" else ""
-        val options = arrayOf("Edit", "Kitchen Label$labelSuffix", "Delete")
+        val options = arrayOf("Edit", "Kitchen Label$labelSuffix", "Add KDS", "Delete")
 
         AlertDialog.Builder(context)
             .setTitle(category.name)
@@ -153,10 +158,118 @@ class CategoryAdapter(
                 when (which) {
                     0 -> showEditDialog(category)
                     1 -> showKitchenLabelPicker(category)
-                    2 -> deleteCategory(category.id)
+                    2 -> showCategoryKdsAssignment(category)
+                    3 -> deleteCategory(category.id)
                 }
             }
             .show()
+    }
+
+    private data class KdsPickerRow(val id: String, val name: String)
+
+    private fun dp(px: Int): Int = (px * context.resources.displayMetrics.density).toInt()
+
+    /**
+     * Adds or removes this category id on [KdsStationRouting.COLLECTION] docs’ [assignedCategoryIds].
+     * All items that list this category (including subcategory-only placements that still use
+     * this category id) follow the same KDS routing as the dashboard.
+     */
+    private fun showCategoryKdsAssignment(category: CategoryModel) {
+        val categoryId = category.id.trim()
+        if (categoryId.isEmpty()) return
+
+        db.collection(KdsStationRouting.COLLECTION).get()
+            .addOnSuccessListener { snap ->
+                val all = snap.documents.mapNotNull { doc ->
+                    if (!KdsStationRouting.isDeviceSelectable(doc)) return@mapNotNull null
+                    val name = doc.getString("name")?.trim().orEmpty().ifBlank { doc.id }
+                    KdsPickerRow(doc.id, name)
+                }.sortedBy { it.name.lowercase(Locale.getDefault()) }
+
+                if (all.isEmpty()) {
+                    val msg = if (snap.documents.isEmpty()) {
+                        R.string.category_no_kds_devices
+                    } else {
+                        R.string.category_no_kds_active_devices
+                    }
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+
+                val baseline = snap.documents
+                    .filter { KdsStationRouting.isDeviceSelectable(it) && KdsStationRouting.deviceCoversCategory(it, categoryId) }
+                    .map { it.id }
+                    .toSet()
+
+                val inflater = LayoutInflater.from(context)
+                val content = inflater.inflate(R.layout.dialog_kds_station_picker, null, false)
+                content.findViewById<TextView>(R.id.txtKdsPickerHint).text =
+                    context.getString(R.string.category_kds_hint)
+                val container = content.findViewById<LinearLayout>(R.id.containerKdsPickerChecks)
+
+                val boxes = all.map { dev ->
+                    CheckBox(context).apply {
+                        text = dev.name
+                        isChecked = baseline.contains(dev.id)
+                        textSize = 16f
+                        setTextColor(Color.parseColor("#1E293B"))
+                        setPadding(0, dp(6), 0, dp(6))
+                    }.also { container.addView(it) }
+                }
+
+                val dialog = MaterialAlertDialogBuilder(context)
+                    .setTitle(R.string.category_assign_kds_title)
+                    .setView(content)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.save, null)
+                    .create()
+
+                dialog.setOnShowListener {
+                    dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+                        val want = all.filterIndexed { i, _ -> boxes[i].isChecked }.map { it.id }.toSet()
+                        saveCategoryKdsAssignments(categoryId, all, want, baseline)
+                        dialog.dismiss()
+                    }
+                }
+                dialog.show()
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(context, e.message ?: "Failed to load KDS devices", Toast.LENGTH_SHORT).show()
+            }
+    }
+
+    private fun saveCategoryKdsAssignments(
+        categoryId: String,
+        allDevices: List<KdsPickerRow>,
+        wantIds: Set<String>,
+        baselineHadIds: Set<String>,
+    ) {
+        val batch = db.batch()
+        var ops = 0
+        for (dev in allDevices) {
+            val want = wantIds.contains(dev.id)
+            val had = baselineHadIds.contains(dev.id)
+            if (want == had) continue
+            val ref = db.collection(KdsStationRouting.COLLECTION).document(dev.id)
+            if (want) {
+                batch.update(ref, "assignedCategoryIds", FieldValue.arrayUnion(categoryId))
+            } else {
+                batch.update(ref, "assignedCategoryIds", FieldValue.arrayRemove(categoryId))
+            }
+            ops++
+        }
+        if (ops == 0) {
+            Toast.makeText(context, R.string.category_kds_saved, Toast.LENGTH_SHORT).show()
+            return
+        }
+        batch.commit()
+            .addOnSuccessListener {
+                Toast.makeText(context, R.string.category_kds_saved, Toast.LENGTH_SHORT).show()
+                onDataChanged()
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(context, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
     }
 
     private fun showEditDialog(category: CategoryModel) {

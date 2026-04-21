@@ -1,5 +1,6 @@
 package com.ernesto.kds.data
 
+import android.util.Log
 import com.google.android.gms.tasks.Task
 import com.google.android.gms.tasks.Tasks
 import com.google.firebase.Timestamp
@@ -33,8 +34,12 @@ class KdsOrdersRepository(
      * Real-time stream of kitchen orders with line items, sorted by `createdAt` ascending.
      * Respects printing trigger (send vs payment vs first event), item filter (all vs label),
      * excludes kitchenStatus **READY**, and includes **COMPLETED** tickets still in the kitchen queue.
+     *
+     * @param kdsDeviceDocId When non-blank, tickets whose [FIELD_KDS_CARD_CLAIMS] map assigns this
+     * card to another device are hidden (first KDS to press Start keeps the ticket).
      */
-    fun observeKitchenOrders(): Flow<List<Order>> = callbackFlow {
+    fun observeKitchenOrders(kdsDeviceDocId: String = ""): Flow<List<Order>> = callbackFlow {
+        val filterDeviceId = kdsDeviceDocId.trim()
         val lock = Any()
         var printingConfig = KdsPrintingConfig.DEFAULT
         var kitchenLabelNorms = emptySet<String>()
@@ -80,7 +85,7 @@ class KdsOrdersRepository(
                         if (!task.isSuccessful) continue
                         val qs = task.result ?: continue
                         built.addAll(
-                            parsePosOrder(docs[i], qs.documents, config, labelNorms),
+                            parsePosOrder(docs[i], qs.documents, config, labelNorms, filterDeviceId),
                         )
                     }
                     built.sortWith(
@@ -268,16 +273,63 @@ class KdsOrdersRepository(
         lineDocIds: List<String> = emptyList(),
         /** For READY: line doc id → quantity that is now fully covered (from KDS line model). */
         readyCoverQtyByLineId: Map<String, Long> = emptyMap(),
+        /** KDS device doc id (`kds_devices/{id}`) claiming this card on Start; cleared on Ready when [kdsClaimCardKey] is set. */
+        kdsClaimDeviceId: String? = null,
+        /** [Order.cardKey] — used with Start to claim, with Ready to release claim. */
+        kdsClaimCardKey: String? = null,
     ) {
         val upper = kitchenStatus.uppercase(Locale.US)
         val orderRef = db.collection(COLLECTION_ORDERS).document(orderId)
         val ids = lineDocIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         if (ids.isEmpty()) return
-        db.runTransaction { tx ->
-            for (trimmed in ids) {
-                val lineRef = orderRef.collection(COLLECTION_ITEMS).document(trimmed)
-                val snap = tx.get(lineRef)
-                if (snap.exists()) {
+        val claimDevice = kdsClaimDeviceId?.trim().orEmpty()
+        val claimCard = kdsClaimCardKey?.trim().orEmpty()
+        Log.d(
+            TAG,
+            "updateOrderStatus: orderId=$orderId upper=$upper lines=${ids.size} " +
+                "claimDevice='$claimDevice' claimCard='$claimCard'",
+        )
+        runCatching {
+            db.runTransaction { tx ->
+                val orderSnap = tx.get(orderRef)
+                if (!orderSnap.exists()) return@runTransaction null
+
+                val lineSnaps = ids.map { trimmed ->
+                    trimmed to tx.get(orderRef.collection(COLLECTION_ITEMS).document(trimmed))
+                }
+
+                val orderUpdates = mutableMapOf<String, Any>()
+
+                if (upper == "PREPARING" && claimDevice.isNotEmpty() && claimCard.isNotEmpty()) {
+                    val claims = parseCardClaims(orderSnap).toMutableMap()
+                    val existing = claims[claimCard]?.trim().orEmpty()
+                    Log.d(TAG, "PREPARING claim check: existing='$existing' device='$claimDevice'")
+                    if (existing.isNotEmpty() && existing != claimDevice) {
+                        throw FirebaseFirestoreException(
+                            "CLAIMED_BY_OTHER_KDS",
+                            FirebaseFirestoreException.Code.FAILED_PRECONDITION,
+                            null,
+                        )
+                    }
+                    if (existing != claimDevice) {
+                        claims[claimCard] = claimDevice
+                        orderUpdates[FIELD_KDS_CARD_CLAIMS] = claims
+                        Log.d(TAG, "Writing claim: $claims")
+                    }
+                }
+
+                if (upper == "READY" && claimCard.isNotEmpty()) {
+                    val claims = parseCardClaims(orderSnap).toMutableMap()
+                    claims.remove(claimCard)
+                    if (claims.isEmpty()) {
+                        orderUpdates[FIELD_KDS_CARD_CLAIMS] = FieldValue.delete()
+                    } else {
+                        orderUpdates[FIELD_KDS_CARD_CLAIMS] = claims
+                    }
+                }
+
+                for ((trimmed, snap) in lineSnaps) {
+                    if (!snap.exists()) continue
                     @Suppress("UNCHECKED_CAST")
                     val batchRaw = snap.get(FIELD_KDS_SEND_BATCHES) as? List<*>
                     val updates = if (!batchRaw.isNullOrEmpty()) {
@@ -285,15 +337,21 @@ class KdsOrdersRepository(
                     } else {
                         buildItemUpdatesLegacy(upper, readyCoverQtyByLineId[trimmed] ?: 0L)
                     }
-                    tx.update(lineRef, updates)
+                    tx.update(snap.reference, updates)
                 }
-            }
-            tx.update(orderRef, mapOf(FIELD_UPDATED_AT to FieldValue.serverTimestamp()))
-            null
-        }.await()
+
+                orderUpdates[FIELD_UPDATED_AT] = FieldValue.serverTimestamp()
+                tx.update(orderRef, orderUpdates)
+                null
+            }.await()
+        }.onFailure { e ->
+            Log.w(TAG, "updateOrderStatus failed for $orderId ($upper)", e)
+            throw e
+        }
     }
 
     companion object {
+        private const val TAG = "KdsOrdersRepo"
         private const val SUBCOLLECTION_SETTINGS = "settings"
         private const val DOCUMENT_UI_SETTINGS = "ui"
 
@@ -306,6 +364,8 @@ class KdsOrdersRepository(
         private const val FIELD_KITCHEN_STARTED_AT = "kitchenStartedAt"
         private const val FIELD_LAST_KITCHEN_SENT_AT = "lastKitchenSentAt"
         private const val FIELD_KITCHEN_CHITS_PRINTED_AT = "kitchenChitsPrintedAt"
+        /** Map: [Order.cardKey] → `kds_devices` document id. First KDS to Start owns the ticket for other tablets. */
+        private const val FIELD_KDS_CARD_CLAIMS = "kdsCardClaims"
         /** Mirrors POS `OrderLineKdsStatus.FIELD` — per-line KDS / kitchen workflow. */
         private const val FIELD_KDS_LINE_STATUS = "kdsStatus"
         private const val FIELD_KDS_STARTED_AT = "kdsStartedAt"
@@ -438,6 +498,20 @@ class KdsOrdersRepository(
             }
         }
 
+        private fun parseCardClaims(doc: DocumentSnapshot): Map<String, String> {
+            @Suppress("UNCHECKED_CAST")
+            val raw = doc.get(FIELD_KDS_CARD_CLAIMS) as? Map<*, *> ?: return emptyMap()
+            val out = LinkedHashMap<String, String>()
+            for ((k, v) in raw) {
+                val ks = k?.toString()?.trim().orEmpty()
+                val vs = v?.toString()?.trim().orEmpty()
+                if (ks.isNotEmpty() && vs.isNotEmpty()) {
+                    out[ks] = vs
+                }
+            }
+            return out
+        }
+
         internal fun kdsEligiblePosStatus(doc: DocumentSnapshot): Boolean {
             val st = doc.getString(FIELD_POS_STATUS)?.trim()?.uppercase().orEmpty()
             if (st == "OPEN") return true
@@ -453,6 +527,7 @@ class KdsOrdersRepository(
             lineDocs: List<DocumentSnapshot>,
             printing: KdsPrintingConfig,
             kitchenLabelNorms: Set<String>,
+            kdsDeviceDocIdForClaimFilter: String = "",
         ): List<Order> {
             if (!doc.exists()) return emptyList()
             val id = doc.id
@@ -485,6 +560,7 @@ class KdsOrdersRepository(
             if (items.isEmpty()) return emptyList()
             val itemsForDisplay = KdsLineWorkflow.linesOmittingKitchenReady(items)
             if (itemsForDisplay.isEmpty()) return emptyList()
+            val cardClaims = parseCardClaims(doc)
             return splitPosOrderIntoKdsCards(
                 id = id,
                 tableName = tableName,
@@ -496,6 +572,8 @@ class KdsOrdersRepository(
                 itemsForDisplay = itemsForDisplay,
                 orderType = normalizeOrderType(doc.getString("orderType")),
                 orderNumber = orderNum,
+                cardClaims = cardClaims,
+                kdsDeviceDocId = kdsDeviceDocIdForClaimFilter.trim(),
             )
         }
 
@@ -514,12 +592,24 @@ class KdsOrdersRepository(
             itemsForDisplay: List<OrderItem>,
             orderType: String,
             orderNumber: Long,
+            cardClaims: Map<String, String> = emptyMap(),
+            kdsDeviceDocId: String = "",
         ): List<Order> {
             fun normSt(s: String) = s.trim().uppercase(Locale.US)
             val preparing = itemsForDisplay.filter { normSt(it.kdsStatus) == "PREPARING" }
             val queued = itemsForDisplay.filter { normSt(it.kdsStatus) != "PREPARING" }
             fun buildCard(items: List<OrderItem>, cardKey: String): Order? {
                 if (items.isEmpty()) return null
+                if (kdsDeviceDocId.isNotEmpty()) {
+                    val holder = cardClaims[cardKey]?.trim().orEmpty()
+                    if (holder.isNotEmpty() && holder != kdsDeviceDocId) {
+                        Log.d(
+                            TAG,
+                            "buildCard: hide cardKey=$cardKey holder=$holder me=$kdsDeviceDocId",
+                        )
+                        return null
+                    }
+                }
                 val (cardStatus, prepAnchor) = KdsLineWorkflow.deriveCardStateForPrinterFilteredItems(
                     items = items,
                     orderKitchenStartedAt = kitchenStartedAtFromOrder,

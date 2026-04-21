@@ -1,8 +1,9 @@
 package com.ernesto.myapplication
 
 import android.content.Context
-import android.graphics.Color
+import android.content.res.Configuration
 import android.graphics.Rect
+import android.text.InputFilter
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
@@ -15,29 +16,20 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.AutoCompleteTextView
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import com.google.android.material.button.MaterialButton
+import android.widget.TextView
+import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.content.ContextCompat
 
 /**
  * Bottom-anchored custom keyboard for the bar-seat-order dialog.
  * The keyboard slides up from the bottom like a system IME, overlaying
- * the content. Height is capped at ~35 % of the screen.
+ * the content. Height is capped (lower in landscape so the form + actions stay usable).
  *
  * @see InventoryPriceKeypad — same UX contract for price fields.
  */
 object BarSeatOrderKeypad {
-
-    private fun outlinedStyle(context: Context): Int {
-        val attrId = context.resources.getIdentifier(
-            "materialButtonOutlinedStyle", "attr", context.packageName
-        )
-        if (attrId == 0) return 0
-        val tv = TypedValue()
-        context.theme.resolveAttribute(attrId, tv, true)
-        return tv.data
-    }
 
     private enum class KeypadKind { ALPHA, PHONE }
 
@@ -46,29 +38,51 @@ object BarSeatOrderKeypad {
      *
      *   FrameLayout (fill screen)
      *   ├── content  (scroll + action bar)  ← gets bottom padding when keyboard visible
-     *   └── keyboard (layout_gravity=BOTTOM, max 35 % height)
+     *   └── keyboard (layout_gravity=BOTTOM; shorter cap + compact keys in landscape)
      *
      * @param actionBar Horizontal button bar (Skip / Cancel / Start Tab) placed
      *                  below the scroll area but above the keyboard.
      */
     fun wrapFormWithKeypads(context: Context, formContent: LinearLayout, actionBar: View): View {
-        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        val screenHeight = context.resources.displayMetrics.heightPixels
-        val maxKbHeight = (screenHeight * 0.48f).toInt()
-
         val etSearch = formContent.findViewById<AutoCompleteTextView>(R.id.etSearchCustomer)
         val etName   = formContent.findViewById<EditText>(R.id.etCustomerName)
         val etPhone  = formContent.findViewById<EditText>(R.id.etCustomerPhone)
         val etEmail  = formContent.findViewById<EditText>(R.id.etCustomerEmail)
+        return wrapFormWithKeypads(
+            context = context,
+            formContent = formContent,
+            actionBar = actionBar,
+            alphaFields = listOfNotNull(etSearch, etName, etEmail),
+            phoneFields = listOfNotNull(etPhone),
+        )
+    }
 
-        val alphaFields = listOf(etSearch, etName, etEmail)
-        val phoneFields = listOf(etPhone)
-        val allFields   = alphaFields + phoneFields
+    /**
+     * Overload with explicit field lists so callers that build their form in code
+     * (e.g. [CustomerDialogHelper]) don't need to rely on XML IDs.
+     */
+    fun wrapFormWithKeypads(
+        context: Context,
+        formContent: LinearLayout,
+        actionBar: View,
+        alphaFields: List<EditText>,
+        phoneFields: List<EditText>,
+    ): View {
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        val allFields = alphaFields + phoneFields
 
         fun dp(v: Float): Int = TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, v, context.resources.displayMetrics
         ).toInt()
 
+        val isLandscape =
+            context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val windowHeight = context.resources.displayMetrics.heightPixels
+        val maxKbHeight = if (isLandscape) {
+            (windowHeight * 0.70f).toInt().coerceAtLeast(dp(300f))
+        } else {
+            (windowHeight * 0.55f).toInt().coerceAtLeast(dp(360f))
+        }
         /* ── content area: scrollable form + action bar ── */
 
         val scroll = ScrollView(context).apply {
@@ -106,13 +120,15 @@ object BarSeatOrderKeypad {
 
         val keypadOuter = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#ECEFF4"))
+            setBackgroundColor(ContextCompat.getColor(context, R.color.pos_keyboard_panel_bg))
             visibility = View.GONE
+            clipChildren = true
+            isClickable = true
         }
 
         keypadOuter.addView(
             View(context).apply {
-                setBackgroundColor(Color.parseColor("#D1D5DB"))
+                setBackgroundColor(ContextCompat.getColor(context, R.color.pos_key_border))
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, dp(1f)
                 )
@@ -121,18 +137,17 @@ object BarSeatOrderKeypad {
 
         val alphaPanel = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(4f), dp(4f), dp(4f), dp(2f))
+            setBackgroundColor(ContextCompat.getColor(context, R.color.pos_keyboard_panel_bg))
         }
 
         val phonePanel = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(4f), dp(4f), dp(4f), dp(2f))
+            setBackgroundColor(ContextCompat.getColor(context, R.color.pos_keyboard_panel_bg))
             visibility = View.GONE
         }
 
         var activeField: EditText? = null
         var activeKind: KeypadKind = KeypadKind.ALPHA
-        var capsOn = false
 
         /* ── caret insertion helper ── */
 
@@ -164,214 +179,10 @@ object BarSeatOrderKeypad {
             }
         }
 
-        /** Phone-pad key (same outlined style as [InventoryPriceKeypad]). */
-        fun makeKeyButton(label: String, grid: GridLayout, onPress: () -> Unit): MaterialButton {
-            return MaterialButton(context, null, outlinedStyle(context)).apply {
-                text = label
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-                minimumHeight = dp(46f)
-                minimumWidth = 0
-                insetTop = 0
-                insetBottom = 0
-                layoutParams = GridLayout.LayoutParams().apply {
-                    width = 0
-                    height = GridLayout.LayoutParams.WRAP_CONTENT
-                    columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                    setMargins(dp(4f), dp(4f), dp(4f), dp(4f))
-                }
-                setOnClickListener { onPress() }
-            }.also { grid.addView(it) }
-        }
-
-        /* ── alpha key rows (compact: 36 dp height, 2 dp margins) ── */
-
-        val letterButtons = mutableListOf<MaterialButton>()
-        val m    = dp(2f)
-        val btnH = dp(32f)
-
-        fun refreshCapsLabels() {
-            for (btn in letterButtons) {
-                val k = btn.tag as? String ?: continue
-                btn.text = if (capsOn) k.uppercase() else k
-            }
-        }
-
-        fun addAlphaRow(keys: List<String>) {
-            val row = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            }
-            val w = 1f / keys.size.coerceAtLeast(1)
-            for (k in keys) {
-                val isLetter = k.length == 1 && k[0].isLetter()
-                val display  = if (isLetter && capsOn) k.uppercase() else k
-                val btn = MaterialButton(context, null, outlinedStyle(context)).apply {
-                    text = display
-                    tag  = if (isLetter) k else null
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, if (k.length > 2) 13f else 16f)
-                    minimumHeight = btnH
-                    minimumWidth  = 0
-                    insetTop    = 0
-                    insetBottom = 0
-                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, w)
-                        .apply { setMargins(m, m, m, m) }
-                    setOnClickListener {
-                        activeField?.let { e ->
-                            when (k) {
-                                "⌫" -> insertAtCaret(e, "⌫")
-                                else -> {
-                                    val ch = if (isLetter && capsOn) k.uppercase() else k
-                                    insertAtCaret(e, ch)
-                                }
-                            }
-                        }
-                    }
-                }
-                if (isLetter) letterButtons.add(btn)
-                row.addView(btn)
-            }
-            alphaPanel.addView(row)
-        }
-
-        addAlphaRow(listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0"))
-        addAlphaRow(listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"))
-        addAlphaRow(listOf("a", "s", "d", "f", "g", "h", "j", "k", "l"))
-
-        val zRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        }
-        val capsBtn = MaterialButton(context, null, outlinedStyle(context)).apply {
-            text = "⇧"
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-            minimumHeight = btnH
-            minimumWidth  = 0
-            insetTop    = 0
-            insetBottom = 0
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f)
-                .apply { setMargins(m, m, m, m) }
-            setOnClickListener {
-                capsOn = !capsOn
-                text = if (capsOn) "⇩" else "⇧"
-                refreshCapsLabels()
-            }
-        }
-        zRow.addView(capsBtn)
-        for (k in listOf("z", "x", "c", "v", "b", "n", "m")) {
-            val btn = MaterialButton(context, null, outlinedStyle(context)).apply {
-                text = k
-                tag  = k
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                minimumHeight = btnH
-                minimumWidth  = 0
-                insetTop    = 0
-                insetBottom = 0
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    .apply { setMargins(m, m, m, m) }
-                setOnClickListener {
-                    activeField?.let { e ->
-                        val ch = if (capsOn) k.uppercase() else k
-                        insertAtCaret(e, ch)
-                    }
-                }
-            }
-            letterButtons.add(btn)
-            zRow.addView(btn)
-        }
-        zRow.addView(
-            MaterialButton(context, null, outlinedStyle(context)).apply {
-                text = "⌫"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                minimumHeight = btnH
-                minimumWidth  = 0
-                insetTop    = 0
-                insetBottom = 0
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f)
-                    .apply { setMargins(m, m, m, m) }
-                setOnClickListener { activeField?.let { insertAtCaret(it, "⌫") } }
-            }
-        )
-        alphaPanel.addView(zRow)
-
-        addAlphaRow(listOf("@", ".", "_", "-", "'"))
-
-        val spaceRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        }
-        spaceRow.addView(
-            MaterialButton(context, null, outlinedStyle(context)).apply {
-                text = "Space"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                minimumHeight = btnH
-                minimumWidth  = 0
-                insetTop    = 0
-                insetBottom = 0
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 3f)
-                    .apply { setMargins(m, m, m, m) }
-                setOnClickListener { activeField?.let { insertAtCaret(it, "SPACE") } }
-            }
-        )
-        spaceRow.addView(
-            MaterialButton(context, null, outlinedStyle(context)).apply {
-                text = "⌫"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                minimumHeight = btnH
-                minimumWidth  = 0
-                insetTop    = 0
-                insetBottom = 0
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    .apply { setMargins(m, m, m, m) }
-                setOnClickListener { activeField?.let { insertAtCaret(it, "⌫") } }
-            }
-        )
-        lateinit var doneBtnRef: MaterialButton
-        spaceRow.addView(
-            MaterialButton(context, null, outlinedStyle(context)).apply {
-                text = "Done"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                minimumHeight = btnH
-                minimumWidth  = 0
-                insetTop    = 0
-                insetBottom = 0
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.5f)
-                    .apply { setMargins(m, m, m, m) }
-                doneBtnRef = this
-            }
-        )
-        alphaPanel.addView(spaceRow)
-
-        /* ── phone keypad ── */
-
-        val phoneGrid = GridLayout(context).apply {
-            columnCount = 3
-            setPadding(dp(8f), dp(4f), dp(8f), dp(4f))
-        }
-        for (k in listOf("1", "2", "3", "4", "5", "6", "7", "8", "9")) {
-            makeKeyButton(k, phoneGrid) { activeField?.let { insertAtCaret(it, k) } }
-        }
-        makeKeyButton("+", phoneGrid) { activeField?.let { insertAtCaret(it, "+") } }
-        makeKeyButton("0", phoneGrid) { activeField?.let { insertAtCaret(it, "0") } }
-        makeKeyButton("⌫", phoneGrid) { activeField?.let { insertAtCaret(it, "⌫") } }
-        phonePanel.addView(phoneGrid)
-
-        keypadOuter.addView(alphaPanel)
-        keypadOuter.addView(phonePanel)
-
-        /* ── show / hide helpers (must be declared before doneBtn / wireAlpha) ── */
-
         fun hideKeypad() {
             if (keypadOuter.visibility != View.VISIBLE) return
-            val h = keypadOuter.height
+            val lpH = (keypadOuter.layoutParams as? FrameLayout.LayoutParams)?.height ?: 0
+            val h = if (lpH > 0) lpH else keypadOuter.height
             val slide = if (h > 0) h.toFloat() else 360f
             keypadOuter.animate()
                 .translationY(slide)
@@ -385,12 +196,37 @@ object BarSeatOrderKeypad {
                 .start()
         }
 
+        fun scrollFocusedIntoView() {
+            val field = activeField ?: return
+            scroll.post {
+                val r = Rect()
+                field.getDrawingRect(r)
+                formContent.offsetDescendantRectToMyCoords(field, r)
+                scroll.requestChildRectangleOnScreen(formContent, r, true)
+            }
+        }
+
+        fun applyKeypadGeometry() {
+            val parentW = (keypadOuter.parent as? View)?.width ?: keypadOuter.width
+            if (parentW <= 0) return
+            keypadOuter.measure(
+                MeasureSpec.makeMeasureSpec(parentW, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(maxKbHeight, MeasureSpec.AT_MOST)
+            )
+            val kbH = keypadOuter.measuredHeight.coerceAtMost(maxKbHeight)
+            val lp = keypadOuter.layoutParams as FrameLayout.LayoutParams
+            lp.height = kbH
+            keypadOuter.layoutParams = lp
+            contentArea.setPadding(0, 0, 0, kbH)
+            scrollFocusedIntoView()
+        }
+
         fun showKeypad() {
             alphaPanel.visibility = if (activeKind == KeypadKind.ALPHA) View.VISIBLE else View.GONE
             phonePanel.visibility = if (activeKind == KeypadKind.PHONE) View.VISIBLE else View.GONE
 
             if (keypadOuter.visibility == View.VISIBLE) {
-                keypadOuter.post { contentArea.setPadding(0, 0, 0, keypadOuter.height) }
+                keypadOuter.post { applyKeypadGeometry() }
                 return
             }
             keypadOuter.visibility = View.INVISIBLE
@@ -400,32 +236,80 @@ object BarSeatOrderKeypad {
                     keypadOuter.visibility = View.VISIBLE
                     return@post
                 }
-                keypadOuter.measure(
-                    MeasureSpec.makeMeasureSpec(parentW, MeasureSpec.EXACTLY),
-                    MeasureSpec.makeMeasureSpec(maxKbHeight, MeasureSpec.AT_MOST)
-                )
-                val kbH = keypadOuter.measuredHeight.coerceAtMost(maxKbHeight)
-
-                val lp = keypadOuter.layoutParams as FrameLayout.LayoutParams
-                lp.height = kbH
-                keypadOuter.layoutParams = lp
-
-                contentArea.setPadding(0, 0, 0, kbH)
-                keypadOuter.translationY = kbH.toFloat()
+                applyKeypadGeometry()
+                val lpH = (keypadOuter.layoutParams as FrameLayout.LayoutParams).height
+                val slideFrom = if (lpH > 0) lpH.toFloat() else 320f
+                keypadOuter.translationY = slideFrom
                 keypadOuter.visibility = View.VISIBLE
                 keypadOuter.animate()
                     .translationY(0f)
                     .setDuration(220)
                     .setInterpolator(DecelerateInterpolator())
+                    .withEndAction { scrollFocusedIntoView() }
                     .start()
             }
         }
 
-        doneBtnRef.setOnClickListener {
+        val performKeyboardDone: () -> Unit = {
             allFields.forEach { it.clearFocus() }
-            imm.hideSoftInputFromWindow(doneBtnRef.windowToken, 0)
+            imm.hideSoftInputFromWindow(keypadOuter.windowToken, 0)
             hideKeypad()
         }
+
+        val onAlphaInsert: (String) -> Unit = { token ->
+            activeField?.let { insertAtCaret(it, token) }
+        }
+        alphaPanel.addView(
+            PosQwertyKeypad.build(context, PosQwertyKeypad.Variant.EMAIL, onAlphaInsert),
+        )
+
+        val res = context.resources
+        val marginH = res.getDimensionPixelSize(R.dimen.pos_key_margin_h)
+        val marginV = res.getDimensionPixelSize(R.dimen.pos_key_margin_v)
+        val minH = res.getDimensionPixelSize(R.dimen.pos_key_min_height)
+        val compactSp =
+            res.getDimension(R.dimen.pos_key_label_compact_sp) / res.displayMetrics.scaledDensity
+        val doneRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+        }
+        doneRow.addView(
+            TextView(context).apply {
+                text = context.getString(R.string.pos_keypad_done)
+                gravity = Gravity.CENTER
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, compactSp)
+                setTextColor(ContextCompat.getColor(context, R.color.pos_key_text_primary))
+                background = AppCompatResources.getDrawable(context, R.drawable.bg_pos_key_default)
+                minimumHeight = minH
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    1f,
+                ).apply { setMargins(marginH, marginV, marginH, marginV) }
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    typeface = android.graphics.Typeface.create(
+                        android.graphics.Typeface.SANS_SERIF,
+                        500,
+                        false,
+                    )
+                }
+                setOnClickListener { performKeyboardDone() }
+            },
+        )
+        alphaPanel.addView(doneRow)
+
+        val onPhoneInsert: (String) -> Unit = { token ->
+            activeField?.let { insertAtCaret(it, token) }
+        }
+        phonePanel.addView(
+            PosQwertyKeypad.buildPhoneDigitsKeypad(context, onPhoneInsert, performKeyboardDone),
+        )
+
+        keypadOuter.addView(alphaPanel)
+        keypadOuter.addView(phonePanel)
 
         /* ── root: FrameLayout with keyboard anchored at bottom ── */
 
@@ -447,8 +331,7 @@ object BarSeatOrderKeypad {
 
         /* ── wire alpha / phone fields ── */
 
-        fun wireAlpha(et: EditText, inputTypeFlags: Int) {
-            et.inputType = inputTypeFlags
+        fun wireAlpha(et: EditText) {
             et.showSoftInputOnFocus = false
             et.setOnClickListener { v -> v.requestFocus() }
             et.setOnFocusChangeListener { v, hasFocus ->
@@ -468,12 +351,19 @@ object BarSeatOrderKeypad {
             }
         }
 
-        wireAlpha(etSearch, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
-        wireAlpha(etName,   InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS)
-        wireAlpha(etEmail,  InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+        for (et in alphaFields) wireAlpha(et)
 
+        val digitsOnlyFilter = InputFilter { source, _, _, _, _, _ ->
+            val filtered = source.filter { it.isDigit() }
+            when {
+                filtered.length == source.length -> null
+                filtered.isEmpty() -> ""
+                else -> filtered
+            }
+        }
         for (et in phoneFields) {
-            et.inputType = InputType.TYPE_CLASS_PHONE
+            et.inputType = InputType.TYPE_CLASS_NUMBER
+            et.filters = arrayOf(digitsOnlyFilter)
             et.showSoftInputOnFocus = false
             et.setOnClickListener { v -> v.requestFocus() }
             et.setOnFocusChangeListener { v, hasFocus ->

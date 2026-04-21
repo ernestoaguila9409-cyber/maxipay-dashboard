@@ -16,9 +16,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.ernesto.kds.data.HeartbeatOutcome
 import com.ernesto.kds.data.KdsDevicePrefs
@@ -62,23 +59,6 @@ class KdsMainActivity : ComponentActivity() {
                 }
             }
         }
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        enableImmersiveMode()
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
-            enableImmersiveMode()
-        }
-    }
-
-    private fun enableImmersiveMode() {
-        WindowInsetsControllerCompat(window, window.decorView).let { controller ->
-            controller.hide(WindowInsetsCompat.Type.systemBars())
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
     }
 }
 
@@ -103,18 +83,21 @@ private fun KdsAppEntry(
             runCatching { auth.signInAnonymously().await() }
         }
         while (isActive) {
-            when (devicePresence.heartbeatOnce()) {
+            when (devicePresence.heartbeatOnce(pairedDeviceId)) {
                 HeartbeatOutcome.RevokedOrDeleted -> {
                     KdsDevicePrefs.clearPairedDevice(prefs)
                     pairedDeviceId = ""
                     return@LaunchedEffect
                 }
-                HeartbeatOutcome.NoDeviceConfigured -> return@LaunchedEffect
+                HeartbeatOutcome.NoDeviceConfigured -> {
+                    // Prefs can lag right after pair; keep polling while UI still shows paired.
+                    if (pairedDeviceId.isBlank()) return@LaunchedEffect
+                    delay(500L)
+                }
                 HeartbeatOutcome.Ok,
                 HeartbeatOutcome.TransientFailure,
-                -> { /* continue */ }
+                -> delay(5_000L)
             }
-            delay(5_000L)
         }
     }
 

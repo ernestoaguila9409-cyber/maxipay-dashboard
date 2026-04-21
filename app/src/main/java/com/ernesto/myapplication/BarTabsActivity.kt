@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.ernesto.myapplication.engine.PaymentService
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -568,78 +569,115 @@ class BarTabsActivity : AppCompatActivity() {
         if (seats.isEmpty()) return
         val combinedName = seats.joinToString(", ") { it.seatName }
         val seatIds = seats.map { it.tableId }
-        OrderNumberGenerator.nextOrderNumber(
-            onSuccess = { orderNumber ->
-                runOnUiThread {
-                    val orderRef = db.collection("Orders").document()
-                    val orderMap = hashMapOf<String, Any>(
-                        "orderNumber" to orderNumber,
-                        "employeeName" to employeeName,
-                        "status" to "OPEN",
-                        "createdAt" to Date(),
-                        "updatedAt" to Date(),
-                        "totalInCents" to 0L,
-                        "totalPaidInCents" to 0L,
-                        "remainingInCents" to 0L,
-                        "orderType" to "BAR_TAB",
-                        "seatIds" to seatIds,
-                        "seatName" to combinedName,
-                        "tableName" to combinedName,
-                        "tableId" to seats.first().tableId,
-                        "area" to "Bar",
-                        "guestCount" to seats.size
-                    )
 
-                    if (!customerId.isNullOrBlank()) orderMap["customerId"] = customerId
-                    if (customerName.isNotBlank()) orderMap["customerName"] = customerName
-                    if (customerPhone.isNotBlank()) orderMap["customerPhone"] = customerPhone
-                    if (customerEmail.isNotBlank()) orderMap["customerEmail"] = customerEmail
-                    if (currentBatchId.isNotBlank()) orderMap["batchId"] = currentBatchId
+        fun customerDisplayNameFromDoc(doc: DocumentSnapshot): String {
+            if (!doc.exists()) return ""
+            val firstName = (doc.getString("firstName") ?: "").trim()
+            val lastName = (doc.getString("lastName") ?: "").trim()
+            val nameField = (doc.getString("name") ?: "").trim()
+            val fullName = if (firstName.isNotEmpty() || lastName.isNotEmpty()) {
+                "$firstName $lastName".trim()
+            } else {
+                nameField
+            }
+            return fullName
+        }
 
-                    if (usePreauth) {
-                        // Payment fields set after preauth succeeds
-                    } else {
-                        orderMap["paymentMethod"] = "CASH"
-                        orderMap["paymentStatus"] = "OPEN"
-                    }
+        fun persistOrderWithResolvedName(resolvedDisplayName: String) {
+            val nameToStore = when {
+                customerName.isNotBlank() -> customerName
+                resolvedDisplayName.isNotBlank() -> resolvedDisplayName
+                else -> ""
+            }
+            OrderNumberGenerator.nextOrderNumber(
+                onSuccess = { orderNumber ->
+                    runOnUiThread {
+                        val orderRef = db.collection("Orders").document()
+                        val orderMap = hashMapOf<String, Any>(
+                            "orderNumber" to orderNumber,
+                            "employeeName" to employeeName,
+                            "status" to "OPEN",
+                            "createdAt" to Date(),
+                            "updatedAt" to Date(),
+                            "totalInCents" to 0L,
+                            "totalPaidInCents" to 0L,
+                            "remainingInCents" to 0L,
+                            "orderType" to "BAR_TAB",
+                            "seatIds" to seatIds,
+                            "seatName" to combinedName,
+                            "tableName" to combinedName,
+                            "tableId" to seats.first().tableId,
+                            "area" to "Bar",
+                            "guestCount" to seats.size
+                        )
 
-                    db.runTransaction { t ->
-                        t.set(orderRef, orderMap)
-                        for (tid in seatIds) {
-                            t.update(
-                                db.collection("Tables").document(tid),
-                                mapOf("currentOrderId" to orderRef.id)
-                            )
-                        }
-                    }.addOnSuccessListener {
-                        exitSelectionMode()
+                        if (!customerId.isNullOrBlank()) orderMap["customerId"] = customerId
+                        if (nameToStore.isNotBlank()) orderMap["customerName"] = nameToStore
+                        if (customerPhone.isNotBlank()) orderMap["customerPhone"] = customerPhone
+                        if (customerEmail.isNotBlank()) orderMap["customerEmail"] = customerEmail
+                        if (currentBatchId.isNotBlank()) orderMap["batchId"] = currentBatchId
+
                         if (usePreauth) {
-                            runPreAuth(orderRef.id, combinedName)
+                            // Payment fields set after preauth succeeds
                         } else {
-                            hidePreAuthLoading()
-                            openBarOrder(orderRef.id, combinedName)
+                            orderMap["paymentMethod"] = "CASH"
+                            orderMap["paymentStatus"] = "OPEN"
                         }
-                    }.addOnFailureListener { e ->
+
+                        db.runTransaction { t ->
+                            t.set(orderRef, orderMap)
+                            for (tid in seatIds) {
+                                t.update(
+                                    db.collection("Tables").document(tid),
+                                    mapOf("currentOrderId" to orderRef.id)
+                                )
+                            }
+                        }.addOnSuccessListener {
+                            exitSelectionMode()
+                            if (usePreauth) {
+                                runPreAuth(orderRef.id, combinedName)
+                            } else {
+                                hidePreAuthLoading()
+                                openBarOrder(orderRef.id, combinedName)
+                            }
+                        }.addOnFailureListener { e ->
+                            hidePreAuthLoading()
+                            Toast.makeText(
+                                this,
+                                "Failed to create tab: ${e.message}",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                },
+                onFailure = { e ->
+                    runOnUiThread {
                         hidePreAuthLoading()
                         Toast.makeText(
                             this,
-                            "Failed to create tab: ${e.message}",
+                            "Failed to generate order number: ${e.message}",
                             Toast.LENGTH_LONG
                         ).show()
                     }
                 }
-            },
-            onFailure = { e ->
-                runOnUiThread {
-                    hidePreAuthLoading()
-                    Toast.makeText(
-                        this,
-                        "Failed to generate order number: ${e.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
+            )
+        }
+
+        val cid = customerId?.trim().orEmpty()
+        if (cid.isNotEmpty() && customerName.isBlank()) {
+            db.collection("Customers").document(cid)
+                .get()
+                .addOnSuccessListener { doc ->
+                    runOnUiThread {
+                        persistOrderWithResolvedName(customerDisplayNameFromDoc(doc))
+                    }
                 }
-            }
-        )
+                .addOnFailureListener {
+                    runOnUiThread { persistOrderWithResolvedName("") }
+                }
+        } else {
+            persistOrderWithResolvedName("")
+        }
     }
 
     private fun runPreAuth(orderId: String, seatName: String) {

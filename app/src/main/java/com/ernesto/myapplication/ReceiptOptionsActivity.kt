@@ -49,6 +49,24 @@ class ReceiptOptionsActivity : AppCompatActivity() {
             etReceiptEmail.setText(customerEmail)
             optionsContainer.visibility = View.GONE
             emailFormContainer.visibility = View.VISIBLE
+        } else {
+            // Fallback: look up the email attached to the order so any order type
+            // (PaymentActivity flows, bar tabs, etc.) auto-fills when the cashier
+            // taps "Email Receipt".
+            val oid = orderId
+            if (!oid.isNullOrBlank()) {
+                db.collection("Orders").document(oid).get()
+                    .addOnSuccessListener { doc ->
+                        val emailOnFile = doc.getString("customerEmail")
+                            ?.trim()
+                            ?.takeIf { it.isNotEmpty() }
+                            ?: return@addOnSuccessListener
+                        if (etReceiptEmail.text.isNullOrBlank()) {
+                            etReceiptEmail.setText(emailOnFile)
+                            etReceiptEmail.setSelection(emailOnFile.length)
+                        }
+                    }
+            }
         }
 
         findViewById<LinearLayout>(R.id.btnPrintReceipt).setOnClickListener {

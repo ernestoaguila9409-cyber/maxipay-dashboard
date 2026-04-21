@@ -1,16 +1,15 @@
 package com.ernesto.myapplication
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
-import android.view.View
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.card.MaterialCardView
-import com.google.android.material.textfield.TextInputEditText
 import java.util.Locale
 
 class CashPaymentActivity : AppCompatActivity() {
@@ -19,21 +18,27 @@ class CashPaymentActivity : AppCompatActivity() {
         const val EXTRA_AMOUNT_DUE_CENTS = "AMOUNT_DUE_CENTS"
         const val EXTRA_TENDERED_CENTS = "CASH_TENDERED_CENTS"
         const val EXTRA_CHANGE_CENTS = "CASH_CHANGE_CENTS"
+
+        private val COLOR_CHANGE = Color.parseColor("#2E7D32")
+        private val COLOR_REMAINING = Color.parseColor("#C62828")
+        private val COLOR_PLACEHOLDER = Color.parseColor("#BDBDBD")
+        private val COLOR_INPUT = Color.parseColor("#212121")
     }
 
     private var amountDueCents: Long = 0L
-    private var cashReceivedCents: Long = 0L
+    private var amountDue: Double = 0.0
+    private var cashReceived: Double = 0.0
 
     private lateinit var txtAmountDue: TextView
-    private lateinit var cardChange: MaterialCardView
-    private lateinit var txtCashReceived: TextView
-    private lateinit var txtChange: TextView
-    private lateinit var txtWarning: TextView
-    private lateinit var inputCustomAmount: TextInputEditText
+    private lateinit var txtCashReceivedInput: TextView
+    private lateinit var txtChangeOrRemaining: TextView
     private lateinit var btnComplete: MaterialButton
+    private lateinit var keyboardContainer: LinearLayout
+    private lateinit var keypad: PosMoneyAmountKeypad
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         setContentView(R.layout.activity_cash_payment)
         supportActionBar?.hide()
 
@@ -42,25 +47,38 @@ class CashPaymentActivity : AppCompatActivity() {
             finish()
             return
         }
+        amountDue = MoneyUtils.centsToDouble(amountDueCents)
 
         txtAmountDue = findViewById(R.id.txtAmountDue)
-        cardChange = findViewById(R.id.cardChange)
-        txtCashReceived = findViewById(R.id.txtCashReceived)
-        txtChange = findViewById(R.id.txtChange)
-        txtWarning = findViewById(R.id.txtWarning)
-        inputCustomAmount = findViewById(R.id.inputCustomAmount)
+        txtCashReceivedInput = findViewById(R.id.txtCashReceivedInput)
+        txtChangeOrRemaining = findViewById(R.id.txtChangeOrRemaining)
         btnComplete = findViewById(R.id.btnComplete)
+        keyboardContainer = findViewById(R.id.keyboardContainerCash)
 
-        txtAmountDue.text = MoneyUtils.centsToDisplay(amountDueCents)
+        txtAmountDue.text = formatCurrency(amountDue)
 
-        setupDenominationButtons()
-        setupExactAmountButton()
-        setupCustomInput()
+        keypad = PosMoneyAmountKeypad(this, keyboardContainer) { raw ->
+            applyCashBuffer(raw)
+        }
+        keypad.attach()
+
+        findViewById<MaterialButton>(R.id.btnExactCash).setOnClickListener {
+            keypad.applyExactAmountCents(amountDueCents)
+        }
+
+        txtCashReceivedInput.post {
+            txtCashReceivedInput.requestFocus()
+            hideIme(txtCashReceivedInput)
+        }
+
+        applyCashBuffer("")
 
         btnComplete.setOnClickListener {
+            val tenderedCents = MoneyUtils.dollarsToCents(cashReceived)
+            val changeCents = (tenderedCents - amountDueCents).coerceAtLeast(0L)
             val data = Intent().apply {
-                putExtra(EXTRA_TENDERED_CENTS, cashReceivedCents)
-                putExtra(EXTRA_CHANGE_CENTS, (cashReceivedCents - amountDueCents).coerceAtLeast(0L))
+                putExtra(EXTRA_TENDERED_CENTS, tenderedCents)
+                putExtra(EXTRA_CHANGE_CENTS, changeCents)
             }
             setResult(RESULT_OK, data)
             finish()
@@ -72,60 +90,48 @@ class CashPaymentActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupDenominationButtons() {
-        val denominations = mapOf(
-            R.id.btnDenom5 to 500L,
-            R.id.btnDenom10 to 1000L,
-            R.id.btnDenom20 to 2000L,
-            R.id.btnDenom50 to 5000L,
-            R.id.btnDenom100 to 10000L
-        )
-        for ((id, cents) in denominations) {
-            findViewById<MaterialButton>(id).setOnClickListener {
-                selectAmount(cents)
-                inputCustomAmount.setText("")
-            }
+    override fun onResume() {
+        super.onResume()
+        if (::txtCashReceivedInput.isInitialized) {
+            hideIme(txtCashReceivedInput)
         }
     }
 
-    private fun setupExactAmountButton() {
-        findViewById<MaterialButton>(R.id.btnExactAmount).setOnClickListener {
-            selectAmount(amountDueCents)
-            inputCustomAmount.setText("")
-        }
+    private fun hideIme(view: android.view.View) {
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(view.windowToken, 0)
     }
 
-    private fun setupCustomInput() {
-        inputCustomAmount.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                val text = s?.toString()?.trim() ?: ""
-                if (text.isEmpty()) return
-                val dollars = text.toDoubleOrNull() ?: return
-                selectAmount(MoneyUtils.dollarsToCents(dollars))
-            }
-        })
-    }
-
-    private fun selectAmount(receivedCents: Long) {
-        cashReceivedCents = receivedCents
-        val changeCents = receivedCents - amountDueCents
-        val sufficient = changeCents >= 0L
-
-        cardChange.visibility = View.VISIBLE
-        txtCashReceived.text = MoneyUtils.centsToDisplay(receivedCents)
-
-        if (sufficient) {
-            txtChange.text = MoneyUtils.centsToDisplay(changeCents)
-            txtChange.setTextColor(android.graphics.Color.parseColor("#2E7D32"))
-            txtWarning.visibility = View.GONE
+    private fun applyCashBuffer(raw: String) {
+        cashReceived = parseCashReceived(raw)
+        renderCashInputDisplay(raw)
+        val delta = cashReceived - amountDue
+        if (delta >= 0.0) {
+            txtChangeOrRemaining.text = "Change: ${formatCurrency(delta)}"
+            txtChangeOrRemaining.setTextColor(COLOR_CHANGE)
         } else {
-            txtChange.text = String.format(Locale.US, "-$%.2f", -changeCents / 100.0)
-            txtChange.setTextColor(android.graphics.Color.parseColor("#C62828"))
-            txtWarning.visibility = View.VISIBLE
+            txtChangeOrRemaining.text = "Remaining: ${formatCurrency(kotlin.math.abs(delta))}"
+            txtChangeOrRemaining.setTextColor(COLOR_REMAINING)
         }
-
-        btnComplete.isEnabled = sufficient
+        val tenderedCents = MoneyUtils.dollarsToCents(cashReceived)
+        btnComplete.isEnabled = tenderedCents >= amountDueCents
     }
+
+    private fun renderCashInputDisplay(raw: String) {
+        if (raw.isEmpty()) {
+            txtCashReceivedInput.text = "0.00"
+            txtCashReceivedInput.setTextColor(COLOR_PLACEHOLDER)
+        } else {
+            txtCashReceivedInput.text = raw
+            txtCashReceivedInput.setTextColor(COLOR_INPUT)
+        }
+    }
+
+    private fun parseCashReceived(raw: String): Double {
+        if (raw.isEmpty() || raw == ".") return 0.0
+        return raw.toDoubleOrNull() ?: 0.0
+    }
+
+    private fun formatCurrency(amount: Double): String =
+        String.format(Locale.US, "$%.2f", amount)
 }

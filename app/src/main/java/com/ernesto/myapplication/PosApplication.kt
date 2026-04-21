@@ -21,6 +21,7 @@ class PosApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        ImmersiveModeHelper.install(this)
         FirebaseAuth.getInstance().addAuthStateListener(authStateListener)
     }
 }

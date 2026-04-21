@@ -36,6 +36,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -293,6 +296,7 @@ fun KdsScreen(viewModel: KdsViewModel) {
                             nowMs = nowMs,
                             onStart = { viewModel.markAsPreparing(order) },
                             onReady = { viewModel.markAsReady(order) },
+                            onMarkItemReady = { item -> viewModel.markItemReady(order, item) },
                         )
                     }
                 }
@@ -446,6 +450,7 @@ private fun KdsSettingsDialog(
                                 nowMs = nowMs,
                                 onStart = {},
                                 onReady = {},
+                                onMarkItemReady = {},
                             )
                         }
                     }
@@ -612,6 +617,7 @@ private fun OrderKdsCard(
     nowMs: Long,
     onStart: () -> Unit,
     onReady: () -> Unit,
+    onMarkItemReady: (OrderItem) -> Unit,
 ) {
     val headerShape = RoundedCornerShape(topStart = CardCorner, topEnd = CardCorner)
     val headerColor = headerColorForOrderType(order.orderType, moduleColorKeys)
@@ -755,40 +761,13 @@ private fun OrderKdsCard(
                             .verticalScroll(bodyScroll)
                             .padding(start = 20.dp, end = 20.dp, top = 20.dp),
                     ) {
-                        order.items.forEach { item ->
-                            val itemSp = textSettings.itemNameSp
-                            val modSp = textSettings.modifiersSp
-                            Text(
-                                text = "${item.displayQuantity}x ${item.name}",
-                                modifier = Modifier.fillMaxWidth(),
-                                fontSize = itemSp.sp,
-                                lineHeight = (itemSp * 1.3f).sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF212121),
-                            )
-                            item.modifierLines.forEach { line ->
-                                Text(
-                                    text = "  • ${line.text}",
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(
-                                            start = 8.dp,
-                                            top = (modSp * 0.28f).dp.coerceIn(3.dp, 12.dp),
-                                        ),
-                                    fontSize = modSp.sp,
-                                    lineHeight = (modSp * 1.45f).sp,
-                                    fontWeight = FontWeight.Normal,
-                                    color = if (line.isRemove) {
-                                        kdsColorFromArgb(textSettings.modifierRemoveColorArgb)
-                                    } else {
-                                        kdsColorFromArgb(textSettings.modifierAddColorArgb)
-                                    },
-                                )
-                            }
-                            Spacer(
-                                modifier = Modifier.height(
-                                    (modSp * 0.35f).dp.coerceIn(8.dp, 16.dp),
-                                ),
+                        order.items.forEachIndexed { index, item ->
+                            KdsItemRow(
+                                item = item,
+                                textSettings = textSettings,
+                                swipeEnabled = order.isPreparing(),
+                                onSwipedReady = { onMarkItemReady(item) },
+                                rowKey = "${order.cardKey}|${item.lineDocId}|${item.kdsBatchId}|$index",
                             )
                         }
                     }
@@ -844,4 +823,97 @@ private fun OrderKdsCard(
             }
         }
     }
+}
+
+@Composable
+private fun KdsItemRow(
+    item: OrderItem,
+    textSettings: KdsTextSettings,
+    swipeEnabled: Boolean,
+    onSwipedReady: () -> Unit,
+    rowKey: String,
+) {
+    val itemSp = textSettings.itemNameSp
+    val modSp = textSettings.modifiersSp
+    val bottomGap = (modSp * 0.35f).dp.coerceIn(8.dp, 16.dp)
+
+    val content: @Composable () -> Unit = {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(vertical = 6.dp),
+        ) {
+            Text(
+                text = "${item.displayQuantity}x ${item.name}",
+                modifier = Modifier.fillMaxWidth(),
+                fontSize = itemSp.sp,
+                lineHeight = (itemSp * 1.3f).sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF212121),
+            )
+            item.modifierLines.forEach { line ->
+                Text(
+                    text = "  • ${line.text}",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            start = 8.dp,
+                            top = (modSp * 0.28f).dp.coerceIn(3.dp, 12.dp),
+                        ),
+                    fontSize = modSp.sp,
+                    lineHeight = (modSp * 1.45f).sp,
+                    fontWeight = FontWeight.Normal,
+                    color = if (line.isRemove) {
+                        kdsColorFromArgb(textSettings.modifierRemoveColorArgb)
+                    } else {
+                        kdsColorFromArgb(textSettings.modifierAddColorArgb)
+                    },
+                )
+            }
+        }
+    }
+
+    if (!swipeEnabled) {
+        content()
+        Spacer(modifier = Modifier.height(bottomGap))
+        return
+    }
+
+    androidx.compose.runtime.key(rowKey) {
+        val dismissState = rememberSwipeToDismissBoxState(
+            confirmValueChange = { value ->
+                if (value == SwipeToDismissBoxValue.StartToEnd) {
+                    onSwipedReady()
+                    true
+                } else {
+                    false
+                }
+            },
+            positionalThreshold = { totalDistance -> totalDistance * 0.45f },
+        )
+        SwipeToDismissBox(
+            state = dismissState,
+            enableDismissFromStartToEnd = true,
+            enableDismissFromEndToStart = false,
+            backgroundContent = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF2E7D32))
+                        .padding(horizontal = 20.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Text(
+                        text = "READY",
+                        color = Color.White,
+                        fontSize = textSettings.buttonsSp.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            },
+            content = { content() },
+        )
+    }
+    Spacer(modifier = Modifier.height(bottomGap))
 }

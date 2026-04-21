@@ -12,7 +12,9 @@ data class CustomerItem(
     val id: String,
     val name: String,
     val phone: String,
-    val email: String
+    val email: String,
+    /** From Firestore `visitCount`; gold star when more than five visits. */
+    val visitCount: Int = 0,
 )
 
 class CustomersAdapter(
@@ -74,6 +76,7 @@ class CustomersAdapter(
     class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val card: MaterialCardView = itemView.findViewById(R.id.cardCustomer)
         private val txtName: TextView = itemView.findViewById(R.id.txtCustomerName)
+        private val txtFrequentStar: TextView = itemView.findViewById(R.id.txtFrequentVisitorStar)
         private val txtPhone: TextView = itemView.findViewById(R.id.txtCustomerPhone)
         private val txtEmail: TextView = itemView.findViewById(R.id.txtCustomerEmail)
 
@@ -85,6 +88,9 @@ class CustomersAdapter(
             onItemClick: (CustomerItem) -> Unit
         ) {
             txtName.text = item.name.ifBlank { "No name" }
+            val frequent = item.visitCount > 5
+            txtFrequentStar.visibility = if (frequent) View.VISIBLE else View.GONE
+
             txtPhone.text = if (item.phone.isNotBlank()) "Phone: ${formatPhone(item.phone)}" else ""
             txtPhone.visibility = if (item.phone.isNotBlank()) View.VISIBLE else View.GONE
             txtEmail.text = if (item.email.isNotBlank()) "Email: ${item.email}" else ""

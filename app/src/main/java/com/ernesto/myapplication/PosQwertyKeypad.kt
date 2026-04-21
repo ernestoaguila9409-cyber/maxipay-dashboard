@@ -280,6 +280,102 @@ object PosQwertyKeypad {
         return panel
     }
 
+    /**
+     * Phone fields: digits 0–9 and backspace only (no +, ., etc.).
+     * Visual system matches [build] (EMAIL / receipt keypad).
+     */
+    fun buildPhoneDigitsKeypad(
+        context: Context,
+        onInsert: (String) -> Unit,
+        onDone: (() -> Unit)? = null,
+    ): LinearLayout {
+        val res = context.resources
+        val marginH = res.getDimensionPixelSize(R.dimen.pos_key_margin_h)
+        val marginV = res.getDimensionPixelSize(R.dimen.pos_key_margin_v)
+        val minH = res.getDimensionPixelSize(R.dimen.pos_key_min_height)
+        val pad = res.getDimensionPixelSize(R.dimen.pos_keyboard_panel_padding)
+        val labelSp = res.getDimension(R.dimen.pos_key_label_sp) / res.displayMetrics.scaledDensity
+        val panel = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+        }
+
+        val digitRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+        }
+        val wDigit = 1f / 10f
+        for (k in listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")) {
+            digitRow.addView(
+                TextView(context).apply {
+                    text = k
+                    gravity = Gravity.CENTER
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, labelSp)
+                    setTextColor(context.getColor(R.color.pos_key_text_primary))
+                    background = AppCompatResources.getDrawable(context, R.drawable.bg_pos_key_default)
+                    minimumHeight = minH
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, wDigit).apply {
+                        setMargins(marginH, marginV, marginH, marginV)
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        typeface = android.graphics.Typeface.create(
+                            android.graphics.Typeface.SANS_SERIF,
+                            500,
+                            false,
+                        )
+                    }
+                    setOnClickListener { onInsert(k) }
+                },
+            )
+        }
+        panel.addView(digitRow)
+
+        val bottomRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+        }
+        if (onDone != null) {
+            bottomRow.addView(
+                textAuxKey(
+                    context,
+                    context.getString(R.string.pos_keypad_done),
+                    2.2f,
+                    minH,
+                    marginH,
+                    marginV,
+                    labelSp,
+                    onDone,
+                ),
+            )
+        }
+        val backWeight = if (onDone != null) 1.15f else 1f
+        bottomRow.addView(
+            AppCompatImageButton(context).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, backWeight).apply {
+                    setMargins(marginH, marginV, marginH, marginV)
+                }
+                minimumHeight = minH
+                setBackgroundResource(R.drawable.bg_pos_key_special)
+                setImageDrawable(AppCompatResources.getDrawable(context, R.drawable.ic_pos_keyboard_backspace))
+                ImageViewCompat.setImageTintList(
+                    this,
+                    android.content.res.ColorStateList.valueOf(context.getColor(R.color.pos_key_text_primary)),
+                )
+                scaleType = ImageView.ScaleType.CENTER
+                contentDescription = "Backspace"
+                setOnClickListener { onInsert("⌫") }
+            },
+        )
+        panel.addView(bottomRow)
+        return panel
+    }
+
     private fun textAuxKey(
         context: Context,
         label: String,

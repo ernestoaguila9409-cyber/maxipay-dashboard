@@ -20,6 +20,8 @@ import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.DocumentSnapshot
+import java.util.Locale
 
 class ItemDetailActivity : AppCompatActivity() {
 
@@ -34,18 +36,26 @@ class ItemDetailActivity : AppCompatActivity() {
     private lateinit var txtModifiersEmpty: TextView
     private lateinit var containerLabels: LinearLayout
     private lateinit var txtLabelsEmpty: TextView
+    private lateinit var containerKds: LinearLayout
+    private lateinit var txtKdsEmpty: TextView
 
     private var itemId = ""
     private var itemName = ""
     private var itemPrice = 0.0
     private var itemPrices: Map<String, Double> = emptyMap()
     private var itemCategoryId = ""
+    /** Category doc ids where this item is placed (matches dashboard / KDS [placementCategoryIds]). */
+    private var itemPlacementCategoryIds: Set<String> = emptySet()
     private var itemSubcategoryId = ""
     private var categoryKitchenLabelRaw = ""
     private var subcategoryKitchenLabelRaw = ""
     private var assignedTaxIds: List<String> = emptyList()
     private var assignedModifierGroupIds: List<String> = emptyList()
     private var labels: List<String> = emptyList()
+    /** KDS devices that show this item (explicit ids, category routing, or no filter = all). */
+    private var kdsAssignedStations: List<KdsDeviceRow> = emptyList()
+
+    private data class KdsDeviceRow(val id: String, val name: String)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,12 +78,15 @@ class ItemDetailActivity : AppCompatActivity() {
         txtModifiersEmpty = findViewById(R.id.txtModifiersEmpty)
         containerLabels = findViewById(R.id.containerLabels)
         txtLabelsEmpty = findViewById(R.id.txtLabelsEmpty)
+        containerKds = findViewById(R.id.containerKds)
+        txtKdsEmpty = findViewById(R.id.txtKdsEmpty)
 
         findViewById<View>(R.id.btnEditItemName).setOnClickListener { showEditNameDialog() }
         txtPrice.setOnClickListener { showEditPriceDialog() }
         findViewById<MaterialButton>(R.id.btnAddTax).setOnClickListener { showAddTaxDialog() }
         findViewById<MaterialButton>(R.id.btnAddModifier).setOnClickListener { showAddModifierDialog() }
         findViewById<MaterialButton>(R.id.btnAddLabel).setOnClickListener { showAddLabelDialog() }
+        findViewById<MaterialButton>(R.id.btnAddKds).setOnClickListener { showAddKdsDialog() }
         findViewById<MaterialButton>(R.id.btnDeleteItem).setOnClickListener { confirmDelete() }
 
         loadItem()
@@ -99,6 +112,7 @@ class ItemDetailActivity : AppCompatActivity() {
                 @Suppress("UNCHECKED_CAST")
                 itemPrices = (doc.get("prices") as? Map<String, Double>) ?: emptyMap()
                 itemCategoryId = doc.getString("categoryId").orEmpty()
+                itemPlacementCategoryIds = KdsStationRouting.placementCategoryIdsFromMenuItemDoc(doc)
                 itemSubcategoryId = subcategoryIdForItem(doc, itemCategoryId)
                 @Suppress("UNCHECKED_CAST")
                 assignedTaxIds = (doc.get("assignedTaxIds") as? List<String>) ?: emptyList()
@@ -124,6 +138,7 @@ class ItemDetailActivity : AppCompatActivity() {
                 loadCategoryAndSubcategoryMeta()
                 loadAssignedTaxes()
                 loadAssignedModifiers()
+                loadKdsAssignments()
             }
             .addOnFailureListener {
                 Toast.makeText(this, R.string.item_detail_load_failed, Toast.LENGTH_SHORT).show()
@@ -194,9 +209,15 @@ class ItemDetailActivity : AppCompatActivity() {
         }
     }
 
-    /** Effective inherited routing label when the item has no own labels (same order as [MenuItemRoutingLabel.resolve]). */
+    /**
+     * Effective inherited routing label when the item has no own labels (same order as
+     * [MenuItemRoutingLabel.resolve]). Hidden unless at least one **kitchen** printer defines
+     * routing labels — otherwise category/subcategory kitchen labels look like printer routing
+     * when no kitchen station is configured.
+     */
     private fun inheritedRoutingDisplay(): Pair<String, Boolean>? {
         if (labels.isNotEmpty()) return null
+        if (SelectedPrinterPrefs.allKitchenLabelOptions(this).isEmpty()) return null
         if (subcategoryKitchenLabelRaw.isNotBlank()) {
             return subcategoryKitchenLabelRaw to true
         }
@@ -681,6 +702,64 @@ class ItemDetailActivity : AppCompatActivity() {
         applyRoutingLabelsToFirestore(trimmed, showSavedToast = true)
     }
 
+    // ── KDS stations (kds_devices: assignedItemIds, assignedCategoryIds, or empty = all) ──
+
+    private fun loadKdsAssignments() {
+        db.collection(KdsStationRouting.COLLECTION).get()
+            .addOnSuccessListener { snap ->
+                val rows = snap.documents
+                    .filter {
+                        KdsStationRouting.isDeviceSelectable(it) &&
+                            KdsStationRouting.deviceCoversMenuItem(it, itemId, itemPlacementCategoryIds)
+                    }
+                    .map { doc ->
+                        val name = doc.getString("name")?.trim().orEmpty().ifBlank { doc.id }
+                        KdsDeviceRow(doc.id, name)
+                    }
+                    .sortedBy { it.name.lowercase(Locale.getDefault()) }
+                kdsAssignedStations = rows
+                bindKdsRows()
+            }
+            .addOnFailureListener {
+                kdsAssignedStations = emptyList()
+                bindKdsRows()
+            }
+    }
+
+    private fun bindKdsRows() {
+        containerKds.removeAllViews()
+        if (kdsAssignedStations.isEmpty()) {
+            txtKdsEmpty.visibility = View.VISIBLE
+            return
+        }
+        txtKdsEmpty.visibility = View.GONE
+
+        for (station in kdsAssignedStations) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(10), 0, dp(10))
+            }
+            row.addView(TextView(this).apply {
+                text = station.name
+                textSize = 15f
+                setTextColor(Color.parseColor("#1E293B"))
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            containerKds.addView(row)
+            containerKds.addView(View(this).apply {
+                setBackgroundColor(Color.parseColor("#EEEEEE"))
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+            })
+        }
+    }
+
+    private fun showAddKdsDialog() {
+        KdsMenuItemStationPicker.show(this, itemId, itemPlacementCategoryIds, db) {
+            loadKdsAssignments()
+        }
+    }
+
     // ── Delete ────────────────────────────────────────────────────────
 
     private fun confirmDelete() {
@@ -688,17 +767,38 @@ class ItemDetailActivity : AppCompatActivity() {
             .setTitle(getString(R.string.item_detail_delete_title, itemName))
             .setMessage(R.string.item_detail_delete_message)
             .setPositiveButton(R.string.item_detail_delete_action) { _, _ ->
-                db.collection("MenuItems").document(itemId).delete()
-                    .addOnSuccessListener {
-                        Toast.makeText(this, R.string.item_detail_deleted, Toast.LENGTH_SHORT).show()
-                        finish()
-                    }
-                    .addOnFailureListener { e ->
-                        Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                    }
+                removeItemFromKdsDeviceAssignments {
+                    db.collection("MenuItems").document(itemId).delete()
+                        .addOnSuccessListener {
+                            Toast.makeText(this, R.string.item_detail_deleted, Toast.LENGTH_SHORT).show()
+                            finish()
+                        }
+                        .addOnFailureListener { e ->
+                            Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                }
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    /** Clears this menu item id from every KDS device filter list (Firestore does not cascade). */
+    private fun removeItemFromKdsDeviceAssignments(done: () -> Unit) {
+        db.collection(KdsStationRouting.COLLECTION)
+            .whereArrayContains("assignedItemIds", itemId)
+            .get()
+            .addOnCompleteListener { task ->
+                val qs = task.result
+                if (!task.isSuccessful || qs == null || qs.isEmpty) {
+                    done()
+                    return@addOnCompleteListener
+                }
+                val batch = db.batch()
+                for (doc in qs.documents) {
+                    batch.update(doc.reference, "assignedItemIds", FieldValue.arrayRemove(itemId))
+                }
+                batch.commit().addOnCompleteListener { done() }
+            }
     }
 
     // ── Util ──────────────────────────────────────────────────────────

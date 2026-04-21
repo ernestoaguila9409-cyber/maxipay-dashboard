@@ -56,7 +56,10 @@ class MenuOnlyActivity : AppCompatActivity() {
     private var pendingUseCategoryAvail: Boolean = true
     private var pendingOrderTypes: List<String> = emptyList()
     private var pendingPrinterLabel: String = ""
+    private var pendingKdsDeviceIds: ArrayList<String> = arrayListOf()
+    private var pendingKdsTouched: Boolean = false
     private var addItemDialogOpen: Boolean = false
+    private var currentAddItemDialog: AlertDialog? = null
 
     private lateinit var modifierLauncher: ActivityResultLauncher<Intent>
     private lateinit var taxLauncher: ActivityResultLauncher<Intent>
@@ -950,6 +953,14 @@ class MenuOnlyActivity : AppCompatActivity() {
             taxLauncher.launch(intent)
         })
 
+        layout.addView(createOptionRow("Assign KDS", pendingKdsDeviceIds.size) {
+            pendingName = nameInput.text.toString()
+            pendingPrice = priceInput.text.toString()
+            pendingStock = stockInput.text.toString()
+            pendingSubId = selectedSubId
+            openKdsPickerFromAddDialog()
+        })
+
         layout.addView(createDivider())
 
         val useCategorySwitch = Switch(this)
@@ -991,7 +1002,7 @@ class MenuOnlyActivity : AppCompatActivity() {
         val scrollView = android.widget.ScrollView(this)
         scrollView.addView(layout)
 
-        AlertDialog.Builder(this)
+        val addDialog = AlertDialog.Builder(this)
             .setTitle("Add Item")
             .setView(scrollView)
             .setPositiveButton("Add") { _, _ ->
@@ -1044,6 +1055,41 @@ class MenuOnlyActivity : AppCompatActivity() {
                 db.collection("MenuItems")
                     .add(item)
                     .addOnSuccessListener { docRef ->
+                        val categoryId = selectedCategoryId!!
+                        val kdsDeviceIds = pendingKdsDeviceIds.toSet()
+                        val kdsTouched = pendingKdsTouched
+                        val runAfterModifiers = {
+                            pl?.let {
+                                KitchenRoutingLabelsFirestore.mergeLabelsIntoFirestore(db, listOf(it))
+                            }
+                            val finishAfterKds = {
+                                clearPendingForm()
+                                loadItems(categoryId)
+                                Toast.makeText(
+                                    this,
+                                    getString(R.string.item_added_short, name),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                            if (kdsTouched && kdsDeviceIds.isNotEmpty()) {
+                                KdsMenuItemStationPicker.applyNewItemAssignments(
+                                    db,
+                                    docRef.id,
+                                    kdsDeviceIds,
+                                ) { ok, err ->
+                                    if (!ok) {
+                                        Toast.makeText(
+                                            this,
+                                            err ?: "Failed to assign KDS",
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                                    finishAfterKds()
+                                }
+                            } else {
+                                finishAfterKds()
+                            }
+                        }
                         if (pendingModifierIds.isNotEmpty()) {
                             val batch = db.batch()
                             pendingModifierIds.forEachIndexed { index, groupId ->
@@ -1055,13 +1101,18 @@ class MenuOnlyActivity : AppCompatActivity() {
                                 ))
                             }
                             batch.commit()
+                                .addOnSuccessListener { runAfterModifiers() }
+                                .addOnFailureListener { e ->
+                                    Toast.makeText(
+                                        this,
+                                        e.message ?: getString(R.string.item_detail_load_failed),
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                    runAfterModifiers()
+                                }
+                        } else {
+                            runAfterModifiers()
                         }
-                        pl?.let {
-                            KitchenRoutingLabelsFirestore.mergeLabelsIntoFirestore(db, listOf(it))
-                        }
-                        clearPendingForm()
-                        loadItems(selectedCategoryId!!)
-                        Toast.makeText(this, "$name added", Toast.LENGTH_SHORT).show()
                     }
             }
             .setNegativeButton("Cancel") { _, _ ->
@@ -1072,7 +1123,9 @@ class MenuOnlyActivity : AppCompatActivity() {
                 addItemDialogOpen = false
                 clearPendingForm()
             }
-            .show()
+            .create()
+        addDialog.show()
+        currentAddItemDialog = addDialog
     }
 
     private fun clearPendingForm() {
@@ -1085,6 +1138,33 @@ class MenuOnlyActivity : AppCompatActivity() {
         pendingUseCategoryAvail = true
         pendingOrderTypes = emptyList()
         pendingPrinterLabel = ""
+        pendingKdsDeviceIds = arrayListOf()
+        pendingKdsTouched = false
+    }
+
+    private fun openKdsPickerFromAddDialog() {
+        val catId = selectedCategoryId ?: run {
+            Toast.makeText(this, "No category selected", Toast.LENGTH_SHORT).show()
+            return
+        }
+        currentAddItemDialog?.dismiss()
+        currentAddItemDialog = null
+        val currentSelection: Set<String>? =
+            if (pendingKdsTouched) pendingKdsDeviceIds.toSet() else null
+        KdsMenuItemStationPicker.pickForNewItem(
+            activity = this,
+            categoryId = catId,
+            currentSelection = currentSelection,
+            db = db,
+            onSelected = { deviceIds ->
+                pendingKdsDeviceIds = ArrayList(deviceIds)
+                pendingKdsTouched = true
+                if (addItemDialogOpen) showAddItemDialog()
+            },
+            onCancelled = {
+                if (addItemDialogOpen) showAddItemDialog()
+            },
+        )
     }
 
 }

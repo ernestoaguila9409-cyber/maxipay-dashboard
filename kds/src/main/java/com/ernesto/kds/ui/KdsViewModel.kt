@@ -1,6 +1,7 @@
 package com.ernesto.kds.ui
 
 import android.app.Application
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import com.google.firebase.firestore.FirebaseFirestoreException
 import java.util.Date
 
 class KdsViewModel(
@@ -67,23 +69,22 @@ class KdsViewModel(
                 .collect { _textSettings.value = it }
         }
         viewModelScope.launch {
-            combine(
-                deviceDocId,
-                repository.observeKitchenOrders(),
-            ) { docId, rawOrders -> docId to rawOrders }
-                .flatMapLatest { (docId, rawOrders) ->
-                    if (docId.isEmpty()) {
-                        flowOf(rawOrders)
-                    } else {
-                        combine(
-                            repository.observeKdsDeviceMenuAssignment(docId),
-                            repository.observeMenuItemCategoryPlacements(),
-                        ) { assignment, itemPlacements ->
-                            filterOrdersByMenuAssignment(
-                                rawOrders,
-                                assignment,
-                                itemPlacements,
-                            )
+            deviceDocId
+                .flatMapLatest { docId ->
+                    repository.observeKitchenOrders(docId).flatMapLatest { rawOrders ->
+                        if (docId.isEmpty()) {
+                            flowOf(rawOrders)
+                        } else {
+                            combine(
+                                repository.observeKdsDeviceMenuAssignment(docId),
+                                repository.observeMenuItemCategoryPlacements(),
+                            ) { assignment, itemPlacements ->
+                                filterOrdersByMenuAssignment(
+                                    rawOrders,
+                                    assignment,
+                                    itemPlacements,
+                                )
+                            }
                         }
                     }
                 }
@@ -105,10 +106,31 @@ class KdsViewModel(
 
     fun markAsPreparing(order: Order) {
         val cardKey = order.cardKey
+        val devId = deviceDocId.value.trim()
         viewModelScope.launch {
+            val snapshotBefore = _orders.value.toList()
             applyOptimisticPreparing(cardKey)
             val lineIds = order.items.map { it.lineDocId.trim() }.filter { it.isNotEmpty() }.distinct()
-            runCatching { repository.updateOrderStatus(order.id, "PREPARING", lineIds) }
+            val result = runCatching {
+                repository.updateOrderStatus(
+                    order.id,
+                    "PREPARING",
+                    lineIds,
+                    kdsClaimDeviceId = devId,
+                    kdsClaimCardKey = cardKey,
+                )
+            }
+            result.onFailure { e ->
+                _orders.value = snapshotBefore
+                val msg = if (e is FirebaseFirestoreException &&
+                    e.code == FirebaseFirestoreException.Code.FAILED_PRECONDITION
+                ) {
+                    "This ticket was started on another KDS."
+                } else {
+                    e.message?.takeIf { it.isNotBlank() } ?: "Could not start ticket."
+                }
+                Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -121,7 +143,56 @@ class KdsViewModel(
                 .filter { it.lineDocId.isNotBlank() }
                 .groupBy { it.lineDocId.trim() }
                 .mapValues { (_, rows) -> rows.sumOf { it.quantity.toLong() } }
-            runCatching { repository.updateOrderStatus(order.id, "READY", lineIds, coverQty) }
+            runCatching {
+                repository.updateOrderStatus(
+                    order.id,
+                    "READY",
+                    lineIds,
+                    coverQty,
+                    kdsClaimCardKey = cardKey,
+                )
+            }
+        }
+    }
+
+    /**
+     * Swipe-right on a single item: mark just that one line READY on Firestore and drop it from
+     * the local card. When the swiped item is the **last active line** on the card, also release
+     * the card claim so the whole ticket closes across tablets (same as the full READY button).
+     */
+    fun markItemReady(order: Order, item: OrderItem) {
+        val lineId = item.lineDocId.trim()
+        if (lineId.isEmpty()) return
+        val cardKey = order.cardKey
+        viewModelScope.launch {
+            val snapshotBefore = _orders.value.toList()
+            val remainingAfter = order.items.filterNot { it === item }
+            val isLastLine = remainingAfter.isEmpty()
+            if (isLastLine) {
+                removeOrderCardOptimistically(cardKey)
+            } else {
+                removeItemFromCardOptimistically(cardKey, item)
+            }
+            val coverQty = mapOf(lineId to item.quantity.toLong().coerceAtLeast(1L))
+            val result = runCatching {
+                repository.updateOrderStatus(
+                    order.id,
+                    "READY",
+                    listOf(lineId),
+                    coverQty,
+                    kdsClaimCardKey = if (isLastLine) cardKey else null,
+                )
+            }
+            result.onFailure {
+                _orders.value = snapshotBefore
+            }
+        }
+    }
+
+    private fun removeItemFromCardOptimistically(cardKey: String, target: OrderItem) {
+        _orders.value = _orders.value.map { o ->
+            if (o.cardKey != cardKey) o
+            else o.copy(items = o.items.filterNot { it === target })
         }
     }
 

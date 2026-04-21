@@ -52,10 +52,11 @@ class KdsPairingRepository(
             ).await()
 
             val stationId = doc.getString("stationId")?.trim().orEmpty()
+            // commit() so the id is readable before returning; apply() can race the heartbeat loop.
             prefs.edit()
                 .putString(KdsDevicePrefs.KEY_DEVICE_DOC_ID, doc.id)
                 .putString(KdsDevicePrefs.KEY_STATION_ID, stationId)
-                .apply()
+                .commit()
 
             doc.id
         }

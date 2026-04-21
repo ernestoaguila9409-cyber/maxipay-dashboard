@@ -130,10 +130,37 @@ function parseTimestamp(raw) {
   return null;
 }
 
+/**
+ * Prefer [order.customerName]; if missing but [order.customerId] is set, load Customers/{id}
+ * (same firstName+lastName vs name rules as POS). Used so email receipts show the customer for
+ * Bar Tab and other flows that only stored customerId.
+ */
+async function resolveCustomerDisplayNameForReceipt(db, order) {
+  const existing = order?.customerName != null ? String(order.customerName).trim() : "";
+  if (existing) return existing;
+  const cid = order?.customerId != null ? String(order.customerId).trim() : "";
+  if (!cid) return "";
+  try {
+    const snap = await db.collection("Customers").doc(cid).get();
+    if (!snap.exists) return "";
+    const d = snap.data() || {};
+    const first = String(d.firstName ?? "").trim();
+    const last = String(d.lastName ?? "").trim();
+    const composed = `${first} ${last}`.trim();
+    if (composed) return composed;
+    const nm = String(d.name ?? "").trim();
+    return nm || "";
+  } catch (e) {
+    logger.warn("resolveCustomerDisplayNameForReceipt failed", { cid, err: e.message });
+    return "";
+  }
+}
+
 function orderMetaSection(order) {
   const orderNumber = order.orderNumber ?? "";
   const orderType = order.orderType ?? "";
   const employeeName = order.employeeName ?? "";
+  const customerName = order.customerName != null ? String(order.customerName).trim() : "";
   const typeLabel = ORDER_TYPE_LABELS[orderType] || orderType || "";
   const typeColor = ORDER_TYPE_COLORS[orderType] || "#757575";
 
@@ -154,6 +181,7 @@ function orderMetaSection(order) {
   if (dateStr) rows.push(row("Date:", escapeHtml(dateStr)));
   if (timeStr) rows.push(row("Time:", escapeHtml(timeStr)));
   if (employeeName) rows.push(row("Cashier:", escapeHtml(employeeName)));
+  if (customerName) rows.push(row("Customer:", escapeHtml(customerName)));
 
   if (rows.length === 0) return "";
 
@@ -695,6 +723,346 @@ function receiptTitleHtml(title) {
   return `<div style="text-align:center;margin:4px 0 14px 0;font-weight:bold;font-size:17px;letter-spacing:0.5px;color:#222;">${escapeHtml(title)}</div>`;
 }
 
+/** Same HTML document as standard (non-split) email receipt — used by sendReceiptEmail and getReceiptEmailPreview. */
+async function composeStandardReceiptWrappedHtml(db, orderId) {
+  const biz = await fetchBusinessInfo(db);
+  const orderRef = db.collection("Orders").doc(orderId);
+  const orderDoc = await orderRef.get();
+  if (!orderDoc.exists) {
+    const e = new Error("Order not found.");
+    e.code = "NOT_FOUND";
+    throw e;
+  }
+  const order = orderDoc.data();
+  const resolvedCustomerName = await resolveCustomerDisplayNameForReceipt(db, order);
+  const orderWithCustomer = {
+    ...order,
+    customerName: resolvedCustomerName || (order.customerName != null ? String(order.customerName).trim() : "") || "",
+  };
+
+  const totalInCents = order.totalInCents ?? 0;
+  const tipAmountInCents = order.tipAmountInCents ?? 0;
+  const taxBreakdown = order.taxBreakdown ?? [];
+  const discountInCents = order.discountInCents ?? 0;
+  const appliedDiscounts = order.appliedDiscounts ?? [];
+
+  const itemsSnap = await orderRef.collection("items").get();
+  const { items, subtotalInCents } = parseItems(itemsSnap);
+  const taxInCents = parseTax(taxBreakdown);
+  const tipConfig = await fetchTipConfig(db);
+  const saleTxSnap = await fetchSaleTransactionForOrder(db, orderId, order);
+  const txData = saleTxSnap ? saleTxSnap.data() : null;
+  const payments = txData && txData.payments && txData.payments.length > 0
+    ? txData.payments
+    : await fetchSalePayments(db, orderId);
+
+  const subtotal = subtotalInCents / 100;
+  const tax = taxInCents / 100;
+  const tip = tipAmountInCents / 100;
+  const total = totalInCents / 100;
+
+  const body =
+    brandedHeader(biz) +
+    receiptTitleHtml("RECEIPT") +
+    orderMetaSection(orderWithCustomer) +
+    itemsTableHtml(items, false, appliedDiscounts) +
+    totalsHtml({
+      subtotal,
+      tax,
+      taxBreakdown,
+      tip,
+      total,
+      discountInCents,
+      appliedDiscounts,
+      tipConfig,
+      tipAmountInCents,
+      omitTipLine: true,
+    }) +
+    paymentHtml(payments) +
+    footerHtml();
+
+  return wrapEmail(body);
+}
+
+/** Same HTML as void email receipt. */
+async function composeVoidReceiptWrappedHtml(db, orderId) {
+  const biz = await fetchBusinessInfo(db);
+  const orderDoc = await db.collection("Orders").doc(orderId).get();
+  if (!orderDoc.exists) {
+    const e = new Error("Order not found.");
+    e.code = "NOT_FOUND";
+    throw e;
+  }
+  const order = orderDoc.data();
+  const resolvedCustomerName = await resolveCustomerDisplayNameForReceipt(db, order);
+  const orderWithCustomer = {
+    ...order,
+    customerName: resolvedCustomerName || (order.customerName != null ? String(order.customerName).trim() : "") || "",
+  };
+  const totalInCents = order.totalInCents ?? 0;
+  const tipAmountInCents = order.tipAmountInCents ?? 0;
+  const taxBreakdown = order.taxBreakdown ?? [];
+  const discountInCents = order.discountInCents ?? 0;
+  const appliedDiscounts = order.appliedDiscounts ?? [];
+  const total = totalInCents / 100;
+
+  const voidedBy = order.voidedBy ?? "";
+  const voidedAt = parseTimestamp(order.voidedAt);
+  const voidedAtStr = voidedAt ? voidedAt.toLocaleString("en-US", { timeZone: BUSINESS_TIMEZONE }) : "";
+
+  const itemsSnap = await db.collection("Orders").doc(orderId).collection("items").get();
+  const { items, subtotalInCents } = parseItems(itemsSnap);
+  const taxInCents = parseTax(taxBreakdown);
+  const tipConfig = await fetchTipConfig(db);
+  const saleTxSnap = await fetchSaleTransactionForOrder(db, orderId, order);
+  const txData = saleTxSnap ? saleTxSnap.data() : null;
+  const payments = txData && txData.payments && txData.payments.length > 0
+    ? txData.payments
+    : await fetchSalePayments(db, orderId);
+
+  const subtotal = subtotalInCents / 100;
+  const tax = taxInCents / 100;
+  const tip = tipAmountInCents / 100;
+
+  let voidMeta = "";
+  if (voidedBy || voidedAtStr) {
+    voidMeta += '<div style="text-align:center;margin-bottom:12px;font-size:14px;color:#777;">';
+    if (voidedBy) voidMeta += `Voided by: ${escapeHtml(voidedBy)}<br>`;
+    if (voidedAtStr) voidMeta += escapeHtml(voidedAtStr);
+    voidMeta += "</div>";
+  }
+
+  const body =
+    brandedHeader(biz) +
+    statusBadge("VOIDED", "#D32F2F") +
+    receiptTitleHtml("VOID RECEIPT") +
+    voidMeta +
+    orderMetaSection(orderWithCustomer) +
+    itemsTableHtml(items, true, appliedDiscounts) +
+    totalsHtml({
+      subtotal,
+      tax,
+      taxBreakdown,
+      tip,
+      total,
+      totalStrike: true,
+      discountInCents,
+      appliedDiscounts,
+      tipConfig,
+      tipAmountInCents,
+      omitTipLine: true,
+    }) +
+    paymentHtml(payments) +
+    footerHtml('<span style="color:#D32F2F;">This transaction has been voided.</span>');
+
+  return wrapEmail(body);
+}
+
+/**
+ * Same HTML as refund email receipt.
+ * @param {string} [transactionId] Original sale transaction id (REFUND docs use originalReferenceId).
+ */
+async function composeRefundReceiptWrappedHtml(db, orderId, transactionId) {
+  const biz = await fetchBusinessInfo(db);
+  const orderDoc = await db.collection("Orders").doc(orderId).get();
+  if (!orderDoc.exists) {
+    const e = new Error("Order not found.");
+    e.code = "NOT_FOUND";
+    throw e;
+  }
+
+  const order = orderDoc.data();
+  const totalInCents = order.totalInCents ?? 0;
+  const totalRefundedInCents = order.totalRefundedInCents ?? 0;
+  const taxBreakdown = order.taxBreakdown ?? [];
+
+  const itemsSnap = await db.collection("Orders").doc(orderId).collection("items").get();
+  const { items, subtotalInCents } = parseItems(itemsSnap);
+
+  let refundAmountCents = 0;
+  let refundedBy = "";
+  let allRefundDocs = [];
+
+  if (transactionId) {
+    const refundSnap = await db
+      .collection("Transactions")
+      .where("type", "==", "REFUND")
+      .where("originalReferenceId", "==", transactionId)
+      .get();
+
+    if (!refundSnap.empty) {
+      allRefundDocs = refundSnap.docs;
+      const sorted = [...refundSnap.docs].sort((a, b) => {
+        const aTime = a.data().createdAt?.toMillis?.() ?? a.data().createdAt?._seconds ?? 0;
+        const bTime = b.data().createdAt?.toMillis?.() ?? b.data().createdAt?._seconds ?? 0;
+        return bTime - aTime;
+      });
+      const refundDoc = sorted[0].data();
+      refundAmountCents = refundDoc.amountInCents ?? Math.round((refundDoc.amount ?? 0) * 100);
+      refundedBy = refundDoc.refundedBy ?? "";
+    }
+  }
+
+  if (refundAmountCents === 0) {
+    refundAmountCents = totalRefundedInCents > 0 ? totalRefundedInCents : totalInCents;
+  }
+
+  const refundAmount = refundAmountCents / 100;
+
+  const itemById = {};
+  const itemByName = {};
+  items.forEach((item) => {
+    if (item.lineKey) itemById[item.lineKey] = item;
+    if (!itemByName[item.name]) itemByName[item.name] = [];
+    itemByName[item.name].push(item);
+  });
+
+  const refundedItems = [];
+  for (const rd of allRefundDocs) {
+    const rdData = rd.data();
+    const rdAmount = rdData.amountInCents ?? Math.round((rdData.amount ?? 0) * 100);
+    const lineKey = rdData.refundedLineKey || "";
+    const rdItemName = (rdData.refundedItemName || "").trim();
+
+    let matched = null;
+    if (lineKey) matched = itemById[lineKey] || null;
+    else if (rdItemName) matched = (itemByName[rdItemName] || [])[0] || null;
+
+    if (matched) {
+      refundedItems.push({ name: matched.name, quantity: matched.quantity, baseCents: matched.lineTotalInCents, refundCents: rdAmount });
+    } else if (rdItemName) {
+      refundedItems.push({ name: rdItemName, quantity: 1, baseCents: rdAmount, refundCents: rdAmount });
+    }
+  }
+
+  if (refundedItems.length === 0) {
+    items.forEach((item) => {
+      refundedItems.push({ name: item.name, quantity: item.quantity, baseCents: item.lineTotalInCents, refundCents: item.lineTotalInCents });
+    });
+  }
+
+  let refundSubtotalCents = 0;
+  refundedItems.forEach((ri) => { refundSubtotalCents += ri.baseCents; });
+
+  const saleTxSnapRf = await fetchSaleTransactionForOrder(db, orderId, order);
+  let salePaymentsRf = saleTxSnapRf ? (saleTxSnapRf.data().payments || []) : [];
+  if (salePaymentsRf.length === 0 && allRefundDocs.length > 0) {
+    const latestRefund = [...allRefundDocs].sort((a, b) => {
+      const aTime = a.data().createdAt?.toMillis?.() ?? a.data().createdAt?._seconds ?? 0;
+      const bTime = b.data().createdAt?.toMillis?.() ?? b.data().createdAt?._seconds ?? 0;
+      return bTime - aTime;
+    })[0].data();
+    if (latestRefund.payments && latestRefund.payments.length > 0) {
+      salePaymentsRf = latestRefund.payments;
+    } else if (latestRefund.paymentType || latestRefund.cardBrand) {
+      salePaymentsRf = [{
+        paymentType: latestRefund.paymentType || "Credit",
+        cardBrand: latestRefund.cardBrand || "",
+        last4: latestRefund.last4 || "",
+        authCode: latestRefund.authCode || "",
+        entryType: latestRefund.entryType || "",
+      }];
+    }
+  }
+
+  const orderType = order.orderType ?? "";
+  const typeLabel = ORDER_TYPE_LABELS[orderType] || orderType || "";
+  const typeColor = ORDER_TYPE_COLORS[orderType] || "#757575";
+
+  const titleHtml = receiptTitleHtml("REFUND RECEIPT");
+
+  const orderNumber = order.orderNumber ?? "";
+  const ts = parseTimestamp(order.createdAt);
+  let dateTimeStr = "";
+  if (ts) {
+    dateTimeStr = ts.toLocaleDateString("en-US", { timeZone: BUSINESS_TIMEZONE, month: "2-digit", day: "2-digit", year: "numeric" }) +
+      " " + ts.toLocaleTimeString("en-US", { timeZone: BUSINESS_TIMEZONE, hour: "numeric", minute: "2-digit", hour12: true });
+  }
+  let orderInfoHtml = '<div style="text-align:center;font-size:14px;color:#333;margin-bottom:4px;">';
+  if (orderNumber) orderInfoHtml += `<div style="font-weight:bold;">Order #${escapeHtml(String(orderNumber))}</div>`;
+  if (dateTimeStr) orderInfoHtml += `<div>Date: ${escapeHtml(dateTimeStr)}</div>`;
+  if (refundedBy) orderInfoHtml += `<div>Refunded by: ${escapeHtml(refundedBy)}</div>`;
+  if (typeLabel) {
+    orderInfoHtml += `<div style="margin-top:6px;"><span style="background:${typeColor};color:#fff;padding:3px 10px;border-radius:4px;font-size:12px;font-weight:bold;display:inline-block;">${escapeHtml(typeLabel)}</span></div>`;
+  }
+  orderInfoHtml += "</div>";
+
+  let riRows = "";
+  refundedItems.forEach((ri) => {
+    const basePrice = (ri.baseCents / 100).toFixed(2);
+    riRows += `<tr>
+        <td style="padding:4px 0;font-size:14px;color:#333;">${escapeHtml(ri.name)}</td>
+        <td style="padding:4px 0;text-align:right;font-size:14px;color:#333;">$${basePrice}</td>
+      </tr>`;
+  });
+  const refundItemsHtml = `
+      <div style="margin-top:16px;">
+        <div style="font-weight:bold;font-size:14px;color:#333;margin-bottom:4px;">Refunded Items:</div>
+        <hr style="border:none;border-top:1px dashed #999;margin:0 0 8px 0;">
+        <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
+          ${riRows}
+        </table>
+      </div>`;
+
+  let taxRowsHtml = "";
+  if (Array.isArray(taxBreakdown) && taxBreakdown.length > 0) {
+    taxBreakdown.forEach((entry) => {
+      const taxName = entry.name || "Tax";
+      const taxType = entry.taxType || "PERCENTAGE";
+      const rate = entry.rate;
+      let prorated;
+      if (taxType === "PERCENTAGE" && rate > 0) {
+        prorated = Math.round(refundSubtotalCents * rate / 100);
+      } else {
+        const orderTaxAmt = entry.amountInCents ?? 0;
+        prorated = subtotalInCents > 0 ? Math.round(orderTaxAmt * refundSubtotalCents / subtotalInCents) : orderTaxAmt;
+      }
+      const taxDollars = (prorated / 100).toFixed(2);
+      let label = taxName;
+      if (taxType === "PERCENTAGE" && rate != null) {
+        const rateStr = rate % 1 === 0 ? rate.toFixed(0) : rate.toFixed(2);
+        label = `${taxName} (${rateStr}%)`;
+      }
+      taxRowsHtml += `<tr>
+          <td style="padding:4px 0;font-size:14px;color:#333;">${escapeHtml(label)}</td>
+          <td style="padding:4px 0;text-align:right;font-size:14px;color:#333;">$${taxDollars}</td>
+        </tr>`;
+    });
+  }
+  const taxesHtml = taxRowsHtml ? `
+      <div style="margin-top:16px;">
+        <div style="font-weight:bold;font-size:14px;color:#333;margin-bottom:4px;">Taxes Refunded:</div>
+        <hr style="border:none;border-top:1px dashed #999;margin:0 0 8px 0;">
+        <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
+          ${taxRowsHtml}
+        </table>
+      </div>` : "";
+
+  const totalRefundHtml = `
+      <div style="margin-top:16px;">
+        <hr style="border:none;border-top:3px double #333;margin:0 0 8px 0;">
+        <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="padding:6px 0;font-size:18px;font-weight:bold;color:#222;">TOTAL REFUND</td>
+            <td style="padding:6px 0;text-align:right;font-size:18px;font-weight:bold;color:#D32F2F;">-$${refundAmount.toFixed(2)}</td>
+          </tr>
+        </table>
+        <hr style="border:none;border-top:3px double #333;margin:8px 0 0 0;">
+      </div>`;
+
+  const body =
+    brandedHeader(biz) +
+    titleHtml +
+    orderInfoHtml +
+    refundItemsHtml +
+    taxesHtml +
+    totalRefundHtml +
+    paymentHtml(salePaymentsRf) +
+    footerHtml();
+
+  return wrapEmail(body);
+}
+
 // ---------------------------------------------------------------------------
 // 1. Standard Receipt
 // ---------------------------------------------------------------------------
@@ -729,6 +1097,11 @@ exports.sendReceiptEmail = onCall(async (request) => {
   }
 
   const order = orderDoc.data();
+  const resolvedCustomerName = await resolveCustomerDisplayNameForReceipt(db, order);
+  const orderWithCustomer = {
+    ...order,
+    customerName: resolvedCustomerName || (order.customerName != null ? String(order.customerName).trim() : "") || "",
+  };
 
   /** Per-guest split receipt: SendGrid HTML (no client share sheet). */
   if (validateSplitReceiptPayload(splitReceipt)) {
@@ -736,7 +1109,7 @@ exports.sendReceiptEmail = onCall(async (request) => {
     const body =
       brandedHeader(biz) +
       receiptTitleHtml("RECEIPT (SPLIT)") +
-      orderMetaSection(order) +
+      orderMetaSection(orderWithCustomer) +
       splitReceiptItemsAndTotalsHtml(splitReceipt, tipConfig) +
       footerHtml();
     const html = wrapEmail(body);
@@ -759,48 +1132,15 @@ exports.sendReceiptEmail = onCall(async (request) => {
     }
   }
 
-  const totalInCents = order.totalInCents ?? 0;
-  const tipAmountInCents = order.tipAmountInCents ?? 0;
-  const taxBreakdown = order.taxBreakdown ?? [];
-  const discountInCents = order.discountInCents ?? 0;
-  const appliedDiscounts = order.appliedDiscounts ?? [];
-
-  const itemsSnap = await orderRef.collection("items").get();
-  const { items, subtotalInCents } = parseItems(itemsSnap);
-  const taxInCents = parseTax(taxBreakdown);
-  const tipConfig = await fetchTipConfig(db);
-  const saleTxSnap = await fetchSaleTransactionForOrder(db, orderId, order);
-  const txData = saleTxSnap ? saleTxSnap.data() : null;
-  const payments = txData && txData.payments && txData.payments.length > 0
-    ? txData.payments
-    : await fetchSalePayments(db, orderId);
-
-  const subtotal = subtotalInCents / 100;
-  const tax = taxInCents / 100;
-  const tip = tipAmountInCents / 100;
-  const total = totalInCents / 100;
-
-  const body =
-    brandedHeader(biz) +
-    receiptTitleHtml("RECEIPT") +
-    orderMetaSection(order) +
-    itemsTableHtml(items, false, appliedDiscounts) +
-    totalsHtml({
-      subtotal,
-      tax,
-      taxBreakdown,
-      tip,
-      total,
-      discountInCents,
-      appliedDiscounts,
-      tipConfig,
-      tipAmountInCents,
-      omitTipLine: true,
-    }) +
-    paymentHtml(payments) +
-    footerHtml();
-
-  const html = wrapEmail(body);
+  let html;
+  try {
+    html = await composeStandardReceiptWrappedHtml(db, orderId);
+  } catch (e) {
+    if (e.code === "NOT_FOUND") {
+      return { success: false, error: "Order not found." };
+    }
+    throw e;
+  }
 
   try {
     await sendGridMail({
@@ -845,71 +1185,21 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  const biz = await fetchBusinessInfo(db);
   const orderDoc = await db.collection("Orders").doc(orderId).get();
-
   if (!orderDoc.exists) {
     return { success: false, error: "Order not found." };
   }
-
   const order = orderDoc.data();
-  const totalInCents = order.totalInCents ?? 0;
-  const tipAmountInCents = order.tipAmountInCents ?? 0;
-  const taxBreakdown = order.taxBreakdown ?? [];
-  const discountInCents = order.discountInCents ?? 0;
-  const appliedDiscounts = order.appliedDiscounts ?? [];
-  const total = totalInCents / 100;
 
-  const voidedBy = order.voidedBy ?? "";
-  const voidedAt = parseTimestamp(order.voidedAt);
-  const voidedAtStr = voidedAt ? voidedAt.toLocaleString("en-US", { timeZone: BUSINESS_TIMEZONE }) : "";
-
-  const itemsSnap = await db.collection("Orders").doc(orderId).collection("items").get();
-  const { items, subtotalInCents } = parseItems(itemsSnap);
-  const taxInCents = parseTax(taxBreakdown);
-  const tipConfig = await fetchTipConfig(db);
-  const saleTxSnap = await fetchSaleTransactionForOrder(db, orderId, order);
-  const txData = saleTxSnap ? saleTxSnap.data() : null;
-  const payments = txData && txData.payments && txData.payments.length > 0
-    ? txData.payments
-    : await fetchSalePayments(db, orderId);
-
-  const subtotal = subtotalInCents / 100;
-  const tax = taxInCents / 100;
-  const tip = tipAmountInCents / 100;
-
-  let voidMeta = "";
-  if (voidedBy || voidedAtStr) {
-    voidMeta += '<div style="text-align:center;margin-bottom:12px;font-size:14px;color:#777;">';
-    if (voidedBy) voidMeta += `Voided by: ${escapeHtml(voidedBy)}<br>`;
-    if (voidedAtStr) voidMeta += escapeHtml(voidedAtStr);
-    voidMeta += "</div>";
+  let html;
+  try {
+    html = await composeVoidReceiptWrappedHtml(db, orderId);
+  } catch (e) {
+    if (e.code === "NOT_FOUND") {
+      return { success: false, error: "Order not found." };
+    }
+    throw e;
   }
-
-  const body =
-    brandedHeader(biz) +
-    statusBadge("VOIDED", "#D32F2F") +
-    receiptTitleHtml("VOID RECEIPT") +
-    voidMeta +
-    orderMetaSection(order) +
-    itemsTableHtml(items, true, appliedDiscounts) +
-    totalsHtml({
-      subtotal,
-      tax,
-      taxBreakdown,
-      tip,
-      total,
-      totalStrike: true,
-      discountInCents,
-      appliedDiscounts,
-      tipConfig,
-      tipAmountInCents,
-      omitTipLine: true,
-    }) +
-    paymentHtml(payments) +
-    footerHtml('<span style="color:#D32F2F;">This transaction has been voided.</span>');
-
-  const html = wrapEmail(body);
 
   try {
     await sendGridMail({
@@ -955,7 +1245,6 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
     }
 
     const db = admin.firestore();
-    const biz = await fetchBusinessInfo(db);
     const orderDoc = await db.collection("Orders").doc(orderId).get();
 
     if (!orderDoc.exists) {
@@ -963,204 +1252,16 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
     }
 
     const order = orderDoc.data();
-    const totalInCents = order.totalInCents ?? 0;
-    const totalRefundedInCents = order.totalRefundedInCents ?? 0;
-    const taxBreakdown = order.taxBreakdown ?? [];
 
-    const itemsSnap = await db.collection("Orders").doc(orderId).collection("items").get();
-    const { items, subtotalInCents } = parseItems(itemsSnap);
-
-    let refundAmountCents = 0;
-    let refundedBy = "";
-    let allRefundDocs = [];
-
-    if (transactionId) {
-      const refundSnap = await db
-        .collection("Transactions")
-        .where("type", "==", "REFUND")
-        .where("originalReferenceId", "==", transactionId)
-        .get();
-
-      if (!refundSnap.empty) {
-        allRefundDocs = refundSnap.docs;
-        const sorted = [...refundSnap.docs].sort((a, b) => {
-          const aTime = a.data().createdAt?.toMillis?.() ?? a.data().createdAt?._seconds ?? 0;
-          const bTime = b.data().createdAt?.toMillis?.() ?? b.data().createdAt?._seconds ?? 0;
-          return bTime - aTime;
-        });
-        const refundDoc = sorted[0].data();
-        refundAmountCents = refundDoc.amountInCents ?? Math.round((refundDoc.amount ?? 0) * 100);
-        refundedBy = refundDoc.refundedBy ?? "";
+    let html;
+    try {
+      html = await composeRefundReceiptWrappedHtml(db, orderId, transactionId);
+    } catch (e) {
+      if (e.code === "NOT_FOUND") {
+        return { success: false, error: "Order not found." };
       }
+      throw e;
     }
-
-    if (refundAmountCents === 0) {
-      refundAmountCents = totalRefundedInCents > 0 ? totalRefundedInCents : totalInCents;
-    }
-
-    const refundAmount = refundAmountCents / 100;
-
-    // Build refunded items list matched to order items for base prices
-    const itemById = {};
-    const itemByName = {};
-    items.forEach((item) => {
-      if (item.lineKey) itemById[item.lineKey] = item;
-      if (!itemByName[item.name]) itemByName[item.name] = [];
-      itemByName[item.name].push(item);
-    });
-
-    const refundedItems = [];
-    for (const rd of allRefundDocs) {
-      const rdData = rd.data();
-      const rdAmount = rdData.amountInCents ?? Math.round((rdData.amount ?? 0) * 100);
-      const lineKey = rdData.refundedLineKey || "";
-      const rdItemName = (rdData.refundedItemName || "").trim();
-
-      let matched = null;
-      if (lineKey) matched = itemById[lineKey] || null;
-      else if (rdItemName) matched = (itemByName[rdItemName] || [])[0] || null;
-
-      if (matched) {
-        refundedItems.push({ name: matched.name, quantity: matched.quantity, baseCents: matched.lineTotalInCents, refundCents: rdAmount });
-      } else if (rdItemName) {
-        refundedItems.push({ name: rdItemName, quantity: 1, baseCents: rdAmount, refundCents: rdAmount });
-      }
-    }
-
-    if (refundedItems.length === 0) {
-      items.forEach((item) => {
-        refundedItems.push({ name: item.name, quantity: item.quantity, baseCents: item.lineTotalInCents, refundCents: item.lineTotalInCents });
-      });
-    }
-
-    let refundSubtotalCents = 0;
-    refundedItems.forEach((ri) => { refundSubtotalCents += ri.baseCents; });
-
-    // Original sale payments (matches thermal refund); fallback to latest refund doc
-    const saleTxSnapRf = await fetchSaleTransactionForOrder(db, orderId, order);
-    let salePaymentsRf = saleTxSnapRf ? (saleTxSnapRf.data().payments || []) : [];
-    if (salePaymentsRf.length === 0 && allRefundDocs.length > 0) {
-      const latestRefund = [...allRefundDocs].sort((a, b) => {
-        const aTime = a.data().createdAt?.toMillis?.() ?? a.data().createdAt?._seconds ?? 0;
-        const bTime = b.data().createdAt?.toMillis?.() ?? b.data().createdAt?._seconds ?? 0;
-        return bTime - aTime;
-      })[0].data();
-      if (latestRefund.payments && latestRefund.payments.length > 0) {
-        salePaymentsRf = latestRefund.payments;
-      } else if (latestRefund.paymentType || latestRefund.cardBrand) {
-        salePaymentsRf = [{
-          paymentType: latestRefund.paymentType || "Credit",
-          cardBrand: latestRefund.cardBrand || "",
-          last4: latestRefund.last4 || "",
-          authCode: latestRefund.authCode || "",
-          entryType: latestRefund.entryType || "",
-        }];
-      }
-    }
-
-    // Order type color badge
-    const orderType = order.orderType ?? "";
-    const typeLabel = ORDER_TYPE_LABELS[orderType] || orderType || "";
-    const typeColor = ORDER_TYPE_COLORS[orderType] || "#757575";
-
-    // --- Build email body matching printed receipt layout ---
-
-    const titleHtml = receiptTitleHtml("REFUND RECEIPT");
-
-    // Order # and Date (centered, like printed receipt)
-    const orderNumber = order.orderNumber ?? "";
-    const ts = parseTimestamp(order.createdAt);
-    let dateTimeStr = "";
-    if (ts) {
-      dateTimeStr = ts.toLocaleDateString("en-US", { timeZone: BUSINESS_TIMEZONE, month: "2-digit", day: "2-digit", year: "numeric" }) +
-        " " + ts.toLocaleTimeString("en-US", { timeZone: BUSINESS_TIMEZONE, hour: "numeric", minute: "2-digit", hour12: true });
-    }
-    let orderInfoHtml = '<div style="text-align:center;font-size:14px;color:#333;margin-bottom:4px;">';
-    if (orderNumber) orderInfoHtml += `<div style="font-weight:bold;">Order #${escapeHtml(String(orderNumber))}</div>`;
-    if (dateTimeStr) orderInfoHtml += `<div>Date: ${escapeHtml(dateTimeStr)}</div>`;
-    if (refundedBy) orderInfoHtml += `<div>Refunded by: ${escapeHtml(refundedBy)}</div>`;
-    if (typeLabel) {
-      orderInfoHtml += `<div style="margin-top:6px;"><span style="background:${typeColor};color:#fff;padding:3px 10px;border-radius:4px;font-size:12px;font-weight:bold;display:inline-block;">${escapeHtml(typeLabel)}</span></div>`;
-    }
-    orderInfoHtml += "</div>";
-
-    // Refunded Items section
-    let riRows = "";
-    refundedItems.forEach((ri) => {
-      const basePrice = (ri.baseCents / 100).toFixed(2);
-      riRows += `<tr>
-        <td style="padding:4px 0;font-size:14px;color:#333;">${escapeHtml(ri.name)}</td>
-        <td style="padding:4px 0;text-align:right;font-size:14px;color:#333;">$${basePrice}</td>
-      </tr>`;
-    });
-    const refundItemsHtml = `
-      <div style="margin-top:16px;">
-        <div style="font-weight:bold;font-size:14px;color:#333;margin-bottom:4px;">Refunded Items:</div>
-        <hr style="border:none;border-top:1px dashed #999;margin:0 0 8px 0;">
-        <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
-          ${riRows}
-        </table>
-      </div>`;
-
-    // Taxes Refunded section
-    let taxRowsHtml = "";
-    if (Array.isArray(taxBreakdown) && taxBreakdown.length > 0) {
-      taxBreakdown.forEach((entry) => {
-        const taxName = entry.name || "Tax";
-        const taxType = entry.taxType || "PERCENTAGE";
-        const rate = entry.rate;
-        let prorated;
-        if (taxType === "PERCENTAGE" && rate > 0) {
-          prorated = Math.round(refundSubtotalCents * rate / 100);
-        } else {
-          const orderTaxAmt = entry.amountInCents ?? 0;
-          prorated = subtotalInCents > 0 ? Math.round(orderTaxAmt * refundSubtotalCents / subtotalInCents) : orderTaxAmt;
-        }
-        const taxDollars = (prorated / 100).toFixed(2);
-        let label = taxName;
-        if (taxType === "PERCENTAGE" && rate != null) {
-          const rateStr = rate % 1 === 0 ? rate.toFixed(0) : rate.toFixed(2);
-          label = `${taxName} (${rateStr}%)`;
-        }
-        taxRowsHtml += `<tr>
-          <td style="padding:4px 0;font-size:14px;color:#333;">${escapeHtml(label)}</td>
-          <td style="padding:4px 0;text-align:right;font-size:14px;color:#333;">$${taxDollars}</td>
-        </tr>`;
-      });
-    }
-    const taxesHtml = taxRowsHtml ? `
-      <div style="margin-top:16px;">
-        <div style="font-weight:bold;font-size:14px;color:#333;margin-bottom:4px;">Taxes Refunded:</div>
-        <hr style="border:none;border-top:1px dashed #999;margin:0 0 8px 0;">
-        <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
-          ${taxRowsHtml}
-        </table>
-      </div>` : "";
-
-    // TOTAL REFUND section
-    const totalRefundHtml = `
-      <div style="margin-top:16px;">
-        <hr style="border:none;border-top:3px double #333;margin:0 0 8px 0;">
-        <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
-          <tr>
-            <td style="padding:6px 0;font-size:18px;font-weight:bold;color:#222;">TOTAL REFUND</td>
-            <td style="padding:6px 0;text-align:right;font-size:18px;font-weight:bold;color:#D32F2F;">-$${refundAmount.toFixed(2)}</td>
-          </tr>
-        </table>
-        <hr style="border:none;border-top:3px double #333;margin:8px 0 0 0;">
-      </div>`;
-
-    const body =
-      brandedHeader(biz) +
-      titleHtml +
-      orderInfoHtml +
-      refundItemsHtml +
-      taxesHtml +
-      totalRefundHtml +
-      paymentHtml(salePaymentsRf) +
-      footerHtml();
-
-    const html = wrapEmail(body);
 
     try {
       await sendGridMail({
@@ -1181,6 +1282,43 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
   } catch (error) {
     logger.error("sendRefundReceiptEmail error:", error.message, error);
     return { success: false, error: error.message || "An unexpected error occurred." };
+  }
+});
+
+/**
+ * Web dashboard: returns the same HTML document as the emailed receipt (no SendGrid).
+ * @param {string} orderId
+ * @param {"standard"|"void"|"refund"} [receiptKind] default standard
+ * @param {string} [saleTransactionId] For refund receipts: original sale transaction id (REFUND.originalReferenceId).
+ */
+exports.getReceiptEmailPreview = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    return { success: false, error: "You must be signed in to view a receipt." };
+  }
+  const { orderId, receiptKind, saleTransactionId } = request.data || {};
+  if (!orderId) {
+    return { success: false, error: "orderId is required." };
+  }
+  const kind = String(receiptKind || "standard").toLowerCase();
+  const db = admin.firestore();
+
+  try {
+    if (kind === "void") {
+      const html = await composeVoidReceiptWrappedHtml(db, orderId);
+      return { success: true, html };
+    }
+    if (kind === "refund") {
+      const html = await composeRefundReceiptWrappedHtml(db, orderId, saleTransactionId || "");
+      return { success: true, html };
+    }
+    const html = await composeStandardReceiptWrappedHtml(db, orderId);
+    return { success: true, html };
+  } catch (e) {
+    if (e.code === "NOT_FOUND") {
+      return { success: false, error: "Order not found." };
+    }
+    logger.error("getReceiptEmailPreview", e);
+    return { success: false, error: e.message || "Failed to build receipt." };
   }
 });
 

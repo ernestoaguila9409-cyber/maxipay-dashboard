@@ -95,11 +95,13 @@ class CustomersActivity : AppCompatActivity() {
                     } else {
                         name
                     }
+                    val visitCount = (doc.getLong("visitCount") ?: 0L).toInt().coerceAtLeast(0)
                     CustomerItem(
                         id = doc.id,
                         name = fullName,
                         phone = phone,
-                        email = email
+                        email = email,
+                        visitCount = visitCount,
                     )
                 }
                 adapter.submitList(items)

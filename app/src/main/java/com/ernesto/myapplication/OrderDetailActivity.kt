@@ -37,6 +37,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
+import com.ernesto.myapplication.SessionEmployee
 import com.ernesto.myapplication.engine.OrderEngine
 import com.ernesto.myapplication.engine.SplitReceiptPayload
 import com.ernesto.myapplication.engine.SplitReceiptReprintHelper

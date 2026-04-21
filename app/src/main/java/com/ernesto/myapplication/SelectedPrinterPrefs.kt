@@ -92,8 +92,11 @@ object SelectedPrinterPrefs {
                 removedAny = true
             }
         }
-        if (removedAny && broadcastChange) {
-            sendPrintersPrefsChangedBroadcast(context.applicationContext, ip)
+        if (removedAny) {
+            if (broadcastChange) {
+                sendPrintersPrefsChangedBroadcast(context.applicationContext, ip)
+            }
+            MenuItemRoutingLabelCleanup.syncMenuItemLabelsToSavedPrinters(context.applicationContext)
         }
     }
 
