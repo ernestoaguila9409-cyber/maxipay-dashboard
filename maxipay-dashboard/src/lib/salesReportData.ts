@@ -10,7 +10,10 @@ import {
   type QuerySnapshot,
 } from "firebase/firestore";
 
-import { buildDailySalesPoints } from "@/lib/dashboardFinance";
+import {
+  buildDailySalesPoints,
+  orderRevenueCentsForMetrics,
+} from "@/lib/dashboardFinance";
 import { parseCreatedAt } from "@/lib/orderDisplayUtils";
 import { db } from "@/firebase/firebaseConfig";
 import { formatCategoryDisplayName } from "@/lib/categoryNameUtils";
@@ -51,9 +54,7 @@ export interface SalesReportPayload {
 }
 
 function orderPaidCents(data: Record<string, unknown>): number {
-  const paid = Math.round(Number(data.totalPaidInCents ?? 0));
-  const totalIn = Math.round(Number(data.totalInCents ?? 0));
-  return paid > 0 ? paid : totalIn;
+  return orderRevenueCentsForMetrics(data as DocumentData);
 }
 
 function inRangeExclusiveEnd(createdAt: Date, start: Date, endExclusive: Date): boolean {

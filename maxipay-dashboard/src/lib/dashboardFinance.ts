@@ -12,6 +12,32 @@ import type { HourlySalesPoint } from "@/components/SalesChart";
 import type { PaymentBreakdownTotals } from "@/components/PaymentBreakdown";
 import { db } from "@/firebase/firebaseConfig";
 
+/**
+ * Revenue from an Order document for dashboard-style KPIs.
+ *
+ * Uses `totalPaidInCents` when money was recorded on the order. For OPEN (and
+ * other in-flight) orders we do **not** fall back to `totalInCents`, otherwise
+ * an unpaid tab or a cancelled terminal attempt still inflates "net sales"
+ * while Finances (from `Transactions`) correctly shows $0 collected.
+ *
+ * For CLOSED / refunded-style orders we still fall back to `totalInCents` when
+ * paid is zero, for rare legacy rows where paid was never backfilled.
+ */
+export function orderRevenueCentsForMetrics(data: DocumentData): number {
+  const status = String(data.status ?? "").toUpperCase();
+  const paid = Math.round(Number(data.totalPaidInCents ?? 0));
+  const totalIn = Math.round(Number(data.totalInCents ?? 0));
+  if (paid > 0) return paid;
+  const settled =
+    status === "CLOSED" ||
+    status === "REFUNDED" ||
+    status === "REFUNDED_FULLY" ||
+    status === "PARTIALLY_REFUNDED" ||
+    status.startsWith("PARTIALLY_");
+  if (settled) return Math.max(0, totalIn);
+  return 0;
+}
+
 /** Start of local calendar day for `base` (00:00:00.000). */
 export function startOfLocalDay(base: Date, dayOffset = 0): Date {
   const d = new Date(base);
@@ -61,7 +87,7 @@ export interface DashboardPeriodTotals {
 
 /**
  * Same rules as the POS dashboard: orders in [start, end] by `createdAt`, excluding VOIDED;
- * net sales uses totalPaidInCents if &gt; 0 else totalInCents.
+ * net sales uses [orderRevenueCentsForMetrics] (paid amounts; no unpaid-tab fallback for OPEN).
  */
 export function aggregateDashboardPeriod(
   snapshot: QuerySnapshot<DocumentData>,
@@ -85,9 +111,7 @@ export function aggregateDashboardPeriod(
     }
 
     orderCount += 1;
-    const paid = Number(data.totalPaidInCents ?? 0);
-    const totalIn = Number(data.totalInCents ?? 0);
-    totalSalesCents += paid > 0 ? paid : totalIn;
+    totalSalesCents += orderRevenueCentsForMetrics(data);
     totalRefundsCents += Number(data.totalRefundedInCents ?? 0);
     const sid = String(data.saleTransactionId ?? "").trim();
     if (sid) {
@@ -155,9 +179,7 @@ export function buildHourlySalesPoints(
     if (String(data.status ?? "") === "VOIDED") {
       return;
     }
-    const paid = Number(data.totalPaidInCents ?? 0);
-    const totalIn = Number(data.totalInCents ?? 0);
-    const cents = paid > 0 ? paid : totalIn;
+    const cents = orderRevenueCentsForMetrics(data);
     const hour = createdAt.getHours();
     amounts[hour] += cents / 100;
   });
@@ -191,9 +213,7 @@ export function buildDailySalesPoints(
     if (!amounts.has(key)) {
       return;
     }
-    const paid = Number(data.totalPaidInCents ?? 0);
-    const totalIn = Number(data.totalInCents ?? 0);
-    const cents = paid > 0 ? paid : totalIn;
+    const cents = orderRevenueCentsForMetrics(data);
     amounts.set(key, (amounts.get(key) ?? 0) + cents / 100);
   });
 

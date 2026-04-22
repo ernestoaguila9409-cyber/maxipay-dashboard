@@ -8,6 +8,7 @@ import {
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { orderRevenueCentsForMetrics } from "@/lib/dashboardFinance";
 
 export interface DailySalesSummary {
   grossSalesCents: number;
@@ -277,9 +278,7 @@ export async function getSalesByOrderType(
     const data = doc.data();
     if (String(data.status ?? "") === "VOIDED") continue;
     const orderType = String(data.orderType ?? "");
-    const paid =
-      Math.round(Number(data.totalPaidInCents ?? 0)) ||
-      Math.round(Number(data.totalInCents ?? 0));
+    const paid = orderRevenueCentsForMetrics(data);
     if (paid <= 0) continue;
     switch (orderType) {
       case "DINE_IN":
@@ -313,9 +312,7 @@ export async function getHourlySales(
   snap.forEach((doc) => {
     const data = doc.data();
     const createdAt = data.createdAt?.toDate?.() ?? new Date();
-    const paid =
-      Math.round(Number(data.totalPaidInCents ?? 0)) ||
-      Math.round(Number(data.totalInCents ?? 0));
+    const paid = orderRevenueCentsForMetrics(data);
     if (paid <= 0) return;
     const hour = createdAt.getHours();
     const cur = hourMap.get(hour) ?? { cents: 0, count: 0 };
@@ -403,9 +400,7 @@ export async function getEmployeeMetrics(
       if (!emp) continue;
       orderEmployee.set(doc.id, emp);
       const a = accum(emp);
-      const paid =
-        Math.round(Number(data.totalPaidInCents ?? 0)) ||
-        Math.round(Number(data.totalInCents ?? 0));
+      const paid = orderRevenueCentsForMetrics(data);
       a.salesCents += paid;
       a.orderCount++;
       const tip = Math.round(Number(data.tipAmountInCents ?? 0));
