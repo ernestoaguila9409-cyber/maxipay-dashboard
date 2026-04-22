@@ -77,6 +77,7 @@ const navItems: NavItem[] = [
       { label: "Table Layout", href: "/dashboard/settings/table-layout", icon: LayoutTemplate },
       { label: "Taxes", href: "/dashboard/taxes", icon: Receipt },
       { label: "Discounts", href: "/dashboard/discounts", icon: Tags },
+      { label: "Payments", href: "/dashboard/payments", icon: CreditCard },
       { label: "KDS", href: "/dashboard/settings/kds", icon: Monitor },
       { label: "Customize Dashboard", href: "/dashboard/settings/customize-dashboard", icon: LayoutGrid },
     ],
