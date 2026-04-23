@@ -351,15 +351,8 @@ export default function PaymentsPage() {
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <p className="text-sm text-slate-500 max-w-2xl">
-              Configure the payment terminals used by the POS. Each terminal
-              chooses its provider (SPIn today, more later) and stores the
-              credentials that device needs to process payments. The POS column
-              shows when a signed-in register last reported SPIn reachability for
-              that terminal (its active selection).
-            </p>
             {migrationMsg && (
-              <p className="mt-2 text-xs text-slate-500">{migrationMsg}</p>
+              <p className="text-xs text-slate-500">{migrationMsg}</p>
             )}
           </div>
           <div className="flex items-center gap-2">

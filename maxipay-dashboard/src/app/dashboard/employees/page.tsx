@@ -271,10 +271,34 @@ export default function EmployeesPage() {
     return true;
   };
 
+  /** Emails are stored lowercase; at most one employee per account may use a given email. */
+  const validateEmailUnique = async (
+    normalizedEmail: string,
+    excludeId?: string
+  ): Promise<boolean> => {
+    if (!normalizedEmail) {
+      setEmailError("");
+      return true;
+    }
+    const q = query(
+      collection(db, "Employees"),
+      where("email", "==", normalizedEmail)
+    );
+    const snap = await getDocs(q);
+    const conflict = snap.docs.some((d) => d.id !== excludeId);
+    if (conflict) {
+      setEmailError("This email is already used by another employee");
+      return false;
+    }
+    setEmailError("");
+    return true;
+  };
+
   const handleSave = async () => {
     const trimName = formName.trim();
     const trimPin = formPin.trim();
     const trimEmail = formEmail.trim();
+    const normalizedEmail = trimEmail ? trimEmail.toLowerCase() : "";
     const trimPhone = formPhone.trim();
     if (!trimName || !trimPin) return;
 
@@ -283,6 +307,9 @@ export default function EmployeesPage() {
       return;
     }
     setEmailError("");
+
+    const emailOk = await validateEmailUnique(normalizedEmail, editTarget?.id);
+    if (!emailOk) return;
 
     const valid = await validatePin(trimPin, editTarget?.id);
     if (!valid) return;
@@ -294,7 +321,7 @@ export default function EmployeesPage() {
           name: trimName,
           pin: trimPin,
           role: formRole,
-          email: trimEmail ? trimEmail : deleteField(),
+          email: normalizedEmail ? normalizedEmail : deleteField(),
           phone: trimPhone ? trimPhone : deleteField(),
         });
       } else {
@@ -303,7 +330,7 @@ export default function EmployeesPage() {
           pin: trimPin,
           role: formRole,
           active: true,
-          ...(trimEmail ? { email: trimEmail } : {}),
+          ...(normalizedEmail ? { email: normalizedEmail } : {}),
           ...(trimPhone ? { phone: trimPhone } : {}),
         });
       }
