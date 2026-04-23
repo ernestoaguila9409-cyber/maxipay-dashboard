@@ -27,6 +27,7 @@ import {
   LayoutTemplate,
   Monitor,
   Contact,
+  ShoppingBag,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
@@ -78,6 +79,7 @@ const navItems: NavItem[] = [
       { label: "Taxes", href: "/dashboard/taxes", icon: Receipt },
       { label: "Discounts", href: "/dashboard/discounts", icon: Tags },
       { label: "Payments", href: "/dashboard/payments", icon: CreditCard },
+      { label: "Online ordering", href: "/dashboard/settings/online-ordering", icon: ShoppingBag },
       { label: "KDS", href: "/dashboard/settings/kds", icon: Monitor },
       { label: "Customize Dashboard", href: "/dashboard/settings/customize-dashboard", icon: LayoutGrid },
     ],
