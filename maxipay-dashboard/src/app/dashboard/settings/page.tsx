@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/context/AuthContext";
-import { Store, Bell, Shield, Palette, ChevronRight, ShoppingBag, type LucideIcon } from "lucide-react";
+import { Store, Bell, Shield, Palette, ChevronRight, type LucideIcon } from "lucide-react";
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -19,12 +19,6 @@ export default function SettingsPage() {
       title: "Business Information",
       description: "Manage your restaurant name, address, and contact info",
       href: "/dashboard/settings/business",
-    },
-    {
-      icon: ShoppingBag,
-      title: "Online ordering",
-      description: "Public order page — pay at pickup or notify POS for Dejavoo (SPIn)",
-      href: "/dashboard/settings/online-ordering",
     },
     {
       icon: Bell,
