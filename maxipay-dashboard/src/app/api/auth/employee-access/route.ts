@@ -5,7 +5,7 @@ import { getFirebaseAdminApp } from "@/lib/firebaseAdmin";
 export const runtime = "nodejs";
 
 const PUBLIC_MESSAGE =
-  "If that email is linked to an employee account, you will receive a message with instructions to set your password.";
+  "If that exact email is saved on your employee profile, you should receive a message within a few minutes with instructions to set your password. Check spam and junk folders. If nothing arrives, ask an administrator to confirm your profile email matches what you entered (including spelling).";
 
 const RATE_WINDOW_MS = 15 * 60 * 1000;
 const RATE_MAX = 8;
@@ -37,27 +37,68 @@ function normalizeEmail(email: unknown): string | null {
   return t;
 }
 
-async function sendPasswordResetOob(email: string): Promise<boolean> {
+type OobResult = { ok: true } | { ok: false; message: string };
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Triggers Firebase's built-in password-reset email (Identity Toolkit REST).
+ * Treats any `error` object in the JSON body as failure — some failures still use HTTP 200.
+ */
+async function sendPasswordResetOobOnce(email: string): Promise<OobResult> {
   const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
   if (!apiKey) {
     console.error("[employee-access] Missing NEXT_PUBLIC_FIREBASE_API_KEY");
-    return false;
+    return { ok: false, message: "missing_api_key" };
   }
   const url = `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(apiKey)}`;
+  const appOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
+  const payload: Record<string, string> = {
+    requestType: "PASSWORD_RESET",
+    email,
+  };
+  if (appOrigin) {
+    payload.continueUrl = `${appOrigin}/login`;
+  }
+
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      requestType: "PASSWORD_RESET",
-      email,
-    }),
+    body: JSON.stringify(payload),
   });
-  const data = (await res.json()) as { error?: { message?: string } };
-  if (!res.ok) {
-    console.error("[employee-access] sendOobCode failed", data);
-    return false;
+  let data: { error?: { message?: string; status?: string }; email?: string };
+  try {
+    data = (await res.json()) as typeof data;
+  } catch {
+    console.error("[employee-access] sendOobCode: invalid JSON body", res.status);
+    return { ok: false, message: "invalid_response" };
   }
-  return true;
+
+  if (data.error) {
+    const msg = data.error.message ?? "unknown_error";
+    console.error("[employee-access] sendOobCode rejected:", msg, data.error);
+    return { ok: false, message: msg };
+  }
+
+  if (!res.ok) {
+    console.error("[employee-access] sendOobCode HTTP", res.status, data);
+    return { ok: false, message: `http_${res.status}` };
+  }
+
+  return { ok: true };
+}
+
+async function sendPasswordResetOobWithRetries(email: string): Promise<OobResult> {
+  let last: OobResult = { ok: false, message: "no_attempt" };
+  for (let i = 0; i < 3; i++) {
+    if (i > 0) await sleep(1000);
+    last = await sendPasswordResetOobOnce(email);
+    if (last.ok) return last;
+    if (last.message === "OPERATION_NOT_ALLOWED") break;
+  }
+  return last;
 }
 
 /**
@@ -93,6 +134,11 @@ export async function POST(req: Request) {
       .get();
 
     if (snap.empty) {
+      console.info(
+        "[employee-access] No Firestore Employees document with field email =",
+        normalized,
+        "(password reset is not sent; fix the profile email or spelling.)"
+      );
       return NextResponse.json({ ok: true, message: PUBLIC_MESSAGE });
     }
 
@@ -105,6 +151,7 @@ export async function POST(req: Request) {
     }
 
     const auth = admin.auth();
+    let createdAuthUser = false;
     try {
       await auth.getUserByEmail(normalized);
     } catch (e: unknown) {
@@ -118,6 +165,7 @@ export async function POST(req: Request) {
             email: normalized,
             emailVerified: false,
           });
+          createdAuthUser = true;
         } catch (e2: unknown) {
           const c2 =
             e2 && typeof e2 === "object" && "code" in e2
@@ -130,13 +178,26 @@ export async function POST(req: Request) {
       }
     }
 
-    const sent = await sendPasswordResetOob(normalized);
-    if (!sent) {
+    if (createdAuthUser) {
+      await sleep(800);
+    }
+
+    const sent = await sendPasswordResetOobWithRetries(normalized);
+    if (!sent.ok) {
+      console.error("[employee-access] Password reset email not sent:", sent.message);
+      const userMsg =
+        sent.message === "OPERATION_NOT_ALLOWED"
+          ? "Password sign-in or password reset is disabled in Firebase. An administrator must enable Email/Password in Firebase Authentication."
+          : sent.message === "TOO_MANY_ATTEMPTS_TRY_LATER" ||
+              sent.message === "RESET_PASSWORD_EXCEED_LIMIT"
+            ? "Too many reset attempts for this email. Wait a while and try again."
+            : "We could not send the reset email. Confirm NEXT_PUBLIC_FIREBASE_API_KEY matches this Firebase project, then try again or contact support.";
       return NextResponse.json(
         {
           ok: false,
           error: "send_failed",
-          message: "We could not send the email right now. Please try again in a few minutes.",
+          message: userMsg,
+          detail: sent.message,
         },
         { status: 503 }
       );

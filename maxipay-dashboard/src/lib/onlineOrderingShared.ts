@@ -15,13 +15,31 @@ export interface OnlineOrderingSettings {
   allowPayInStore: boolean;
   /** Customer asks to pay by card; POS is notified to run SPIn on the terminal. */
   allowRequestTerminalFromWeb: boolean;
+  /**
+   * When true, the public online menu only lists items allowed by
+   * [onlineMenuCategoryIds] / [onlineMenuItemIds]. When false, legacy
+   * `MenuItems.channels.online` controls visibility.
+   */
+  onlineMenuCurationEnabled: boolean;
+  /** Selecting a category includes every item placed in that category. */
+  onlineMenuCategoryIds: string[];
+  /** Extra items to include when their category is not fully selected. */
+  onlineMenuItemIds: string[];
 }
 
 export const DEFAULT_ONLINE_ORDERING_SETTINGS: OnlineOrderingSettings = {
   enabled: false,
   allowPayInStore: true,
   allowRequestTerminalFromWeb: false,
+  onlineMenuCurationEnabled: false,
+  onlineMenuCategoryIds: [],
+  onlineMenuItemIds: [],
 };
+
+function parseStringIdArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x): x is string => typeof x === "string" && x.trim().length > 0);
+}
 
 export function parseOnlineOrderingSettings(
   data: Record<string, unknown> | undefined
@@ -34,5 +52,8 @@ export function parseOnlineOrderingSettings(
     allowRequestTerminalFromWeb:
       data.allowRequestTerminalFromWeb === true ||
       legacyStripe,
+    onlineMenuCurationEnabled: data.onlineMenuCurationEnabled === true,
+    onlineMenuCategoryIds: parseStringIdArray(data.onlineMenuCategoryIds),
+    onlineMenuItemIds: parseStringIdArray(data.onlineMenuItemIds),
   };
 }

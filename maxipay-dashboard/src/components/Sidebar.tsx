@@ -28,6 +28,7 @@ import {
   Monitor,
   Contact,
   ShoppingBag,
+  Globe,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
@@ -50,6 +51,7 @@ const navItems: NavItem[] = [
     children: [
       { label: "Menus", href: "/dashboard/menus", icon: CalendarClock },
       { label: "Modifiers", href: "/dashboard/modifiers", icon: SlidersHorizontal },
+      { label: "Online menu", href: "/dashboard/menu/online", icon: Globe },
     ],
   },
   { label: "Employees", href: "/dashboard/employees", icon: Users },

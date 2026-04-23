@@ -9,6 +9,10 @@ import {
   type OnlineOrderingSettings,
   type OnlinePaymentChoice,
 } from "@/lib/onlineOrderingShared";
+import {
+  isMenuItemVisibleOnOnlineChannel,
+  menuItemPlacementCategoryIds,
+} from "@/lib/onlineMenuCuration";
 
 export type { OnlineOrderingSettings, OnlinePaymentChoice };
 export {
@@ -56,9 +60,8 @@ function menuItemOnlinePriceCents(data: DocumentData): number {
   return Math.round(legacy * 100);
 }
 
-function isOnlineChannelOn(data: DocumentData): boolean {
-  const ch = data.channels as Record<string, unknown> | undefined;
-  return ch?.online === true;
+function asRecord(data: DocumentData): Record<string, unknown> {
+  return data as unknown as Record<string, unknown>;
 }
 
 export async function loadPublicOnlineOrderingConfig(
@@ -71,7 +74,9 @@ export async function loadPublicOnlineOrderingConfig(
   const bizName =
     (bizSnap.exists ? bizSnap.get("businessName") : null)?.toString().trim() ||
     "Restaurant";
-  const oo = parseOnlineOrderingSettings(ooSnap.data());
+  const oo = parseOnlineOrderingSettings(
+    ooSnap.data() as Record<string, unknown> | undefined
+  );
   return {
     enabled: oo.enabled,
     businessName: bizName,
@@ -83,10 +88,14 @@ export async function loadPublicOnlineOrderingConfig(
 export async function loadOnlineMenu(
   db: Firestore
 ): Promise<{ categories: OnlineMenuCategory[]; items: OnlineMenuItem[] }> {
-  const [catSnap, itemSnap] = await Promise.all([
+  const [catSnap, itemSnap, ooSnap] = await Promise.all([
     db.collection("Categories").get(),
     db.collection("MenuItems").get(),
+    db.collection(SETTINGS_COLLECTION).doc(ONLINE_ORDERING_SETTINGS_DOC).get(),
   ]);
+  const oo = parseOnlineOrderingSettings(
+    ooSnap.data() as Record<string, unknown> | undefined
+  );
 
   const categories: OnlineMenuCategory[] = catSnap.docs.map((d) => {
     const data = d.data();
@@ -101,11 +110,10 @@ export async function loadOnlineMenu(
   const items: OnlineMenuItem[] = [];
   for (const d of itemSnap.docs) {
     const data = d.data();
-    if (!isOnlineChannelOn(data)) continue;
+    const rec = asRecord(data);
+    if (!isMenuItemVisibleOnOnlineChannel(d.id, rec, oo)) continue;
     const unitPriceCents = menuItemOnlinePriceCents(data);
-    const rawCategoryIds = Array.isArray(data.categoryIds)
-      ? (data.categoryIds as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0)
-      : [];
+    const rawCategoryIds = menuItemPlacementCategoryIds(rec);
     const categoryId =
       rawCategoryIds[0] || (typeof data.categoryId === "string" ? data.categoryId : "");
     items.push({
@@ -119,7 +127,15 @@ export async function loadOnlineMenu(
     });
   }
 
-  return { categories, items };
+  const catIdsUsed = new Set<string>();
+  for (const it of items) {
+    for (const cid of it.categoryIds.length > 0 ? it.categoryIds : [it.categoryId]) {
+      if (cid) catIdsUsed.add(cid);
+    }
+  }
+  const filteredCategories = categories.filter((c) => catIdsUsed.has(c.id));
+
+  return { categories: filteredCategories, items };
 }
 
 export interface CartLineInput {
@@ -160,6 +176,14 @@ export async function createOnlineOrderTransaction(
     throw new OnlineOrderValidationError("Cart is empty.");
   }
 
+  const ooSnap = await db
+    .collection(SETTINGS_COLLECTION)
+    .doc(ONLINE_ORDERING_SETTINGS_DOC)
+    .get();
+  const oo = parseOnlineOrderingSettings(
+    ooSnap.data() as Record<string, unknown> | undefined
+  );
+
   const itemIds = [...new Set(lines.map((l) => l.itemId))];
   const refs = itemIds.map((id) => db.collection("MenuItems").doc(id));
   const snaps = await db.getAll(...refs);
@@ -183,7 +207,7 @@ export async function createOnlineOrderTransaction(
   for (const line of lines) {
     const data = byId.get(line.itemId);
     if (!data) throw new OnlineOrderValidationError(`Unknown menu item: ${line.itemId}`);
-    if (!isOnlineChannelOn(data)) {
+    if (!isMenuItemVisibleOnOnlineChannel(line.itemId, asRecord(data), oo)) {
       throw new OnlineOrderValidationError(`Item is not available online: ${line.itemId}`);
     }
     const stock = typeof data.stock === "number" ? data.stock : 0;
