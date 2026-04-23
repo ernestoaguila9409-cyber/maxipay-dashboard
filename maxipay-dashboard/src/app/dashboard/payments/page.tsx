@@ -43,6 +43,67 @@ interface TerminalRow extends PaymentTerminalDoc {
 const PAYMENTS_COLLECTION = "payment_terminals";
 const LEGACY_COLLECTION = "Terminals";
 
+/** If the POS stops heartbeating, treat as offline after this many ms without posLastSeen. */
+const POS_HEARTBEAT_STALE_MS = 120_000;
+
+function timestampToMillis(ts: unknown): number | null {
+  if (ts == null) return null;
+  if (ts instanceof Timestamp) return ts.toMillis();
+  if (
+    typeof ts === "object" &&
+    ts !== null &&
+    typeof (ts as Timestamp).toMillis === "function"
+  ) {
+    return (ts as Timestamp).toMillis();
+  }
+  return null;
+}
+
+function formatAgo(ms: number): string {
+  const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 48) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
+
+function posReachabilityDisplay(
+  posLastSeen: unknown,
+  posConnectionStatus?: string
+): { title: string; line: string; dotClass: string } {
+  const ms = timestampToMillis(posLastSeen);
+  if (ms == null) {
+    return {
+      title: "No signal",
+      line: "POS not reporting yet",
+      dotClass: "bg-slate-300",
+    };
+  }
+  const age = Date.now() - ms;
+  const fresh = age < POS_HEARTBEAT_STALE_MS;
+  if (fresh && posConnectionStatus !== "OFFLINE") {
+    return {
+      title: "Online",
+      line: `POS ${formatAgo(ms)}`,
+      dotClass: "bg-emerald-500",
+    };
+  }
+  if (posConnectionStatus === "OFFLINE") {
+    return {
+      title: "Offline",
+      line: `Last POS OK ${formatAgo(ms)}`,
+      dotClass: "bg-rose-500",
+    };
+  }
+  return {
+    title: "Stale",
+    line: `Last POS OK ${formatAgo(ms)}`,
+    dotClass: "bg-amber-500",
+  };
+}
+
 export default function PaymentsPage() {
   const { user } = useAuth();
 
@@ -86,6 +147,8 @@ export default function PaymentsPage() {
             data.capabilities ?? PAYMENT_PROVIDERS.SPIN.capabilities,
           config: (data.config ?? {}) as Record<string, string>,
           legacyTerminalId: data.legacyTerminalId,
+          posConnectionStatus: data.posConnectionStatus,
+          posLastSeen: data.posLastSeen,
         });
       });
       list.sort((a, b) => a.name.localeCompare(b.name));
@@ -291,7 +354,9 @@ export default function PaymentsPage() {
             <p className="text-sm text-slate-500 max-w-2xl">
               Configure the payment terminals used by the POS. Each terminal
               chooses its provider (SPIn today, more later) and stores the
-              credentials that device needs to process payments.
+              credentials that device needs to process payments. The POS column
+              shows when a signed-in register last reported SPIn reachability for
+              that terminal (its active selection).
             </p>
             {migrationMsg && (
               <p className="mt-2 text-xs text-slate-500">{migrationMsg}</p>
@@ -349,8 +414,11 @@ export default function PaymentsPage() {
                   <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4">
                     Identifier
                   </th>
+                  <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-44">
+                    POS
+                  </th>
                   <th className="text-center text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-24">
-                    Status
+                    Enabled
                   </th>
                   <th className="text-right text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-28">
                     Actions
@@ -362,6 +430,10 @@ export default function PaymentsPage() {
                   const providerEntry = PAYMENT_PROVIDERS[t.provider];
                   const identifier =
                     t.config?.tpn || t.config?.deviceId || "—";
+                  const pos = posReachabilityDisplay(
+                    t.posLastSeen,
+                    t.posConnectionStatus
+                  );
                   return (
                     <tr
                       key={t.id}
@@ -386,6 +458,24 @@ export default function PaymentsPage() {
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-600 font-mono">
                         {identifier}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div
+                          className="flex items-start gap-2"
+                          title="SPIn reachability as seen from a signed-in POS (heartbeat)."
+                        >
+                          <span
+                            className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${pos.dotClass}`}
+                          />
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-slate-800">
+                              {pos.title}
+                            </div>
+                            <div className="text-xs text-slate-500 truncate max-w-[11rem]">
+                              {pos.line}
+                            </div>
+                          </div>
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-center">
                         <button

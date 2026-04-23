@@ -133,4 +133,8 @@ export interface PaymentTerminalDoc {
   createdAt?: unknown;
   updatedAt?: unknown;
   legacyTerminalId?: string;
+  /** Written by POS heartbeat: ONLINE / OFFLINE */
+  posConnectionStatus?: string;
+  /** When the POS last reported a successful SPIn status probe */
+  posLastSeen?: unknown;
 }
