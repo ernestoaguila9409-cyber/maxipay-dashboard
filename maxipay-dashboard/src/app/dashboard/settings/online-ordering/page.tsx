@@ -11,7 +11,7 @@ import {
   type OnlineOrderingSettings,
 } from "@/lib/onlineOrderingShared";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
-import { ShoppingBag, ExternalLink, CreditCard, Store, Loader2 } from "lucide-react";
+import { ShoppingBag, ExternalLink, Store, Loader2, Smartphone } from "lucide-react";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -46,7 +46,9 @@ export default function OnlineOrderingSettingsPage() {
       await setDoc(
         doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
         {
-          ...next,
+          enabled: next.enabled,
+          allowPayInStore: next.allowPayInStore,
+          allowRequestTerminalFromWeb: next.allowRequestTerminalFromWeb,
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -60,7 +62,6 @@ export default function OnlineOrderingSettingsPage() {
   };
 
   const orderUrl = origin ? `${origin}/order` : "/order";
-  const webhookUrl = origin ? `${origin}/api/online-ordering/stripe-webhook` : "";
 
   return (
     <>
@@ -74,7 +75,7 @@ export default function OnlineOrderingSettingsPage() {
             <div>
               <h2 className="font-semibold text-slate-900">Customer ordering page</h2>
               <p className="text-sm text-slate-500 mt-1">
-                Guests use the same <strong className="text-slate-700">business name</strong> as{" "}
+                Guests see the same <strong className="text-slate-700">business name</strong> as{" "}
                 <span className="text-slate-700">Settings → Business Information</span>
                 {businessName ? (
                   <>
@@ -83,7 +84,7 @@ export default function OnlineOrderingSettingsPage() {
                     ).
                   </>
                 ) : (
-                  " (live from Firestore — updates automatically when you change it)."
+                  " (live from Firestore — updates when you change it)."
                 )}
               </p>
             </div>
@@ -112,7 +113,7 @@ export default function OnlineOrderingSettingsPage() {
           <label className="flex items-center justify-between gap-4 cursor-pointer">
             <div>
               <p className="font-medium text-slate-800">Enable online ordering</p>
-              <p className="text-sm text-slate-500">When off, the public page shows &ldquo;not available&rdquo;.</p>
+              <p className="text-sm text-slate-500">When off, the public page shows ordering is unavailable.</p>
             </div>
             <input
               type="checkbox"
@@ -126,10 +127,10 @@ export default function OnlineOrderingSettingsPage() {
             <div className="flex gap-2">
               <Store size={18} className="text-slate-400 shrink-0 mt-0.5" />
               <div>
-                <p className="font-medium text-slate-800">Pay at the store (Dejavoo / SPIn)</p>
+                <p className="font-medium text-slate-800">Pay when you pick up (cash or card later)</p>
                 <p className="text-sm text-slate-500">
-                  Customer pays when they arrive. Staff rings the order on the Z8 (or other SPIn terminal) as
-                  today.
+                  Order is saved unpaid. Staff collects payment at pickup — card runs on the Dejavoo (SPIn) as
+                  usual.
                 </p>
               </div>
             </div>
@@ -143,21 +144,22 @@ export default function OnlineOrderingSettingsPage() {
 
           <label className="flex items-center justify-between gap-4 cursor-pointer">
             <div className="flex gap-2">
-              <CreditCard size={18} className="text-slate-400 shrink-0 mt-0.5" />
+              <Smartphone size={18} className="text-slate-400 shrink-0 mt-0.5" />
               <div>
-                <p className="font-medium text-slate-800">Pay in browser (Stripe)</p>
+                <p className="font-medium text-slate-800">Notify POS to take card on Dejavoo</p>
                 <p className="text-sm text-slate-500">
-                  Card checkout on the web. Requires server env{" "}
-                  <code className="text-xs bg-slate-100 px-1 rounded">STRIPE_SECRET_KEY</code> and webhook
-                  secret. This does not run through the Dejavoo; it complements pay-at-store.
+                  Customer chooses card at the restaurant. The website does not collect card numbers. The POS
+                  tablet gets a notification to open checkout so payment runs on your Z8 through SPIn.
                 </p>
               </div>
             </div>
             <input
               type="checkbox"
               className="w-5 h-5 accent-blue-600"
-              checked={settings.allowPayOnlineStripe}
-              onChange={(e) => void persist({ ...settings, allowPayOnlineStripe: e.target.checked })}
+              checked={settings.allowRequestTerminalFromWeb}
+              onChange={(e) =>
+                void persist({ ...settings, allowRequestTerminalFromWeb: e.target.checked })
+              }
             />
           </label>
 
@@ -170,26 +172,11 @@ export default function OnlineOrderingSettingsPage() {
           {saveState === "error" && <p className="text-sm text-red-600">Save failed. Try again.</p>}
         </div>
 
-        <div className="bg-amber-50 rounded-2xl border border-amber-100 p-6 space-y-2 text-sm text-amber-950">
-          <p className="font-semibold">Stripe webhook (for &ldquo;Pay now&rdquo;)</p>
+        <div className="bg-slate-50 rounded-2xl border border-slate-200 p-6 text-sm text-slate-700 space-y-2">
+          <p className="font-semibold text-slate-800">Deployment tip</p>
           <p>
-            In the Stripe Dashboard, add an endpoint that points to:
-            {webhookUrl ? (
-              <span className="block font-mono text-xs mt-2 break-all bg-white/60 p-2 rounded border border-amber-200">
-                {webhookUrl}
-              </span>
-            ) : (
-              <span className="block mt-1">your-site-origin + /api/online-ordering/stripe-webhook</span>
-            )}
-          </p>
-          <p>
-            Listen for <code className="bg-white/60 px-1 rounded">checkout.session.completed</code>. Set{" "}
-            <code className="bg-white/60 px-1 rounded">STRIPE_WEBHOOK_SECRET</code> on the server.
-          </p>
-          <p>
-            For correct redirects after payment, set{" "}
-            <code className="bg-white/60 px-1 rounded">NEXT_PUBLIC_APP_URL</code> to your live site URL (e.g.{" "}
-            https://pos.yourdomain.com).
+            Set <code className="text-xs bg-white px-1 rounded border border-slate-200">NEXT_PUBLIC_APP_URL</code>{" "}
+            to your live dashboard URL so links and redirects stay correct in production.
           </p>
         </div>
       </div>

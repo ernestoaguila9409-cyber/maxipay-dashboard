@@ -23,7 +23,7 @@ export default function SettingsPage() {
     {
       icon: ShoppingBag,
       title: "Online ordering",
-      description: "Public order page, pay at store (SPIn) or pay now (Stripe)",
+      description: "Public order page — pay at pickup or notify POS for Dejavoo (SPIn)",
       href: "/dashboard/settings/online-ordering",
     },
     {

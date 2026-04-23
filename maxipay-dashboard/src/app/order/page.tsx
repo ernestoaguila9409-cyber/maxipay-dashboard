@@ -6,7 +6,7 @@ type PublicConfig = {
   enabled: boolean;
   businessName: string;
   allowPayInStore: boolean;
-  allowPayOnlineStripe: boolean;
+  allowRequestTerminalFromWeb: boolean;
 };
 
 type MenuItem = {
@@ -40,9 +40,9 @@ export default function PublicOrderPage() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
-  const [paymentChoice, setPaymentChoice] = useState<"PAY_AT_STORE" | "PAY_ONLINE_STRIPE">(
-    "PAY_AT_STORE"
-  );
+  const [paymentChoice, setPaymentChoice] = useState<
+    "PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB"
+  >("PAY_AT_STORE");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -59,7 +59,7 @@ export default function PublicOrderPage() {
       enabled: data.enabled,
       businessName: data.businessName,
       allowPayInStore: data.allowPayInStore,
-      allowPayOnlineStripe: data.allowPayOnlineStripe,
+      allowRequestTerminalFromWeb: data.allowRequestTerminalFromWeb,
     });
   }, []);
 
@@ -97,7 +97,7 @@ export default function PublicOrderPage() {
   useEffect(() => {
     if (!cfg) return;
     if (cfg.allowPayInStore) setPaymentChoice("PAY_AT_STORE");
-    else if (cfg.allowPayOnlineStripe) setPaymentChoice("PAY_ONLINE_STRIPE");
+    else if (cfg.allowRequestTerminalFromWeb) setPaymentChoice("REQUEST_TERMINAL_FROM_WEB");
   }, [cfg]);
 
   const itemsByCategory = useMemo(() => {
@@ -180,10 +180,6 @@ export default function PublicOrderPage() {
       const data = await res.json();
       if (!res.ok) {
         setSubmitError(data.error || data.detail || "Order failed.");
-        return;
-      }
-      if (paymentChoice === "PAY_ONLINE_STRIPE" && data.checkoutUrl) {
-        window.location.href = data.checkoutUrl as string;
         return;
       }
       setCheckoutOpen(false);
@@ -383,18 +379,19 @@ export default function PublicOrderPage() {
                   </span>
                 </label>
               )}
-              {cfg.allowPayOnlineStripe && (
+              {cfg.allowRequestTerminalFromWeb && (
                 <label className="flex gap-2 items-start text-sm cursor-pointer">
                   <input
                     type="radio"
                     name="pay"
-                    checked={paymentChoice === "PAY_ONLINE_STRIPE"}
-                    onChange={() => setPaymentChoice("PAY_ONLINE_STRIPE")}
+                    checked={paymentChoice === "REQUEST_TERMINAL_FROM_WEB"}
+                    onChange={() => setPaymentChoice("REQUEST_TERMINAL_FROM_WEB")}
                   />
                   <span>
-                    <span className="font-medium text-slate-900">Pay now (card)</span>
+                    <span className="font-medium text-slate-900">Pay by card at the restaurant</span>
                     <span className="block text-slate-500">
-                      Secure checkout by Stripe. Your order is paid before pickup.
+                      The POS tablet is notified to run your payment on the Dejavoo terminal (SPIn) when you
+                      arrive — no card numbers are entered on this website.
                     </span>
                   </span>
                 </label>

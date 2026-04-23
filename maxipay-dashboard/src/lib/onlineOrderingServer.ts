@@ -22,7 +22,7 @@ export interface PublicOnlineOrderingConfig {
   enabled: boolean;
   businessName: string;
   allowPayInStore: boolean;
-  allowPayOnlineStripe: boolean;
+  allowRequestTerminalFromWeb: boolean;
 }
 
 export interface OnlineMenuItem {
@@ -76,7 +76,7 @@ export async function loadPublicOnlineOrderingConfig(
     enabled: oo.enabled,
     businessName: bizName,
     allowPayInStore: oo.allowPayInStore,
-    allowPayOnlineStripe: oo.allowPayOnlineStripe,
+    allowRequestTerminalFromWeb: oo.allowRequestTerminalFromWeb,
   };
 }
 
