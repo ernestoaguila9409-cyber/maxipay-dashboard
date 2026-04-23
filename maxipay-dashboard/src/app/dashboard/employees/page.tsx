@@ -17,13 +17,12 @@ import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import {
   UserPlus,
-  Pencil,
   Trash2,
   X,
   Shield,
   ShieldCheck,
-  KeyRound,
   User,
+  MoreVertical,
 } from "lucide-react";
 
 interface Employee {
@@ -32,6 +31,87 @@ interface Employee {
   role: string;
   pin: string;
   active: boolean;
+  phone?: string;
+  email?: string;
+}
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
+  }
+  const single = parts[0] || "?";
+  return single.slice(0, Math.min(2, single.length)).toUpperCase();
+}
+
+function dashIfEmpty(value: string | undefined): string {
+  const t = value?.trim();
+  return t ? t : "—";
+}
+
+function roleBadgeClass(role: string) {
+  return role === "ADMINISTRATOR"
+    ? "bg-slate-200 text-slate-800"
+    : "bg-slate-100 text-slate-600";
+}
+
+function EmployeeRowMenu({
+  emp,
+  menuOpen,
+  onToggle,
+  onEdit,
+  onDelete,
+  wrapperClassName,
+}: {
+  emp: Employee;
+  menuOpen: boolean;
+  onToggle: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  wrapperClassName: string;
+}) {
+  return (
+    <div
+      className={wrapperClassName}
+      data-employee-menu
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        aria-label={`Actions for ${emp.name}`}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={onToggle}
+        className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
+      >
+        <MoreVertical size={18} />
+      </button>
+      {menuOpen && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-1 z-20 min-w-[140px] rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            onClick={onEdit}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+            onClick={onDelete}
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const ROLES = ["EMPLOYEE", "ADMINISTRATOR"] as const;
@@ -51,6 +131,17 @@ export default function EmployeesPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!el?.closest("[data-employee-menu]")) setOpenMenuId(null);
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [openMenuId]);
 
   useEffect(() => {
     if (!user) return;
@@ -67,6 +158,8 @@ export default function EmployeesPage() {
             role: data.role || "EMPLOYEE",
             pin: data.pin || "",
             active: data.active !== false,
+            phone: typeof data.phone === "string" ? data.phone : undefined,
+            email: typeof data.email === "string" ? data.email : undefined,
           });
         });
         list.sort((a, b) => a.name.localeCompare(b.name));
@@ -205,67 +298,133 @@ export default function EmployeesPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {employees.map((emp) => (
-              <div
-                key={emp.id}
-                className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md transition-shadow group"
-              >
-                <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    <span className="text-blue-600 font-semibold text-lg">
-                      {emp.name.charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-slate-800 truncate">
-                      {emp.name}
-                    </h3>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      {emp.role === "ADMINISTRATOR" ? (
-                        <ShieldCheck size={14} className="text-amber-500" />
-                      ) : (
-                        <Shield size={14} className="text-slate-400" />
-                      )}
-                      <span className="text-sm text-slate-500">{emp.role}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <KeyRound size={14} className="text-slate-400" />
-                      <span className="text-sm text-slate-400 font-mono">
-                        {"••••"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => openEdit(emp)}
-                      className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-blue-600 transition-colors"
-                      title="Edit"
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            {/* column headers — hidden on xs, shown md+ for table alignment */}
+            <div
+              className="hidden md:grid md:grid-cols-[40px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto_44px] md:gap-3 md:items-center px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500"
+              aria-hidden
+            >
+              <span />
+              <span>Name</span>
+              <span>Phone</span>
+              <span>Email</span>
+              <span className="text-right pr-2">Role</span>
+              <span />
+            </div>
+            <ul className="divide-y divide-slate-100" role="list">
+              {employees.map((emp) => {
+                const phoneDisplay = dashIfEmpty(emp.phone);
+                const emailDisplay = dashIfEmpty(emp.email);
+                const menuOpen = openMenuId === emp.id;
+                return (
+                  <li key={emp.id}>
+                    <div
+                      tabIndex={0}
+                      onClick={() => {
+                        setOpenMenuId(null);
+                        openEdit(emp);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setOpenMenuId(null);
+                          openEdit(emp);
+                        }
+                      }}
+                      className="w-full text-left cursor-pointer hover:bg-slate-50/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/30"
                     >
-                      <Pencil size={15} />
-                    </button>
-                    <button
-                      onClick={() => setDeleteTarget(emp)}
-                      className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
-                      title="Delete"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </div>
-                <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
-                  <span
-                    className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-                      emp.active
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-slate-100 text-slate-500"
-                    }`}
-                  >
-                    {emp.active ? "Active" : "Inactive"}
-                  </span>
-                </div>
-              </div>
-            ))}
+                      {/* Mobile: stacked scan-friendly block */}
+                      <div className="md:hidden px-4 py-3 space-y-2">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 text-blue-700 text-xs font-bold"
+                            aria-hidden
+                          >
+                            {getInitials(emp.name)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-slate-900 truncate">
+                              {emp.name}
+                            </p>
+                            <p className="text-sm text-slate-500 truncate">
+                              {emailDisplay}
+                            </p>
+                          </div>
+                          <EmployeeRowMenu
+                            emp={emp}
+                            menuOpen={menuOpen}
+                            onToggle={() =>
+                              setOpenMenuId(menuOpen ? null : emp.id)
+                            }
+                            onEdit={() => {
+                              setOpenMenuId(null);
+                              openEdit(emp);
+                            }}
+                            onDelete={() => {
+                              setOpenMenuId(null);
+                              setDeleteTarget(emp);
+                            }}
+                            wrapperClassName="relative flex-shrink-0"
+                          />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-[52px] text-sm">
+                          <span className="text-slate-600">{phoneDisplay}</span>
+                          <span
+                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${roleBadgeClass(emp.role)}`}
+                          >
+                            {emp.role === "ADMINISTRATOR" ? "Admin" : "Employee"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Desktop: single aligned row */}
+                      <div className="hidden md:grid md:grid-cols-[40px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto_44px] md:gap-3 md:items-center px-4 py-3">
+                        <div
+                          className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold"
+                          aria-hidden
+                        >
+                          {getInitials(emp.name)}
+                        </div>
+                        <span className="font-bold text-slate-900 truncate min-w-0">
+                          {emp.name}
+                        </span>
+                        <span className="text-sm text-slate-600 truncate min-w-0">
+                          {phoneDisplay}
+                        </span>
+                        <span className="text-sm text-slate-500 truncate min-w-0">
+                          {emailDisplay}
+                        </span>
+                        <span className="flex justify-end min-w-0">
+                          <span
+                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${roleBadgeClass(emp.role)}`}
+                          >
+                            {emp.role === "ADMINISTRATOR"
+                              ? "Admin"
+                              : "Employee"}
+                          </span>
+                        </span>
+                        <EmployeeRowMenu
+                          emp={emp}
+                          menuOpen={menuOpen}
+                          onToggle={() =>
+                            setOpenMenuId(menuOpen ? null : emp.id)
+                          }
+                          onEdit={() => {
+                            setOpenMenuId(null);
+                            openEdit(emp);
+                          }}
+                          onDelete={() => {
+                            setOpenMenuId(null);
+                            setDeleteTarget(emp);
+                          }}
+                          wrapperClassName="relative flex justify-end flex-shrink-0"
+                        />
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         )}
       </div>
