@@ -374,7 +374,9 @@ export default function PublicOrderPage() {
                   <span>
                     <span className="font-medium text-slate-900">Pay at the store</span>
                     <span className="block text-slate-500">
-                      Staff will take payment on the Dejavoo terminal (SPIn) when you pick up.
+                      Staff runs payment on the Dejavoo (SPIn) when you pick up — chip, tap, swipe, or{" "}
+                      <strong className="font-medium text-slate-600">manual entry on the terminal</strong> if
+                      your Z* allows it (not on this website).
                     </span>
                   </span>
                 </label>
@@ -390,8 +392,10 @@ export default function PublicOrderPage() {
                   <span>
                     <span className="font-medium text-slate-900">Pay by card at the restaurant</span>
                     <span className="block text-slate-500">
-                      The POS tablet is notified to run your payment on the Dejavoo terminal (SPIn) when you
-                      arrive — no card numbers are entered on this website.
+                      The POS gets a heads-up to open checkout. When you are there, staff runs SPIn on the
+                      Dejavoo Z* — you can use the terminal&apos;s{" "}
+                      <strong className="font-medium text-slate-600">manual card entry</strong> if enabled on
+                      your device. Nothing is typed on this website.
                     </span>
                   </span>
                 </label>

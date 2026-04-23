@@ -129,8 +129,8 @@ export default function OnlineOrderingSettingsPage() {
               <div>
                 <p className="font-medium text-slate-800">Pay when you pick up (cash or card later)</p>
                 <p className="text-sm text-slate-500">
-                  Order is saved unpaid. Staff collects payment at pickup — card runs on the Dejavoo (SPIn) as
-                  usual.
+                  Order is saved unpaid. At pickup, staff runs the sale on the Dejavoo (SPIn) — chip/tap/swipe
+                  or manual entry on the Z* if your terminal profile allows it.
                 </p>
               </div>
             </div>
@@ -148,8 +148,10 @@ export default function OnlineOrderingSettingsPage() {
               <div>
                 <p className="font-medium text-slate-800">Notify POS to take card on Dejavoo</p>
                 <p className="text-sm text-slate-500">
-                  Customer chooses card at the restaurant. The website does not collect card numbers. The POS
-                  tablet gets a notification to open checkout so payment runs on your Z8 through SPIn.
+                  No card data on the web. The POS gets a notification to open checkout; the sale still runs
+                  on the Dejavoo through SPIn (insert/tap/swipe or{" "}
+                  <strong className="font-medium text-slate-700">manual entry on the Z*</strong> when your
+                  device and processor allow it).
                 </p>
               </div>
             </div>

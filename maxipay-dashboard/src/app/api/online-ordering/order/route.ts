@@ -88,7 +88,7 @@ export async function POST(request: Request) {
       message:
         paymentChoice === "PAY_AT_STORE"
           ? "Order placed. Pay when you pick up — staff will use the Dejavoo terminal (SPIn)."
-          : "Order placed. The restaurant POS has been notified to take card payment on the Dejavoo terminal (SPIn) when you arrive.",
+          : "Order placed. The POS was notified — staff runs payment on the Dejavoo (SPIn) when you arrive; keyed entry can be done on the terminal if your Z* supports it.",
     });
   } catch (e) {
     if (e instanceof OnlineOrderValidationError) {

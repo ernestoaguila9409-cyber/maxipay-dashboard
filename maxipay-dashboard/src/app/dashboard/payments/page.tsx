@@ -56,9 +56,7 @@ export default function PaymentsPage() {
 
   const [name, setName] = useState("");
   const [providerId, setProviderId] = useState<PaymentProviderId>("SPIN");
-  const [deviceModel, setDeviceModel] = useState<string>(
-    PAYMENT_PROVIDERS.SPIN.deviceModels[0]
-  );
+  const [deviceModel, setDeviceModel] = useState<string>("");
   const [config, setConfig] = useState<Record<string, string>>({});
   const [showSecrets, setShowSecrets] = useState(false);
 
@@ -101,7 +99,7 @@ export default function PaymentsPage() {
     setEditing(null);
     setName("");
     setProviderId("SPIN");
-    setDeviceModel(PAYMENT_PROVIDERS.SPIN.deviceModels[0]);
+    setDeviceModel("");
     setConfig({});
     setShowSecrets(false);
     setFormError(null);
@@ -112,9 +110,7 @@ export default function PaymentsPage() {
     setEditing(t);
     setName(t.name);
     setProviderId(t.provider);
-    setDeviceModel(
-      t.deviceModel || PAYMENT_PROVIDERS[t.provider].deviceModels[0]
-    );
+    setDeviceModel(t.deviceModel?.trim() ?? "");
     setConfig({ ...t.config });
     setShowSecrets(false);
     setFormError(null);
@@ -123,7 +119,6 @@ export default function PaymentsPage() {
 
   const onProviderChange = (next: PaymentProviderId) => {
     setProviderId(next);
-    setDeviceModel(PAYMENT_PROVIDERS[next].deviceModels[0]);
     const nextKeys = new Set(
       PAYMENT_PROVIDERS[next].credentialSchema.map((f) => f.key)
     );
@@ -158,7 +153,7 @@ export default function PaymentsPage() {
       } = {
         name: trimmedName,
         provider: providerId,
-        deviceModel,
+        deviceModel: deviceModel.trim(),
         active: editing?.active ?? true,
         baseUrl: provider.baseUrl,
         endpoints: provider.endpoints,
@@ -241,7 +236,7 @@ export default function PaymentsPage() {
             (src.terminalName as string) ||
             `Terminal ${legacyDoc.id.slice(0, 6)}`,
           provider: "SPIN",
-          deviceModel: (src.deviceModel as string) || "Other",
+          deviceModel: ((src.deviceModel as string) || "").trim(),
           active: (src.active as boolean) ?? true,
           baseUrl: PAYMENT_PROVIDERS.SPIN.baseUrl,
           endpoints: PAYMENT_PROVIDERS.SPIN.endpoints,
@@ -491,19 +486,18 @@ export default function PaymentsPage() {
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                    Device Model
+                    Device model
                   </label>
-                  <select
+                  <input
+                    type="text"
                     value={deviceModel}
                     onChange={(e) => setDeviceModel(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
-                  >
-                    {provider.deviceModels.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="e.g. Dejavoo Z8, P17, QD4"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
+                  />
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    Enter any model name; it is stored as-is for your records and the POS.
+                  </p>
                 </div>
 
                 <div className="pt-2 border-t border-slate-100">
