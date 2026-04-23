@@ -118,6 +118,53 @@ function transactionHasCashTender(data: DocumentData): boolean {
   return false;
 }
 
+/** Cash tender on a sale/capture — same idea as POS Cash Flow. */
+function cashTenderCentsForSale(data: DocumentData): number {
+  const type = String(data.type ?? "");
+  if (type !== "SALE" && type !== "CAPTURE") return 0;
+  if (data.voided === true) return 0;
+  const pays = data.payments as Record<string, unknown>[] | undefined;
+  if (Array.isArray(pays) && pays.length > 0) {
+    let c = 0;
+    for (const p of pays) {
+      if (String(p.status) === "VOIDED") continue;
+      const pt = String(p.paymentType ?? "").toLowerCase();
+      const ac = Number(p.amountInCents ?? 0);
+      if (pt === "cash") c += ac;
+    }
+    if (c !== 0) return Math.round(Math.abs(c));
+    if (primaryPaymentType(data).toLowerCase() === "cash") {
+      return txAmountCents(data, type);
+    }
+    return 0;
+  }
+  if (primaryPaymentType(data).toLowerCase() === "cash") {
+    return txAmountCents(data, type);
+  }
+  return 0;
+}
+
+/** Cash refunded to customer — matches POS cash-out from refunds. */
+function cashTenderCentsForRefund(data: DocumentData): number {
+  if (String(data.type ?? "") !== "REFUND") return 0;
+  if (data.voided === true) return 0;
+  const pays = data.payments as Record<string, unknown>[] | undefined;
+  if (Array.isArray(pays) && pays.length > 0) {
+    let c = 0;
+    for (const p of pays) {
+      if (String(p.status) === "VOIDED") continue;
+      if (String(p.paymentType ?? "").toLowerCase() === "cash") {
+        c += Math.abs(Number(p.amountInCents ?? 0));
+      }
+    }
+    if (c !== 0) return Math.round(c);
+  }
+  if (String(data.paymentType ?? "").toLowerCase() === "cash") {
+    return Math.abs(txAmountCents(data, "REFUND"));
+  }
+  return 0;
+}
+
 /** Card-only unsettled sales suitable for dashboard → POS void queue. */
 function canRequestRemoteVoid(data: DocumentData): boolean {
   if (!inFinancialTx(data)) return false;
@@ -626,28 +673,72 @@ export default function SalesActivityClient() {
     });
 
     txDocs.forEach(({ id, data }) => {
+      if (data.voided === true) return;
       const t = String(data.type ?? "");
-      if (t !== "CASH_ADD" && t !== "PAID_OUT") return;
       if (batchId && String(data.batchId ?? "") !== batchId) return;
       const ts = docDate(data);
       if (!ts) return;
       if (!batchId && (ts < start || ts >= endExclusive)) return;
-      if (qLower) {
-        const blob = `${t} ${data.note ?? ""} ${data.userId ?? ""}`.toLowerCase();
-        if (!blob.includes(qLower)) return;
+
+      if (t === "CASH_ADD" || t === "PAID_OUT") {
+        if (qLower) {
+          const blob = `${t} ${data.note ?? ""} ${data.userId ?? ""}`.toLowerCase();
+          if (!blob.includes(qLower)) return;
+        }
+        const cents =
+          Number(data.amountInCents ?? 0) ||
+          Math.round(Number(data.amount ?? 0) * 100);
+        rows.push({
+          key: `tx-${id}`,
+          sort: ts.getTime(),
+          type: t === "CASH_ADD" ? "IN (drawer)" : "OUT (drawer)",
+          amount: t === "PAID_OUT" ? -Math.abs(cents) : Math.abs(cents),
+          reason: String(data.note ?? "—"),
+          employee: String(data.employeeName ?? data.userId ?? "—"),
+          time: ts.toLocaleString(),
+          batchLine: `Batch: ${batchLabel(String(data.batchId ?? ""))}`,
+        });
+        return;
       }
-      const cents =
-        Number(data.amountInCents ?? 0) || Math.round(Number(data.amount ?? 0) * 100);
-      rows.push({
-        key: `tx-${id}`,
-        sort: ts.getTime(),
-        type: t === "CASH_ADD" ? "IN (drawer)" : "OUT (drawer)",
-        amount: t === "PAID_OUT" ? -Math.abs(cents) : Math.abs(cents),
-        reason: String(data.note ?? "—"),
-        employee: String(data.employeeName ?? data.userId ?? "—"),
-        time: ts.toLocaleString(),
-        batchLine: `Batch: ${batchLabel(String(data.batchId ?? ""))}`,
-      });
+
+      if (t === "SALE" || t === "CAPTURE") {
+        const cashCents = cashTenderCentsForSale(data);
+        if (cashCents <= 0) return;
+        if (qLower) {
+          const blob = `cash sale ${t} ${data.orderNumber ?? ""} ${data.orderId ?? ""} ${data.employeeName ?? ""}`.toLowerCase();
+          if (!blob.includes(qLower)) return;
+        }
+        rows.push({
+          key: `tx-cashsale-${id}`,
+          sort: ts.getTime(),
+          type: "Cash sale",
+          amount: cashCents,
+          reason: `Order #${String(data.orderNumber ?? "—")}`,
+          employee: String(data.employeeName ?? data.userId ?? "—"),
+          time: ts.toLocaleString(),
+          batchLine: `Batch: ${batchLabel(String(data.batchId ?? ""))}`,
+        });
+        return;
+      }
+
+      if (t === "REFUND") {
+        const cashCents = cashTenderCentsForRefund(data);
+        if (cashCents <= 0) return;
+        if (qLower) {
+          const blob = `cash refund ${data.orderNumber ?? ""} ${data.orderId ?? ""} ${data.employeeName ?? ""}`.toLowerCase();
+          if (!blob.includes(qLower)) return;
+        }
+        rows.push({
+          key: `tx-cashrefund-${id}`,
+          sort: ts.getTime(),
+          type: "Cash refund",
+          amount: -Math.abs(cashCents),
+          reason: `Order #${String(data.orderNumber ?? "—")}`,
+          employee: String(data.employeeName ?? data.userId ?? "—"),
+          time: ts.toLocaleString(),
+          batchLine: `Batch: ${batchLabel(String(data.batchId ?? ""))}`,
+        });
+      }
     });
 
     rows.sort((a, b) => b.sort - a.sort);
@@ -724,7 +815,8 @@ export default function SalesActivityClient() {
           <p className="text-xs text-slate-500">
             Use <span className="font-medium text-slate-700">date range</span> or{" "}
             <span className="font-medium text-slate-700">a specific batch</span> — not both. Choosing
-            a batch loads all orders, transactions, and cash log rows for that batch.
+            a batch loads all orders, transactions, and the cash log (drawer moves, cash sales, and
+            cash refunds — same sources as POS Cash Flow).
           </p>
           <div className="flex flex-wrap gap-3 items-end">
             <div>
@@ -1007,10 +1099,14 @@ export default function SalesActivityClient() {
                       key={r.key}
                       className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
                     >
-                      <div className="flex justify-between">
+                      <div className="flex justify-between gap-2">
                         <span className="font-semibold text-slate-900">{r.type}</span>
-                        <span className="font-semibold tabular-nums">
-                          {fmtMoney(Math.abs(r.amount))}
+                        <span
+                          className={`font-semibold tabular-nums shrink-0 ${
+                            r.amount < 0 ? "text-rose-600" : "text-emerald-800"
+                          }`}
+                        >
+                          {fmtMoney(r.amount)}
                         </span>
                       </div>
                       <p className="text-sm text-slate-600 mt-1">{r.reason}</p>
