@@ -11,6 +11,7 @@ import {
   query,
   where,
   getDocs,
+  deleteField,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
@@ -23,6 +24,8 @@ import {
   ShieldCheck,
   User,
   MoreVertical,
+  Mail,
+  Phone,
 } from "lucide-react";
 
 interface Employee {
@@ -47,6 +50,12 @@ function getInitials(name: string): string {
 function dashIfEmpty(value: string | undefined): string {
   const t = value?.trim();
   return t ? t : "—";
+}
+
+function isValidEmail(value: string): boolean {
+  const t = value.trim();
+  if (!t) return true;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
 }
 
 function roleBadgeClass(role: string) {
@@ -124,10 +133,13 @@ export default function EmployeesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Employee | null>(null);
   const [formName, setFormName] = useState("");
+  const [formEmail, setFormEmail] = useState("");
+  const [formPhone, setFormPhone] = useState("");
   const [formPin, setFormPin] = useState("");
   const [formRole, setFormRole] = useState<string>("EMPLOYEE");
   const [saving, setSaving] = useState(false);
   const [pinError, setPinError] = useState("");
+  const [emailError, setEmailError] = useState("");
 
   const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -178,24 +190,31 @@ export default function EmployeesPage() {
   const openAdd = () => {
     setEditTarget(null);
     setFormName("");
+    setFormEmail("");
+    setFormPhone("");
     setFormPin("");
     setFormRole("EMPLOYEE");
     setPinError("");
+    setEmailError("");
     setModalOpen(true);
   };
 
   const openEdit = (emp: Employee) => {
     setEditTarget(emp);
     setFormName(emp.name);
+    setFormEmail(emp.email?.trim() ?? "");
+    setFormPhone(emp.phone?.trim() ?? "");
     setFormPin(emp.pin);
     setFormRole(emp.role);
     setPinError("");
+    setEmailError("");
     setModalOpen(true);
   };
 
   const closeModal = () => {
     setModalOpen(false);
     setEditTarget(null);
+    setEmailError("");
   };
 
   const validatePin = async (pin: string, excludeId?: string): Promise<boolean> => {
@@ -217,7 +236,15 @@ export default function EmployeesPage() {
   const handleSave = async () => {
     const trimName = formName.trim();
     const trimPin = formPin.trim();
+    const trimEmail = formEmail.trim();
+    const trimPhone = formPhone.trim();
     if (!trimName || !trimPin) return;
+
+    if (!isValidEmail(trimEmail)) {
+      setEmailError("Enter a valid email address or leave blank");
+      return;
+    }
+    setEmailError("");
 
     const valid = await validatePin(trimPin, editTarget?.id);
     if (!valid) return;
@@ -229,6 +256,8 @@ export default function EmployeesPage() {
           name: trimName,
           pin: trimPin,
           role: formRole,
+          email: trimEmail ? trimEmail : deleteField(),
+          phone: trimPhone ? trimPhone : deleteField(),
         });
       } else {
         await addDoc(collection(db, "Employees"), {
@@ -236,6 +265,8 @@ export default function EmployeesPage() {
           pin: trimPin,
           role: formRole,
           active: true,
+          ...(trimEmail ? { email: trimEmail } : {}),
+          ...(trimPhone ? { phone: trimPhone } : {}),
         });
       }
       closeModal();
@@ -432,7 +463,7 @@ export default function EmployeesPage() {
       {/* ── Add / Edit Modal ── */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
               <h2 className="text-lg font-semibold text-slate-800">
                 {editTarget ? "Edit Employee" : "Add Employee"}
@@ -444,7 +475,7 @@ export default function EmployeesPage() {
                 <X size={18} />
               </button>
             </div>
-            <div className="px-6 py-5 space-y-4">
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">
                   Name
@@ -455,6 +486,59 @@ export default function EmployeesPage() {
                   placeholder="Employee name"
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Email
+                </label>
+                <div className="relative">
+                  <Mail
+                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                    size={18}
+                    aria-hidden
+                  />
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    value={formEmail}
+                    onChange={(e) => {
+                      setFormEmail(e.target.value);
+                      if (emailError) setEmailError("");
+                    }}
+                    placeholder="name@example.com"
+                    className={`w-full pl-11 pr-4 py-2.5 rounded-xl border outline-none text-slate-800 placeholder:text-slate-400 ${
+                      emailError
+                        ? "border-red-300 focus:border-red-500 focus:ring-2 focus:ring-red-500/20"
+                        : "border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    }`}
+                  />
+                </div>
+                {emailError ? (
+                  <p className="text-red-500 text-xs mt-1.5">{emailError}</p>
+                ) : (
+                  <p className="text-slate-400 text-xs mt-1.5">Optional</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Phone
+                </label>
+                <div className="relative">
+                  <Phone
+                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                    size={18}
+                    aria-hidden
+                  />
+                  <input
+                    type="tel"
+                    autoComplete="tel"
+                    value={formPhone}
+                    onChange={(e) => setFormPhone(e.target.value)}
+                    placeholder="(555) 123-4567"
+                    className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400"
+                  />
+                </div>
+                <p className="text-slate-400 text-xs mt-1.5">Optional</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">
