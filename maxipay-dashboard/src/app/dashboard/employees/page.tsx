@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   collection,
   onSnapshot,
@@ -26,6 +26,9 @@ import {
   MoreVertical,
   Mail,
   Phone,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
 } from "lucide-react";
 
 interface Employee {
@@ -62,6 +65,13 @@ function roleBadgeClass(role: string) {
   return role === "ADMINISTRATOR"
     ? "bg-slate-200 text-slate-800"
     : "bg-slate-100 text-slate-600";
+}
+
+/** Lower sorts before higher when sorting ascending by role. */
+function roleSortKey(role: string): number {
+  if (role === "ADMINISTRATOR") return 0;
+  if (role === "EMPLOYEE") return 1;
+  return 2;
 }
 
 function EmployeeRowMenu({
@@ -144,6 +154,8 @@ export default function EmployeesPage() {
   const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  /** null = sort by name; asc = Admin → Employee; desc = Employee → Admin */
+  const [roleSort, setRoleSort] = useState<null | "asc" | "desc">(null);
 
   useEffect(() => {
     if (!openMenuId) return;
@@ -174,7 +186,6 @@ export default function EmployeesPage() {
             email: typeof data.email === "string" ? data.email : undefined,
           });
         });
-        list.sort((a, b) => a.name.localeCompare(b.name));
         setEmployees(list);
         setLoading(false);
       },
@@ -186,6 +197,33 @@ export default function EmployeesPage() {
 
     return () => unsub();
   }, [user]);
+
+  const sortedEmployees = useMemo(() => {
+    const list = [...employees];
+    if (roleSort === null) {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      return list;
+    }
+    list.sort((a, b) => {
+      const cmp = roleSortKey(a.role) - roleSortKey(b.role);
+      if (cmp !== 0) return roleSort === "asc" ? cmp : -cmp;
+      return a.name.localeCompare(b.name);
+    });
+    return list;
+  }, [employees, roleSort]);
+
+  const cycleRoleSort = () => {
+    setRoleSort((prev) =>
+      prev === null ? "asc" : prev === "asc" ? "desc" : null
+    );
+  };
+
+  const roleSortLabel =
+    roleSort === null
+      ? "Name A–Z"
+      : roleSort === "asc"
+        ? "Role · Admin first"
+        : "Role · Employee first";
 
   const openAdd = () => {
     setEditTarget(null);
@@ -307,6 +345,28 @@ export default function EmployeesPage() {
           </button>
         </div>
 
+        {!loading && employees.length > 0 && (
+          <div className="flex md:hidden items-center gap-2 text-sm text-slate-600">
+            <span className="text-slate-500">Sort</span>
+            <button
+              type="button"
+              onClick={cycleRoleSort}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              {roleSort === null && (
+                <ArrowUpDown size={14} className="text-slate-400" aria-hidden />
+              )}
+              {roleSort === "asc" && (
+                <ArrowUp size={14} className="text-blue-600" aria-hidden />
+              )}
+              {roleSort === "desc" && (
+                <ArrowDown size={14} className="text-blue-600" aria-hidden />
+              )}
+              {roleSortLabel}
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin" />
@@ -331,19 +391,40 @@ export default function EmployeesPage() {
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             {/* column headers — hidden on xs, shown md+ for table alignment */}
-            <div
-              className="hidden md:grid md:grid-cols-[40px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto_44px] md:gap-3 md:items-center px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500"
-              aria-hidden
-            >
+            <div className="hidden md:grid md:grid-cols-[40px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto_44px] md:gap-3 md:items-center px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <span />
               <span>Name</span>
               <span>Phone</span>
               <span>Email</span>
-              <span className="text-right pr-2">Role</span>
+              <div className="flex justify-end min-w-0 pr-1">
+                <button
+                  type="button"
+                  onClick={cycleRoleSort}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 -my-1 text-right uppercase tracking-wide text-slate-500 hover:text-slate-900 hover:bg-slate-200/80 transition-colors"
+                  aria-label={
+                    roleSort === null
+                      ? "Sort by role: administrators first"
+                      : roleSort === "asc"
+                        ? "Sort by role: employees first"
+                        : "Sort by name A to Z"
+                  }
+                >
+                  Role
+                  {roleSort === null && (
+                    <ArrowUpDown size={14} className="opacity-60 shrink-0" />
+                  )}
+                  {roleSort === "asc" && (
+                    <ArrowUp size={14} className="text-blue-600 shrink-0" />
+                  )}
+                  {roleSort === "desc" && (
+                    <ArrowDown size={14} className="text-blue-600 shrink-0" />
+                  )}
+                </button>
+              </div>
               <span />
             </div>
             <ul className="divide-y divide-slate-100" role="list">
-              {employees.map((emp) => {
+              {sortedEmployees.map((emp) => {
                 const phoneDisplay = dashIfEmpty(emp.phone);
                 const emailDisplay = dashIfEmpty(emp.email);
                 const menuOpen = openMenuId === emp.id;
