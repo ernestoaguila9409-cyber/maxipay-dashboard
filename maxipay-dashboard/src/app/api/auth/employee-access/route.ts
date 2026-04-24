@@ -37,74 +37,191 @@ function normalizeEmail(email: unknown): string | null {
   return t;
 }
 
-type OobResult = { ok: true } | { ok: false; message: string };
-
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/**
- * Triggers Firebase's built-in password-reset email (Identity Toolkit REST).
- * Treats any `error` object in the JSON body as failure — some failures still use HTTP 200.
- */
-async function sendPasswordResetOobOnce(email: string): Promise<OobResult> {
-  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
-  if (!apiKey) {
-    console.error("[employee-access] Missing NEXT_PUBLIC_FIREBASE_API_KEY");
-    return { ok: false, message: "missing_api_key" };
-  }
-  const url = `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(apiKey)}`;
-  const appOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
-  const payload: Record<string, string> = {
-    requestType: "PASSWORD_RESET",
-    email,
-  };
-  if (appOrigin) {
-    payload.continueUrl = `${appOrigin}/login`;
-  }
+// ---------------------------------------------------------------------------
+// Business info from Firestore (mirrors functions/index.js)
+// ---------------------------------------------------------------------------
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  let data: { error?: { message?: string; status?: string }; email?: string };
-  try {
-    data = (await res.json()) as typeof data;
-  } catch {
-    console.error("[employee-access] sendOobCode: invalid JSON body", res.status);
-    return { ok: false, message: "invalid_response" };
-  }
-
-  if (data.error) {
-    const msg = data.error.message ?? "unknown_error";
-    console.error("[employee-access] sendOobCode rejected:", msg, data.error);
-    return { ok: false, message: msg };
-  }
-
-  if (!res.ok) {
-    console.error("[employee-access] sendOobCode HTTP", res.status, data);
-    return { ok: false, message: `http_${res.status}` };
-  }
-
-  return { ok: true };
+async function fetchBusinessInfo(
+  db: admin.firestore.Firestore
+): Promise<Record<string, unknown>> {
+  const snap = await db.collection("Settings").doc("businessInfo").get();
+  if (!snap.exists) return {};
+  return (snap.data() as Record<string, unknown>) ?? {};
 }
 
-async function sendPasswordResetOobWithRetries(email: string): Promise<OobResult> {
-  let last: OobResult = { ok: false, message: "no_attempt" };
+function resolveLogoUrl(biz: Record<string, unknown>): string | null {
+  const raw = typeof biz.logoUrl === "string" ? biz.logoUrl.trim() : "";
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  if (lower.includes("your-server-or-storage")) return null;
+  if (lower.startsWith("https://") || lower.startsWith("http://")) return raw;
+  return null;
+}
+
+function esc(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// ---------------------------------------------------------------------------
+// Branded password-reset email HTML
+// ---------------------------------------------------------------------------
+
+function composeResetEmailHtml(
+  businessName: string,
+  logoUrl: string | null,
+  resetLink: string
+): string {
+  const logoBlock = logoUrl
+    ? `<img src="${esc(logoUrl)}" alt="${esc(businessName)}"
+           style="max-width:140px;height:auto;margin-bottom:14px;display:block;margin-left:auto;margin-right:auto;border:0;outline:none;text-decoration:none;">`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background-color:#f4f4f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f7;padding:40px 0;">
+    <tr><td align="center">
+      <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+
+        <!-- Header -->
+        <tr><td style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);padding:32px 32px 24px;text-align:center;">
+          ${logoBlock}
+          <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:0.3px;">${esc(businessName)}</h1>
+        </td></tr>
+
+        <!-- Body -->
+        <tr><td style="padding:36px 32px 20px;">
+          <h2 style="margin:0 0 16px;font-size:20px;font-weight:600;color:#1e293b;">Reset Your Password</h2>
+          <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#475569;">
+            We received a request to reset the password for your account at <strong>${esc(businessName)}</strong>.
+          </p>
+          <p style="margin:0 0 28px;font-size:15px;line-height:1.6;color:#475569;">
+            Click the button below to choose a new password:
+          </p>
+          <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
+            <tr><td style="border-radius:8px;background-color:#2563eb;">
+              <a href="${esc(resetLink)}"
+                 target="_blank"
+                 style="display:inline-block;padding:14px 36px;font-size:16px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">
+                Reset Password
+              </a>
+            </td></tr>
+          </table>
+          <p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:#94a3b8;">
+            If the button doesn't work, copy and paste this link into your browser:
+          </p>
+          <p style="margin:0 0 24px;font-size:13px;line-height:1.5;color:#2563eb;word-break:break-all;">
+            ${esc(resetLink)}
+          </p>
+          <hr style="border:none;border-top:1px solid #e2e8f0;margin:0 0 20px;">
+          <p style="margin:0;font-size:13px;line-height:1.5;color:#94a3b8;">
+            If you didn't request a password reset, you can safely ignore this email. Your password will not change.
+          </p>
+        </td></tr>
+
+        <!-- Footer -->
+        <tr><td style="padding:20px 32px 28px;text-align:center;">
+          <p style="margin:0;font-size:12px;color:#94a3b8;">
+            &mdash; The ${esc(businessName)} Team
+          </p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+// ---------------------------------------------------------------------------
+// SendGrid HTTP API (no extra dependency — uses global fetch)
+// ---------------------------------------------------------------------------
+
+type SendResult = { ok: true } | { ok: false; message: string };
+
+async function sendViaSendGrid(
+  to: string,
+  fromEmail: string,
+  fromName: string,
+  subject: string,
+  html: string
+): Promise<SendResult> {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  if (!apiKey) {
+    return {
+      ok: false,
+      message:
+        "SENDGRID_API_KEY is not configured on the dashboard. Add it to your Vercel / hosting environment variables.",
+    };
+  }
+
+  const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      personalizations: [{ to: [{ email: to }] }],
+      from: { email: fromEmail, name: fromName },
+      subject,
+      content: [{ type: "text/html", value: html }],
+    }),
+  });
+
+  if (res.status >= 200 && res.status < 300) return { ok: true };
+
+  const body = await res.text().catch(() => "");
+  return { ok: false, message: `SendGrid ${res.status}: ${body.slice(0, 300)}` };
+}
+
+// ---------------------------------------------------------------------------
+// Generate reset link with retries (Admin SDK)
+// ---------------------------------------------------------------------------
+
+async function generateResetLinkWithRetries(
+  email: string,
+  continueUrl: string | undefined
+): Promise<{ ok: true; link: string } | { ok: false; message: string }> {
+  const auth = admin.auth();
+  const settings = continueUrl ? { url: continueUrl } : undefined;
+
+  let lastMsg = "no_attempt";
   for (let i = 0; i < 3; i++) {
     if (i > 0) await sleep(1000);
-    last = await sendPasswordResetOobOnce(email);
-    if (last.ok) return last;
-    if (last.message === "OPERATION_NOT_ALLOWED") break;
+    try {
+      const link = await auth.generatePasswordResetLink(email, settings);
+      return { ok: true, link };
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message: string }).message)
+          : "unknown";
+      lastMsg = msg;
+      console.error(`[employee-access] generatePasswordResetLink attempt ${i + 1}:`, msg);
+      if (msg.includes("OPERATION_NOT_ALLOWED")) break;
+    }
   }
-  return last;
+  return { ok: false, message: lastMsg };
 }
+
+// ---------------------------------------------------------------------------
+// POST handler
+// ---------------------------------------------------------------------------
 
 /**
  * Ensures a Firebase Auth user exists for this email (create on first use),
- * then triggers Firebase's password-reset email so the user can set a password.
- * Only runs when the email exists on exactly one Employees document (normalized).
+ * generates a password-reset link via Admin SDK, then sends a branded email
+ * through SendGrid using the merchant's business name from Firestore.
  */
 export async function POST(req: Request) {
   const ip = getClientIp(req);
@@ -150,6 +267,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, message: PUBLIC_MESSAGE });
     }
 
+    // Ensure Firebase Auth user exists
     const auth = admin.auth();
     let createdAuthUser = false;
     try {
@@ -182,21 +300,44 @@ export async function POST(req: Request) {
       await sleep(800);
     }
 
-    const sent = await sendPasswordResetOobWithRetries(normalized);
+    // Generate password-reset link via Admin SDK
+    const appOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
+    const continueUrl = appOrigin ? `${appOrigin}/login` : undefined;
+    const linkResult = await generateResetLinkWithRetries(normalized, continueUrl);
+
+    if (!linkResult.ok) {
+      console.error("[employee-access] Password reset link generation failed:", linkResult.message);
+      const userMsg = linkResult.message.includes("OPERATION_NOT_ALLOWED")
+        ? "Password sign-in or password reset is disabled in Firebase. An administrator must enable Email/Password in Firebase Authentication."
+        : "We could not generate the reset link. Please try again or contact support.";
+      return NextResponse.json(
+        { ok: false, error: "send_failed", message: userMsg, detail: linkResult.message },
+        { status: 503 }
+      );
+    }
+
+    // Fetch business branding from Firestore
+    const biz = await fetchBusinessInfo(db);
+    const businessName =
+      (typeof biz.businessName === "string" && biz.businessName.trim()) || "MaxiPay";
+    const logoUrl = resolveLogoUrl(biz);
+
+    // Compose and send branded email via SendGrid
+    const fromEmail =
+      process.env.SENDGRID_AUTH_FROM_EMAIL ||
+      process.env.SENDGRID_FROM_EMAIL ||
+      "noreply@maxipaypos.com";
+    const subject = `Reset your password — ${businessName}`;
+    const html = composeResetEmailHtml(businessName, logoUrl, linkResult.link);
+    const sent = await sendViaSendGrid(normalized, fromEmail, businessName, subject, html);
+
     if (!sent.ok) {
-      console.error("[employee-access] Password reset email not sent:", sent.message);
-      const userMsg =
-        sent.message === "OPERATION_NOT_ALLOWED"
-          ? "Password sign-in or password reset is disabled in Firebase. An administrator must enable Email/Password in Firebase Authentication."
-          : sent.message === "TOO_MANY_ATTEMPTS_TRY_LATER" ||
-              sent.message === "RESET_PASSWORD_EXCEED_LIMIT"
-            ? "Too many reset attempts for this email. Wait a while and try again."
-            : "We could not send the reset email. Confirm NEXT_PUBLIC_FIREBASE_API_KEY matches this Firebase project, then try again or contact support.";
+      console.error("[employee-access] SendGrid error:", sent.message);
       return NextResponse.json(
         {
           ok: false,
           error: "send_failed",
-          message: userMsg,
+          message: "We could not send the reset email. Please try again or contact support.",
           detail: sent.message,
         },
         { status: 503 }
