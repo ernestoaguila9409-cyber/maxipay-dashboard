@@ -6,6 +6,7 @@ import {
   ONLINE_ORDERING_SETTINGS_DOC,
   SETTINGS_COLLECTION,
   parseOnlineOrderingSettings,
+  slugify,
   type OnlineOrderingSettings,
   type OnlinePaymentChoice,
 } from "@/lib/onlineOrderingShared";
@@ -25,6 +26,7 @@ export {
 export interface PublicOnlineOrderingConfig {
   enabled: boolean;
   businessName: string;
+  slug: string;
   allowPayInStore: boolean;
   allowRequestTerminalFromWeb: boolean;
 }
@@ -77,9 +79,11 @@ export async function loadPublicOnlineOrderingConfig(
   const oo = parseOnlineOrderingSettings(
     ooSnap.data() as Record<string, unknown> | undefined
   );
+  const slug = oo.onlineOrderingSlug || slugify(bizName);
   return {
     enabled: oo.enabled,
     businessName: bizName,
+    slug,
     allowPayInStore: oo.allowPayInStore,
     allowRequestTerminalFromWeb: oo.allowRequestTerminalFromWeb,
   };

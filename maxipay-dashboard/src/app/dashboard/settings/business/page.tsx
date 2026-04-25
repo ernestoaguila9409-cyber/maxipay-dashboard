@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Header from "@/components/Header";
 import { db, storage } from "@/firebase/firebaseConfig";
-import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -27,6 +27,7 @@ import {
   thermalCharsPerLine,
   wrapThermalText,
 } from "@/lib/receiptThermal";
+import { slugify, ONLINE_ORDERING_SETTINGS_DOC } from "@/lib/onlineOrderingShared";
 
 /* ══════════════════════════════════════════════
    Types — mirrors Android ReceiptSettings.kt
@@ -345,6 +346,17 @@ export default function BusinessInformationPage() {
         },
         { merge: true }
       );
+
+      const ooRef = doc(db, DOC_REF, ONLINE_ORDERING_SETTINGS_DOC);
+      const ooSnap = await getDoc(ooRef);
+      const existingSlug = ooSnap.exists() ? ooSnap.get("onlineOrderingSlug") : null;
+      if (!existingSlug || typeof existingSlug !== "string" || !existingSlug.trim()) {
+        const generated = slugify(data.businessName.trim());
+        if (generated) {
+          await setDoc(ooRef, { onlineOrderingSlug: generated, updatedAt: serverTimestamp() }, { merge: true });
+        }
+      }
+
       setSaveStatus("saved");
       setDirty(false);
       setTimeout(() => setSaveStatus("idle"), 3500);

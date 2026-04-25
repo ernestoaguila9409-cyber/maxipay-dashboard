@@ -8,10 +8,11 @@ import {
   ONLINE_ORDERING_SETTINGS_DOC,
   SETTINGS_COLLECTION,
   parseOnlineOrderingSettings,
+  slugify,
   type OnlineOrderingSettings,
 } from "@/lib/onlineOrderingShared";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
-import { ShoppingBag, ExternalLink, Store, Loader2, Smartphone } from "lucide-react";
+import { ShoppingBag, ExternalLink, Store, Loader2, Smartphone, Link2, Copy, Check } from "lucide-react";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -20,6 +21,9 @@ export default function OnlineOrderingSettingsPage() {
   const [businessName, setBusinessName] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [origin, setOrigin] = useState("");
+  const [slugInput, setSlugInput] = useState("");
+  const [slugSaving, setSlugSaving] = useState(false);
+  const [slugCopied, setSlugCopied] = useState(false);
 
   useEffect(() => {
     setOrigin(typeof window !== "undefined" ? window.location.origin : "");
@@ -30,7 +34,9 @@ export default function OnlineOrderingSettingsPage() {
     const bizRef = doc(db, SETTINGS_COLLECTION, "businessInfo");
     const unsubs = [
       onSnapshot(ooRef, (snap) => {
-        setSettings(parseOnlineOrderingSettings(snap.data() as Record<string, unknown> | undefined));
+        const parsed = parseOnlineOrderingSettings(snap.data() as Record<string, unknown> | undefined);
+        setSettings(parsed);
+        setSlugInput(parsed.onlineOrderingSlug);
       }),
       onSnapshot(bizRef, (snap) => {
         const n = snap.get("businessName");
@@ -61,7 +67,35 @@ export default function OnlineOrderingSettingsPage() {
     }
   };
 
-  const orderUrl = origin ? `${origin}/order` : "/order";
+  const saveSlug = async (raw: string) => {
+    const cleaned = slugify(raw) || slugify(businessName);
+    if (!cleaned) return;
+    setSlugSaving(true);
+    try {
+      await setDoc(
+        doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
+        { onlineOrderingSlug: cleaned, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSlugSaving(false);
+    }
+  };
+
+  const effectiveSlug = settings.onlineOrderingSlug || slugify(businessName);
+  const orderUrl = origin
+    ? `${origin}/order${effectiveSlug ? `/${effectiveSlug}` : ""}`
+    : `/order${effectiveSlug ? `/${effectiveSlug}` : ""}`;
+
+  const copyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(orderUrl);
+      setSlugCopied(true);
+      setTimeout(() => setSlugCopied(false), 2000);
+    } catch { /* clipboard may be blocked */ }
+  };
 
   return (
     <>
@@ -90,20 +124,65 @@ export default function OnlineOrderingSettingsPage() {
             </div>
           </div>
 
-          <div className="rounded-xl bg-slate-50 border border-slate-100 p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Public link</p>
-              <p className="text-sm font-mono text-slate-800 break-all">{orderUrl}</p>
+          <div className="rounded-xl bg-slate-50 border border-slate-100 p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Public link</p>
+                <p className="text-sm font-mono text-slate-800 break-all">{orderUrl}</p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={copyUrl}
+                  className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  {slugCopied ? <Check size={16} className="text-emerald-600" /> : <Copy size={16} />}
+                  {slugCopied ? "Copied" : "Copy"}
+                </button>
+                <a
+                  href={orderUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium no-underline"
+                >
+                  Open page
+                  <ExternalLink size={16} />
+                </a>
+              </div>
             </div>
-            <a
-              href={orderUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 shrink-0 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium no-underline"
-            >
-              Open page
-              <ExternalLink size={16} />
-            </a>
+
+            <div className="pt-2 border-t border-slate-200">
+              <label className="block">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Link2 size={14} className="text-slate-400" />
+                  <span className="text-xs font-medium text-slate-600">URL slug</span>
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex-1 flex items-center gap-0 rounded-lg border border-slate-200 bg-white overflow-hidden">
+                    <span className="text-xs text-slate-400 pl-3 shrink-0 select-none">/order/</span>
+                    <input
+                      type="text"
+                      value={slugInput}
+                      onChange={(e) => setSlugInput(e.target.value)}
+                      onBlur={() => void saveSlug(slugInput)}
+                      placeholder={slugify(businessName) || "your-business"}
+                      className="flex-1 py-2 pr-3 text-sm text-slate-800 outline-none bg-transparent placeholder:text-slate-300"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    disabled={slugSaving}
+                    onClick={() => void saveSlug(slugInput)}
+                    className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {slugSaving ? "Saving…" : "Save"}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  Auto-generated from your business name. Edit to customize — only lowercase letters, numbers, and hyphens.
+                </p>
+              </label>
+            </div>
           </div>
         </div>
 

@@ -10,11 +10,31 @@ export type OnlinePaymentChoice = "PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB";
 /** POS listens here to open checkout on the Dejavoo (SPIn). */
 export const ONLINE_TERMINAL_PAYMENT_REQUESTS = "OnlineTerminalPaymentRequests";
 
+/**
+ * Converts a business name into a URL-safe slug.
+ * "Joe's Pizza & Grill" → "joes-pizza-grill"
+ */
+export function slugify(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/['']/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
 export interface OnlineOrderingSettings {
   enabled: boolean;
   allowPayInStore: boolean;
   /** Customer asks to pay by card; POS is notified to run SPIn on the terminal. */
   allowRequestTerminalFromWeb: boolean;
+  /**
+   * URL-safe slug derived from the business name.
+   * Used in the public ordering URL: `/order/{slug}`.
+   */
+  onlineOrderingSlug: string;
   /**
    * When true, the public online menu only lists items allowed by
    * [onlineMenuCategoryIds] / [onlineMenuItemIds]. When false, legacy
@@ -31,6 +51,7 @@ export const DEFAULT_ONLINE_ORDERING_SETTINGS: OnlineOrderingSettings = {
   enabled: false,
   allowPayInStore: true,
   allowRequestTerminalFromWeb: false,
+  onlineOrderingSlug: "",
   onlineMenuCurationEnabled: false,
   onlineMenuCategoryIds: [],
   onlineMenuItemIds: [],
@@ -52,6 +73,10 @@ export function parseOnlineOrderingSettings(
     allowRequestTerminalFromWeb:
       data.allowRequestTerminalFromWeb === true ||
       legacyStripe,
+    onlineOrderingSlug:
+      typeof data.onlineOrderingSlug === "string"
+        ? data.onlineOrderingSlug.trim()
+        : "",
     onlineMenuCurationEnabled: data.onlineMenuCurationEnabled === true,
     onlineMenuCategoryIds: parseStringIdArray(data.onlineMenuCategoryIds),
     onlineMenuItemIds: parseStringIdArray(data.onlineMenuItemIds),
