@@ -11,6 +11,8 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.viewpager2.widget.ViewPager2
+import android.media.RingtoneManager
+import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import java.util.Locale
@@ -41,6 +43,9 @@ class MainActivity : AppCompatActivity() {
 
     private var openOrdersListener: ListenerRegistration? = null
     private var dashboardConfigListener: ListenerRegistration? = null
+    private var uberOrdersListener: ListenerRegistration? = null
+    private val knownUberOrderIds = mutableSetOf<String>()
+    private var uberAlertDialog: AlertDialog? = null
     private var currentBatchId: String = ""
 
     private var employeeName: String = ""
@@ -78,6 +83,7 @@ class MainActivity : AppCompatActivity() {
 
         setupDashboardGrid()
         listenForOpenOrders()
+        listenForUberOrders()
         ensureOpenBatch()
         ReceiptSettings.startBusinessInfoSync(this)
 
@@ -333,6 +339,8 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         openOrdersListener?.remove()
         dashboardConfigListener?.remove()
+        uberOrdersListener?.remove()
+        uberAlertDialog?.dismiss()
     }
 
     private fun listenForOpenOrders() {
@@ -367,6 +375,63 @@ class MainActivity : AppCompatActivity() {
                 dashboardAdapter.updateBadge("bar", bar)
                 dashboardAdapter.updateBadge("online_orders", online)
             }
+    }
+
+    private fun listenForUberOrders() {
+        uberOrdersListener?.remove()
+        uberOrdersListener = db.collection("Orders")
+            .whereEqualTo("orderType", "UBER_EATS")
+            .whereEqualTo("status", "OPEN")
+            .addSnapshotListener { snapshots, error ->
+                if (error != null || snapshots == null) return@addSnapshotListener
+
+                for (change in snapshots.documentChanges) {
+                    if (change.type == DocumentChange.Type.ADDED) {
+                        val docId = change.document.id
+                        if (knownUberOrderIds.add(docId)) {
+                            showUberOrderAlert(change.document)
+                        }
+                    }
+                }
+                val currentIds = snapshots.documents.map { it.id }.toSet()
+                knownUberOrderIds.retainAll(currentIds)
+            }
+    }
+
+    private fun showUberOrderAlert(doc: com.google.firebase.firestore.DocumentSnapshot) {
+        if (isDestroyed || isFinishing) return
+
+        val orderNumber = doc.getLong("orderNumber") ?: 0L
+        val customerName = doc.getString("customerName") ?: "Uber Customer"
+        val totalCents = doc.getLong("totalInCents") ?: 0L
+        val itemsCount = (doc.getLong("itemsCount") ?: 0L).toInt()
+        val total = String.format(Locale.US, "$%.2f", totalCents / 100.0)
+
+        val message = buildString {
+            append("Order #$orderNumber")
+            append("\nCustomer: $customerName")
+            if (itemsCount > 0) append("\nItems: $itemsCount")
+            append("\nTotal: $total")
+        }
+
+        try {
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            RingtoneManager.getRingtone(applicationContext, uri)?.play()
+        } catch (_: Exception) { }
+
+        uberAlertDialog?.dismiss()
+        uberAlertDialog = AlertDialog.Builder(this)
+            .setTitle("New Uber Eats Order!")
+            .setMessage(message)
+            .setPositiveButton("View Order") { _, _ ->
+                val intent = Intent(this, OrderDetailActivity::class.java)
+                intent.putExtra("orderId", doc.id)
+                intent.putExtra("employeeName", employeeName)
+                startActivity(intent)
+            }
+            .setNegativeButton("Later", null)
+            .setCancelable(true)
+            .show()
     }
 
     private fun loadCurrentSales() {

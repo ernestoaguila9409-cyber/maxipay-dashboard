@@ -1615,6 +1615,7 @@ exports.uberWebhook = require("./uber").uberWebhook;
 
 const uberTriggers = require("./uber-triggers");
 exports.uberOnOrderStatusChange = uberTriggers.uberOnOrderStatusChange;
+exports.uberEnrichNewOrder = uberTriggers.uberEnrichNewOrder;
 
 const uberCallables = require("./uber-callables");
 exports.uberGetStores = uberCallables.uberGetStores;

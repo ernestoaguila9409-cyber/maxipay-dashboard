@@ -84,6 +84,10 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var txtPartialRefundBy: TextView
     private lateinit var txtPartialRefundDate: TextView
 
+    private lateinit var uberActionsContainer: LinearLayout
+    private lateinit var btnAcceptUber: MaterialButton
+    private lateinit var btnDenyUber: MaterialButton
+
     private lateinit var adapter: OrderItemsAdapter
     private val listItems = mutableListOf<OrderListItem>()
     private val itemDocs = mutableListOf<DocumentSnapshot>()
@@ -169,6 +173,9 @@ class OrderDetailActivity : AppCompatActivity() {
         txtPartialRefundAmount = findViewById(R.id.txtPartialRefundAmount)
         txtPartialRefundBy = findViewById(R.id.txtPartialRefundBy)
         txtPartialRefundDate = findViewById(R.id.txtPartialRefundDate)
+        uberActionsContainer = findViewById(R.id.uberActionsContainer)
+        btnAcceptUber = findViewById(R.id.btnAcceptUber)
+        btnDenyUber = findViewById(R.id.btnDenyUber)
 
         recycler.layoutManager = LinearLayoutManager(this)
         adapter = OrderItemsAdapter(listItems) { itemDoc -> onOrderItemClick(itemDoc) }
@@ -226,6 +233,13 @@ class OrderDetailActivity : AppCompatActivity() {
         btnRefund.visibility = View.GONE
         btnReceipt.visibility = View.GONE
         btnTipAdjust.visibility = View.GONE
+        uberActionsContainer.visibility = View.GONE
+        btnAcceptUber.visibility = View.VISIBLE
+        btnAcceptUber.isEnabled = true
+        btnAcceptUber.text = "Accept"
+        btnDenyUber.visibility = View.VISIBLE
+        btnDenyUber.isEnabled = true
+        btnDenyUber.text = "Deny"
 
         db.collection("Orders").document(orderId)
             .get()
@@ -291,12 +305,37 @@ class OrderDetailActivity : AppCompatActivity() {
                 refreshSplitBanner(saleTransactionId)
 
                 if (status == "OPEN") {
-                    btnCheckout.visibility = View.VISIBLE
-                    btnCheckout.setOnClickListener {
-                        val i = Intent(this, MenuActivity::class.java)
-                        i.putExtra("ORDER_ID", orderId)
-                        startActivity(i)
+                    if (orderType == "UBER_EATS") {
+                        uberActionsContainer.visibility = View.VISIBLE
+                        btnAcceptUber.setOnClickListener { acceptUberOrder() }
+                        btnDenyUber.setOnClickListener { confirmDenyUberOrder() }
+                    } else {
+                        btnCheckout.visibility = View.VISIBLE
+                        btnCheckout.setOnClickListener {
+                            val i = Intent(this, MenuActivity::class.java)
+                            i.putExtra("ORDER_ID", orderId)
+                            startActivity(i)
+                        }
                     }
+                }
+
+                if (orderType == "UBER_EATS" && status == "ACCEPTED") {
+                    uberActionsContainer.visibility = View.VISIBLE
+                    findViewById<TextView>(R.id.txtUberBanner).text =
+                        "Order Accepted — Mark ready when prepared"
+                    btnAcceptUber.text = "Ready for Pickup"
+                    btnAcceptUber.setOnClickListener { markUberOrderReady() }
+                    btnDenyUber.text = "Cancel"
+                    btnDenyUber.setOnClickListener { confirmCancelUberOrder() }
+                }
+
+                if (orderType == "UBER_EATS" && status == "READY") {
+                    uberActionsContainer.visibility = View.VISIBLE
+                    findViewById<TextView>(R.id.txtUberBanner).text =
+                        "Order is ready — Waiting for driver pickup"
+                    btnAcceptUber.visibility = View.GONE
+                    btnDenyUber.text = "Cancel"
+                    btnDenyUber.setOnClickListener { confirmCancelUberOrder() }
                 }
 
                 if (status == "VOIDED") {
@@ -360,6 +399,122 @@ class OrderDetailActivity : AppCompatActivity() {
                         resolveBatchAndShowTipAdjust(saleTransactionId)
                     }
                 }
+            }
+    }
+
+    // ===============================
+    // UBER EATS: ACCEPT / DENY
+    // ===============================
+
+    private fun acceptUberOrder() {
+        btnAcceptUber.isEnabled = false
+        btnDenyUber.isEnabled = false
+        db.collection("Orders").document(orderId)
+            .update(
+                mapOf(
+                    "status" to "ACCEPTED",
+                    "acceptedAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                )
+            )
+            .addOnSuccessListener {
+                Toast.makeText(this, "Order accepted", Toast.LENGTH_SHORT).show()
+                uberActionsContainer.visibility = View.GONE
+                loadHeader()
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_LONG).show()
+                btnAcceptUber.isEnabled = true
+                btnDenyUber.isEnabled = true
+            }
+    }
+
+    private fun confirmDenyUberOrder() {
+        AlertDialog.Builder(this)
+            .setTitle("Deny Uber Eats Order?")
+            .setMessage("This will notify the customer that the order cannot be fulfilled.")
+            .setPositiveButton("Deny") { _, _ -> denyUberOrder() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun denyUberOrder() {
+        btnAcceptUber.isEnabled = false
+        btnDenyUber.isEnabled = false
+        db.collection("Orders").document(orderId)
+            .update(
+                mapOf(
+                    "status" to "DENIED",
+                    "deniedAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                    "denyReason" to "Order cannot be fulfilled at this time",
+                    "denyReasonCode" to "ITEM_AVAILABILITY",
+                )
+            )
+            .addOnSuccessListener {
+                Toast.makeText(this, "Order denied", Toast.LENGTH_SHORT).show()
+                uberActionsContainer.visibility = View.GONE
+                loadHeader()
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_LONG).show()
+                btnAcceptUber.isEnabled = true
+                btnDenyUber.isEnabled = true
+            }
+    }
+
+    private fun markUberOrderReady() {
+        btnAcceptUber.isEnabled = false
+        btnDenyUber.isEnabled = false
+        db.collection("Orders").document(orderId)
+            .update(
+                mapOf(
+                    "status" to "READY",
+                    "readyAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                )
+            )
+            .addOnSuccessListener {
+                Toast.makeText(this, "Order marked ready for pickup", Toast.LENGTH_SHORT).show()
+                loadHeader()
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_LONG).show()
+                btnAcceptUber.isEnabled = true
+                btnDenyUber.isEnabled = true
+            }
+    }
+
+    private fun confirmCancelUberOrder() {
+        AlertDialog.Builder(this)
+            .setTitle("Cancel Uber Eats Order?")
+            .setMessage("This will cancel the order and notify the customer.")
+            .setPositiveButton("Cancel Order") { _, _ -> cancelUberOrder() }
+            .setNegativeButton("Go Back", null)
+            .show()
+    }
+
+    private fun cancelUberOrder() {
+        btnAcceptUber.isEnabled = false
+        btnDenyUber.isEnabled = false
+        db.collection("Orders").document(orderId)
+            .update(
+                mapOf(
+                    "status" to "CANCELLED",
+                    "cancelledAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                    "cancelReason" to "OUT_OF_ITEMS",
+                )
+            )
+            .addOnSuccessListener {
+                Toast.makeText(this, "Order cancelled", Toast.LENGTH_SHORT).show()
+                uberActionsContainer.visibility = View.GONE
+                loadHeader()
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_LONG).show()
+                btnAcceptUber.isEnabled = true
+                btnDenyUber.isEnabled = true
             }
     }
 

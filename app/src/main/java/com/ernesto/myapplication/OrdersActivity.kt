@@ -425,8 +425,8 @@ class OrdersActivity : AppCompatActivity() {
 
     private fun applyStatusFilter(list: List<OrderRow>): List<OrderRow> {
         return when (statusFilter) {
-            "OPEN" -> list.filter { it.status == "OPEN" }
-            "NOT_OPEN" -> list.filter { it.status != "OPEN" }
+            "OPEN" -> list.filter { it.status == "OPEN" || it.status == "ACCEPTED" }
+            "NOT_OPEN" -> list.filter { it.status != "OPEN" && it.status != "ACCEPTED" }
             "CLOSED" -> list.filter { it.status == "CLOSED" && it.totalRefundedInCents == 0L }
             "VOIDED" -> list.filter { it.status == "VOIDED" }
             "REFUNDED_FULLY" -> list.filter { it.status == "REFUNDED" || it.totalRefundedInCents >= it.totalCents }

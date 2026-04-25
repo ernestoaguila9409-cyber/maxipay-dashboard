@@ -331,6 +331,55 @@
         </LinearLayout>
     </LinearLayout>
 
+    <!-- UBER EATS ACCEPT / DENY -->
+    <LinearLayout
+        android:id="@+id/uberActionsContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:background="#FFF8E1"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp">
+
+        <TextView
+            android:id="@+id/txtUberBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="New Uber Eats Order — Accept or Deny"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#E65100"
+            android:gravity="center"
+            android:layout_marginBottom="8dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnAcceptUber"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Accept"
+                android:backgroundTint="#2E7D32"
+                android:layout_marginEnd="4dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnDenyUber"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Deny"
+                android:backgroundTint="#C62828"
+                android:layout_marginStart="4dp"/>
+        </LinearLayout>
+    </LinearLayout>
+
     <!-- CHECKOUT BUTTON -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnCheckout"

@@ -142,6 +142,10 @@ class OrdersAdapter(
         private fun bindStatusBar(status: String) {
             val color = when (status.uppercase()) {
                 "OPEN" -> Color.parseColor("#2196F3")
+                "ACCEPTED" -> Color.parseColor("#2E7D32")
+                "READY" -> Color.parseColor("#1565C0")
+                "DENIED" -> Color.parseColor("#C62828")
+                "CANCELLED" -> Color.parseColor("#795548")
                 "CLOSED" -> Color.parseColor("#9E9E9E")
                 "VOIDED" -> Color.parseColor("#F44336")
                 "REFUNDED" -> Color.parseColor("#FF9800")
@@ -159,6 +163,10 @@ class OrdersAdapter(
 
             val (bgColor, textColor) = when (status.uppercase()) {
                 "OPEN" -> Color.parseColor("#E3F2FD") to Color.parseColor("#1565C0")
+                "ACCEPTED" -> Color.parseColor("#E8F5E9") to Color.parseColor("#2E7D32")
+                "READY" -> Color.parseColor("#E3F2FD") to Color.parseColor("#1565C0")
+                "DENIED" -> Color.parseColor("#FFEBEE") to Color.parseColor("#C62828")
+                "CANCELLED" -> Color.parseColor("#EFEBE9") to Color.parseColor("#795548")
                 "CLOSED" -> Color.parseColor("#F5F5F5") to Color.parseColor("#616161")
                 "VOIDED" -> Color.parseColor("#FFEBEE") to Color.parseColor("#C62828")
                 "REFUNDED" -> Color.parseColor("#FFF3E0") to Color.parseColor("#E65100")

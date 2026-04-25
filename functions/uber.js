@@ -183,6 +183,7 @@ async function logWebhookEvent(db, { eventType, eventId, uberOrderId, status, er
 // ---------------------------------------------------------------------------
 
 async function handleOrderCreated(db, payload, rawPayload) {
+  const t0 = Date.now();
   logger.info("[uber] handleOrderCreated — start");
 
   const { uberOrderId, customerName, totalInCents, items } =
@@ -195,13 +196,19 @@ async function handleOrderCreated(db, payload, rawPayload) {
   logger.info("[uber] handleOrderCreated — orderId:", uberOrderId);
 
   const orderRef = db.collection("Orders").doc(uberOrderId);
+
+  const t1 = Date.now();
   const existing = await orderRef.get();
+  logger.info("[uber] timing: orderRef.get()", { ms: Date.now() - t1, exists: existing.exists });
   if (existing.exists) {
     logger.info("[uber] handleOrderCreated — duplicate, skipping:", uberOrderId);
     return;
   }
 
+  const t2 = Date.now();
   const orderNumber = await nextOrderNumber(db);
+  logger.info("[uber] timing: nextOrderNumber()", { ms: Date.now() - t2, orderNumber });
+
   const now = admin.firestore.FieldValue.serverTimestamp();
   const subtotalInCents = items.reduce((s, i) => s + i.lineTotalInCents, 0);
 
@@ -232,32 +239,16 @@ async function handleOrderCreated(db, payload, rawPayload) {
     batch.set(itemRef, { ...item, createdAt: now, updatedAt: now });
   });
 
+  const t3 = Date.now();
   await batch.commit();
+  logger.info("[uber] timing: batch.commit()", { ms: Date.now() - t3 });
   logger.info("[uber] Order stored:", uberOrderId, "orderNumber:", orderNumber,
-    "items:", items.length, "total:", totalInCents);
+    "items:", items.length, "total:", totalInCents,
+    "totalElapsedMs:", Date.now() - t0);
 
-  // Fetch full order details from Uber API to enrich the Firestore document.
-  // This satisfies the "Get Order details (uAPI)" validation requirement.
-  try {
-    const fullOrder = await uberApi.getOrderDetails(uberOrderId);
-    if (fullOrder) {
-      const enrichment = {
-        uberFullOrder: fullOrder,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      };
-      if (fullOrder.store) enrichment.uberStoreId = fullOrder.store.store_id || null;
-      if (fullOrder.eater) {
-        const phone = fullOrder.eater.phone?.number || null;
-        if (phone) enrichment.customerPhone = phone;
-      }
-      await orderRef.update(enrichment);
-      logger.info("[uber] Order enriched with full Uber details:", uberOrderId);
-    }
-  } catch (enrichErr) {
-    logger.warn("[uber] Failed to fetch full order details (non-fatal)", {
-      orderId: uberOrderId, err: enrichErr.message,
-    });
-  }
+  // NOTE: Uber API enrichment (getOrderDetails) is now performed by a separate
+  // Firestore-triggered function (uberEnrichNewOrder) so that the webhook can
+  // return 200 OK to Uber within the required time window.
 }
 
 async function handleOrderUpdated(db, payload) {
@@ -446,16 +437,22 @@ exports.uberWebhook = onRequest(
         bodyKeys: Object.keys(body),
       });
 
-      // Respond HTTP 200 immediately — Uber requires fast acknowledgement
-      res.status(200).json({ status: "ok" });
-
-      // Fire-and-forget async processing (errors are caught inside)
-      processWebhookAsync(body).catch((err) => {
-        logger.error("[uber] Unhandled error in async processing", {
-          err: err.message,
-          stack: err.stack,
+      // Process synchronously and AWAIT before responding. Cloud Run can
+      // terminate the container after the HTTP response is sent, dropping
+      // any pending fire-and-forget work. By awaiting, we guarantee the
+      // order is persisted in Firestore before Uber considers the webhook
+      // delivered. Slow API enrichment is offloaded to a separate Firestore
+      // trigger to keep this fast.
+      try {
+        await processWebhookAsync(body);
+      } catch (procErr) {
+        logger.error("[uber] Error in webhook processing", {
+          err: procErr.message,
+          stack: procErr.stack,
         });
-      });
+      }
+
+      res.status(200).json({ status: "ok" });
     } catch (outerErr) {
       logger.error("[uber] Critical error in webhook handler", {
         err: outerErr.message,

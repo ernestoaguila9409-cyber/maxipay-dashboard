@@ -62,9 +62,15 @@ async function uberFetch(method, path, { body, query, expectStatus } = {}) {
     }
 
     if (res.status === 204 || res.headers.get("content-length") === "0") {
+      logger.info("[uber-api] success (no body)", { method, path, status: res.status });
       return null;
     }
-    return res.json();
+    const text = await res.text();
+    logger.info("[uber-api] success", {
+      method, path, status: res.status,
+      body: text.substring(0, 500),
+    });
+    try { return JSON.parse(text); } catch { return null; }
   };
 
   return attempt(false);
@@ -85,76 +91,80 @@ async function getIntegrationDetails(storeId) {
 }
 
 // ---------------------------------------------------------------------------
-// Order lifecycle
+// Order lifecycle — Order Suite API (/v1/delivery/order/)
 // ---------------------------------------------------------------------------
 
-/** GET /v2/eats/order/{orderId} — full order details. */
+/** GET /v1/delivery/order/{orderId} — full order details. */
 async function getOrderDetails(orderId) {
-  return uberFetch("GET", `/v2/eats/order/${orderId}`);
+  return uberFetch("GET", `/v1/delivery/order/${orderId}`, {
+    query: { expand: "carts,deliveries,payment" },
+  });
 }
 
 /**
- * POST /v1/eats/orders/{orderId}/accept_pos_order — accept an order.
+ * POST /v1/delivery/order/{orderId}/accept — accept an order.
  * @param {string} orderId
  * @param {object} [opts]
- * @param {string} [opts.reason]
- * @param {number} [opts.pickupTime] Unix timestamp
+ * @param {string} [opts.readyForPickupTime] RFC3339 timestamp
  * @param {string} [opts.externalReferenceId]
+ * @param {string} [opts.acceptedBy]
  */
 async function acceptOrder(orderId, opts = {}) {
   const payload = {};
-  if (opts.reason) payload.reason = opts.reason;
-  if (opts.pickupTime) payload.pickup_time = opts.pickupTime;
+  if (opts.readyForPickupTime) payload.ready_for_pickup_time = opts.readyForPickupTime;
   if (opts.externalReferenceId) payload.external_reference_id = opts.externalReferenceId;
+  if (opts.acceptedBy) payload.accepted_by = opts.acceptedBy;
+  if (opts.pickupInstructions) payload.order_pickup_instructions = opts.pickupInstructions;
 
-  return uberFetch("POST", `/v1/eats/orders/${orderId}/accept_pos_order`, {
-    body: payload,
-    expectStatus: [204, 200],
-  });
-}
-
-/**
- * POST /v1/eats/orders/{orderId}/deny_pos_order — deny an order.
- * @param {string} orderId
- * @param {object} reason  { explanation, reason_code, ... }
- */
-async function denyOrder(orderId, reason = {}) {
-  const payload = {
-    reason: {
-      explanation: reason.explanation || "Order cannot be fulfilled",
-      reason_code: reason.reason_code || "ITEM_AVAILABILITY",
-      ...(reason.out_of_stock_items && { out_of_stock_items: reason.out_of_stock_items }),
-      ...(reason.invalid_items && { invalid_items: reason.invalid_items }),
-    },
-  };
-
-  return uberFetch("POST", `/v1/eats/orders/${orderId}/deny_pos_order`, {
-    body: payload,
-    expectStatus: [204, 200],
-  });
-}
-
-/**
- * POST /v1/eats/orders/{orderId}/cancel — cancel a live order.
- * @param {string} orderId
- * @param {string} [reason] e.g. "OUT_OF_ITEMS", "KITCHEN_CLOSED"
- * @param {string} [details]
- */
-async function cancelOrder(orderId, reason, details) {
-  const payload = {};
-  if (reason) payload.reason = reason;
-  if (details) payload.details = details;
-  payload.cancelling_party = "MERCHANT";
-
-  return uberFetch("POST", `/v1/eats/orders/${orderId}/cancel`, {
+  return uberFetch("POST", `/v1/delivery/order/${orderId}/accept`, {
     body: payload,
     expectStatus: [200, 204],
   });
 }
 
-/** POST /v1/eats/orders/{orderId}/ready — mark order as ready for pickup. */
+/**
+ * POST /v1/delivery/order/{orderId}/deny — deny an order.
+ * @param {string} orderId
+ * @param {object} reason  { explanation, type }
+ */
+async function denyOrder(orderId, reason = {}) {
+  const payload = {
+    deny_reason: {
+      info: reason.explanation || "Order cannot be fulfilled at this time",
+      type: reason.type || "ITEM_ISSUE",
+    },
+  };
+
+  return uberFetch("POST", `/v1/delivery/order/${orderId}/deny`, {
+    body: payload,
+    expectStatus: [200, 204],
+  });
+}
+
+/**
+ * POST /v1/delivery/order/{orderId}/cancel — cancel a live order.
+ * @param {string} orderId
+ * @param {string} [reason] e.g. "OUT_OF_ITEMS"
+ * @param {string} [details]
+ */
+async function cancelOrder(orderId, reason, details) {
+  const payload = {
+    cancellation_reason: {
+      info: details || reason || "Order cannot be fulfilled",
+      type: reason || "ITEM_ISSUE",
+    },
+  };
+
+  return uberFetch("POST", `/v1/delivery/order/${orderId}/cancel`, {
+    body: payload,
+    expectStatus: [200, 204],
+  });
+}
+
+/** POST /v1/delivery/order/{orderId}/ready — mark order as ready for pickup. */
 async function markOrderReady(orderId) {
-  return uberFetch("POST", `/v1/eats/orders/${orderId}/ready`, {
+  logger.info("[uber-api] markOrderReady", { orderId, path: `/v1/delivery/order/${orderId}/ready` });
+  return uberFetch("POST", `/v1/delivery/order/${orderId}/ready`, {
     body: {},
     expectStatus: [200, 204],
   });
