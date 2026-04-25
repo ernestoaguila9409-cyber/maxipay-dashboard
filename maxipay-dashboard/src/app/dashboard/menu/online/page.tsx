@@ -5,8 +5,6 @@ import {
   collection,
   doc,
   onSnapshot,
-  orderBy,
-  query,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
@@ -68,7 +66,7 @@ export default function OnlineMenuPage() {
     if (!user) return;
     const unsubs = [
       onSnapshot(
-        query(collection(db, "Categories"), orderBy("sortOrder")),
+        collection(db, "Categories"),
         (snap) => {
           const rows: CategoryRow[] = [];
           snap.forEach((d) => {
