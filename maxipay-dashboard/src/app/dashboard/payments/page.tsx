@@ -116,7 +116,7 @@ export default function PaymentsPage() {
   const [formError, setFormError] = useState<string | null>(null);
 
   const [name, setName] = useState("");
-  const [providerId, setProviderId] = useState<PaymentProviderId>("SPIN");
+  const [providerId, setProviderId] = useState<PaymentProviderId>("SPIN_Z");
   const [deviceModel, setDeviceModel] = useState<string>("");
   const [config, setConfig] = useState<Record<string, string>>({});
   const [showSecrets, setShowSecrets] = useState(false);
@@ -138,13 +138,13 @@ export default function PaymentsPage() {
         list.push({
           id: d.id,
           name: data.name ?? "Unnamed terminal",
-          provider: (data.provider ?? "SPIN") as PaymentProviderId,
+          provider: (data.provider ?? "SPIN_Z") as PaymentProviderId,
           deviceModel: data.deviceModel ?? "",
           active: data.active ?? true,
           baseUrl: data.baseUrl ?? "",
           endpoints: data.endpoints ?? {},
           capabilities:
-            data.capabilities ?? PAYMENT_PROVIDERS.SPIN.capabilities,
+            data.capabilities ?? PAYMENT_PROVIDERS[(data.provider ?? "SPIN_Z") as PaymentProviderId]?.capabilities ?? PAYMENT_PROVIDERS.SPIN_Z.capabilities,
           config: (data.config ?? {}) as Record<string, string>,
           legacyTerminalId: data.legacyTerminalId,
           posConnectionStatus: data.posConnectionStatus,
@@ -161,7 +161,7 @@ export default function PaymentsPage() {
   const openAdd = () => {
     setEditing(null);
     setName("");
-    setProviderId("SPIN");
+    setProviderId("SPIN_Z");
     setDeviceModel("");
     setConfig({});
     setShowSecrets(false);
@@ -298,12 +298,12 @@ export default function PaymentsPage() {
             (src.name as string) ||
             (src.terminalName as string) ||
             `Terminal ${legacyDoc.id.slice(0, 6)}`,
-          provider: "SPIN",
+          provider: "SPIN_Z",
           deviceModel: ((src.deviceModel as string) || "").trim(),
           active: (src.active as boolean) ?? true,
-          baseUrl: PAYMENT_PROVIDERS.SPIN.baseUrl,
-          endpoints: PAYMENT_PROVIDERS.SPIN.endpoints,
-          capabilities: PAYMENT_PROVIDERS.SPIN.capabilities,
+          baseUrl: PAYMENT_PROVIDERS.SPIN_Z.baseUrl,
+          endpoints: PAYMENT_PROVIDERS.SPIN_Z.endpoints,
+          capabilities: PAYMENT_PROVIDERS.SPIN_Z.capabilities,
           config: {
             tpn: (src.tpn as string) || "",
             registerId: (src.registerId as string) || "",
