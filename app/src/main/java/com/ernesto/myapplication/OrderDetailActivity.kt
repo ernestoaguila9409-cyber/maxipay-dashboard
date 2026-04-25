@@ -42,6 +42,7 @@ import com.ernesto.myapplication.engine.OrderEngine
 import com.ernesto.myapplication.engine.SplitReceiptPayload
 import com.ernesto.myapplication.engine.SplitReceiptReprintHelper
 import com.ernesto.myapplication.engine.PaymentService
+import com.ernesto.myapplication.payments.SpinApiUrls
 import android.graphics.Typeface
 import com.google.firebase.Timestamp
 import com.google.firebase.functions.FirebaseFunctions
@@ -1019,16 +1020,22 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun updateOrderTypeBadge(status: String) {
-        if (orderType != "TO_GO" && orderType != "DINE_IN") {
+        val knownTypes = setOf("TO_GO", "DINE_IN", "UBER_EATS")
+        if (orderType !in knownTypes) {
             txtOrderType.visibility = View.GONE
             return
         }
 
         txtOrderType.visibility = View.VISIBLE
-        val label = if (orderType == "TO_GO") "TO-GO" else "DINE IN"
+        val label = when (orderType) {
+            "TO_GO" -> "TO-GO"
+            "UBER_EATS" -> "UBER EATS"
+            else -> "DINE IN"
+        }
         val bgArgb = OrderTypeColorResolver.colorArgbForOrderType(orderType)
 
-        txtOrderType.text = if (status == "OPEN") "$label  ✎" else label
+        val isEditable = status == "OPEN" && orderType != "UBER_EATS"
+        txtOrderType.text = if (isEditable) "$label  ✎" else label
         txtOrderType.setTextColor(android.graphics.Color.WHITE)
 
         val bg = android.graphics.drawable.GradientDrawable()
@@ -1036,7 +1043,7 @@ class OrderDetailActivity : AppCompatActivity() {
         bg.cornerRadius = 16f
         txtOrderType.background = bg
 
-        if (status == "OPEN") {
+        if (isEditable) {
             txtOrderType.setOnClickListener { showSwitchOrderTypeDialog() }
         } else {
             txtOrderType.setOnClickListener(null)
@@ -1396,7 +1403,7 @@ class OrderDetailActivity : AppCompatActivity() {
             .build()
         val body = json.toString().toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
-            .url("https://spinpos.net/v2/Payment/Void")
+            .url(SpinApiUrls.voidPayment(this@OrderDetailActivity))
             .post(body)
             .build()
 
@@ -1742,7 +1749,7 @@ class OrderDetailActivity : AppCompatActivity() {
             .toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
-            .url("https://spinpos.net/v2/Payment/Return")
+            .url(SpinApiUrls.refund(this@OrderDetailActivity))
             .post(body)
             .build()
 
@@ -2122,7 +2129,7 @@ class OrderDetailActivity : AppCompatActivity() {
 
         segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         if (oType.isNotBlank()) {
-            val label = when (oType) { "DINE_IN" -> "Dine In"; "TO_GO" -> "To Go"; "BAR_TAB" -> "Bar Tab"; else -> oType }
+            val label = when (oType) { "DINE_IN" -> "Dine In"; "TO_GO" -> "To Go"; "BAR_TAB" -> "Bar Tab"; "UBER_EATS" -> "Uber Eats"; else -> oType }
             segs += EscPosPrinter.Segment("Type: $label", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
         if (rs.showServerName && empName.isNotBlank()) segs += EscPosPrinter.Segment("Server: $empName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
@@ -2544,7 +2551,7 @@ class OrderDetailActivity : AppCompatActivity() {
             segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
         if (orderType.isNotBlank()) {
-            val label = when (orderType) { "DINE_IN" -> "Dine In"; "TO_GO" -> "To Go"; "BAR_TAB" -> "Bar Tab"; else -> orderType }
+            val label = when (orderType) { "DINE_IN" -> "Dine In"; "TO_GO" -> "To Go"; "BAR_TAB" -> "Bar Tab"; "UBER_EATS" -> "Uber Eats"; else -> orderType }
             segs += EscPosPrinter.Segment("Type: $label", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
         if (rs.showServerName && empName.isNotBlank()) segs += EscPosPrinter.Segment("Server: $empName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)

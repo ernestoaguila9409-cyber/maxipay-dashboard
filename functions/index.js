@@ -12,6 +12,11 @@ const logger = require("firebase-functions/logger");
  * revoked, or lacks Mail Send permission. Keys must be set on the deployed function:
  *   firebase functions:secrets:set SENDGRID_API_KEY
  * and (v2) bound in code or set as env in Google Cloud Console → Cloud Functions → Runtime.
+ *
+ * Password reset / verification emails are sent by Firebase Auth, not this file. Enable
+ * Custom SMTP in Firebase Console → Authentication → Email templates; use a branded
+ * @maxipaypos.com sender there, not receipt@ (receipts use SENDGRID_FROM_EMAIL). See
+ * functions/README.md.
  */
 function getSendGridApiKey() {
   const k = process.env.SENDGRID_API_KEY;
@@ -1601,3 +1606,17 @@ exports.fixStorageCors = onRequest(async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Uber Eats — webhook, Firestore triggers, and callable functions
+// ---------------------------------------------------------------------------
+
+exports.uberWebhook = require("./uber").uberWebhook;
+
+const uberTriggers = require("./uber-triggers");
+exports.uberOnOrderStatusChange = uberTriggers.uberOnOrderStatusChange;
+
+const uberCallables = require("./uber-callables");
+exports.uberGetStores = uberCallables.uberGetStores;
+exports.uberSyncMenu = uberCallables.uberSyncMenu;
+exports.uberGetReports = uberCallables.uberGetReports;

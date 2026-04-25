@@ -83,13 +83,15 @@ object TipConfig {
         getTipPresentation(context) == PRESENTATION_CUSTOMER_SCREEN
 
     /**
-     * Printed / thermal receipt: show a Tip line when tips are enabled.
+     * Printed / thermal receipt: show a Tip line in the totals section when tips are enabled.
      * In receipt mode, always show the line (including $0.00) so staff can write tip on paper.
-     * In customer-screen mode, show only when tip amount is greater than zero.
+     * In customer-screen mode, never show tip lines on paper — tips are only on the customer-facing flow.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun shouldIncludeTipLineOnPrintedReceipt(context: Context, tipAmountInCents: Long): Boolean {
         if (!isTipsEnabled(context)) return false
-        return if (!isTipOnCustomerScreen(context)) true else tipAmountInCents > 0L
+        if (isTipOnCustomerScreen(context)) return false
+        return true
     }
 
     fun isSubtotalBased(context: Context): Boolean =

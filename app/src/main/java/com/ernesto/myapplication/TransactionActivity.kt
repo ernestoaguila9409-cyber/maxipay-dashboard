@@ -38,6 +38,7 @@ import com.ernesto.myapplication.engine.MoneyUtils
 import com.ernesto.myapplication.engine.PaymentService
 import com.ernesto.myapplication.engine.SplitReceiptPayload
 import com.ernesto.myapplication.engine.SplitReceiptReprintHelper
+import com.ernesto.myapplication.payments.SpinApiUrls
 import com.google.firebase.Timestamp
 import java.text.SimpleDateFormat
 
@@ -1720,7 +1721,7 @@ class TransactionActivity : AppCompatActivity() {
             .build()
         val body = json.toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
-            .url("https://spinpos.net/v2/Payment/Void")
+            .url(SpinApiUrls.voidPayment(this@TransactionActivity))
             .post(body)
             .build()
 
@@ -1936,7 +1937,7 @@ class TransactionActivity : AppCompatActivity() {
         }.toString()
 
         sendApiRequest(
-            url = "https://spinpos.net/v2/Payment/Return",
+            url = SpinApiUrls.refund(this@TransactionActivity),
             json = json,
             type = "REFUND",
             referenceId = transaction.referenceId,

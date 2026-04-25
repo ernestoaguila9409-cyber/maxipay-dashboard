@@ -15,6 +15,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
@@ -38,6 +39,13 @@ class ItemDetailActivity : AppCompatActivity() {
     private lateinit var txtLabelsEmpty: TextView
     private lateinit var containerKds: LinearLayout
     private lateinit var txtKdsEmpty: TextView
+    private lateinit var cardItemStock: MaterialCardView
+    private lateinit var txtItemDetailStock: TextView
+    private lateinit var txtItemDetailStockStatus: TextView
+
+    private var stockCountingEnabled = true
+    private var itemLoadComplete = false
+    private var itemStock = 0L
 
     private var itemId = ""
     private var itemName = ""
@@ -80,6 +88,9 @@ class ItemDetailActivity : AppCompatActivity() {
         txtLabelsEmpty = findViewById(R.id.txtLabelsEmpty)
         containerKds = findViewById(R.id.containerKds)
         txtKdsEmpty = findViewById(R.id.txtKdsEmpty)
+        cardItemStock = findViewById(R.id.cardItemStock)
+        txtItemDetailStock = findViewById(R.id.txtItemDetailStock)
+        txtItemDetailStockStatus = findViewById(R.id.txtItemDetailStockStatus)
 
         findViewById<View>(R.id.btnEditItemName).setOnClickListener { showEditNameDialog() }
         txtPrice.setOnClickListener { showEditPriceDialog() }
@@ -88,13 +99,108 @@ class ItemDetailActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.btnAddLabel).setOnClickListener { showAddLabelDialog() }
         findViewById<MaterialButton>(R.id.btnAddKds).setOnClickListener { showAddKdsDialog() }
         findViewById<MaterialButton>(R.id.btnDeleteItem).setOnClickListener { confirmDelete() }
+        findViewById<MaterialButton>(R.id.btnEditStock).setOnClickListener { showEditStockDialog() }
+        txtItemDetailStock.setOnClickListener { showEditStockDialog() }
 
+        loadStockSetting()
         loadItem()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        loadStockSetting()
     }
 
     override fun onSupportNavigateUp(): Boolean {
         finish()
         return true
+    }
+
+    // ── Stock (Settings / inventory + MenuItems.stock) ──────────────
+
+    private fun loadStockSetting() {
+        db.collection("Settings").document("inventory").get()
+            .addOnSuccessListener { doc ->
+                stockCountingEnabled = doc.getBoolean("stockCountingEnabled") ?: true
+                applyStockSectionVisibility()
+            }
+            .addOnFailureListener {
+                stockCountingEnabled = true
+                applyStockSectionVisibility()
+            }
+    }
+
+    private fun applyStockSectionVisibility() {
+        val show = stockCountingEnabled && itemLoadComplete
+        cardItemStock.visibility = if (show) View.VISIBLE else View.GONE
+        if (show) bindStockDisplay()
+    }
+
+    private fun bindStockDisplay() {
+        txtItemDetailStock.text = itemStock.toString()
+        when {
+            itemStock <= 0 -> {
+                txtItemDetailStockStatus.text = getString(R.string.item_detail_stock_status_out)
+                txtItemDetailStockStatus.setTextColor(0xFFDC2626.toInt())
+                txtItemDetailStockStatus.setBackgroundResource(R.drawable.bg_stock_badge_red)
+            }
+            itemStock <= 10 -> {
+                txtItemDetailStockStatus.text = getString(R.string.item_detail_stock_status_low)
+                txtItemDetailStockStatus.setTextColor(0xFFA16207.toInt())
+                txtItemDetailStockStatus.setBackgroundResource(R.drawable.bg_stock_badge_yellow)
+            }
+            else -> {
+                txtItemDetailStockStatus.text = getString(R.string.item_detail_stock_status_in)
+                txtItemDetailStockStatus.setTextColor(0xFF16A34A.toInt())
+                txtItemDetailStockStatus.setBackgroundResource(R.drawable.bg_stock_badge_green)
+            }
+        }
+    }
+
+    private fun showEditStockDialog() {
+        if (!stockCountingEnabled || !itemLoadComplete) return
+        val density = resources.displayMetrics.density
+        val padH = (24 * density).toInt()
+        val padV = (8 * density).toInt()
+
+        val til = TextInputLayout(this).apply {
+            setPadding(padH, padV, padH, 0)
+            boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
+            hint = getString(R.string.item_detail_stock_hint)
+        }
+        val edit = TextInputEditText(til.context).apply {
+            setText(itemStock.toString())
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+        til.addView(edit)
+
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.item_detail_edit_stock_title)
+            .setView(til)
+            .setPositiveButton(R.string.save, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+
+        dialog.setOnShowListener {
+            edit.selectAll()
+            dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+                val raw = edit.text?.toString()?.trim().orEmpty()
+                val newStock = raw.toLongOrNull()
+                if (newStock == null || newStock < 0) {
+                    Toast.makeText(this, R.string.item_detail_stock_invalid, Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                db.collection("MenuItems").document(itemId)
+                    .update("stock", newStock)
+                    .addOnSuccessListener {
+                        itemStock = newStock
+                        bindStockDisplay()
+                        Toast.makeText(this, R.string.item_detail_saved, Toast.LENGTH_SHORT).show()
+                    }
+            }
+        }
+        dialog.show()
     }
 
     // ── Load ──────────────────────────────────────────────────────────
@@ -107,6 +213,10 @@ class ItemDetailActivity : AppCompatActivity() {
                     finish()
                     return@addOnSuccessListener
                 }
+                itemStock = doc.getLong("stock") ?: 0L
+                itemLoadComplete = true
+                applyStockSectionVisibility()
+
                 itemName = doc.getString("name").orEmpty()
                 itemPrice = doc.getDouble("price") ?: 0.0
                 @Suppress("UNCHECKED_CAST")

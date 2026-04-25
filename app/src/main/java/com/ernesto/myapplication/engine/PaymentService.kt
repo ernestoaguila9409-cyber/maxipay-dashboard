@@ -3,6 +3,7 @@ package com.ernesto.myapplication.engine
 import android.content.Context
 import android.util.Log
 import com.ernesto.myapplication.TerminalPrefs
+import com.ernesto.myapplication.payments.SpinApiUrls
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -68,7 +69,7 @@ class PaymentService(private val context: Context) {
         val body = json.toString().toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
-            .url("https://spinpos.net/v2/Payment/Auth")
+            .url(SpinApiUrls.auth(context))
             .post(body)
             .build()
 
@@ -173,7 +174,7 @@ class PaymentService(private val context: Context) {
         val body = json.toString().toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
-            .url("https://spinpos.net/v2/Payment/Capture")
+            .url(SpinApiUrls.capture(context))
             .post(body)
             .build()
 
@@ -286,7 +287,7 @@ class PaymentService(private val context: Context) {
 
         val body = json.toString().toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
-            .url("https://spinpos.net/v2/Payment/TipAdjust")
+            .url(SpinApiUrls.tipAdjust(context))
             .post(body)
             .build()
 

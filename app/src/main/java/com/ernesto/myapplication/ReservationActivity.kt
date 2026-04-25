@@ -4,6 +4,8 @@ import android.app.DatePickerDialog
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.format.DateFormat
 import android.view.LayoutInflater
 import android.view.View
@@ -136,6 +138,19 @@ class ReservationActivity : AppCompatActivity() {
     private var lastReservationsSnapshot: QuerySnapshot? = null
     private val reservationLayoutGraceListeners = mutableMapOf<String, ListenerRegistration>()
 
+    /**
+     * Firestore snapshots only fire when data changes — after [reservationTime] + layout grace,
+     * nothing writes by itself, so we must periodically re-run expiry against the last snapshot.
+     */
+    private val expirySweepHandler = Handler(Looper.getMainLooper())
+    private val expirySweepIntervalMs = 30_000L
+    private val expirySweepRunnable = object : Runnable {
+        override fun run() {
+            sweepExpiredReservationsIfNeeded()
+            expirySweepHandler.postDelayed(this, expirySweepIntervalMs)
+        }
+    }
+
     /** When false, list shows active bookings; when true, ended / cancelled / expired. */
     private var showClosedReservations: Boolean = false
 
@@ -231,14 +246,31 @@ class ReservationActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         listenReservations()
+        sweepExpiredReservationsIfNeeded()
+        expirySweepHandler.postDelayed(expirySweepRunnable, expirySweepIntervalMs)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        sweepExpiredReservationsIfNeeded()
     }
 
     override fun onStop() {
         super.onStop()
+        expirySweepHandler.removeCallbacks(expirySweepRunnable)
         reservationsListener?.remove()
         reservationsListener = null
         clearReservationLayoutGraceListeners()
         lastReservationsSnapshot = null
+    }
+
+    private fun sweepExpiredReservationsIfNeeded() {
+        val snap = lastReservationsSnapshot ?: return
+        for (doc in snap.documents) {
+            if (ReservationFirestoreHelper.shouldReleaseHoldForReservationDoc(doc)) {
+                ReservationFirestoreHelper.releaseHoldForExpiredReservationIfNeeded(db, doc.id)
+            }
+        }
     }
 
     private fun clearReservationLayoutGraceListeners() {

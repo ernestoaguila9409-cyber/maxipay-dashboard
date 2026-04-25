@@ -599,11 +599,7 @@ class TableSelectionActivity : AppCompatActivity() {
                 val name = tableNames[tableId] ?: "Table"
                 val seats = tableSeats[tableId] ?: 4
                 val shape = tableShapes[tableId] ?: TableShapeView.Shape.SQUARE
-                val enc = tableDocMapUiNormsEnc[tableId].orEmpty()
-                val norm = ReservationFirestoreHelper.parseReservationMapUiNormsV1(enc)[tableId]
-                val posX = if (norm != null) norm.first * cw else rect.x
-                val posY = if (norm != null) norm.second * ch else rect.y
-                addTableToCanvas(tableId, name, seats, shape, posX, posY, null)
+                addTableToCanvas(tableId, name, seats, shape, rect.x, rect.y, null)
             }
         }
     }

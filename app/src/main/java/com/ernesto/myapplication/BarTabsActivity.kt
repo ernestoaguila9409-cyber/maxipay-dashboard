@@ -103,7 +103,40 @@ class BarTabsActivity : AppCompatActivity() {
     }
 
     private fun handleSeatLongPress(seat: BarSeat) {
-        if (seat.isOccupied) return
+        if (seat.isOccupied) {
+            val orderId = seat.orderId ?: return
+            exitSelectionMode()
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Mark seat as unoccupied?")
+                .setMessage(
+                    "This will unlink ${seat.seatName} from the open tab. " +
+                        "It only works when the tab balance is $0.00."
+                )
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Unoccupy seat") { _, _ ->
+                    val seatNamesByTableId = barSeats.associate { it.tableId to it.name }
+                    val fallbackSeatIds = openOrdersByTableId.entries
+                        .filter { it.value.orderId == orderId }
+                        .map { it.key }
+                    BarTabSeatHelper.detachOccupiedBarSeat(
+                        db = db,
+                        orderId = orderId,
+                        tableIdToFree = seat.tableId,
+                        seatNamesByTableId = seatNamesByTableId,
+                        fallbackSeatIds = fallbackSeatIds,
+                    ).addOnSuccessListener {
+                        Toast.makeText(this, "Seat is now open.", Toast.LENGTH_SHORT).show()
+                    }.addOnFailureListener { e ->
+                        Toast.makeText(
+                            this,
+                            e.message ?: "Could not unoccupy seat.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+                .show()
+            return
+        }
         selectionMode = true
         selectedTableIds.clear()
         selectedTableIds.add(seat.tableId)

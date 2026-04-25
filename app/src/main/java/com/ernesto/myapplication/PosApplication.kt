@@ -1,6 +1,8 @@
 package com.ernesto.myapplication
 
 import android.app.Application
+import com.ernesto.myapplication.payments.PaymentTerminalReachabilitySync
+import com.ernesto.myapplication.payments.PaymentTerminalRepository
 import com.google.firebase.auth.FirebaseAuth
 
 class PosApplication : Application() {
@@ -10,12 +12,20 @@ class PosApplication : Application() {
             PrintingSettingsCache.start()
             PrinterKitchenStyleCache.start()
             PrinterDashboardCommandListener.start(this)
+            RemoteVoidCommandListener.start(this)
+            OnlineTerminalPaymentListener.start(this)
             PrinterFirestoreDeletionSync.start(this)
+            PaymentTerminalRepository.start()
+            PaymentTerminalReachabilitySync.start(this)
         } else {
             PrintingSettingsCache.stop()
             PrinterKitchenStyleCache.stop()
             PrinterDashboardCommandListener.stop()
+            RemoteVoidCommandListener.stop()
+            OnlineTerminalPaymentListener.stop()
             PrinterFirestoreDeletionSync.stop()
+            PaymentTerminalRepository.stop()
+            PaymentTerminalReachabilitySync.stop()
         }
     }
 

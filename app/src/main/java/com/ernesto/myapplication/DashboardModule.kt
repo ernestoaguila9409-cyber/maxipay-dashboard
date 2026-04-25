@@ -35,19 +35,40 @@ data class DashboardModule(
             DashboardModule("dine_in", "DINE IN", "ic_dine_in", "green", 0),
             DashboardModule("to_go", "TO-GO", "ic_to_go", "orange", 1),
             DashboardModule("bar", "BAR", "ic_bar", "teal", 2),
-            DashboardModule("transactions", "TRANSACTIONS", "ic_transactions", "purple", 3),
-            DashboardModule("settle_batch", "SETTLE BATCH", "ic_settle_batch", "purple", 4),
-            DashboardModule("employees", "EMPLOYEES", "ic_employees", "purple", 5),
-            DashboardModule("customers", "CUSTOMERS", "ic_customers", "purple", 6),
-            DashboardModule("orders", "ORDERS", "ic_orders", "purple", 7),
-            DashboardModule("setup", "SETUP", "ic_settings", "purple", 8),
-            DashboardModule("modifiers", "MODIFIERS", "ic_modifiers", "purple", 9),
-            DashboardModule("inventory", "INVENTORY", "ic_inventory", "purple", 10),
-            DashboardModule("reports", "REPORTS", "ic_reports", "purple", 11),
-            DashboardModule("printers", "PRINTERS", "ic_printer", "purple", 12),
-            DashboardModule("cash_flow", "CASH FLOW", "ic_cash", "purple", 13),
-            DashboardModule("reservation", "RESERVATION", "ic_calendar", "purple", 14),
+            DashboardModule("online_orders", "ONLINE", "ic_globe", "uber_green", 3),
+            DashboardModule("transactions", "TRANSACTIONS", "ic_transactions", "purple", 4),
+            DashboardModule("settle_batch", "SETTLE BATCH", "ic_settle_batch", "purple", 5),
+            DashboardModule("employees", "EMPLOYEES", "ic_employees", "purple", 6),
+            DashboardModule("customers", "CUSTOMERS", "ic_customers", "purple", 7),
+            DashboardModule("orders", "ORDERS", "ic_orders", "purple", 8),
+            DashboardModule("setup", "SETUP", "ic_settings", "purple", 9),
+            DashboardModule("modifiers", "MODIFIERS", "ic_modifiers", "purple", 10),
+            DashboardModule("inventory", "INVENTORY", "ic_inventory", "purple", 11),
+            DashboardModule("reports", "REPORTS", "ic_reports", "purple", 12),
+            DashboardModule("printers", "PRINTERS", "ic_printer", "purple", 13),
+            DashboardModule("cash_flow", "CASH FLOW", "ic_cash", "purple", 14),
+            DashboardModule("reservation", "RESERVATION", "ic_calendar", "purple", 15),
         )
+
+        /**
+         * Ensures the ONLINE ORDERS tile exists when the saved Firestore layout predates it.
+         * Inserts it right after BAR when possible; otherwise appends. Re-indexes positions.
+         */
+        fun mergeOnlineOrdersDashboardTile(modules: List<DashboardModule>): List<DashboardModule> {
+            if (modules.any { it.key == "online_orders" }) {
+                return modules.sortedBy { it.position }
+            }
+            val def = getDefaults().find { it.key == "online_orders" }
+                ?: return modules.sortedBy { it.position }
+            val sorted = modules.sortedBy { it.position }.toMutableList()
+            val barIdx = sorted.indexOfFirst { it.key == "bar" }
+            if (barIdx >= 0) {
+                sorted.add(barIdx + 1, def)
+            } else {
+                sorted.add(def)
+            }
+            return sorted.mapIndexed { index, m -> m.copy(position = index) }
+        }
 
         /**
          * Ensures the PRINTERS tile exists when the saved Firestore layout predates it.

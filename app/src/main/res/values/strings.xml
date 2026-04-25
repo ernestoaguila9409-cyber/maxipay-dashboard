@@ -130,6 +130,14 @@
     <string name="item_detail_edit_price">Edit price</string>
     <string name="item_detail_price_hint">Price</string>
     <string name="item_detail_price_invalid">Enter a valid price.</string>
+    <string name="item_detail_stock_heading">Stock</string>
+    <string name="item_detail_edit_stock">+ Edit stock</string>
+    <string name="item_detail_edit_stock_title">Edit stock</string>
+    <string name="item_detail_stock_hint">Quantity on hand</string>
+    <string name="item_detail_stock_invalid">Enter a whole number zero or greater.</string>
+    <string name="item_detail_stock_status_out">Out of stock</string>
+    <string name="item_detail_stock_status_low">Low stock</string>
+    <string name="item_detail_stock_status_in">In stock</string>
     <string name="item_detail_no_category">No category</string>
     <string name="item_detail_saved">Saved</string>
     <string name="item_detail_not_found">Item not found.</string>

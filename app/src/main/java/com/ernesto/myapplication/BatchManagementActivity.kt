@@ -14,6 +14,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import com.ernesto.myapplication.payments.SpinApiUrls
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
 import okhttp3.*
@@ -290,7 +291,7 @@ class BatchManagementActivity : AppCompatActivity() {
         val body = json.toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
-            .url("https://spinpos.net/v2/Payment/Settle")
+            .url(SpinApiUrls.settle(this))
             .post(body)
             .addHeader("Content-Type", "application/json")
             .build()

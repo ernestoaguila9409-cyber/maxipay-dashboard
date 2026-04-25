@@ -54,9 +54,7 @@ class BarTabsAdapter(
         holder.bind(seat)
         holder.itemView.setOnClickListener { onSeatClick(seat) }
         holder.itemView.setOnLongClickListener {
-            if (!seat.isOccupied) {
-                onSeatLongPress(seat)
-            }
+            onSeatLongPress(seat)
             true
         }
     }

@@ -160,7 +160,9 @@ class MainActivity : AppCompatActivity() {
                         DashboardModule.mergeTipDashboardTile(
                             this,
                             DashboardModule.mergeReservationDashboardTile(
-                                DashboardModule.mergePrintersDashboardTile(modules)
+                                DashboardModule.mergeOnlineOrdersDashboardTile(
+                                    DashboardModule.mergePrintersDashboardTile(modules)
+                                )
                             ),
                         )
                     )
@@ -174,7 +176,9 @@ class MainActivity : AppCompatActivity() {
                         DashboardModule.mergeTipDashboardTile(
                             this,
                             DashboardModule.mergeReservationDashboardTile(
-                                DashboardModule.mergePrintersDashboardTile(serverModules)
+                                DashboardModule.mergeOnlineOrdersDashboardTile(
+                                    DashboardModule.mergePrintersDashboardTile(serverModules)
+                                )
                             ),
                         )
                     )
@@ -231,6 +235,12 @@ class MainActivity : AppCompatActivity() {
                 i.putExtra("employeeName", employeeName)
                 startActivity(i)
             }
+            "online_orders" -> {
+                val i = Intent(this, OrdersActivity::class.java)
+                i.putExtra("employeeName", employeeName)
+                i.putExtra("FILTER_ONLINE", true)
+                startActivity(i)
+            }
             "transactions" -> {
                 val i = Intent(this, TransactionActivity::class.java)
                 i.putExtra("employeeName", employeeName)
@@ -278,7 +288,9 @@ class MainActivity : AppCompatActivity() {
                     DashboardModule.mergeTipDashboardTile(
                         this,
                         DashboardModule.mergeReservationDashboardTile(
-                            DashboardModule.mergePrintersDashboardTile(modules)
+                            DashboardModule.mergeOnlineOrdersDashboardTile(
+                                DashboardModule.mergePrintersDashboardTile(modules)
+                            )
                         ),
                     )
                 )
@@ -332,12 +344,15 @@ class MainActivity : AppCompatActivity() {
                 var dineIn = 0
                 var toGo = 0
                 var bar = 0
+                var online = 0
 
                 for (doc in snapshots) {
+                    val source = doc.getString("orderSource") ?: ""
+                    if (source.isNotBlank()) {
+                        online++
+                        continue
+                    }
                     when (doc.getString("orderType")) {
-                        // Match [TableSelectionActivity.listenForOccupiedTables]: only orders tied to a table
-                        // count as "open dine-in" for the badge. Otherwise orphan DINE_IN docs (no tableId)
-                        // show a badge but no occupied table on the floor plan.
                         "DINE_IN" -> {
                             val tid = doc.getString("tableId")
                             if (!tid.isNullOrBlank()) dineIn++
@@ -350,6 +365,7 @@ class MainActivity : AppCompatActivity() {
                 dashboardAdapter.updateBadge("dine_in", dineIn)
                 dashboardAdapter.updateBadge("to_go", toGo)
                 dashboardAdapter.updateBadge("bar", bar)
+                dashboardAdapter.updateBadge("online_orders", online)
             }
     }
 

@@ -34,6 +34,7 @@ object OrderTypeColorResolver {
             "DINE_IN" -> "dine_in"
             "TO_GO", "TAKEOUT", "TAKE_OUT" -> "to_go"
             "BAR", "BAR_TAB" -> "bar"
+            "UBER_EATS" -> "uber_eats"
             else -> "to_go"
         }
     }
@@ -42,6 +43,7 @@ object OrderTypeColorResolver {
         "dine_in" -> "green"
         "to_go" -> "orange"
         "bar" -> "teal"
+        "uber_eats" -> "uber_green"
         else -> "purple"
     }
 }

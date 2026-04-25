@@ -106,6 +106,14 @@
             android:text="Bar"
             app:checkedIconVisible="false"/>
 
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chipOnline"
+            style="@style/Widget.MaterialComponents.Chip.Choice"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Online"
+            app:checkedIconVisible="false"/>
+
     </com.google.android.material.chip.ChipGroup>
 
     <!-- Refund count summary (visible when employee filter is active) -->
@@ -118,6 +126,18 @@
         android:paddingVertical="8dp"
         android:textSize="14sp"
         android:textColor="#757575"/>
+
+    <!-- Empty state -->
+    <TextView
+        android:id="@+id/txtEmptyState"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="No orders found"
+        android:textColor="#9E9E9E"
+        android:textSize="16sp"
+        android:visibility="gone"/>
 
     <!-- Orders List -->
     <androidx.recyclerview.widget.RecyclerView

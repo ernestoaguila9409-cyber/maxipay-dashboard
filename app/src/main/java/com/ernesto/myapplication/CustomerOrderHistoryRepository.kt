@@ -11,23 +11,24 @@ import com.google.firebase.firestore.QuerySnapshot
 import java.util.Date
 
 /**
- * Read/write the per-customer recent-order cache used by the "Same as usual?" suggestion and any
- * future feature that needs a quick look at a customer's recent orders (Favorites, predictive
+ * Read/write per-customer recent-order information used by the "Same as usual?" suggestion and
+ * any future feature that needs a quick look at a customer's recent orders (Favorites, predictive
  * recommendations).
  *
  * **Read path** — [loadRecentHistory]:
- *  1. If the Customer doc already has `visitCount`, `lastOrders` (cache populated after a prior
- *     close on this device), return those.
- *  2. Otherwise **fallback** to querying `Orders` where customerId == X AND status == "CLOSED",
- *     ordered by createdAt desc, limit 5. Items for each order are fetched from the `items`
- *     subcollection. This ensures existing customers show the suggestion immediately, without a
- *     one-time migration.
+ *  - Always queries `Orders` where customerId == X AND status == "CLOSED", ordered by createdAt
+ *    desc, limit [MAX_LAST_ORDERS]. Items for each order are fetched from the `items`
+ *    subcollection. This is authoritative — the Customer doc cache (`visitCount` / `lastOrders`)
+ *    is *not* consulted here because a single miss in the write path (e.g. an order closed before
+ *    `customerId` was attached) would otherwise hide the card even for loyal customers.
  *
  * **Write path** — [updateAfterOrderClosed]:
  *  - `visitCount += 1`
  *  - `lastVisitAt = order.createdAt` (or now)
  *  - Prepend order summary into `lastOrders`, cap at [MAX_LAST_ORDERS].
  *  - VOIDED orders are skipped.
+ *  - These writes are still produced because `visitCount` is consumed elsewhere (CustomersActivity,
+ *    dashboard) to flag frequent customers with a gold star.
  */
 class CustomerOrderHistoryRepository(
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance(),
@@ -52,19 +53,14 @@ class CustomerOrderHistoryRepository(
             onSuccess(RecentHistory(0, null, emptyList()))
             return
         }
-        db.collection(COLLECTION_CUSTOMERS).document(id).get()
-            .addOnSuccessListener { doc ->
-                val cached = cachedHistoryOrNull(doc)
-                if (cached != null) {
-                    onSuccess(cached)
-                } else {
-                    loadHistoryFromOrders(id, onSuccess, onFailure)
-                }
-            }
-            .addOnFailureListener { onFailure(it) }
+        loadHistoryFromOrders(id, onSuccess, onFailure)
     }
 
-    @Suppress("UNCHECKED_CAST")
+    /**
+     * Retained in case a future caller wants a fast (non-authoritative) read straight from the
+     * Customer doc cache — not used by the "Same as usual?" flow anymore.
+     */
+    @Suppress("UNCHECKED_CAST", "unused")
     private fun cachedHistoryOrNull(doc: DocumentSnapshot): RecentHistory? {
         if (!doc.exists()) return null
         val visitCount = (doc.getLong(FIELD_VISIT_COUNT) ?: return null).toInt()

@@ -78,12 +78,20 @@ class OrdersAdapter(
         }
 
         fun bind(order: OrderRow, isSelected: Boolean) {
+            val isOnline = order.orderSource.isNotBlank()
             val label = buildString {
                 if (order.orderNumber > 0L) append("#${order.orderNumber}")
-                val name = order.employeeName.takeIf { it.isNotBlank() && it != "—" }
-                if (name != null) {
+                val displayName = if (isOnline) {
+                    order.customerName.takeIf { it.isNotBlank() }
+                } else {
+                    order.employeeName.takeIf { it.isNotBlank() && it != "—" }
+                }
+                if (displayName != null) {
                     if (isNotEmpty()) append(" · ")
-                    append(name)
+                    append(displayName)
+                }
+                if (isOnline && order.itemsCount > 0) {
+                    append(" · ${order.itemsCount} item${if (order.itemsCount != 1) "s" else ""}")
                 }
             }
             txtOrderLabel.text = label
@@ -176,6 +184,7 @@ class OrdersAdapter(
                 "DINE_IN" -> "DINE IN"
                 "BAR" -> "BAR"
                 "BAR_TAB" -> "BAR TAB"
+                "UBER_EATS" -> "UBER EATS"
                 else -> "TO-GO"
             }
 

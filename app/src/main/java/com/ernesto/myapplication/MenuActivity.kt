@@ -1,6 +1,9 @@
 package com.ernesto.myapplication
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
@@ -23,6 +26,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.abs
@@ -83,6 +87,29 @@ class MenuActivity : AppCompatActivity() {
     private lateinit var gridAdapter: MenuGridAdapter
     private val searchHandler = Handler(Looper.getMainLooper())
     private var searchRunnable: Runnable? = null
+
+    private val kitchenDestinationHandler = Handler(Looper.getMainLooper())
+    private val kitchenDestinationProbeRunnable = Runnable { runKitchenDestinationReachabilityProbe() }
+
+    /**
+     * True when at least one saved kitchen printer responds on port 9100, or a KDS device has a fresh
+     * Firestore `lastSeen` ([KdsActiveCache.hasOnlineKds]).
+     */
+    private var kitchenSendDestinationReachable = false
+
+    private var kitchenDestinationProbeLoopActive = false
+
+    private val kdsAvailabilityListener: () -> Unit = {
+        kitchenDestinationHandler.removeCallbacks(kitchenDestinationProbeRunnable)
+        kitchenDestinationHandler.post(kitchenDestinationProbeRunnable)
+    }
+
+    private val printerPrefsChangedReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            kitchenDestinationHandler.removeCallbacks(kitchenDestinationProbeRunnable)
+            kitchenDestinationHandler.post(kitchenDestinationProbeRunnable)
+        }
+    }
     private lateinit var cartTaxDetails: LinearLayout
     private lateinit var cartTaxSummary: LinearLayout
     private lateinit var txtTotal: TextView
@@ -370,16 +397,70 @@ class MenuActivity : AppCompatActivity() {
         syncCartButtonStates()
     }
 
+    override fun onStart() {
+        super.onStart()
+        KdsActiveCache.start(db)
+        KdsActiveCache.addAvailabilityListener(kdsAvailabilityListener)
+        ContextCompat.registerReceiver(
+            this,
+            printerPrefsChangedReceiver,
+            IntentFilter(SelectedPrinterPrefs.ACTION_PRINTERS_PREFS_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+    }
+
+    override fun onStop() {
+        try {
+            unregisterReceiver(printerPrefsChangedReceiver)
+        } catch (_: IllegalArgumentException) {
+        }
+        KdsActiveCache.removeAvailabilityListener(kdsAvailabilityListener)
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         CustomerDisplayManager.attach(this)
         loadAllTaxes()
         discountEngine.loadDiscounts { refreshCart() }
+        kitchenDestinationProbeLoopActive = true
+        kitchenDestinationHandler.removeCallbacks(kitchenDestinationProbeRunnable)
+        kitchenDestinationHandler.post(kitchenDestinationProbeRunnable)
+    }
+
+    override fun onPause() {
+        kitchenDestinationProbeLoopActive = false
+        kitchenDestinationHandler.removeCallbacks(kitchenDestinationProbeRunnable)
+        super.onPause()
     }
 
     override fun onDestroy() {
+        kitchenDestinationHandler.removeCallbacks(kitchenDestinationProbeRunnable)
         detachOrderKitchenStatusListener()
         super.onDestroy()
+    }
+
+    private fun runKitchenDestinationReachabilityProbe() {
+        Thread {
+            val printers = SelectedPrinterPrefs.getAll(applicationContext, PrinterDeviceType.KITCHEN)
+            val anyKitchenPrinterOnline = printers.any { isPrinterOnline(it.ipAddress) }
+            val kdsUp = KdsActiveCache.hasOnlineKds
+            val show = anyKitchenPrinterOnline || kdsUp
+            runOnUiThread {
+                if (isFinishing) return@runOnUiThread
+                if (kitchenSendDestinationReachable != show) {
+                    kitchenSendDestinationReachable = show
+                    syncCartButtonStates()
+                }
+                kitchenDestinationHandler.removeCallbacks(kitchenDestinationProbeRunnable)
+                if (kitchenDestinationProbeLoopActive && !isFinishing) {
+                    kitchenDestinationHandler.postDelayed(
+                        kitchenDestinationProbeRunnable,
+                        KITCHEN_DESTINATION_PROBE_INTERVAL_MS,
+                    )
+                }
+            }
+        }.start()
     }
 
     private fun applyKitchenInProcessFromItemsSnapshot(snap: QuerySnapshot?) {
@@ -1969,7 +2050,11 @@ class MenuActivity : AppCompatActivity() {
         if (!::btnCheckout.isInitialized) return
         val hasItems = cartMap.isNotEmpty()
         val busy = isSendingToKitchen || isCheckoutPending || isCaptureFlowActive
-        btnSendKitchen.isEnabled = hasItems && !busy
+        val showSendKitchen = kitchenSendDestinationReachable
+        if (::btnSendKitchen.isInitialized) {
+            btnSendKitchen.visibility = if (showSendKitchen) View.VISIBLE else View.GONE
+            btnSendKitchen.isEnabled = showSendKitchen && hasItems && !busy
+        }
         btnCheckout.isEnabled = hasItems && !busy
     }
 
@@ -4025,4 +4110,8 @@ class MenuActivity : AppCompatActivity() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private companion object {
+        private const val KITCHEN_DESTINATION_PROBE_INTERVAL_MS = 7_000L
+    }
 }

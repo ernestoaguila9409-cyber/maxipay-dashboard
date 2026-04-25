@@ -15,6 +15,7 @@ import com.google.android.material.button.MaterialButton
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import com.ernesto.myapplication.payments.SpinApiUrls
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -26,7 +27,6 @@ class TerminalListActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "TerminalHealth"
-        private const val SPIN_BASE_URL = "https://spinpos.net/v2"
         private const val HEALTH_CHECK_INTERVAL_MS = 10_000L
         /** Min interval between Firestore lastSeen writes while terminal stays ONLINE (avoids spam). */
         private const val LAST_SEEN_PERSIST_INTERVAL_MS = 45_000L
@@ -146,7 +146,7 @@ class TerminalListActivity : AppCompatActivity() {
         val body = json.toString().toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
-            .url("$SPIN_BASE_URL/Payment/Status")
+            .url(SpinApiUrls.status(this))
             .post(body)
             .build()
 

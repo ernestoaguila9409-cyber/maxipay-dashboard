@@ -12,7 +12,30 @@
         android:id="@+id/etEmployeeName"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Employee Name"/>
+        android:hint="Employee Name"
+        android:inputType="textPersonName|textCapWords"
+        android:importantForAutofill="yes"
+        android:autofillHints="name" />
+
+    <EditText
+        android:id="@+id/etEmployeeEmail"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:hint="Email (optional)"
+        android:inputType="textEmailAddress"
+        android:importantForAutofill="yes"
+        android:autofillHints="emailAddress" />
+
+    <EditText
+        android:id="@+id/etEmployeePhone"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:hint="Phone (optional)"
+        android:inputType="phone"
+        android:importantForAutofill="yes"
+        android:autofillHints="phone" />
 
     <!-- PIN Field with Eye Toggle -->
     <com.google.android.material.textfield.TextInputLayout

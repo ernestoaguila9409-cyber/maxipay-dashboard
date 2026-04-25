@@ -36,6 +36,7 @@ import com.ernesto.myapplication.engine.DiscountEngine
 import com.ernesto.myapplication.engine.PaymentEngine
 import com.ernesto.myapplication.engine.SplitReceiptCalculator
 import com.ernesto.myapplication.engine.SplitReceiptPayload
+import com.ernesto.myapplication.payments.SpinApiUrls
 import android.util.Log
 import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
@@ -1858,7 +1859,7 @@ class PaymentActivity : AppCompatActivity() {
             .toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
-            .url("https://spinpos.net/v2/Payment/Sale")
+            .url(SpinApiUrls.sale(this@PaymentActivity))
             .post(body)
             .build()
 
@@ -1963,6 +1964,10 @@ class PaymentActivity : AppCompatActivity() {
             invoiceNumber = invoiceNumber,
             onSuccess = { remainingInCents ->
 
+                if (remainingInCents <= 0L) {
+                    OnlineTerminalPaymentRequestHelper.markCompletedIfPresent(db, oid)
+                }
+
                 runOnUiThread {
                     showApproved(paymentType)
                     remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
@@ -2010,6 +2015,10 @@ class PaymentActivity : AppCompatActivity() {
             cashTenderedInCents = tenderedCents,
             cashChangeInCents = changeCents,
             onSuccess = { remainingInCents ->
+
+                if (remainingInCents <= 0L) {
+                    OnlineTerminalPaymentRequestHelper.markCompletedIfPresent(db, oid)
+                }
 
                 CashDrawerManager.openCashDrawerIfCash(this, paymentType)
 

@@ -45,6 +45,7 @@ class OrdersActivity : AppCompatActivity() {
     private lateinit var chipGroupStatus: ChipGroup
     private lateinit var chipGroupOrderType: ChipGroup
     private lateinit var txtRefundCountSummary: TextView
+    private lateinit var txtEmptyState: TextView
 
     private val db: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
 
@@ -93,6 +94,7 @@ class OrdersActivity : AppCompatActivity() {
         chipGroupStatus = findViewById(R.id.chipGroupFilter)
         chipGroupOrderType = findViewById(R.id.chipGroupOrderType)
         txtRefundCountSummary = findViewById(R.id.txtRefundCountSummary)
+        txtEmptyState = findViewById(R.id.txtEmptyState)
 
         adapter = OrdersAdapter(
             onOrderClick = { order ->
@@ -174,12 +176,21 @@ class OrdersActivity : AppCompatActivity() {
                 R.id.chipDineIn -> "DINE_IN"
                 R.id.chipToGo -> "TO_GO"
                 R.id.chipBar -> "BAR"
+                R.id.chipOnline -> "ONLINE"
                 else -> "ALL"
             }
             applyAndRefresh()
         }
 
         btnFilter.setOnClickListener { showFilterDialog() }
+
+        if (intent.getBooleanExtra("FILTER_ONLINE", false)) {
+            chipGroupOrderType.check(R.id.chipOnline)
+            chipGroupStatus.check(R.id.chipOpen)
+            orderTypeFilter = "ONLINE"
+            statusFilter = "OPEN"
+            filter = "OPEN"
+        }
     }
 
     override fun onStart() {
@@ -307,6 +318,8 @@ class OrdersActivity : AppCompatActivity() {
                         val orderNumber = doc.getLong("orderNumber") ?: 0L
                         val createdAt = doc.getTimestamp("createdAt") ?: Timestamp.now()
                         val orderType = doc.getString("orderType") ?: ""
+                        val orderSource = doc.getString("orderSource") ?: ""
+                        val itemsCount = (doc.getLong("itemsCount") ?: 0L).toInt()
                         val preAuthAmount = doc.getDouble("preAuthAmount") ?: 0.0
                         val preAuthAmountCents = Math.round(preAuthAmount * 100)
                         val kdsAgg = if (KdsActiveCache.hasActiveKds && OrderListKdsAggregator.orderReleasedToKitchen(doc)) {
@@ -327,6 +340,8 @@ class OrdersActivity : AppCompatActivity() {
                                 orderType = orderType,
                                 preAuthAmountCents = preAuthAmountCents,
                                 kdsAggregateStatus = kdsAgg,
+                                orderSource = orderSource,
+                                itemsCount = itemsCount,
                             )
                         )
                     }
@@ -345,6 +360,7 @@ class OrdersActivity : AppCompatActivity() {
                 orders.addAll(applyFilters(allOrders))
                 adapter.submit(orders)
                 updateDeleteButtonState()
+                updateEmptyState()
                 updateRefundCountSummary()
 
                 if (currentOrderView && orders.isEmpty()) {
@@ -362,7 +378,21 @@ class OrdersActivity : AppCompatActivity() {
         orders.clear()
         orders.addAll(applyFilters(allOrders))
         adapter.submit(orders)
+        updateEmptyState()
         updateRefundCountSummary()
+    }
+
+    private fun updateEmptyState() {
+        if (orders.isEmpty()) {
+            val msg = if (orderTypeFilter == "ONLINE") "No online orders yet"
+                      else "No orders found"
+            txtEmptyState.text = msg
+            txtEmptyState.visibility = View.VISIBLE
+            recyclerOrders.visibility = View.GONE
+        } else {
+            txtEmptyState.visibility = View.GONE
+            recyclerOrders.visibility = View.VISIBLE
+        }
     }
 
     private fun updateRefundCountSummary() {
@@ -378,10 +408,10 @@ class OrdersActivity : AppCompatActivity() {
     private fun applyFilters(list: List<OrderRow>): List<OrderRow> {
         var result = applyStatusFilter(list)
         if (orderTypeFilter != "ALL") {
-            result = if (orderTypeFilter == "BAR") {
-                result.filter { it.orderType == "BAR" || it.orderType == "BAR_TAB" }
-            } else {
-                result.filter { it.orderType == orderTypeFilter }
+            result = when (orderTypeFilter) {
+                "BAR" -> result.filter { it.orderType == "BAR" || it.orderType == "BAR_TAB" }
+                "ONLINE" -> result.filter { it.orderSource.isNotBlank() }
+                else -> result.filter { it.orderType == orderTypeFilter }
             }
         }
         if (employeeFilter != null) {

@@ -15,6 +15,9 @@ data class OrderRow(
     val preAuthAmountCents: Long = 0L,
     /** Aggregated kitchen phase for list icon; null = hide. */
     val kdsAggregateStatus: String? = null,
+    /** Non-empty for online orders (e.g. "uber_eats", "doordash"). */
+    val orderSource: String = "",
+    val itemsCount: Int = 0,
 ) {
     val netCents: Long get() = (totalCents - totalRefundedInCents).coerceAtLeast(0L)
 

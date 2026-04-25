@@ -624,6 +624,8 @@ object EscPosPrinter {
  * Segments printed after the grand TOTAL line for credit card sales: suggested tip guide (no tip yet)
  * or a Tip + Total summary after tip adjust. Uses [TipConfig] for calculation base, [TipConfig.getPresets]
  * for percentage rows, and [TipConfig.isCustomTipEnabled] for the Custom Tip line.
+ *
+ * Omitted entirely when tips are collected on the customer-facing screen ([TipConfig.isTipOnCustomerScreen]).
  */
 fun buildCreditTipReceiptFollowUpSegments(
     context: Context,
@@ -637,6 +639,7 @@ fun buildCreditTipReceiptFollowUpSegments(
     transactionVoided: Boolean
 ): List<EscPosPrinter.Segment> {
     if (!TipConfig.isTipsEnabled(context) || transactionVoided) return emptyList()
+    if (TipConfig.isTipOnCustomerScreen(context)) return emptyList()
     val hasCredit = payments.any { p ->
         p["paymentType"]?.toString()?.equals("Credit", ignoreCase = true) == true
     }

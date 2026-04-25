@@ -20,6 +20,7 @@ object ColorRegistry {
         "indigo" to 0xFF3949AB.toInt(),
         "pink" to 0xFFAD1457.toInt(),
         "cyan" to 0xFF0097A7.toInt(),
+        "uber_green" to 0xFF06C167.toInt(),
     )
 
     private const val DEFAULT_COLOR = 0xFF6A4FB3.toInt() // purple
