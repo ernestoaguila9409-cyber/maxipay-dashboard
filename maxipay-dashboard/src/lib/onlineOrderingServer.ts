@@ -40,6 +40,7 @@ export interface OnlineMenuItem {
   /** Unit price in cents (online channel). */
   unitPriceCents: number;
   stock: number;
+  imageUrl: string;
 }
 
 export interface OnlineMenuCategory {
@@ -128,6 +129,7 @@ export async function loadOnlineMenu(
       categoryIds: rawCategoryIds.length > 0 ? rawCategoryIds : categoryId ? [categoryId] : [],
       unitPriceCents,
       stock: typeof data.stock === "number" ? data.stock : 0,
+      imageUrl: typeof data.imageUrl === "string" ? data.imageUrl : "",
     });
   }
 
