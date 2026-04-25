@@ -992,7 +992,7 @@ export default function SalesActivityClient() {
                   return (
                     <Link
                       key={id}
-                      href={`/dashboard/orders/${id}`}
+                      href={`/dashboard/orders/${id}?from=sales-activity`}
                       className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:border-violet-200 hover:shadow transition-all"
                     >
                       <div className="flex justify-between gap-2">
@@ -1191,7 +1191,7 @@ export default function SalesActivityClient() {
             {String(txModal.data.orderId ?? "").trim() ? (
               <div className="space-y-2">
                 <Link
-                  href={`/dashboard/orders/${txModal.data.orderId}`}
+                  href={`/dashboard/orders/${String(txModal.data.orderId).trim()}?from=sales-activity`}
                   className="block text-center py-2 rounded-xl bg-violet-600 text-white text-sm font-medium hover:bg-violet-700"
                 >
                   View order

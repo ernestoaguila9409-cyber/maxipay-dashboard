@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   doc,
   getDoc,
@@ -62,11 +62,19 @@ interface RefundActivityRow {
   createdAtLabel: string | null;
 }
 
+const SALES_ACTIVITY_FROM = "sales-activity";
+
 export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const orderId = typeof params.orderId === "string" ? params.orderId : "";
   const { user } = useAuth();
+
+  const fromSalesActivity =
+    searchParams.get("from")?.trim().toLowerCase() === SALES_ACTIVITY_FROM;
+  const backHref = fromSalesActivity ? "/dashboard/sales-activity" : "/dashboard/orders";
+  const backLabel = fromSalesActivity ? "Back to sales activity" : "Back to orders";
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -281,11 +289,11 @@ export default function OrderDetailPage() {
       <div className="p-6 max-w-3xl mx-auto space-y-6">
         <button
           type="button"
-          onClick={() => router.push("/dashboard/orders")}
+          onClick={() => router.push(backHref)}
           className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900"
         >
           <ArrowLeft size={18} />
-          Back to orders
+          {backLabel}
         </button>
 
         {loading && (
