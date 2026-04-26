@@ -12,7 +12,19 @@ import {
   type OnlineOrderingSettings,
 } from "@/lib/onlineOrderingShared";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
-import { ShoppingBag, ExternalLink, Store, Loader2, Smartphone, Link2, Copy, Check, CreditCard } from "lucide-react";
+import {
+  ShoppingBag,
+  ExternalLink,
+  Store,
+  Loader2,
+  Smartphone,
+  Link2,
+  Copy,
+  Check,
+  CreditCard,
+  Eye,
+  EyeOff,
+} from "lucide-react";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -24,6 +36,11 @@ export default function OnlineOrderingSettingsPage() {
   const [slugInput, setSlugInput] = useState("");
   const [slugSaving, setSlugSaving] = useState(false);
   const [slugCopied, setSlugCopied] = useState(false);
+  const [hppTpnDraft, setHppTpnDraft] = useState("");
+  const [hppAuthDraft, setHppAuthDraft] = useState("");
+  const [hppCredsError, setHppCredsError] = useState<string | null>(null);
+  const [showHppAuth, setShowHppAuth] = useState(false);
+  const [hppCredsSaveState, setHppCredsSaveState] = useState<SaveState>("idle");
 
   useEffect(() => {
     setOrigin(typeof window !== "undefined" ? window.location.origin : "");
@@ -46,18 +63,32 @@ export default function OnlineOrderingSettingsPage() {
     return () => unsubs.forEach((u) => u());
   }, []);
 
-  const persist = async (next: OnlineOrderingSettings) => {
+  useEffect(() => {
+    setHppTpnDraft(settings.iposHppTpn);
+    setHppAuthDraft(settings.iposHppAuthToken);
+  }, [settings.iposHppTpn, settings.iposHppAuthToken]);
+
+  type FlagPatch = Partial<
+    Pick<
+      OnlineOrderingSettings,
+      "enabled" | "allowPayInStore" | "allowRequestTerminalFromWeb" | "allowPayOnlineHpp"
+    >
+  >;
+
+  const persist = async (flags: FlagPatch, credentials?: { tpn: string; authToken: string }) => {
     setSaveState("saving");
     try {
+      const payload: Record<string, unknown> = {
+        ...flags,
+        updatedAt: serverTimestamp(),
+      };
+      if (credentials) {
+        payload.iposHppTpn = credentials.tpn;
+        payload.iposHppAuthToken = credentials.authToken;
+      }
       await setDoc(
         doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
-        {
-          enabled: next.enabled,
-          allowPayInStore: next.allowPayInStore,
-          allowRequestTerminalFromWeb: next.allowRequestTerminalFromWeb,
-          allowPayOnlineHpp: next.allowPayOnlineHpp,
-          updatedAt: serverTimestamp(),
-        },
+        payload,
         { merge: true }
       );
       setSaveState("saved");
@@ -65,6 +96,33 @@ export default function OnlineOrderingSettingsPage() {
     } catch (e) {
       console.error(e);
       setSaveState("error");
+    }
+  };
+
+  const saveHppCredentialsOnly = async () => {
+    setHppCredsError(null);
+    const tpn = hppTpnDraft.trim();
+    const authToken = hppAuthDraft.trim();
+    if (!tpn || !authToken) {
+      setHppCredsError("TPN and Auth token are required.");
+      return;
+    }
+    setHppCredsSaveState("saving");
+    try {
+      await setDoc(
+        doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
+        {
+          iposHppTpn: tpn,
+          iposHppAuthToken: authToken,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      setHppCredsSaveState("saved");
+      setTimeout(() => setHppCredsSaveState("idle"), 2000);
+    } catch (e) {
+      console.error(e);
+      setHppCredsSaveState("error");
     }
   };
 
@@ -199,7 +257,7 @@ export default function OnlineOrderingSettingsPage() {
               type="checkbox"
               className="w-5 h-5 accent-blue-600"
               checked={settings.enabled}
-              onChange={(e) => void persist({ ...settings, enabled: e.target.checked })}
+              onChange={(e) => void persist({ enabled: e.target.checked })}
             />
           </label>
 
@@ -218,7 +276,7 @@ export default function OnlineOrderingSettingsPage() {
               type="checkbox"
               className="w-5 h-5 accent-blue-600"
               checked={settings.allowPayInStore}
-              onChange={(e) => void persist({ ...settings, allowPayInStore: e.target.checked })}
+              onChange={(e) => void persist({ allowPayInStore: e.target.checked })}
             />
           </label>
 
@@ -240,31 +298,127 @@ export default function OnlineOrderingSettingsPage() {
               className="w-5 h-5 accent-blue-600"
               checked={settings.allowRequestTerminalFromWeb}
               onChange={(e) =>
-                void persist({ ...settings, allowRequestTerminalFromWeb: e.target.checked })
+                void persist({ allowRequestTerminalFromWeb: e.target.checked })
               }
             />
           </label>
 
-          <label className="flex items-center justify-between gap-4 cursor-pointer">
-            <div className="flex gap-2">
-              <CreditCard size={18} className="text-slate-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-medium text-slate-800">Pay online with card (iPOSpays)</p>
-                <p className="text-sm text-slate-500">
-                  Customer pays securely on a hosted payment page before pickup. Card data never touches
-                  your site — iPOSpays handles the payment and redirects the customer back.
-                </p>
+          <div className="space-y-3">
+            <label className="flex items-center justify-between gap-4 cursor-pointer">
+              <div className="flex gap-2">
+                <CreditCard size={18} className="text-slate-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-slate-800">Pay online with card (iPOSpays)</p>
+                  <p className="text-sm text-slate-500">
+                    Customer pays securely on a hosted payment page before pickup. Card data never touches
+                    your site — iPOSpays handles the payment and redirects the customer back.
+                  </p>
+                </div>
               </div>
+              <input
+                type="checkbox"
+                className="w-5 h-5 accent-blue-600 shrink-0"
+                checked={settings.allowPayOnlineHpp}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setHppCredsError(null);
+                  if (on) {
+                    const tpn = hppTpnDraft.trim();
+                    const authToken = hppAuthDraft.trim();
+                    if (!tpn || !authToken) {
+                      setHppCredsError(
+                        "Enter your iPOSpays TPN and Auth token below, then enable Pay online with card."
+                      );
+                      return;
+                    }
+                    void persist({ allowPayOnlineHpp: true }, { tpn, authToken });
+                  } else {
+                    void persist({ allowPayOnlineHpp: false });
+                  }
+                }}
+              />
+            </label>
+
+            {hppCredsError && (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                {hppCredsError}
+              </p>
+            )}
+
+            {settings.allowPayOnlineHpp &&
+              (!settings.iposHppTpn.trim() || !settings.iposHppAuthToken.trim()) && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                  Pay online is on but credentials are missing in Firestore. Enter TPN and Auth token and
+                  save.
+                </p>
+              )}
+
+            <div className="ml-0 sm:ml-8 pl-0 sm:pl-4 sm:border-l-2 sm:border-slate-100 space-y-3">
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+                iPOSpays credentials (required for Pay online with card)
+              </p>
+              <label className="block space-y-1">
+                <span className="text-xs text-slate-600">TPN (terminal processing number)</span>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  value={hppTpnDraft}
+                  onChange={(e) => {
+                    setHppTpnDraft(e.target.value);
+                    setHppCredsError(null);
+                  }}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                  placeholder="From your iPOSpays / CloudPOS portal"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs text-slate-600">Auth token</span>
+                <div className="flex gap-2">
+                  <input
+                    type={showHppAuth ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={hppAuthDraft}
+                    onChange={(e) => {
+                      setHppAuthDraft(e.target.value);
+                      setHppCredsError(null);
+                    }}
+                    className="flex-1 min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                    placeholder="Merchant auth token from iPOSpays"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowHppAuth((v) => !v)}
+                    className="shrink-0 px-3 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    aria-label={showHppAuth ? "Hide auth token" : "Show auth token"}
+                  >
+                    {showHppAuth ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </label>
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => void saveHppCredentialsOnly()}
+                  disabled={hppCredsSaveState === "saving"}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-900 disabled:opacity-50"
+                >
+                  {hppCredsSaveState === "saving" && <Loader2 className="animate-spin" size={16} />}
+                  Save credentials
+                </button>
+                {hppCredsSaveState === "saved" && (
+                  <span className="text-sm text-emerald-600">Credentials saved.</span>
+                )}
+                {hppCredsSaveState === "error" && (
+                  <span className="text-sm text-red-600">Could not save credentials.</span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Stored in your Firestore <code className="text-[10px]">Settings/onlineOrdering</code>. The
+                public ordering page never receives these values. You can update the token anytime without
+                changing server environment variables.
+              </p>
             </div>
-            <input
-              type="checkbox"
-              className="w-5 h-5 accent-blue-600"
-              checked={settings.allowPayOnlineHpp}
-              onChange={(e) =>
-                void persist({ ...settings, allowPayOnlineHpp: e.target.checked })
-              }
-            />
-          </label>
+          </div>
 
           {saveState === "saving" && (
             <p className="text-sm text-slate-500 flex items-center gap-2">

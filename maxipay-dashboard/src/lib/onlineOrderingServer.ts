@@ -68,6 +68,40 @@ function asRecord(data: DocumentData): Record<string, unknown> {
   return data as unknown as Record<string, unknown>;
 }
 
+/** Server-only: iPOSpays HPP credentials (Firestore `Settings/onlineOrdering`, env fallback). */
+export interface IposHppCredentials {
+  tpn: string;
+  authToken: string;
+  queryApiKey: string;
+  hppBaseUrl: string;
+}
+
+/**
+ * Loads TPN + auth for HPP POST and queryPaymentStatus.
+ * Firestore fields `iposHppTpn` / `iposHppAuthToken` on `Settings/onlineOrdering` override env when set.
+ */
+export async function loadIposHppCredentials(db: Firestore): Promise<IposHppCredentials> {
+  const ooSnap = await db
+    .collection(SETTINGS_COLLECTION)
+    .doc(ONLINE_ORDERING_SETTINGS_DOC)
+    .get();
+  const oo = parseOnlineOrderingSettings(
+    ooSnap.data() as Record<string, unknown> | undefined
+  );
+  const fromFsTpn = oo.iposHppTpn.trim();
+  const fromFsAuth = oo.iposHppAuthToken.trim();
+  const envTpn = (process.env.IPOS_HPP_TPN || "").trim();
+  const envAuth = (process.env.IPOS_HPP_AUTH_TOKEN || "").trim();
+  const tpn = fromFsTpn || envTpn;
+  const authToken = fromFsAuth || envAuth;
+  const queryApiKey = (
+    (process.env.IPOS_HPP_QUERY_API_KEY || "").trim() || authToken
+  ).trim();
+  const hppBaseUrl =
+    (process.env.IPOS_HPP_BASE_URL || "").trim();
+  return { tpn, authToken, queryApiKey, hppBaseUrl };
+}
+
 export async function loadPublicOnlineOrderingConfig(
   db: Firestore
 ): Promise<PublicOnlineOrderingConfig> {

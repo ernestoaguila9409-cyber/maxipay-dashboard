@@ -3,19 +3,22 @@ import { NextResponse } from "next/server";
 import { getFirebaseAdminApp } from "@/lib/firebaseAdmin";
 import {
   createOnlineOrderTransaction,
+  loadIposHppCredentials,
   loadPublicOnlineOrderingConfig,
   OnlineOrderValidationError,
   type CartLineInput,
+  type IposHppCredentials,
   type OnlinePaymentChoice,
 } from "@/lib/onlineOrderingServer";
 import { ONLINE_TERMINAL_PAYMENT_REQUESTS } from "@/lib/onlineOrderingShared";
 
 export const runtime = "nodejs";
 
-const IPOS_HPP_SANDBOX = "https://payment.ipospays.tech/api/v1/external-payment-transaction";
 const IPOS_HPP_PROD = "https://payment.ipospays.com/api/v1/external-payment-transaction";
 
-function iposHppUrl(): string {
+function iposHppPostUrl(hppBaseUrl: string): string {
+  const b = hppBaseUrl.trim();
+  if (b) return b;
   return process.env.IPOS_HPP_BASE_URL || IPOS_HPP_PROD;
 }
 
@@ -36,9 +39,10 @@ async function createHppPaymentUrl(
   customerEmail: string,
   customerPhone: string,
   slug: string,
+  preloadedCreds?: IposHppCredentials,
 ): Promise<string> {
-  const tpn = (process.env.IPOS_HPP_TPN || "").trim();
-  const authToken = (process.env.IPOS_HPP_AUTH_TOKEN || "").trim();
+  const creds = preloadedCreds ?? (await loadIposHppCredentials(db));
+  const { tpn, authToken } = creds;
   if (!tpn || !authToken) throw new Error("iPOSpays HPP is not configured (missing TPN or auth token).");
 
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").trim();
@@ -117,7 +121,7 @@ async function createHppPaymentUrl(
     },
   };
 
-  const resp = await fetch(iposHppUrl(), {
+  const resp = await fetch(iposHppPostUrl(creds.hppBaseUrl), {
     method: "POST",
     headers: { "Content-Type": "application/json", token: authToken },
     body: JSON.stringify(payload),
@@ -187,6 +191,21 @@ export async function POST(request: Request) {
       );
     }
 
+    let hppCredsValidated: IposHppCredentials | undefined;
+    if (paymentChoice === "PAY_ONLINE_HPP") {
+      const hppCreds = await loadIposHppCredentials(db);
+      if (!hppCreds.tpn || !hppCreds.authToken) {
+        return NextResponse.json(
+          {
+            error:
+              "Pay online with card is enabled but iPOSpays credentials are missing. Add your TPN and Auth token in Dashboard → Settings → Online ordering.",
+          },
+          { status: 503 }
+        );
+      }
+      hppCredsValidated = hppCreds;
+    }
+
     const created = await createOnlineOrderTransaction(db, {
       lines,
       customerName,
@@ -217,6 +236,7 @@ export async function POST(request: Request) {
           customerEmail,
           customerPhone,
           cfg.slug,
+          hppCredsValidated,
         );
         return NextResponse.json({
           ok: true,

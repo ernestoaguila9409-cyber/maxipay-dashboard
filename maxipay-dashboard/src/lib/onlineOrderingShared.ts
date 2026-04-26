@@ -47,6 +47,13 @@ export interface OnlineOrderingSettings {
   onlineMenuCategoryIds: string[];
   /** Extra items to include when their category is not fully selected. */
   onlineMenuItemIds: string[];
+  /**
+   * iPOSpays Hosted Payment Page — merchant TPN (CloudPOS terminal processing number).
+   * Stored per tenant in Firestore; server routes read via Admin SDK (never exposed on public config API).
+   */
+  iposHppTpn: string;
+  /** iPOSpays merchant auth token from the portal (rotates per merchant). */
+  iposHppAuthToken: string;
 }
 
 export const DEFAULT_ONLINE_ORDERING_SETTINGS: OnlineOrderingSettings = {
@@ -58,6 +65,8 @@ export const DEFAULT_ONLINE_ORDERING_SETTINGS: OnlineOrderingSettings = {
   onlineMenuCurationEnabled: false,
   onlineMenuCategoryIds: [],
   onlineMenuItemIds: [],
+  iposHppTpn: "",
+  iposHppAuthToken: "",
 };
 
 function parseStringIdArray(v: unknown): string[] {
@@ -84,5 +93,9 @@ export function parseOnlineOrderingSettings(
     onlineMenuCurationEnabled: data.onlineMenuCurationEnabled === true,
     onlineMenuCategoryIds: parseStringIdArray(data.onlineMenuCategoryIds),
     onlineMenuItemIds: parseStringIdArray(data.onlineMenuItemIds),
+    iposHppTpn:
+      typeof data.iposHppTpn === "string" ? data.iposHppTpn.trim() : "",
+    iposHppAuthToken:
+      typeof data.iposHppAuthToken === "string" ? data.iposHppAuthToken.trim() : "",
   };
 }

@@ -1,14 +1,15 @@
 import admin from "firebase-admin";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp } from "@/lib/firebaseAdmin";
+import { loadIposHppCredentials } from "@/lib/onlineOrderingServer";
 
 export const runtime = "nodejs";
 
 const SANDBOX_QUERY_URL = "https://api.ipospays.tech/v1/queryPaymentStatus";
 const PROD_QUERY_URL = "https://api.ipospays.com/v1/queryPaymentStatus";
 
-function queryBaseUrl(): string {
-  const base = (process.env.IPOS_HPP_BASE_URL || "").trim();
+function queryBaseUrl(hppBaseUrl: string): string {
+  const base = hppBaseUrl.trim() || (process.env.IPOS_HPP_BASE_URL || "").trim();
   if (base.includes("ipospays.com")) return PROD_QUERY_URL;
   if (base) return SANDBOX_QUERY_URL;
   return PROD_QUERY_URL;
@@ -66,12 +67,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "orderId is required." }, { status: 400 });
     }
 
-    const tpn = (process.env.IPOS_HPP_TPN || "").trim();
-    const apiKey = (
-      process.env.IPOS_HPP_QUERY_API_KEY ||
-      process.env.IPOS_HPP_AUTH_TOKEN ||
-      ""
-    ).trim();
+    const creds = await loadIposHppCredentials(db);
+    const { tpn, queryApiKey: apiKey } = creds;
     if (!tpn || !apiKey) {
       return NextResponse.json({ error: "Payment service not configured." }, { status: 500 });
     }
@@ -92,7 +89,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No HPP payment link for this order." }, { status: 400 });
     }
 
-    const url = `${queryBaseUrl()}?tpn=${encodeURIComponent(tpn)}&transactionReferenceId=${encodeURIComponent(txRefId)}`;
+    const url = `${queryBaseUrl(creds.hppBaseUrl)}?tpn=${encodeURIComponent(tpn)}&transactionReferenceId=${encodeURIComponent(txRefId)}`;
 
     const resp = await fetch(url, {
       method: "GET",
