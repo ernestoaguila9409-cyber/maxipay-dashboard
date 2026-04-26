@@ -21,11 +21,23 @@ function Spinner() {
   );
 }
 
+/**
+ * iPOSpays appends its own query params (e.g. `?responseCode=200&…`) to the
+ * return URL.  Because the URL already has `?`, the appended `?` becomes a
+ * literal character inside the *last* parameter's value.  Strip it so IDs and
+ * numbers are clean.
+ */
+function cleanParam(raw: string | null): string | null {
+  if (!raw) return null;
+  const idx = raw.indexOf("?");
+  return idx >= 0 ? raw.substring(0, idx) : raw;
+}
+
 function SuccessInner() {
   const { slug } = useParams<{ slug: string }>();
   const sp = useSearchParams();
-  const orderNumber = sp.get("orderNumber");
-  const orderId = sp.get("orderId");
+  const orderNumber = cleanParam(sp.get("orderNumber"));
+  const orderId = cleanParam(sp.get("orderId"));
   const sessionId = sp.get("session_id");
   const [businessName, setBusinessName] = useState<string>("");
   const [paymentStatus, setPaymentStatus] = useState<"confirming" | "confirmed" | "pending" | "error">(

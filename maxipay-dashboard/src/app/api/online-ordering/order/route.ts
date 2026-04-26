@@ -43,9 +43,9 @@ async function createHppPaymentUrl(
 
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").trim();
   const base = appUrl || "https://www.maxipaypos.com";
-  const returnUrl = `${base}/order/${slug}/success?orderId=${orderId}&orderNumber=${orderNumber}`;
-  const failureUrl = `${base}/order/${slug}?paymentFailed=1&orderId=${orderId}`;
-  const cancelUrl = `${base}/order/${slug}?paymentCancelled=1&orderId=${orderId}`;
+  const returnUrl = `${base}/order/${slug}/success?orderNumber=${orderNumber}&orderId=${orderId}`;
+  const failureUrl = `${base}/order/${slug}?orderId=${orderId}&paymentFailed=1`;
+  const cancelUrl = `${base}/order/${slug}?orderId=${orderId}&paymentCancelled=1`;
 
   const txRefId = `OO${orderId.substring(0, 16)}`;
 
