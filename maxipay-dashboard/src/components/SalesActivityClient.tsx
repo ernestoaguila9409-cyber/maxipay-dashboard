@@ -38,6 +38,23 @@ function docDate(data: DocumentData): Date | null {
   return null;
 }
 
+function statusPill(statusRaw: string): { label: string; className: string } {
+  const u = String(statusRaw || "").trim().toUpperCase();
+  if (u === "OPEN") {
+    return { label: "OPEN", className: "bg-orange-100 text-orange-800" };
+  }
+  if (u === "VOIDED") {
+    return { label: "VOIDED", className: "bg-red-100 text-red-800" };
+  }
+  if (u === "REFUNDED" || u === "PARTIALLY_REFUNDED" || u === "REFUNDED_FULLY") {
+    return { label: "REFUNDED", className: "bg-violet-100 text-violet-800" };
+  }
+  if (!u) {
+    return { label: "—", className: "bg-slate-100 text-slate-700" };
+  }
+  return { label: u, className: "bg-emerald-100 text-emerald-800" };
+}
+
 type TabId = "orders" | "transactions" | "cash";
 type DatePreset = "today" | "yesterday" | "7days" | "custom";
 type PaymentFilter = "all" | "cash" | "credit" | "debit";
@@ -432,6 +449,42 @@ export default function SalesActivityClient() {
         )
       );
 
+      // Include orders voided *within* the selected date range even if the order was created earlier.
+      // This keeps dashboard Sales Activity aligned with POS behavior (voids show on the day they occur).
+      if (!batchId) {
+        const voidedOrdersQ = query(
+          collection(db, "Orders"),
+          where("status", "==", "VOIDED"),
+          where("voidedAt", ">=", tsStart),
+          where("voidedAt", "<", tsEnd),
+          orderBy("voidedAt", "desc"),
+          limit(400)
+        );
+        unsubs.push(
+          onSnapshot(
+            voidedOrdersQ,
+            (snap) => {
+              setLoadErr(null);
+              const voidedRows: { id: string; data: DocumentData }[] = [];
+              snap.forEach((d) => voidedRows.push({ id: d.id, data: d.data() }));
+              setOrderDocs((prev) => {
+                if (voidedRows.length === 0) return prev;
+                const byId = new Map<string, { id: string; data: DocumentData }>();
+                prev.forEach((r) => byId.set(r.id, r));
+                voidedRows.forEach((r) => byId.set(r.id, r));
+                const merged = Array.from(byId.values());
+                merged.sort(byCreatedAtDesc);
+                return merged;
+              });
+            },
+            (e) => {
+              console.error(e);
+              setLoadErr((e as Error).message ?? String(e));
+            }
+          )
+        );
+      }
+
       unsubs.push(
         onSnapshot(
           txQ,
@@ -449,6 +502,41 @@ export default function SalesActivityClient() {
           }
         )
       );
+
+      // Include transactions voided *within* the selected date range even if the sale/capture was created earlier.
+      if (!batchId) {
+        const voidedTxQ = query(
+          collection(db, "Transactions"),
+          where("voided", "==", true),
+          where("voidedAt", ">=", tsStart),
+          where("voidedAt", "<", tsEnd),
+          orderBy("voidedAt", "desc"),
+          limit(900)
+        );
+        unsubs.push(
+          onSnapshot(
+            voidedTxQ,
+            (snap) => {
+              setLoadErr(null);
+              const voidedRows: { id: string; data: DocumentData }[] = [];
+              snap.forEach((d) => voidedRows.push({ id: d.id, data: d.data() }));
+              setTxDocs((prev) => {
+                if (voidedRows.length === 0) return prev;
+                const byId = new Map<string, { id: string; data: DocumentData }>();
+                prev.forEach((r) => byId.set(r.id, r));
+                voidedRows.forEach((r) => byId.set(r.id, r));
+                const merged = Array.from(byId.values());
+                merged.sort(byCreatedAtDesc);
+                return merged;
+              });
+            },
+            (e) => {
+              console.error(e);
+              setLoadErr((e as Error).message ?? String(e));
+            }
+          )
+        );
+      }
 
       const cashQ = batchId
         ? query(
@@ -980,7 +1068,7 @@ export default function SalesActivityClient() {
               ) : (
                 filteredOrders.map(({ id, data }) => {
                   const status = String(data.status ?? "OPEN");
-                  const open = status.toUpperCase() === "OPEN";
+                  const pill = statusPill(status);
                   const num = data.orderNumber as number | undefined;
                   const refunded = Number(data.totalRefundedInCents ?? 0) > 0;
                   const multi = (txnCountByOrder.get(id) ?? 0) >= 2;
@@ -1004,11 +1092,9 @@ export default function SalesActivityClient() {
                       <p className="text-sm text-slate-600 mt-1">{sub}</p>
                       <div className="flex flex-wrap gap-2 mt-2 items-center text-xs">
                         <span
-                          className={`px-2 py-0.5 rounded-full font-semibold ${
-                            open ? "bg-orange-100 text-orange-800" : "bg-emerald-100 text-emerald-800"
-                          }`}
+                          className={`px-2 py-0.5 rounded-full font-semibold ${pill.className}`}
                         >
-                          {open ? "OPEN" : "CLOSED"}
+                          {pill.label}
                         </span>
                         <span className="text-slate-400">{ts.toLocaleString()}</span>
                         {multi ? (
