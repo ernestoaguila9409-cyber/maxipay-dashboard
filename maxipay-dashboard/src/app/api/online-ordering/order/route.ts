@@ -80,6 +80,7 @@ async function createHppPaymentUrl(
         tagValue: String(orderNumber),
         isTagMandate: false,
       },
+      expiry: 1,
     },
     notificationOption: {
       notificationBySMS: false,
