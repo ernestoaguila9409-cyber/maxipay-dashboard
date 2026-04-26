@@ -47,7 +47,7 @@ async function createHppPaymentUrl(
   const failureUrl = `${base}/order/${slug}?paymentFailed=1&orderId=${orderId}`;
   const cancelUrl = `${base}/order/${slug}?paymentCancelled=1&orderId=${orderId}`;
 
-  const txRefId = `OO-${orderId.substring(0, 15)}`;
+  const txRefId = `OO${orderId.substring(0, 16)}`;
 
   let webhookUrl = "";
   const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || process.env.FIREBASE_PROJECT_ID || "";
