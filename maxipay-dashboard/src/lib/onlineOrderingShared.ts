@@ -5,7 +5,7 @@ export const SETTINGS_COLLECTION = "Settings";
 export const BUSINESS_INFO_DOC = "businessInfo";
 
 /** Firestore `Orders.onlinePaymentChoice` + API `paymentChoice`. */
-export type OnlinePaymentChoice = "PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB";
+export type OnlinePaymentChoice = "PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB" | "PAY_ONLINE_HPP";
 
 /** POS listens here to open checkout on the Dejavoo (SPIn). */
 export const ONLINE_TERMINAL_PAYMENT_REQUESTS = "OnlineTerminalPaymentRequests";
@@ -30,6 +30,8 @@ export interface OnlineOrderingSettings {
   allowPayInStore: boolean;
   /** Customer asks to pay by card; POS is notified to run SPIn on the terminal. */
   allowRequestTerminalFromWeb: boolean;
+  /** Customer pays online via iPOSpays Hosted Payment Page. */
+  allowPayOnlineHpp: boolean;
   /**
    * URL-safe slug derived from the business name.
    * Used in the public ordering URL: `/order/{slug}`.
@@ -51,6 +53,7 @@ export const DEFAULT_ONLINE_ORDERING_SETTINGS: OnlineOrderingSettings = {
   enabled: false,
   allowPayInStore: true,
   allowRequestTerminalFromWeb: false,
+  allowPayOnlineHpp: false,
   onlineOrderingSlug: "",
   onlineMenuCurationEnabled: false,
   onlineMenuCategoryIds: [],
@@ -73,6 +76,7 @@ export function parseOnlineOrderingSettings(
     allowRequestTerminalFromWeb:
       data.allowRequestTerminalFromWeb === true ||
       legacyStripe,
+    allowPayOnlineHpp: data.allowPayOnlineHpp === true,
     onlineOrderingSlug:
       typeof data.onlineOrderingSlug === "string"
         ? data.onlineOrderingSlug.trim()

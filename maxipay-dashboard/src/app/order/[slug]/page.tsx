@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 /* ═══════════════════════════════════════════
    Types
@@ -13,6 +13,7 @@ type PublicConfig = {
   slug: string;
   allowPayInStore: boolean;
   allowRequestTerminalFromWeb: boolean;
+  allowPayOnlineHpp: boolean;
 };
 
 type MenuItem = {
@@ -454,7 +455,7 @@ function CheckoutModal({
     customerName: string;
     customerPhone: string;
     customerEmail: string;
-    paymentChoice: "PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB";
+    paymentChoice: "PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB" | "PAY_ONLINE_HPP";
   }) => void;
   submitting: boolean;
   submitError: string | null;
@@ -462,8 +463,8 @@ function CheckoutModal({
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
-  const [pay, setPay] = useState<"PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB">(
-    cfg.allowPayInStore ? "PAY_AT_STORE" : "REQUEST_TERMINAL_FROM_WEB"
+  const [pay, setPay] = useState<"PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB" | "PAY_ONLINE_HPP">(
+    cfg.allowPayOnlineHpp ? "PAY_ONLINE_HPP" : cfg.allowPayInStore ? "PAY_AT_STORE" : "REQUEST_TERMINAL_FROM_WEB"
   );
 
   if (!open) return null;
@@ -574,6 +575,25 @@ function CheckoutModal({
                   </div>
                 </label>
               )}
+              {cfg.allowPayOnlineHpp && (
+                <label
+                  className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-colors ${
+                    pay === "PAY_ONLINE_HPP" ? "border-black bg-neutral-50" : "border-neutral-200 hover:border-neutral-300"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="payment"
+                    className="mt-0.5 accent-black"
+                    checked={pay === "PAY_ONLINE_HPP"}
+                    onChange={() => setPay("PAY_ONLINE_HPP")}
+                  />
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-900">Pay now with card</p>
+                    <p className="text-xs text-neutral-500 mt-0.5">Secure online payment — pay before pickup</p>
+                  </div>
+                </label>
+              )}
             </div>
           </div>
 
@@ -604,9 +624,10 @@ function CheckoutModal({
    Main Page
    ═══════════════════════════════════════════ */
 
-export default function PublicOrderPage() {
+function PublicOrderPageInner() {
   const { slug } = useParams<{ slug: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
   const [menu, setMenu] = useState<{ categories: MenuCategory[]; items: MenuItem[] } | null>(null);
@@ -620,6 +641,9 @@ export default function PublicOrderPage() {
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const paymentFailed = searchParams.get("paymentFailed") === "1";
+  const paymentCancelled = searchParams.get("paymentCancelled") === "1";
 
   /* ── Data loading ── */
 
@@ -698,7 +722,7 @@ export default function PublicOrderPage() {
     customerName: string;
     customerPhone: string;
     customerEmail: string;
-    paymentChoice: "PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB";
+    paymentChoice: "PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB" | "PAY_ONLINE_HPP";
   }) => {
     setSubmitError(null);
     if (!cfg?.enabled) return;
@@ -714,6 +738,16 @@ export default function PublicOrderPage() {
       });
       const result = await res.json();
       if (!res.ok) { setSubmitError(result.error || result.detail || "Order failed."); return; }
+
+      if (data.paymentChoice === "PAY_ONLINE_HPP" && result.paymentUrl) {
+        window.location.href = result.paymentUrl;
+        return;
+      }
+      if (data.paymentChoice === "PAY_ONLINE_HPP" && result.hppError) {
+        setSubmitError(result.hppError);
+        return;
+      }
+
       setCheckoutOpen(false);
       setCart({});
       router.push(`/order/${slug}/success?orderNumber=${result.orderNumber}`);
@@ -764,6 +798,11 @@ export default function PublicOrderPage() {
 
   return (
     <div className="min-h-screen bg-[#fafafa] text-neutral-900">
+      {(paymentFailed || paymentCancelled) && (
+        <div className={`px-4 py-3 text-center text-sm font-medium ${paymentFailed ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>
+          {paymentFailed ? "Payment was declined or failed. Please try again." : "Payment was cancelled. Your order is still saved — you can try paying again."}
+        </div>
+      )}
       {/* Header */}
       <header className="sticky top-0 z-20 bg-white border-b border-neutral-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
@@ -930,5 +969,19 @@ export default function PublicOrderPage() {
         .animate-fade-in { animation: fade-in 0.2s ease-out; }
       `}</style>
     </div>
+  );
+}
+
+export default function PublicOrderPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#fafafa] flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-neutral-200 border-t-black rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <PublicOrderPageInner />
+    </Suspense>
   );
 }

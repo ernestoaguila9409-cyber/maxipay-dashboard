@@ -12,7 +12,7 @@ import {
   type OnlineOrderingSettings,
 } from "@/lib/onlineOrderingShared";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
-import { ShoppingBag, ExternalLink, Store, Loader2, Smartphone, Link2, Copy, Check } from "lucide-react";
+import { ShoppingBag, ExternalLink, Store, Loader2, Smartphone, Link2, Copy, Check, CreditCard } from "lucide-react";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -55,6 +55,7 @@ export default function OnlineOrderingSettingsPage() {
           enabled: next.enabled,
           allowPayInStore: next.allowPayInStore,
           allowRequestTerminalFromWeb: next.allowRequestTerminalFromWeb,
+          allowPayOnlineHpp: next.allowPayOnlineHpp,
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -240,6 +241,27 @@ export default function OnlineOrderingSettingsPage() {
               checked={settings.allowRequestTerminalFromWeb}
               onChange={(e) =>
                 void persist({ ...settings, allowRequestTerminalFromWeb: e.target.checked })
+              }
+            />
+          </label>
+
+          <label className="flex items-center justify-between gap-4 cursor-pointer">
+            <div className="flex gap-2">
+              <CreditCard size={18} className="text-slate-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-slate-800">Pay online with card (iPOSpays)</p>
+                <p className="text-sm text-slate-500">
+                  Customer pays securely on a hosted payment page before pickup. Card data never touches
+                  your site — iPOSpays handles the payment and redirects the customer back.
+                </p>
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              className="w-5 h-5 accent-blue-600"
+              checked={settings.allowPayOnlineHpp}
+              onChange={(e) =>
+                void persist({ ...settings, allowPayOnlineHpp: e.target.checked })
               }
             />
           </label>

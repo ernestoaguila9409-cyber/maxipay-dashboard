@@ -29,6 +29,7 @@ export interface PublicOnlineOrderingConfig {
   slug: string;
   allowPayInStore: boolean;
   allowRequestTerminalFromWeb: boolean;
+  allowPayOnlineHpp: boolean;
 }
 
 export interface OnlineMenuItem {
@@ -87,6 +88,7 @@ export async function loadPublicOnlineOrderingConfig(
     slug,
     allowPayInStore: oo.allowPayInStore,
     allowRequestTerminalFromWeb: oo.allowRequestTerminalFromWeb,
+    allowPayOnlineHpp: oo.allowPayOnlineHpp,
   };
 }
 
