@@ -212,6 +212,20 @@ export function firestoreDate(data: { createdAt?: Timestamp }): Date | null {
   return parseCreatedAt(data as Record<string, unknown>);
 }
 
+/**
+ * Status for dashboard lists: if Firestore still says OPEN but the order is
+ * fully paid (e.g. online HPP before a POS tax recompute), show Closed.
+ */
+export function effectivePosOrderStatus(data: Record<string, unknown>): string {
+  const raw = String(data.status ?? "OPEN").trim();
+  const u = raw.toUpperCase();
+  if (u === "VOIDED" || u === "REFUNDED") return raw;
+  const total = Math.round(Number(data.totalInCents ?? 0));
+  const paid = Math.round(Number(data.totalPaidInCents ?? 0));
+  if (total > 0 && paid >= total) return "CLOSED";
+  return raw;
+}
+
 /** Maps Firestore `Orders` document to dashboard table row (POS app schema). */
 export function mapFirestoreOrderDoc(
   docId: string,
@@ -234,7 +248,7 @@ export function mapFirestoreOrderDoc(
     orderType: formatOrderTypeLabel(otRaw),
     orderTypeRaw: otRaw,
     total: totalInCents / 100,
-    status: String(data.status ?? "OPEN"),
+    status: effectivePosOrderStatus(data),
     createdAt: createdAt ?? null,
     createdAtMs: createdAt ? createdAt.getTime() : 0,
     date: createdAt ? createdAt.toLocaleDateString() : "—",

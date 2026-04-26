@@ -67,7 +67,11 @@ export async function POST(request: Request) {
     }
 
     const tpn = (process.env.IPOS_HPP_TPN || "").trim();
-    const apiKey = (process.env.IPOS_HPP_AUTH_TOKEN || "").trim();
+    const apiKey = (
+      process.env.IPOS_HPP_QUERY_API_KEY ||
+      process.env.IPOS_HPP_AUTH_TOKEN ||
+      ""
+    ).trim();
     if (!tpn || !apiKey) {
       return NextResponse.json({ error: "Payment service not configured." }, { status: 500 });
     }
@@ -100,8 +104,16 @@ export async function POST(request: Request) {
     const responseCode = Number(hpResp.responseCode);
     const isSuccess = responseCode === 200;
 
-    if (isSuccess && order.status !== "CLOSED" && order.status !== "PAID") {
-      const saleTransactionId = await createEcommerceTransaction(db, orderId, order, hpResp as Record<string, unknown>);
+    // Webhook may have already closed the order while queryPaymentStatus still
+    // returns pending / non-200 for a short window — treat paid order as success.
+    const orderAfterQuery = await db.collection("Orders").doc(orderId).get();
+    const fresh = orderAfterQuery.data() || order;
+    if (fresh.status === "CLOSED" || fresh.status === "PAID") {
+      return NextResponse.json({ status: "PAID", message: "Already confirmed." });
+    }
+
+    if (isSuccess && fresh.status !== "CLOSED" && fresh.status !== "PAID") {
+      const saleTransactionId = await createEcommerceTransaction(db, orderId, fresh, hpResp as Record<string, unknown>);
 
       await db.collection("Orders").doc(orderId).update({
         hppStatus: "PAID",
@@ -115,7 +127,7 @@ export async function POST(request: Request) {
         hppApprovalCode: hpResp.responseApprovalCode || "",
         hppTotalAmount: hpResp.totalAmount || 0,
         hppRespondedAt: admin.firestore.FieldValue.serverTimestamp(),
-        totalPaidInCents: (order.totalInCents as number) || 0,
+        totalPaidInCents: (fresh.totalInCents as number) || 0,
         remainingInCents: 0,
         status: "CLOSED",
         saleTransactionId,

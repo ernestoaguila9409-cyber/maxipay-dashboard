@@ -62,7 +62,8 @@ function SuccessInner() {
     confirmedRef.current = true;
 
     let attempts = 0;
-    const maxAttempts = 6;
+    /** ~36s: query API + webhook can lag after iPOS redirect to this page */
+    const maxAttempts = 12;
 
     const tryConfirm = async () => {
       try {
@@ -109,7 +110,15 @@ function SuccessInner() {
         )}
 
         <h1 className="text-2xl font-bold text-neutral-900">
-          {paymentStatus === "confirming" ? "Confirming payment…" : "Order confirmed"}
+          {paymentStatus === "confirming"
+            ? "Confirming payment…"
+            : paymentStatus === "confirmed"
+              ? "Order approved"
+              : paymentStatus === "pending"
+                ? "Order received"
+                : paymentStatus === "error"
+                  ? "We couldn&apos;t verify payment"
+                  : "Order approved"}
         </h1>
 
         {orderNumber && (
@@ -134,7 +143,8 @@ function SuccessInner() {
         )}
         {paymentStatus === "confirmed" && (
           <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
-            Payment received. Show your order number when you pick up. We&apos;ll have it ready for you.
+            Payment successful. Your order is approved &mdash; show your order number when you pick up. We&apos;ll have it
+            ready for you.
           </p>
         )}
         {paymentStatus === "pending" && (

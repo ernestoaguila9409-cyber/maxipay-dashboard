@@ -21,6 +21,7 @@ import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import { Banknote, CreditCard, Layers, Loader2, Plus, Search, X } from "lucide-react";
 import { startOfLocalDay } from "@/lib/dashboardFinance";
+import { effectivePosOrderStatus } from "@/lib/orderDisplayUtils";
 
 function fmtMoney(cents: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -1067,7 +1068,7 @@ export default function SalesActivityClient() {
                 <p className="text-slate-500 text-sm py-8 text-center">No orders</p>
               ) : (
                 filteredOrders.map(({ id, data }) => {
-                  const status = String(data.status ?? "OPEN");
+                  const status = effectivePosOrderStatus(data as Record<string, unknown>);
                   const pill = statusPill(status);
                   const num = data.orderNumber as number | undefined;
                   const refunded = Number(data.totalRefundedInCents ?? 0) > 0;
