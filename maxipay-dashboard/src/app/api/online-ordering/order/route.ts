@@ -16,7 +16,7 @@ const IPOS_HPP_SANDBOX = "https://payment.ipospays.tech/api/v1/external-payment-
 const IPOS_HPP_PROD = "https://payment.ipospays.com/api/v1/external-payment-transaction";
 
 function iposHppUrl(): string {
-  return process.env.IPOS_HPP_BASE_URL || IPOS_HPP_SANDBOX;
+  return process.env.IPOS_HPP_BASE_URL || IPOS_HPP_PROD;
 }
 
 interface OrderBody {
