@@ -1074,7 +1074,8 @@ export default function SalesActivityClient() {
                   const multi = (txnCountByOrder.get(id) ?? 0) >= 2;
                   const table = String(data.tableName ?? "").trim();
                   const cust = String(data.customerName ?? "").trim();
-                  const sub = [table, cust].filter(Boolean).join(" · ") || "—";
+                  const emp = String(data.employeeName ?? "").trim();
+                  const sub = [emp, table, cust].filter(Boolean).join(" · ") || "—";
                   const total = Number(data.totalInCents ?? 0);
                   const ts = data.createdAt?.toDate?.() ?? new Date();
                   return (
