@@ -12,12 +12,21 @@ export function formatOrderTypeLabel(orderType: string): string {
       return "Dine In";
     case "TO_GO":
       return "To Go";
+    case "ONLINE_PICKUP":
+      return "Online Order";
     case "BAR_TAB":
     case "BAR":
       return "Bar";
     default:
       return orderType?.trim() ? orderType.replace(/_/g, " ") : "—";
   }
+}
+
+/** Web / MaxiPay online ordering — same signal as Android `orderSource` + `orderType`. */
+export function isWebOnlineOrder(data: Record<string, unknown>): boolean {
+  const src = String(data.orderSource ?? "").trim();
+  const ot = String(data.orderType ?? "").trim();
+  return src === "online_ordering" || ot === "ONLINE_PICKUP";
 }
 
 /** Firestore `taxBreakdown[]` entry (Android OrderEngine / POS). */
@@ -170,19 +179,23 @@ export function orderTypeBadgeStyle(orderTypeRaw: string): {
       ? "DINE IN"
       : u === "TO_GO"
         ? "TO-GO"
-        : u === "BAR_TAB"
-          ? "BAR TAB"
-          : u === "BAR"
-            ? "BAR"
-            : formatOrderTypeLabel(u).toUpperCase();
+        : u === "ONLINE_PICKUP"
+          ? "ONLINE ORDER"
+          : u === "BAR_TAB"
+            ? "BAR TAB"
+            : u === "BAR"
+              ? "BAR"
+              : formatOrderTypeLabel(u).toUpperCase();
   const backgroundColor =
     u === "DINE_IN"
       ? "#4CAF50"
       : u === "TO_GO"
         ? "#FF9800"
-        : u === "BAR" || u === "BAR_TAB"
-          ? "#00897B"
-          : "#64748B";
+        : u === "ONLINE_PICKUP"
+          ? "#43A047"
+          : u === "BAR" || u === "BAR_TAB"
+            ? "#00897B"
+            : "#64748B";
   return { backgroundColor, label };
 }
 
@@ -242,6 +255,7 @@ export function mapFirestoreOrderDoc(
       ? String(orderNumberRaw)
       : docId.slice(-6);
   const otRaw = String(data.orderType ?? "");
+  const online = isWebOnlineOrder(data);
   return {
     id: docId,
     orderNumber,
@@ -259,7 +273,8 @@ export function mapFirestoreOrderDoc(
         })
       : "—",
     source: "pos",
-    employeeName: String(data.employeeName ?? "—"),
+    /** List UIs: do not show guest name in the employee column for web online orders (detail shows `customerName`). */
+    employeeName: online ? "—" : String(data.employeeName ?? "—"),
     customerName: String(data.customerName ?? ""),
   };
 }

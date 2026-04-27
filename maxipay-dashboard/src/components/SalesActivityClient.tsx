@@ -21,7 +21,11 @@ import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import { Banknote, CreditCard, Layers, Loader2, Plus, Search, X } from "lucide-react";
 import { startOfLocalDay } from "@/lib/dashboardFinance";
-import { effectivePosOrderStatus } from "@/lib/orderDisplayUtils";
+import {
+  effectivePosOrderStatus,
+  isWebOnlineOrder,
+  orderTypeBadgeStyle,
+} from "@/lib/orderDisplayUtils";
 
 function fmtMoney(cents: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -1068,7 +1072,8 @@ export default function SalesActivityClient() {
                 <p className="text-slate-500 text-sm py-8 text-center">No orders</p>
               ) : (
                 filteredOrders.map(({ id, data }) => {
-                  const status = effectivePosOrderStatus(data as Record<string, unknown>);
+                  const rec = data as Record<string, unknown>;
+                  const status = effectivePosOrderStatus(rec);
                   const pill = statusPill(status);
                   const num = data.orderNumber as number | undefined;
                   const refunded = Number(data.totalRefundedInCents ?? 0) > 0;
@@ -1076,7 +1081,17 @@ export default function SalesActivityClient() {
                   const table = String(data.tableName ?? "").trim();
                   const cust = String(data.customerName ?? "").trim();
                   const emp = String(data.employeeName ?? "").trim();
-                  const sub = [emp, table, cust].filter(Boolean).join(" · ") || "—";
+                  const online = isWebOnlineOrder(rec);
+                  const sub = online
+                    ? [table].filter(Boolean).join(" · ") || "Online order"
+                    : (() => {
+                        const parts: string[] = [];
+                        if (emp) parts.push(emp);
+                        if (table) parts.push(table);
+                        if (cust && cust !== emp) parts.push(cust);
+                        return parts.join(" · ") || "—";
+                      })();
+                  const typeBadge = orderTypeBadgeStyle(String(data.orderType ?? ""));
                   const total = Number(data.totalInCents ?? 0);
                   const ts = data.createdAt?.toDate?.() ?? new Date();
                   return (
@@ -1093,6 +1108,12 @@ export default function SalesActivityClient() {
                       </div>
                       <p className="text-sm text-slate-600 mt-1">{sub}</p>
                       <div className="flex flex-wrap gap-2 mt-2 items-center text-xs">
+                        <span
+                          className="px-2 py-0.5 rounded-full font-semibold text-white"
+                          style={{ backgroundColor: typeBadge.backgroundColor }}
+                        >
+                          {typeBadge.label}
+                        </span>
                         <span
                           className={`px-2 py-0.5 rounded-full font-semibold ${pill.className}`}
                         >
