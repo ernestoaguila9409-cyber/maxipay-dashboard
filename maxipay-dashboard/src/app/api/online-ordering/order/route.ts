@@ -153,6 +153,12 @@ export async function POST(request: Request) {
     if (!cfg.enabled) {
       return NextResponse.json({ error: "Online ordering is disabled." }, { status: 403 });
     }
+    if (!cfg.isOpen) {
+      return NextResponse.json(
+        { error: "We're currently closed for online orders. Please try again soon." },
+        { status: 403 }
+      );
+    }
 
     let body: OrderBody;
     try {

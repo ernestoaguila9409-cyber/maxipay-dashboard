@@ -2,15 +2,27 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import type { HeroSlide, PublicStorefront } from "@/lib/storefrontShared";
+import { HeroCarousel } from "@/components/storefront/HeroCarousel";
+import { StoreHeader } from "@/components/storefront/StoreHeader";
+import { FeaturedRow, type FeaturedRowItem } from "@/components/storefront/FeaturedRow";
 
 /* ═══════════════════════════════════════════
    Types
    ═══════════════════════════════════════════ */
 
+/**
+ * Public config the page uses to gate features (payment options, open/closed). Reuses the
+ * fields from the storefront snapshot but stays a separate type so the rest of the page
+ * doesn't have to know about hero slides.
+ */
 type PublicConfig = {
   enabled: boolean;
   businessName: string;
+  logoUrl: string;
   slug: string;
+  isOpen: boolean;
+  prepTimeLabel: string;
   allowPayInStore: boolean;
   allowPayOnlineHpp: boolean;
 };
@@ -24,6 +36,7 @@ type MenuItem = {
   unitPriceCents: number;
   stock: number;
   imageUrl: string;
+  isFeatured: boolean;
 };
 
 type MenuCategory = { id: string; name: string; sortOrder: number };
@@ -228,12 +241,14 @@ function MenuItemCard({
 function CartSidebar({
   lines,
   subtotal,
+  prepTimeLabel,
   onAdd,
   onDec,
   onCheckout,
 }: {
   lines: CartLine[];
   subtotal: number;
+  prepTimeLabel: string;
   onAdd: (id: string) => void;
   onDec: (id: string) => void;
   onCheckout: () => void;
@@ -310,6 +325,12 @@ function CartSidebar({
               <span className="text-neutral-500">Subtotal</span>
               <span className="font-semibold text-neutral-900 tabular-nums">{fmt(subtotal)}</span>
             </div>
+            {prepTimeLabel && (
+              <div className="flex justify-between text-xs">
+                <span className="text-neutral-500">Estimated prep time</span>
+                <span className="font-medium text-neutral-700">{prepTimeLabel}</span>
+              </div>
+            )}
             <button
               type="button"
               onClick={onCheckout}
@@ -610,6 +631,7 @@ function PublicOrderPageInner() {
   const searchParams = useSearchParams();
 
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
+  const [storefront, setStorefront] = useState<PublicStorefront | null>(null);
   const [menu, setMenu] = useState<{ categories: MenuCategory[]; items: MenuItem[] } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [menuLoading, setMenuLoading] = useState(false);
@@ -622,18 +644,33 @@ function PublicOrderPageInner() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const categoryRefs = useRef<Record<string, HTMLElement | null>>({});
+  const setCategoryRef = useCallback((id: string, el: HTMLElement | null) => {
+    categoryRefs.current[id] = el;
+  }, []);
+
   const paymentFailed = searchParams.get("paymentFailed") === "1";
   const paymentCancelled = searchParams.get("paymentCancelled") === "1";
 
   /* ── Data loading ── */
 
   const loadConfig = useCallback(async () => {
-    const res = await fetch("/api/online-ordering/config", { cache: "no-store" });
-    const data = (await res.json()) as PublicConfig & { error?: string };
+    const res = await fetch("/api/online-ordering/storefront", { cache: "no-store" });
+    const data = (await res.json()) as PublicStorefront & { error?: string };
     if (!res.ok) { setLoadError(data.error || "Could not load store."); setCfg(null); return; }
     if (data.slug && data.slug !== slug) { router.replace(`/order/${data.slug}`); return; }
     setLoadError(null);
-    setCfg(data);
+    setStorefront(data);
+    setCfg({
+      enabled: data.enabled,
+      businessName: data.businessName,
+      logoUrl: data.logoUrl,
+      slug: data.slug,
+      isOpen: data.isOpen,
+      prepTimeLabel: data.prepTimeLabel,
+      allowPayInStore: data.allowPayInStore,
+      allowPayOnlineHpp: data.allowPayOnlineHpp,
+    });
   }, [slug, router]);
 
   const loadMenu = useCallback(async () => {
@@ -684,6 +721,51 @@ function PublicOrderPageInner() {
 
   const subtotalCents = useMemo(() => cartLines.reduce((s, l) => s + l.item.unitPriceCents * l.quantity, 0), [cartLines]);
   const cartCount = useMemo(() => cartLines.reduce((s, l) => s + l.quantity, 0), [cartLines]);
+
+  const featuredRowItems: FeaturedRowItem[] = useMemo(() => {
+    if (!menu || !storefront) return [];
+    if (storefront.featuredItemIds.length > 0) {
+      const map = new Map(menu.items.map((it) => [it.id, it] as const));
+      return storefront.featuredItemIds
+        .map((id) => map.get(id))
+        .filter((it): it is MenuItem => Boolean(it))
+        .map((it) => ({
+          id: it.id,
+          name: it.name,
+          unitPriceCents: it.unitPriceCents,
+          imageUrl: it.imageUrl,
+        }));
+    }
+    return menu.items
+      .filter((it) => it.imageUrl)
+      .slice(0, 8)
+      .map((it) => ({
+        id: it.id,
+        name: it.name,
+        unitPriceCents: it.unitPriceCents,
+        imageUrl: it.imageUrl,
+      }));
+  }, [menu, storefront]);
+
+  const scrollToCategory = useCallback((categoryId: string) => {
+    setActiveCategoryId(categoryId);
+    const el = categoryRefs.current[categoryId];
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  const handleHeroClick = useCallback((s: HeroSlide) => {
+    if (s.actionType === "CATEGORY" && s.actionValue) {
+      scrollToCategory(s.actionValue);
+    } else if (s.actionType === "ITEM" && s.actionValue && menu) {
+      const exists = menu.items.some((it) => it.id === s.actionValue);
+      if (exists) {
+        const ids = menu.items.find((it) => it.id === s.actionValue)?.categoryIds ?? [];
+        if (ids[0]) scrollToCategory(ids[0]);
+      }
+    } else if (s.actionType === "URL" && s.actionValue) {
+      window.open(s.actionValue, "_blank", "noopener,noreferrer");
+    }
+  }, [menu, scrollToCategory]);
 
   /* ── Cart actions ── */
 
@@ -783,20 +865,27 @@ function PublicOrderPageInner() {
           {paymentFailed ? "Payment was declined or failed. Please try again." : "Payment was cancelled. Your order is still saved — you can try paying again."}
         </div>
       )}
+      {!cfg.isOpen && (
+        <div className="px-4 py-3 text-center text-sm font-medium bg-rose-50 text-rose-700">
+          We&apos;re currently closed. You can still browse the menu — orders will reopen soon.
+        </div>
+      )}
       {/* Header */}
       <header className="sticky top-0 z-20 bg-white border-b border-neutral-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="flex items-center justify-between h-16">
-            <div>
-              <h1 className="text-xl font-bold text-neutral-900 leading-none">{cfg.businessName}</h1>
-              <p className="text-xs text-neutral-500 mt-0.5">Pickup</p>
-            </div>
+          <div className="flex items-center justify-between h-16 gap-4">
+            <StoreHeader
+              businessName={cfg.businessName}
+              logoUrl={cfg.logoUrl}
+              isOpen={cfg.isOpen}
+              prepTimeLabel={cfg.prepTimeLabel}
+            />
 
-            {/* Desktop cart badge */}
+            {/* Mobile cart badge */}
             <button
               type="button"
               onClick={() => cartCount > 0 ? setMobileCartOpen(true) : undefined}
-              className="lg:hidden flex items-center gap-2 h-10 px-4 rounded-full bg-black text-white text-sm font-semibold"
+              className="lg:hidden flex items-center gap-2 h-10 px-4 rounded-full bg-black text-white text-sm font-semibold shrink-0"
               style={{ visibility: cartCount > 0 ? "visible" : "hidden" }}
             >
               <IconBag size={16} />
@@ -811,11 +900,21 @@ function PublicOrderPageInner() {
             <CategoryTabs
               categories={visibleCategories}
               active={activeCategoryId}
-              onSelect={setActiveCategoryId}
+              onSelect={(id) => {
+                setActiveCategoryId(id);
+                if (id !== "ALL") scrollToCategory(id);
+              }}
             />
           </div>
         )}
       </header>
+
+      {/* Hero carousel (above the fold, full-bleed under the sticky header) */}
+      {storefront && storefront.heroSlides.length > 0 && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
+          <HeroCarousel slides={storefront.heroSlides} onSlideClick={handleHeroClick} />
+        </div>
+      )}
 
       {/* Body: 2-column layout */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
@@ -829,6 +928,16 @@ function PublicOrderPageInner() {
             )}
             {loadError && <p className="text-sm text-red-600 mb-4">{loadError}</p>}
 
+            {menu && !menuLoading && featuredRowItems.length > 0 && activeCategoryId === "ALL" && (
+              <div className="mb-8">
+                <FeaturedRow
+                  items={featuredRowItems}
+                  title="Popular"
+                  onAdd={(id) => addToCart(id)}
+                />
+              </div>
+            )}
+
             {menu && !menuLoading && (
               activeCategoryId === "ALL" ? (
                 <div className="space-y-8">
@@ -836,7 +945,11 @@ function PublicOrderPageInner() {
                     const catItems = itemsByCategory.get(cat.id) ?? [];
                     if (catItems.length === 0) return null;
                     return (
-                      <section key={cat.id}>
+                      <section
+                        key={cat.id}
+                        ref={(el) => setCategoryRef(cat.id, el)}
+                        className="scroll-mt-32"
+                      >
                         <h2 className="text-lg font-bold text-neutral-900 mb-3">{cat.name}</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           {catItems.map((it) => (
@@ -898,6 +1011,7 @@ function PublicOrderPageInner() {
               <CartSidebar
                 lines={cartLines}
                 subtotal={subtotalCents}
+                prepTimeLabel={cfg.prepTimeLabel}
                 onAdd={addToCart}
                 onDec={decFromCart}
                 onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}

@@ -54,6 +54,7 @@ const navItems: NavItem[] = [
       { label: "Online menu", href: "/dashboard/menu/online", icon: Globe },
     ],
   },
+  { label: "Online ordering", href: "/dashboard/online-ordering", icon: ShoppingBag },
   { label: "Employees", href: "/dashboard/employees", icon: Users },
   { label: "Customers", href: "/dashboard/customers", icon: Contact },
   { label: "Printers", href: "/dashboard/printers", icon: Printer },

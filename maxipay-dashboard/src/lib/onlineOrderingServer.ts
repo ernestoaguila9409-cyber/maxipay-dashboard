@@ -5,11 +5,20 @@ import {
   BUSINESS_INFO_DOC,
   ONLINE_ORDERING_SETTINGS_DOC,
   SETTINGS_COLLECTION,
+  formatPrepTimeRange,
+  isStoreCurrentlyOpen,
   parseOnlineOrderingSettings,
   slugify,
   type OnlineOrderingSettings,
   type OnlinePaymentChoice,
 } from "@/lib/onlineOrderingShared";
+import {
+  HERO_SLIDES_COLLECTION,
+  HERO_SLIDES_MAX,
+  parseHeroSlide,
+  type HeroSlide,
+  type PublicStorefront,
+} from "@/lib/storefrontShared";
 import {
   isMenuItemVisibleOnOnlineChannel,
   menuItemPlacementCategoryIds,
@@ -26,7 +35,11 @@ export {
 export interface PublicOnlineOrderingConfig {
   enabled: boolean;
   businessName: string;
+  logoUrl: string;
   slug: string;
+  isOpen: boolean;
+  prepTimeMinutes: number;
+  prepTimeLabel: string;
   allowPayInStore: boolean;
   allowPayOnlineHpp: boolean;
 }
@@ -41,6 +54,8 @@ export interface OnlineMenuItem {
   unitPriceCents: number;
   stock: number;
   imageUrl: string;
+  /** True when the owner explicitly featured this item from the dashboard. */
+  isFeatured: boolean;
 }
 
 export interface OnlineMenuCategory {
@@ -111,6 +126,8 @@ export async function loadPublicOnlineOrderingConfig(
   const bizName =
     (bizSnap.exists ? bizSnap.get("businessName") : null)?.toString().trim() ||
     "Restaurant";
+  const logoUrl =
+    (bizSnap.exists ? bizSnap.get("logoUrl") : null)?.toString().trim() || "";
   const oo = parseOnlineOrderingSettings(
     ooSnap.data() as Record<string, unknown> | undefined
   );
@@ -118,9 +135,52 @@ export async function loadPublicOnlineOrderingConfig(
   return {
     enabled: oo.enabled,
     businessName: bizName,
+    logoUrl,
     slug,
+    isOpen: isStoreCurrentlyOpen(oo),
+    prepTimeMinutes: oo.prepTimeMinutes,
+    prepTimeLabel: formatPrepTimeRange(oo.prepTimeMinutes),
     allowPayInStore: oo.allowPayInStore,
     allowPayOnlineHpp: oo.allowPayOnlineHpp,
+  };
+}
+
+/** Lists hero slides ordered by `order ASC`, capped to [HERO_SLIDES_MAX]. */
+export async function loadHeroSlides(db: Firestore): Promise<HeroSlide[]> {
+  const snap = await db.collection(HERO_SLIDES_COLLECTION).get();
+  const slides = snap.docs.map((d) => parseHeroSlide(d.id, d.data() as Record<string, unknown>));
+  slides.sort((a, b) => a.order - b.order);
+  return slides.slice(0, HERO_SLIDES_MAX);
+}
+
+/**
+ * Single round-trip data the customer page needs for its hero, header, featured row
+ * and payment options. Hides items the menu loader would also hide.
+ */
+export async function loadPublicStorefront(db: Firestore): Promise<PublicStorefront> {
+  const [cfg, slides] = await Promise.all([
+    loadPublicOnlineOrderingConfig(db),
+    loadHeroSlides(db),
+  ]);
+  const ooSnap = await db
+    .collection(SETTINGS_COLLECTION)
+    .doc(ONLINE_ORDERING_SETTINGS_DOC)
+    .get();
+  const oo = parseOnlineOrderingSettings(
+    ooSnap.data() as Record<string, unknown> | undefined
+  );
+  return {
+    enabled: cfg.enabled,
+    isOpen: cfg.isOpen,
+    businessName: cfg.businessName,
+    logoUrl: cfg.logoUrl,
+    slug: cfg.slug,
+    prepTimeMinutes: cfg.prepTimeMinutes,
+    prepTimeLabel: cfg.prepTimeLabel,
+    allowPayInStore: cfg.allowPayInStore,
+    allowPayOnlineHpp: cfg.allowPayOnlineHpp,
+    heroSlides: slides,
+    featuredItemIds: oo.featuredItemIds,
   };
 }
 
@@ -146,6 +206,7 @@ export async function loadOnlineMenu(
   });
   categories.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
 
+  const featuredSet = new Set(oo.featuredItemIds);
   const items: OnlineMenuItem[] = [];
   for (const d of itemSnap.docs) {
     const data = d.data();
@@ -164,6 +225,7 @@ export async function loadOnlineMenu(
       unitPriceCents,
       stock: typeof data.stock === "number" ? data.stock : 0,
       imageUrl: typeof data.imageUrl === "string" ? data.imageUrl : "",
+      isFeatured: featuredSet.has(d.id),
     });
   }
 
