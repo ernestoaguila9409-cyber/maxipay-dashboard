@@ -7,7 +7,7 @@ import {
   onSnapshot,
 } from "firebase/firestore";
 import {
-  ChefHat,
+  ArrowLeft,
   ExternalLink,
   Image as ImageIcon,
   Layers,
@@ -184,6 +184,14 @@ export default function OnlineOrderingDashboardPage() {
     <>
       <Header title="Online ordering" />
       <div className="px-6 py-5">
+        {/* Breadcrumb / back affordance — entry point lives at Settings → Online ordering */}
+        <Link
+          href="/dashboard/settings/online-ordering"
+          className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900 mb-3"
+        >
+          <ArrowLeft size={16} />
+          Back to online ordering settings
+        </Link>
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-6">
           {/* LEFT — admin panes */}
           <div className="space-y-5 min-w-0">
@@ -202,12 +210,6 @@ export default function OnlineOrderingDashboardPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <Link
-                  href="/dashboard/settings/online-ordering"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-medium hover:bg-slate-50"
-                >
-                  <ChefHat size={14} /> Slug &amp; payments
-                </Link>
                 <a
                   href={orderUrl}
                   target="_blank"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import Header from "@/components/Header";
 import { db } from "@/firebase/firebaseConfig";
 import {
@@ -23,6 +24,8 @@ import {
   CreditCard,
   Eye,
   EyeOff,
+  ChevronRight,
+  LayoutGrid,
 } from "lucide-react";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -156,6 +159,31 @@ export default function OnlineOrderingSettingsPage() {
     <>
       <Header title="Online ordering" />
       <div className="p-6 max-w-3xl space-y-6">
+        {/* Control center entry — links to /dashboard/online-ordering (hero, featured, storefront, live preview) */}
+        <Link
+          href="/dashboard/online-ordering"
+          className="group block bg-gradient-to-br from-blue-600 to-violet-600 text-white rounded-2xl shadow-sm hover:shadow-lg transition-shadow no-underline"
+        >
+          <div className="p-6 flex items-center gap-4">
+            <div className="shrink-0 w-12 h-12 rounded-xl bg-white/15 backdrop-blur-sm grid place-items-center">
+              <LayoutGrid size={22} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="font-semibold text-[17px] leading-tight">
+                Online ordering control center
+              </h2>
+              <p className="text-sm text-white/85 mt-0.5">
+                Hero carousel, featured items, store logo &amp; prep time, with a live preview of
+                your storefront.
+              </p>
+            </div>
+            <ChevronRight
+              size={22}
+              className="shrink-0 opacity-80 transition-transform group-hover:translate-x-0.5"
+            />
+          </div>
+        </Link>
+
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-4">
           <div className="flex items-start gap-3">
             <div className="p-2 rounded-xl bg-violet-50 text-violet-700">
