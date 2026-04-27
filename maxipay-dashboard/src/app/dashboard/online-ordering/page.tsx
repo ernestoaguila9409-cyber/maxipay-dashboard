@@ -192,10 +192,10 @@ export default function OnlineOrderingDashboardPage() {
           <ArrowLeft size={16} />
           Back to online ordering settings
         </Link>
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-6">
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(420px,min(46vw,720px))] gap-6 xl:items-stretch xl:min-h-[50vh]">
           {/* LEFT — admin panes */}
-          <div className="space-y-5 min-w-0">
-            <header className="rounded-2xl bg-white border border-slate-200 p-5 shadow-sm flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+          <div className="flex flex-col gap-5 min-w-0 xl:min-h-[50vh] xl:h-full">
+            <header className="rounded-2xl bg-white border border-slate-200 p-5 shadow-sm flex flex-col sm:flex-row sm:items-center gap-3 justify-between shrink-0">
               <div className="flex items-center gap-3 min-w-0">
                 <span className="grid place-items-center w-10 h-10 rounded-xl bg-violet-50 text-violet-700 shrink-0">
                   <ShoppingBag size={20} />
@@ -221,9 +221,9 @@ export default function OnlineOrderingDashboardPage() {
               </div>
             </header>
 
-            {/* Tabs */}
-            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm">
-              <div className="flex flex-wrap gap-1 p-1.5 border-b border-slate-100 bg-slate-50/60 rounded-t-2xl">
+            {/* Tabs — stretch on xl so the pane uses at least half the viewport height */}
+            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm xl:flex-1 xl:flex xl:flex-col xl:min-h-0">
+              <div className="flex flex-wrap gap-1 p-1.5 border-b border-slate-100 bg-slate-50/60 rounded-t-2xl shrink-0">
                 {TABS.map((t) => {
                   const isActive = activeTab === t.id;
                   return (
@@ -243,7 +243,7 @@ export default function OnlineOrderingDashboardPage() {
                   );
                 })}
               </div>
-              <div className="p-5">
+              <div className="p-5 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
                 {activeTab === "hero" && (
                   <HeroCarouselManager categories={visibleCategories} items={visibleItems} />
                 )}
@@ -273,9 +273,9 @@ export default function OnlineOrderingDashboardPage() {
             </div>
           </div>
 
-          {/* RIGHT — live preview */}
-          <aside className="hidden xl:block">
-            <div className="sticky top-[88px]">
+          {/* RIGHT — live preview (wide column, min half viewport tall) */}
+          <aside className="hidden xl:block xl:min-h-[50vh] self-stretch">
+            <div className="sticky top-[88px] h-full min-h-[50vh]">
               <StorefrontPreview
                 storefront={previewStorefront}
                 menu={{ categories: visibleCategories, items: visibleItems }}

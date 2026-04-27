@@ -19,6 +19,11 @@ export interface HeroCarouselProps {
   autoplayMs?: number;
   /** Compact = smaller fixed heights for in-dashboard preview. */
   compact?: boolean;
+  /**
+   * When [compact] is true, use a taller strip (still smaller than the public storefront).
+   * Used by the dashboard live preview so the hero is not postage-stamp sized.
+   */
+  compactTall?: boolean;
   /** Extra classes on the outer wrapper. */
   className?: string;
 }
@@ -28,6 +33,7 @@ export function HeroCarousel({
   onSlideClick,
   autoplayMs = 6000,
   compact = false,
+  compactTall = false,
   className = "",
 }: HeroCarouselProps) {
   const [active, setActive] = useState(0);
@@ -52,11 +58,15 @@ export function HeroCarousel({
   }, [autoplayMs, count, go, paused]);
 
   if (count === 0) {
+    const emptyH =
+      compact && compactTall
+        ? "min-h-[200px] h-[clamp(200px,28vh,360px)]"
+        : compact
+          ? "h-36"
+          : "h-48 sm:h-72";
     return (
       <div
-        className={`flex items-center justify-center rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 text-neutral-400 ${
-          compact ? "h-36" : "h-48 sm:h-72"
-        } ${className}`}
+        className={`flex items-center justify-center rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 text-neutral-400 ${emptyH} ${className}`}
       >
         <div className="flex flex-col items-center gap-2 text-xs">
           <ImageIcon size={compact ? 22 : 28} />
@@ -66,7 +76,12 @@ export function HeroCarousel({
     );
   }
 
-  const heightClass = compact ? "h-36 sm:h-44" : "h-48 sm:h-64 md:h-80";
+  const heightClass =
+    compact && compactTall
+      ? "min-h-[200px] h-[clamp(200px,28vh,360px)]"
+      : compact
+        ? "h-36 sm:h-44"
+        : "h-48 sm:h-64 md:h-80";
 
   return (
     <div

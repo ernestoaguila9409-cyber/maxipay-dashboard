@@ -20,8 +20,8 @@ export interface StorefrontPreviewProps {
  * because both this preview and the customer page read from the same `Settings/onlineOrdering`
  * + `OnlineHeroSlides` documents via Firestore listeners.
  *
- * Rendered inside a fixed-width card that imitates a phone-frame so the owner can sanity-check
- * the layout on small screens without leaving the dashboard.
+ * Rendered beside the admin panes in a dedicated column. The outer shell is at least half the
+ * viewport tall on large screens so the preview is easy to see while editing.
  */
 export function StorefrontPreview({ storefront, menu }: StorefrontPreviewProps) {
   const featuredItems: FeaturedRowItem[] = (() => {
@@ -53,13 +53,15 @@ export function StorefrontPreview({ storefront, menu }: StorefrontPreviewProps) 
   const visibleCategories = menu?.categories ?? [];
 
   return (
-    <div className="bg-neutral-100 rounded-3xl border border-neutral-200 shadow-inner p-3 flex flex-col gap-3 max-h-[calc(100vh-120px)] overflow-y-auto">
-      <div className="flex items-center justify-between text-[11px] font-medium text-neutral-500 px-1">
+    <div className="bg-neutral-100 rounded-3xl border border-neutral-200 shadow-inner p-3 sm:p-4 flex flex-col gap-3 h-full min-h-[50vh] max-h-[calc(100vh-72px)] overflow-y-auto">
+      <div className="flex items-center justify-between text-[11px] font-medium text-neutral-500 px-1 shrink-0">
         <span className="uppercase tracking-wider">Live preview</span>
-        <span className="text-neutral-400">/order/{storefront.slug || "…"}</span>
+        <span className="text-neutral-400 truncate max-w-[55%] text-right">
+          /order/{storefront.slug || "…"}
+        </span>
       </div>
 
-      <div className="bg-white rounded-2xl overflow-hidden border border-neutral-200">
+      <div className="bg-white rounded-2xl overflow-hidden border border-neutral-200 flex-1 flex flex-col min-h-[calc(50vh-4.5rem)] xl:min-h-[calc(50vh-5rem)]">
         <div className="px-4 pt-4 pb-2">
           <StoreHeader
             businessName={storefront.businessName}
@@ -70,8 +72,13 @@ export function StorefrontPreview({ storefront, menu }: StorefrontPreviewProps) 
           />
         </div>
 
-        <div className="px-4 pb-4">
-          <HeroCarousel slides={storefront.heroSlides} compact autoplayMs={5000} />
+        <div className="px-4 pb-4 shrink-0">
+          <HeroCarousel
+            slides={storefront.heroSlides}
+            compact
+            compactTall
+            autoplayMs={5000}
+          />
         </div>
 
         {visibleCategories.length > 0 && (
