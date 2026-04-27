@@ -33,12 +33,64 @@ function cleanParam(raw: string | null): string | null {
   return idx >= 0 ? raw.substring(0, idx) : raw;
 }
 
+const IPOS_KEYS = [
+  "responseCode", "responseMessage", "transactionType", "amount",
+  "cardType", "cardLast4Digit", "batchNumber", "transactionNumber",
+  "transactionId", "responseApprovalCode", "totalAmount", "tips",
+  "cardToken", "rrn", "transactionReferenceId",
+];
+
+/**
+ * Extract iPOSpays redirect params.
+ *
+ * iPOSpays appends `?responseCode=200&…` to the return URL which already
+ * contains `?orderNumber=X&orderId=Y`.  The browser only sees ONE `?`, so
+ * the iPOSpays block may appear in two places:
+ *
+ * Case A — iPOSpays used `&` to append (or the browser normalised it).
+ *   → responseCode etc. are top-level search params.
+ *
+ * Case B — iPOSpays appended with a literal `?` that's NOT the first `?`.
+ *   → The extra params end up inside the *value* of orderId
+ *     (e.g. `orderId=abc123?responseCode=200&cardType=CREDIT&…`).
+ *
+ * We try Case A first; if responseCode isn't found at the top level, we
+ * parse it out of the raw orderId value (Case B).
+ */
+function extractIposRedirectParams(sp: URLSearchParams): Record<string, string> | null {
+  if (sp.get("responseCode")) {
+    const result: Record<string, string> = {};
+    for (const k of IPOS_KEYS) {
+      const v = sp.get(k);
+      if (v != null) result[k] = v;
+    }
+    return result;
+  }
+
+  const rawOrderId = sp.get("orderId") || "";
+  const qIdx = rawOrderId.indexOf("?");
+  if (qIdx >= 0) {
+    const embedded = new URLSearchParams(rawOrderId.substring(qIdx + 1));
+    if (embedded.get("responseCode")) {
+      const result: Record<string, string> = {};
+      for (const k of IPOS_KEYS) {
+        const v = embedded.get(k);
+        if (v != null) result[k] = v;
+      }
+      return result;
+    }
+  }
+
+  return null;
+}
+
 function SuccessInner() {
   const { slug } = useParams<{ slug: string }>();
   const sp = useSearchParams();
   const orderNumber = cleanParam(sp.get("orderNumber"));
   const orderId = cleanParam(sp.get("orderId"));
   const sessionId = sp.get("session_id");
+  const iposRedirectParams = extractIposRedirectParams(sp);
   const [businessName, setBusinessName] = useState<string>("");
   const [paymentStatus, setPaymentStatus] = useState<"confirming" | "confirmed" | "pending" | "error">(
     orderId ? "confirming" : "confirmed"
@@ -70,7 +122,10 @@ function SuccessInner() {
         const res = await fetch("/api/online-ordering/confirm-hpp-payment", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ orderId }),
+          body: JSON.stringify({
+            orderId,
+            ...(iposRedirectParams ? { iposRedirect: iposRedirectParams } : {}),
+          }),
         });
         const data = await res.json();
         if (data.status === "PAID") {
@@ -94,7 +149,7 @@ function SuccessInner() {
     };
 
     void tryConfirm();
-  }, [orderId]);
+  }, [orderId, iposRedirectParams]);
 
   return (
     <div className="min-h-screen bg-[#fafafa] flex flex-col items-center justify-center p-6 text-center">

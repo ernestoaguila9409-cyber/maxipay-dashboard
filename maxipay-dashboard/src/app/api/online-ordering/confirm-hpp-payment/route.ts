@@ -61,17 +61,18 @@ export async function POST(request: Request) {
     getFirebaseAdminApp();
     const db = admin.firestore();
 
-    const body = (await request.json()) as { orderId?: string };
+    const body = (await request.json()) as {
+      orderId?: string;
+      iposRedirect?: Record<string, string>;
+    };
     const orderId = body.orderId;
     if (!orderId || typeof orderId !== "string") {
       return NextResponse.json({ error: "orderId is required." }, { status: 400 });
     }
+    const iposRedirect = body.iposRedirect ?? null;
 
     const creds = await loadIposHppCredentials(db);
     const { tpn, queryApiKey: apiKey } = creds;
-    if (!tpn || !apiKey) {
-      return NextResponse.json({ error: "Payment service not configured." }, { status: 500 });
-    }
 
     const orderDoc = await db.collection("Orders").doc(orderId).get();
     if (!orderDoc.exists) {
@@ -89,32 +90,58 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No HPP payment link for this order." }, { status: 400 });
     }
 
-    const url = `${queryBaseUrl(creds.hppBaseUrl)}?tpn=${encodeURIComponent(tpn)}&transactionReferenceId=${encodeURIComponent(txRefId)}`;
+    // --- 1. Try the queryPaymentStatus API (if credentials available) ---
+    let apiSuccess = false;
+    let hpResp: Record<string, unknown> = {};
 
-    const resp = await fetch(url, {
-      method: "GET",
-      headers: { Authorization: apiKey },
-    });
+    if (tpn && apiKey) {
+      try {
+        const url = `${queryBaseUrl(creds.hppBaseUrl)}?tpn=${encodeURIComponent(tpn)}&transactionReferenceId=${encodeURIComponent(txRefId)}`;
+        const resp = await fetch(url, {
+          method: "GET",
+          headers: { Authorization: apiKey },
+          signal: AbortSignal.timeout(8000),
+        });
+        const respBody = await resp.json();
+        hpResp = (respBody?.iposHPResponse || respBody) as Record<string, unknown>;
+        apiSuccess = Number(hpResp.responseCode) === 200;
+      } catch (e) {
+        console.warn("[confirm-hpp-payment] queryPaymentStatus failed, will try redirect params", e);
+      }
+    }
 
-    const respBody = await resp.json();
-    const hpResp = respBody?.iposHPResponse || respBody;
-    const responseCode = Number(hpResp.responseCode);
-    const isSuccess = responseCode === 200;
-
-    // Webhook may have already closed the order while queryPaymentStatus still
-    // returns pending / non-200 for a short window — treat paid order as success.
+    // Webhook may have closed the order while we queried.
     const orderAfterQuery = await db.collection("Orders").doc(orderId).get();
     const fresh = orderAfterQuery.data() || order;
     if (fresh.status === "CLOSED" || fresh.status === "PAID") {
       return NextResponse.json({ status: "PAID", message: "Already confirmed." });
     }
 
-    if (isSuccess && fresh.status !== "CLOSED" && fresh.status !== "PAID") {
-      const saleTransactionId = await createEcommerceTransaction(db, orderId, fresh, hpResp as Record<string, unknown>);
+    // --- 2. Fallback: use iPOSpays redirect params from the client ---
+    // iPOSpays redirects the customer with responseCode=200 in the URL when
+    // payment succeeds, but their queryPaymentStatus API may lag by seconds.
+    // We trust the redirect params when either:
+    //   (a) transactionReferenceId in the redirect matches the stored one, OR
+    //   (b) no transactionReferenceId in the redirect but the order already has
+    //       an hppPaymentUrl (i.e. the HPP link was legitimately created).
+    if (!apiSuccess && iposRedirect) {
+      const redirectCode = Number(iposRedirect.responseCode);
+      const redirectTxRef = (iposRedirect.transactionReferenceId || "").trim();
+      const storedTxRef = String(txRefId || "").trim();
+      const txRefMatches = redirectTxRef && storedTxRef && redirectTxRef === storedTxRef;
+      const hasHppLink = !!fresh.hppPaymentUrl;
+      if (redirectCode === 200 && (txRefMatches || (!redirectTxRef && hasHppLink))) {
+        apiSuccess = true;
+        hpResp = { ...iposRedirect };
+      }
+    }
+
+    if (apiSuccess && fresh.status !== "CLOSED" && fresh.status !== "PAID") {
+      const saleTransactionId = await createEcommerceTransaction(db, orderId, fresh, hpResp);
 
       await db.collection("Orders").doc(orderId).update({
         hppStatus: "PAID",
-        hppResponseCode: responseCode,
+        hppResponseCode: Number(hpResp.responseCode) || 200,
         hppResponseMessage: hpResp.responseMessage || "",
         hppCardType: hpResp.cardType || "",
         hppCardLast4: hpResp.cardLast4Digit || "",
@@ -136,9 +163,9 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
-      status: isSuccess ? "PAID" : "PENDING",
-      responseCode,
-      responseMessage: hpResp.responseMessage || "",
+      status: apiSuccess ? "PAID" : "PENDING",
+      responseCode: Number(hpResp.responseCode) || 0,
+      responseMessage: (hpResp.responseMessage as string) || "",
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
