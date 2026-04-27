@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   arrayRemove,
   arrayUnion,
@@ -32,6 +32,7 @@ import {
 import { kdsDeviceRoutesMenuItemLine } from "@/lib/kdsMenuAssignment";
 import Header from "@/components/Header";
 import MenuUploadModal from "@/components/MenuUploadModal";
+import { ItemImageSection } from "@/components/menu-item-image/ItemImageSection";
 import {
   Search,
   Plus,
@@ -151,6 +152,8 @@ interface MenuItem {
   externalMappings?: ExternalMappings;
   /** Kitchen routing label; must match a label on a kitchen printer (POS). */
   printerLabel?: string;
+  /** Firebase Storage download URL (menu / online ordering). */
+  imageUrl?: string;
 }
 
 /** Firestore MenuItems row held in memory before rebuild() adds category-derived fields. */
@@ -482,6 +485,7 @@ export default function MenuPage() {
   const [editLabelExpanded, setEditLabelExpanded] = useState(false);
   const [editModifiersExpanded, setEditModifiersExpanded] = useState(false);
   const [editTaxesExpanded, setEditTaxesExpanded] = useState(false);
+  const [editImageUrl, setEditImageUrl] = useState("");
   const [editMenuId, setEditMenuId] = useState("");
   const [editMenuIds, setEditMenuIds] = useState<Record<string, boolean>>({});
   const [editPosPrice, setEditPosPrice] = useState("");
@@ -688,6 +692,10 @@ export default function MenuPage() {
             printerLabel:
               typeof data.printerLabel === "string" && data.printerLabel.trim()
                 ? data.printerLabel.trim()
+                : undefined,
+            imageUrl:
+              typeof data.imageUrl === "string" && data.imageUrl.trim()
+                ? data.imageUrl.trim()
                 : undefined,
           });
         });
@@ -1474,6 +1482,19 @@ export default function MenuPage() {
     }
   }
 
+  const getMenuItemIdToken = useCallback(async () => {
+    if (!user) throw new Error("Unauthorized");
+    return user.getIdToken();
+  }, [user]);
+
+  const persistEditItemImageUrl = useCallback(
+    async (url: string) => {
+      if (!editTarget) return;
+      await updateDoc(doc(db, "MenuItems", editTarget.id), { imageUrl: url });
+    },
+    [editTarget]
+  );
+
   const openEdit = (item: MenuItem) => {
     setEditTarget(item);
     const priceStrings: Record<string, string> = {};
@@ -1532,6 +1553,7 @@ export default function MenuPage() {
     }
     setEditTaxes(txs);
     setEditPrinterLabel(item.printerLabel?.trim() ?? "");
+    setEditImageUrl(typeof item.imageUrl === "string" ? item.imageUrl.trim() : "");
     setEditLabelExpanded(false);
     editKdsTouchedRef.current = false;
     const kdsRoutingMatches = kdsDevicesThatRouteMenuItem(item, kdsPickerRowsRef.current);
@@ -1611,6 +1633,13 @@ export default function MenuPage() {
         await mergeKitchenLabelToSettings(pl);
       } else {
         update.printerLabel = deleteField();
+      }
+
+      const img = editImageUrl.trim();
+      if (img) {
+        update.imageUrl = img;
+      } else {
+        update.imageUrl = deleteField();
       }
 
       await updateDoc(doc(db, "MenuItems", editTarget.id), update);
@@ -4244,7 +4273,7 @@ export default function MenuPage() {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => !saving && setEditTarget(null)}
           />
-          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
             <div className="px-6 py-5 space-y-5">
               <div>
                 <h3 className="text-lg font-semibold text-slate-800">
@@ -4254,6 +4283,18 @@ export default function MenuPage() {
                   {editTarget.name}
                 </p>
               </div>
+
+              {user && (
+                <ItemImageSection
+                  imageUrl={editImageUrl}
+                  onImageUrlChange={setEditImageUrl}
+                  onPersistImageUrl={persistEditItemImageUrl}
+                  itemId={editTarget.id}
+                  itemName={editTarget.name}
+                  getIdToken={getMenuItemIdToken}
+                  disabled={saving}
+                />
+              )}
 
               <div className="space-y-4">
                 {editCategoryHasSchedule ? (
