@@ -10,7 +10,6 @@ import {
   type IposHppCredentials,
   type OnlinePaymentChoice,
 } from "@/lib/onlineOrderingServer";
-import { ONLINE_TERMINAL_PAYMENT_REQUESTS } from "@/lib/onlineOrderingShared";
 
 export const runtime = "nodejs";
 
@@ -169,16 +168,17 @@ export async function POST(request: Request) {
     const rawChoice = body.paymentChoice;
 
     let paymentChoice: OnlinePaymentChoice;
+    if (rawChoice === "REQUEST_TERMINAL_FROM_WEB") {
+      return NextResponse.json(
+        { error: "That payment option is no longer available." },
+        { status: 400 }
+      );
+    }
     if (rawChoice === "PAY_AT_STORE") {
       if (!cfg.allowPayInStore) {
         return NextResponse.json({ error: "Pay at store is not enabled." }, { status: 400 });
       }
       paymentChoice = "PAY_AT_STORE";
-    } else if (rawChoice === "REQUEST_TERMINAL_FROM_WEB") {
-      if (!cfg.allowRequestTerminalFromWeb) {
-        return NextResponse.json({ error: "Pay on POS terminal is not enabled." }, { status: 400 });
-      }
-      paymentChoice = "REQUEST_TERMINAL_FROM_WEB";
     } else if (rawChoice === "PAY_ONLINE_HPP") {
       if (!cfg.allowPayOnlineHpp) {
         return NextResponse.json({ error: "Online card payment is not enabled." }, { status: 400 });
@@ -213,17 +213,6 @@ export async function POST(request: Request) {
       customerEmail,
       paymentChoice,
     });
-
-    if (paymentChoice === "REQUEST_TERMINAL_FROM_WEB") {
-      await db.collection(ONLINE_TERMINAL_PAYMENT_REQUESTS).doc(created.orderId).set({
-        orderId: created.orderId,
-        orderNumber: created.orderNumber,
-        totalInCents: created.totalInCents,
-        status: "pending",
-        requestedAt: admin.firestore.FieldValue.serverTimestamp(),
-        source: "online_ordering",
-      });
-    }
 
     if (paymentChoice === "PAY_ONLINE_HPP") {
       try {
@@ -269,10 +258,7 @@ export async function POST(request: Request) {
       orderNumber: created.orderNumber,
       totalInCents: created.totalInCents,
       paymentChoice,
-      message:
-        paymentChoice === "PAY_AT_STORE"
-          ? "Order placed. Pay when you pick up."
-          : "Order placed. The POS was notified — staff will run payment when you arrive.",
+      message: "Order placed. Pay when you pick up.",
     });
   } catch (e) {
     if (e instanceof OnlineOrderValidationError) {

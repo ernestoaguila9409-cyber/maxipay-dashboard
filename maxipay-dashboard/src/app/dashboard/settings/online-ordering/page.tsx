@@ -17,7 +17,6 @@ import {
   ExternalLink,
   Store,
   Loader2,
-  Smartphone,
   Link2,
   Copy,
   Check,
@@ -69,10 +68,7 @@ export default function OnlineOrderingSettingsPage() {
   }, [settings.iposHppTpn, settings.iposHppAuthToken]);
 
   type FlagPatch = Partial<
-    Pick<
-      OnlineOrderingSettings,
-      "enabled" | "allowPayInStore" | "allowRequestTerminalFromWeb" | "allowPayOnlineHpp"
-    >
+    Pick<OnlineOrderingSettings, "enabled" | "allowPayInStore" | "allowPayOnlineHpp">
   >;
 
   const persist = async (flags: FlagPatch, credentials?: { tpn: string; authToken: string }) => {
@@ -277,29 +273,6 @@ export default function OnlineOrderingSettingsPage() {
               className="w-5 h-5 accent-blue-600"
               checked={settings.allowPayInStore}
               onChange={(e) => void persist({ allowPayInStore: e.target.checked })}
-            />
-          </label>
-
-          <label className="flex items-center justify-between gap-4 cursor-pointer">
-            <div className="flex gap-2">
-              <Smartphone size={18} className="text-slate-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-medium text-slate-800">Notify POS to take card on Dejavoo</p>
-                <p className="text-sm text-slate-500">
-                  No card data on the web. The POS gets a notification to open checkout; the sale still runs
-                  on the Dejavoo through SPIn (insert/tap/swipe or{" "}
-                  <strong className="font-medium text-slate-700">manual entry on the Z*</strong> when your
-                  device and processor allow it).
-                </p>
-              </div>
-            </div>
-            <input
-              type="checkbox"
-              className="w-5 h-5 accent-blue-600"
-              checked={settings.allowRequestTerminalFromWeb}
-              onChange={(e) =>
-                void persist({ allowRequestTerminalFromWeb: e.target.checked })
-              }
             />
           </label>
 

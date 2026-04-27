@@ -12,7 +12,6 @@ type PublicConfig = {
   businessName: string;
   slug: string;
   allowPayInStore: boolean;
-  allowRequestTerminalFromWeb: boolean;
   allowPayOnlineHpp: boolean;
 };
 
@@ -455,7 +454,7 @@ function CheckoutModal({
     customerName: string;
     customerPhone: string;
     customerEmail: string;
-    paymentChoice: "PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB" | "PAY_ONLINE_HPP";
+    paymentChoice: "PAY_AT_STORE" | "PAY_ONLINE_HPP";
   }) => void;
   submitting: boolean;
   submitError: string | null;
@@ -463,8 +462,8 @@ function CheckoutModal({
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
-  const [pay, setPay] = useState<"PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB" | "PAY_ONLINE_HPP">(
-    cfg.allowPayOnlineHpp ? "PAY_ONLINE_HPP" : cfg.allowPayInStore ? "PAY_AT_STORE" : "REQUEST_TERMINAL_FROM_WEB"
+  const [pay, setPay] = useState<"PAY_AT_STORE" | "PAY_ONLINE_HPP">(
+    cfg.allowPayOnlineHpp ? "PAY_ONLINE_HPP" : "PAY_AT_STORE"
   );
 
   if (!open) return null;
@@ -553,25 +552,6 @@ function CheckoutModal({
                   <div>
                     <p className="text-sm font-semibold text-neutral-900">Pay at the store</p>
                     <p className="text-xs text-neutral-500 mt-0.5">Cash or card when you pick up</p>
-                  </div>
-                </label>
-              )}
-              {cfg.allowRequestTerminalFromWeb && (
-                <label
-                  className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-colors ${
-                    pay === "REQUEST_TERMINAL_FROM_WEB" ? "border-black bg-neutral-50" : "border-neutral-200 hover:border-neutral-300"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="payment"
-                    className="mt-0.5 accent-black"
-                    checked={pay === "REQUEST_TERMINAL_FROM_WEB"}
-                    onChange={() => setPay("REQUEST_TERMINAL_FROM_WEB")}
-                  />
-                  <div>
-                    <p className="text-sm font-semibold text-neutral-900">Pay by card at restaurant</p>
-                    <p className="text-xs text-neutral-500 mt-0.5">Staff will run payment on the terminal when you arrive</p>
                   </div>
                 </label>
               )}
@@ -722,7 +702,7 @@ function PublicOrderPageInner() {
     customerName: string;
     customerPhone: string;
     customerEmail: string;
-    paymentChoice: "PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB" | "PAY_ONLINE_HPP";
+    paymentChoice: "PAY_AT_STORE" | "PAY_ONLINE_HPP";
   }) => {
     setSubmitError(null);
     if (!cfg?.enabled) return;

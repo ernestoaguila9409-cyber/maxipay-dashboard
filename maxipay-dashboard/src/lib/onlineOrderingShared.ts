@@ -5,9 +5,9 @@ export const SETTINGS_COLLECTION = "Settings";
 export const BUSINESS_INFO_DOC = "businessInfo";
 
 /** Firestore `Orders.onlinePaymentChoice` + API `paymentChoice`. */
-export type OnlinePaymentChoice = "PAY_AT_STORE" | "REQUEST_TERMINAL_FROM_WEB" | "PAY_ONLINE_HPP";
+export type OnlinePaymentChoice = "PAY_AT_STORE" | "PAY_ONLINE_HPP";
 
-/** POS listens here to open checkout on the Dejavoo (SPIn). */
+/** @deprecated Legacy collection for web-triggered terminal pay; no longer created by MaxiPay web ordering. */
 export const ONLINE_TERMINAL_PAYMENT_REQUESTS = "OnlineTerminalPaymentRequests";
 
 /**
@@ -28,8 +28,6 @@ export function slugify(text: string): string {
 export interface OnlineOrderingSettings {
   enabled: boolean;
   allowPayInStore: boolean;
-  /** Customer asks to pay by card; POS is notified to run SPIn on the terminal. */
-  allowRequestTerminalFromWeb: boolean;
   /** Customer pays online via iPOSpays Hosted Payment Page. */
   allowPayOnlineHpp: boolean;
   /**
@@ -59,7 +57,6 @@ export interface OnlineOrderingSettings {
 export const DEFAULT_ONLINE_ORDERING_SETTINGS: OnlineOrderingSettings = {
   enabled: false,
   allowPayInStore: true,
-  allowRequestTerminalFromWeb: false,
   allowPayOnlineHpp: false,
   onlineOrderingSlug: "",
   onlineMenuCurationEnabled: false,
@@ -78,13 +75,9 @@ export function parseOnlineOrderingSettings(
   data: Record<string, unknown> | undefined
 ): OnlineOrderingSettings {
   if (!data) return { ...DEFAULT_ONLINE_ORDERING_SETTINGS };
-  const legacyStripe = data.allowPayOnlineStripe === true;
   return {
     enabled: data.enabled === true,
     allowPayInStore: data.allowPayInStore !== false,
-    allowRequestTerminalFromWeb:
-      data.allowRequestTerminalFromWeb === true ||
-      legacyStripe,
     allowPayOnlineHpp: data.allowPayOnlineHpp === true,
     onlineOrderingSlug:
       typeof data.onlineOrderingSlug === "string"

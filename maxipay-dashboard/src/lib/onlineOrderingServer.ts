@@ -28,7 +28,6 @@ export interface PublicOnlineOrderingConfig {
   businessName: string;
   slug: string;
   allowPayInStore: boolean;
-  allowRequestTerminalFromWeb: boolean;
   allowPayOnlineHpp: boolean;
 }
 
@@ -121,7 +120,6 @@ export async function loadPublicOnlineOrderingConfig(
     businessName: bizName,
     slug,
     allowPayInStore: oo.allowPayInStore,
-    allowRequestTerminalFromWeb: oo.allowRequestTerminalFromWeb,
     allowPayOnlineHpp: oo.allowPayOnlineHpp,
   };
 }
