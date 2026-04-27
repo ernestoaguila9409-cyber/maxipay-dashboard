@@ -422,6 +422,9 @@ export default function MenuPage() {
   const [saving, setSaving] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
+  /** Pre-generated MenuItems doc id so image upload / Pexels commit work before the row is written. */
+  const [addDraftItemId, setAddDraftItemId] = useState<string | null>(null);
+  const [addImageUrl, setAddImageUrl] = useState("");
   const [addName, setAddName] = useState("");
   const [addPrices, setAddPrices] = useState<Record<string, string>>({});
   const [addStock, setAddStock] = useState("");
@@ -1684,6 +1687,8 @@ export default function MenuPage() {
     setAddPrinterLabel("");
     setAddKdsExpanded(false);
     setAddKdsDeviceId("");
+    setAddImageUrl("");
+    setAddDraftItemId(null);
   };
 
   // ── Add Category ──
@@ -1978,7 +1983,15 @@ export default function MenuPage() {
         await mergeKitchenLabelToSettings(addPl);
       }
 
-      const newRef = await addDoc(collection(db, "MenuItems"), data);
+      const imgUrl = addImageUrl.trim();
+      if (imgUrl) {
+        data.imageUrl = imgUrl;
+      }
+
+      const itemId =
+        addDraftItemId ?? doc(collection(db, "MenuItems")).id;
+      const newRef = doc(db, "MenuItems", itemId);
+      await setDoc(newRef, data);
       const kdsPick = addKdsDeviceId.trim();
       if (kdsPick) {
         try {
@@ -2347,7 +2360,11 @@ export default function MenuPage() {
                   <span className="hidden lg:inline">Transfer</span>
                 </button>
                 <button
-                  onClick={() => { resetAddForm(); setAddOpen(true); }}
+                  onClick={() => {
+                    resetAddForm();
+                    setAddDraftItemId(doc(collection(db, "MenuItems")).id);
+                    setAddOpen(true);
+                  }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors"
                 >
                   <Plus size={14} />
@@ -3697,7 +3714,7 @@ export default function MenuPage() {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => !addSaving && setAddOpen(false)}
           />
-          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
             <div className="px-6 py-5 space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-slate-800">
@@ -3725,6 +3742,20 @@ export default function MenuPage() {
                     className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
                   />
                 </div>
+
+                {user && addDraftItemId && (
+                  <ItemImageSection
+                    imageUrl={addImageUrl}
+                    onImageUrlChange={setAddImageUrl}
+                    onPersistImageUrl={async (url) => {
+                      setAddImageUrl(url);
+                    }}
+                    itemId={addDraftItemId}
+                    itemName={addName}
+                    getIdToken={getMenuItemIdToken}
+                    disabled={addSaving}
+                  />
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
