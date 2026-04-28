@@ -2735,6 +2735,14 @@ export default function MenuPage() {
                                   />
                                 )}
                                 <div className="flex-1 min-w-0 flex items-center gap-3">
+                                  {item.imageUrl ? (
+                                    <img
+                                      src={item.imageUrl}
+                                      alt=""
+                                      className="w-10 h-10 rounded-lg object-cover shrink-0 border border-slate-200 bg-slate-50"
+                                      loading="lazy"
+                                    />
+                                  ) : null}
                                   <span className={`text-[17px] font-semibold truncate ${inStock ? "text-slate-800" : "text-slate-400 line-through"}`}>
                                     {item.name}
                                   </span>
@@ -2896,6 +2904,17 @@ export default function MenuPage() {
                                   </div>
                                 )}
                               </div>
+
+                              {item.imageUrl ? (
+                                <div className="mb-3 rounded-xl overflow-hidden border border-slate-100 bg-slate-50 -mt-1">
+                                  <img
+                                    src={item.imageUrl}
+                                    alt=""
+                                    className="w-full h-28 object-cover"
+                                    loading="lazy"
+                                  />
+                                </div>
+                              ) : null}
 
                               <div className="flex items-center justify-between mb-3">
                                 <div>
