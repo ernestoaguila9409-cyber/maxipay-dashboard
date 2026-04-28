@@ -6,16 +6,7 @@ import {
   doc,
   onSnapshot,
 } from "firebase/firestore";
-import {
-  ArrowLeft,
-  ExternalLink,
-  Image as ImageIcon,
-  Layers,
-  Settings as SettingsIcon,
-  ShoppingBag,
-  Sparkles,
-  UtensilsCrossed,
-} from "lucide-react";
+import { ArrowLeft, ExternalLink, Image as ImageIcon, Settings as SettingsIcon, ShoppingBag } from "lucide-react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { db } from "@/firebase/firebaseConfig";
@@ -42,8 +33,7 @@ import {
   menuItemPlacementCategoryIds,
 } from "@/lib/onlineMenuCuration";
 import type { OnlineMenuCategory, OnlineMenuItem } from "@/lib/onlineOrderingServer";
-import HeroCarouselManager from "@/components/online-ordering-admin/HeroCarouselManager";
-import FeaturedItemsManager from "@/components/online-ordering-admin/FeaturedItemsManager";
+import StorefrontPictureManager from "@/components/online-ordering-admin/StorefrontPictureManager";
 import StorefrontSettingsManager from "@/components/online-ordering-admin/StorefrontSettingsManager";
 import { StorefrontPreview } from "@/components/storefront/StorefrontPreview";
 
@@ -52,7 +42,7 @@ interface AdminMenuItem extends OnlineMenuItem {
   rawDoc: Record<string, unknown>;
 }
 
-type TabId = "hero" | "categories" | "menu" | "featured" | "settings";
+type TabId = "picture" | "settings";
 
 interface TabSpec {
   id: TabId;
@@ -61,16 +51,13 @@ interface TabSpec {
 }
 
 const TABS: TabSpec[] = [
-  { id: "hero", label: "Hero carousel", icon: ImageIcon },
-  { id: "categories", label: "Categories", icon: Layers },
-  { id: "menu", label: "Menu items", icon: UtensilsCrossed },
-  { id: "featured", label: "Featured", icon: Sparkles },
+  { id: "picture", label: "Store Front picture", icon: ImageIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export default function OnlineOrderingDashboardPage() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<TabId>("hero");
+  const [activeTab, setActiveTab] = useState<TabId>("picture");
 
   const [settings, setSettings] = useState<OnlineOrderingSettings>(DEFAULT_ONLINE_ORDERING_SETTINGS);
   const [businessName, setBusinessName] = useState("");
@@ -205,7 +192,7 @@ export default function OnlineOrderingDashboardPage() {
                     Online ordering control center
                   </h1>
                   <p className="text-xs text-slate-500 truncate">
-                    Storefront, hero carousel, featured items — all in one place.
+                    Storefront banner image and ordering settings.
                   </p>
                 </div>
               </div>
@@ -244,22 +231,7 @@ export default function OnlineOrderingDashboardPage() {
                 })}
               </div>
               <div className="p-5 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
-                {activeTab === "hero" && (
-                  <HeroCarouselManager categories={visibleCategories} items={visibleItems} />
-                )}
-                {activeTab === "categories" && (
-                  <CategoriesShortcut categoriesCount={categories.length} />
-                )}
-                {activeTab === "menu" && (
-                  <MenuShortcut itemsCount={items.length} curationOn={settings.onlineMenuCurationEnabled} />
-                )}
-                {activeTab === "featured" && (
-                  <FeaturedItemsManager
-                    items={visibleItems}
-                    categories={visibleCategories}
-                    featuredItemIds={settings.featuredItemIds}
-                  />
-                )}
+                {activeTab === "picture" && <StorefrontPictureManager />}
                 {activeTab === "settings" && (
                   <StorefrontSettingsManager
                     settings={settings}
@@ -293,91 +265,6 @@ export default function OnlineOrderingDashboardPage() {
         </div>
       </div>
     </>
-  );
-}
-
-/* ─────────────────────────────────────────────
-   Lightweight pointer tabs to existing pages
-   (Categories + Menu Items already have full editors elsewhere; we don't duplicate them.)
-   ───────────────────────────────────────────── */
-
-function CategoriesShortcut({ categoriesCount }: { categoriesCount: number }) {
-  return (
-    <ShortcutPanel
-      icon={<Layers size={20} />}
-      title="Categories"
-      subtitle={`${categoriesCount} categor${categoriesCount === 1 ? "y" : "ies"} configured`}
-      description="Categories are shared between the in-store POS, KDS, and the online menu. Manage them in the main Menu page so the rename / sort order / icon stays in sync everywhere."
-      links={[
-        { href: "/dashboard/menu", label: "Open menu editor" },
-        { href: "/dashboard/menu/online", label: "Pick which categories appear online" },
-      ]}
-    />
-  );
-}
-
-function MenuShortcut({
-  itemsCount,
-  curationOn,
-}: {
-  itemsCount: number;
-  curationOn: boolean;
-}) {
-  return (
-    <ShortcutPanel
-      icon={<UtensilsCrossed size={20} />}
-      title="Menu items"
-      subtitle={`${itemsCount} item${itemsCount === 1 ? "" : "s"} in your catalog`}
-      description={
-        curationOn
-          ? "Curated online menu is on — the storefront only shows items / categories you picked. Edit prices, descriptions and photos in the Menu editor; pick what's online in the Online menu page."
-          : "Items appear online when their per-item online channel flag is on. Toggle that flag in the Menu editor — or switch to the curated online menu to manage online visibility separately from the POS."
-      }
-      links={[
-        { href: "/dashboard/menu", label: "Edit items, prices & photos" },
-        { href: "/dashboard/menu/online", label: "Online menu visibility" },
-      ]}
-    />
-  );
-}
-
-function ShortcutPanel({
-  icon,
-  title,
-  subtitle,
-  description,
-  links,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  subtitle: string;
-  description: string;
-  links: { href: string; label: string }[];
-}) {
-  return (
-    <div>
-      <div className="flex items-start gap-3">
-        <span className="grid place-items-center w-10 h-10 rounded-xl bg-blue-50 text-blue-700 shrink-0">
-          {icon}
-        </span>
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
-        </div>
-      </div>
-      <p className="text-sm text-slate-600 mt-4 leading-relaxed">{description}</p>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {links.map((l) => (
-          <Link
-            key={l.href}
-            href={l.href}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-medium hover:bg-slate-50"
-          >
-            <ExternalLink size={14} /> {l.label}
-          </Link>
-        ))}
-      </div>
-    </div>
   );
 }
 
