@@ -33,6 +33,7 @@ interface CategoryRow {
 interface ItemRow {
   id: string;
   name: string;
+  imageUrl?: string;
   /** Placement categories for this item (may be empty). */
   categoryIds: string[];
   /** Full Firestore fields for visibility rules. */
@@ -40,12 +41,38 @@ interface ItemRow {
 }
 
 function parseItem(docId: string, data: Record<string, unknown>): ItemRow {
+  const rawImg = data.imageUrl;
+  const imageUrl =
+    typeof rawImg === "string" && rawImg.trim() ? rawImg.trim() : undefined;
   return {
     id: docId,
     name: typeof data.name === "string" ? data.name : "Item",
+    imageUrl,
     categoryIds: menuItemPlacementCategoryIds(data),
     firestoreData: data,
   };
+}
+
+function OnlineMenuItemThumb({ url, dimmed }: { url?: string; dimmed?: boolean }) {
+  const u = url?.trim();
+  if (u) {
+    return (
+      <img
+        src={u}
+        alt=""
+        className={`w-10 h-10 rounded-lg object-cover shrink-0 border border-slate-200 bg-slate-50 ${
+          dimmed ? "opacity-60" : ""
+        }`}
+        loading="lazy"
+      />
+    );
+  }
+  return (
+    <div
+      className="w-10 h-10 rounded-lg shrink-0 border border-dashed border-slate-200 bg-slate-50"
+      aria-hidden
+    />
+  );
 }
 
 export default function OnlineMenuPage() {
@@ -326,8 +353,12 @@ export default function OnlineMenuPage() {
                     </div>
                     <ul className="divide-y divide-slate-100">
                       {list.map((it) => (
-                        <li key={it.id} className="px-4 py-2.5 text-sm text-slate-700">
-                          {it.name}
+                        <li
+                          key={it.id}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700"
+                        >
+                          <OnlineMenuItemThumb url={it.imageUrl} />
+                          <span className="min-w-0">{it.name}</span>
                         </li>
                       ))}
                     </ul>
@@ -343,8 +374,12 @@ export default function OnlineMenuPage() {
                     {visibleItems
                       .filter((it) => it.categoryIds.length === 0)
                       .map((it) => (
-                        <li key={it.id} className="px-4 py-2.5 text-sm text-slate-700">
-                          {it.name}
+                        <li
+                          key={it.id}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700"
+                        >
+                          <OnlineMenuItemThumb url={it.imageUrl} />
+                          <span className="min-w-0">{it.name}</span>
                         </li>
                       ))}
                   </ul>
@@ -409,13 +444,14 @@ export default function OnlineMenuPage() {
                             <li key={it.id} className="flex items-center gap-3 px-4 py-2">
                               <input
                                 type="checkbox"
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
                                 checked={checked}
                                 disabled={covered}
                                 onChange={() => toggleItem(it)}
                               />
+                              <OnlineMenuItemThumb url={it.imageUrl} dimmed={covered} />
                               <span
-                                className={`text-sm flex-1 ${
+                                className={`text-sm flex-1 min-w-0 ${
                                   covered ? "text-slate-400" : "text-slate-700"
                                 }`}
                               >
@@ -447,12 +483,13 @@ export default function OnlineMenuPage() {
                         <li key={it.id} className="flex items-center gap-3 px-4 py-2">
                           <input
                             type="checkbox"
-                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
                             checked={checked}
                             disabled={covered}
                             onChange={() => toggleItem(it)}
                           />
-                          <span className="text-sm text-slate-700 flex-1">{it.name}</span>
+                          <OnlineMenuItemThumb url={it.imageUrl} dimmed={covered} />
+                          <span className="text-sm text-slate-700 flex-1 min-w-0">{it.name}</span>
                         </li>
                       );
                     })}
