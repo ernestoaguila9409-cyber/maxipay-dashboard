@@ -92,8 +92,8 @@ export default function StorefrontSettingsManager({ settings }: StorefrontSettin
           Online ordering is{" "}
           <span className="font-medium text-slate-700">{settings.enabled ? "enabled" : "disabled"}</span>.
           Use the override below to temporarily stop accepting orders without disabling the feature. When{" "}
-          <span className="font-medium text-slate-700">Auto</span> is on and you enforce business hours below,
-          the schedule also controls whether the storefront shows open.
+          <span className="font-medium text-slate-700">Auto</span> is on and you apply the business hours
+          schedule below, the storefront open/closed follows that schedule.
         </p>
         <div className="flex flex-col sm:flex-row gap-3">
           <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer">

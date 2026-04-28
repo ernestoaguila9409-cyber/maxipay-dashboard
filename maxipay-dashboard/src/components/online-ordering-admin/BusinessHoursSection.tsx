@@ -68,7 +68,8 @@ export default function BusinessHoursSection({
 
   const applyWeekly = useCallback(
     (next: OnlineOrderingDayHours[]) => {
-      onPersist({ businessHoursWeekly: next });
+      /** Turning the schedule on whenever it is edited avoids “I changed days but the site stayed Open”. */
+      onPersist({ businessHoursWeekly: next, businessHoursEnforced: true });
     },
     [onPersist]
   );
@@ -100,7 +101,7 @@ export default function BusinessHoursSection({
         );
         return;
       }
-      onPersist({ businessHoursTimezone: value });
+      onPersist({ businessHoursTimezone: value, businessHoursEnforced: true });
       setCustomTzDraft("");
     },
     [onPersist, settings.businessHoursTimezone]
@@ -110,7 +111,7 @@ export default function BusinessHoursSection({
     const t = customTzDraft.trim();
     if (!t) return;
     if (!isValidIanaTimeZone(t)) return;
-    onPersist({ businessHoursTimezone: t });
+    onPersist({ businessHoursTimezone: t, businessHoursEnforced: true });
   }, [customTzDraft, onPersist]);
 
   return (
@@ -120,14 +121,23 @@ export default function BusinessHoursSection({
         <h3 className="text-sm font-semibold text-slate-800">Business hours</h3>
       </div>
       <p className="text-xs text-slate-500 mb-4">
-        Set a weekly schedule in your chosen time zone. When{" "}
-        <span className="font-medium text-slate-700">Enforce business hours</span> is on and{" "}
-        <span className="font-medium text-slate-700">Auto (follow toggle)</span> is selected above, the
-        public ordering site shows <span className="font-medium text-slate-700">Closed</span> outside
-        these windows and checkout is blocked. Use <span className="font-medium text-slate-700">Force open</span>{" "}
-        to bypass the schedule temporarily, or <span className="font-medium text-slate-700">Force closed</span>{" "}
-        for a one-off closure.
+        Weekly hours use the time zone below. They apply when{" "}
+        <span className="font-medium text-slate-700">Apply schedule to storefront</span> is checked and{" "}
+        <span className="font-medium text-slate-700">Auto (follow toggle)</span> is selected in Open / closed
+        above—then the public site shows <span className="font-medium text-slate-700">Closed</span> outside
+        these windows. Editing days or times below turns the schedule on automatically. Use{" "}
+        <span className="font-medium text-slate-700">Force open</span> to bypass the schedule, or{" "}
+        <span className="font-medium text-slate-700">Force closed</span> for a one-off closure.
       </p>
+
+      {!settings.businessHoursEnforced && (
+        <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 mb-4">
+          <span className="font-semibold">This schedule is not affecting customers yet.</span> Check{" "}
+          <span className="font-medium">Apply schedule to storefront</span> below, or change any day or
+          time—then refresh your public ordering page. Unchecked days (e.g. Monday) only count as closed
+          when the schedule is applied.
+        </p>
+      )}
 
       <label className="flex items-start gap-2 mb-4 cursor-pointer">
         <input
@@ -138,7 +148,11 @@ export default function BusinessHoursSection({
           className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
         />
         <span className="text-sm text-slate-700">
-          Enforce business hours (only applies when override is Auto and online ordering is enabled)
+          <span className="font-semibold">Apply schedule to storefront</span>
+          <span className="block text-xs text-slate-500 mt-0.5 font-normal">
+            When off, online ordering stays Open whenever it is enabled and Auto is selected—your day-by-day
+            table is ignored. When on, closed days and outside hours show Closed and block checkout.
+          </span>
         </span>
       </label>
 
@@ -185,7 +199,7 @@ export default function BusinessHoursSection({
           <thead>
             <tr className="bg-slate-50 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
               <th className="px-3 py-2">Day</th>
-              <th className="px-3 py-2 w-24">Open</th>
+              <th className="px-3 py-2 w-28">Taking orders</th>
               <th className="px-3 py-2">From</th>
               <th className="px-3 py-2">Until</th>
             </tr>
@@ -204,7 +218,7 @@ export default function BusinessHoursSection({
                       disabled={disabled}
                       onChange={(e) => setDay(dayIndex, { openForDay: e.target.checked })}
                       className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      aria-label={`${label} accepting orders`}
+                      aria-label={`${label}: taking online orders`}
                     />
                   </td>
                   <td className="px-3 py-2">
