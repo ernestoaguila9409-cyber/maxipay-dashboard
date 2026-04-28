@@ -9,7 +9,7 @@
  * Logo + storefront flags live on the same docs already used by the Android receipt
  * settings + online ordering settings:
  *  - `Settings/businessInfo`     → `businessName`, `logoUrl`
- *  - `Settings/onlineOrdering`   → `prepTimeMinutes`, `openStatusOverride`, `featuredItemIds`
+ *  - `Settings/onlineOrdering`   → `prepTimeMinutes`, `openStatusOverride`, business hours, `featuredItemIds`
  */
 
 export const HERO_SLIDES_COLLECTION = "OnlineHeroSlides";

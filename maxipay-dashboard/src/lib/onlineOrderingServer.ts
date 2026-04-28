@@ -286,6 +286,12 @@ export async function createOnlineOrderTransaction(
     ooSnap.data() as Record<string, unknown> | undefined
   );
 
+  if (!isStoreCurrentlyOpen(oo)) {
+    throw new OnlineOrderValidationError(
+      "We're currently closed for online orders. Please try again soon."
+    );
+  }
+
   const itemIds = [...new Set(lines.map((l) => l.itemId))];
   const refs = itemIds.map((id) => db.collection("MenuItems").doc(id));
   const snaps = await db.getAll(...refs);

@@ -10,6 +10,7 @@ import {
   type OnlineOrderingSettings,
   type StoreOpenOverride,
 } from "@/lib/onlineOrderingShared";
+import BusinessHoursSection from "@/components/online-ordering-admin/BusinessHoursSection";
 
 interface StorefrontSettingsManagerProps {
   settings: OnlineOrderingSettings;
@@ -70,7 +71,9 @@ export default function StorefrontSettingsManager({ settings }: StorefrontSettin
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-slate-900">Storefront settings</h2>
-        <p className="text-sm text-slate-500 mt-0.5">Prep time and open/closed control.</p>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Business hours, prep time, and open/closed control.
+        </p>
       </div>
 
       {error && (
@@ -88,7 +91,9 @@ export default function StorefrontSettingsManager({ settings }: StorefrontSettin
         <p className="text-xs text-slate-500 mb-3">
           Online ordering is{" "}
           <span className="font-medium text-slate-700">{settings.enabled ? "enabled" : "disabled"}</span>.
-          Use the override below to temporarily stop accepting orders without disabling the feature.
+          Use the override below to temporarily stop accepting orders without disabling the feature. When{" "}
+          <span className="font-medium text-slate-700">Auto</span> is on and you enforce business hours below,
+          the schedule also controls whether the storefront shows open.
         </p>
         <div className="flex flex-col sm:flex-row gap-3">
           <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
@@ -128,6 +133,12 @@ export default function StorefrontSettingsManager({ settings }: StorefrontSettin
           </div>
         </div>
       </section>
+
+      <BusinessHoursSection
+        settings={settings}
+        disabled={savingSettings}
+        onPersist={(patch) => void persistSettings(patch)}
+      />
 
       {/* Prep time */}
       <section className="rounded-2xl border border-slate-200 bg-white p-5">
