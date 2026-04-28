@@ -232,15 +232,7 @@ export default function OnlineOrderingDashboardPage() {
               </div>
               <div className="p-5 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
                 {activeTab === "picture" && <StorefrontPictureManager />}
-                {activeTab === "settings" && (
-                  <StorefrontSettingsManager
-                    settings={settings}
-                    businessName={businessName}
-                    logoUrl={logoUrl}
-                    logoStoragePath={user ? `businesses/${user.uid}/logo.png` : null}
-                    uid={user?.uid ?? null}
-                  />
-                )}
+                {activeTab === "settings" && <StorefrontSettingsManager settings={settings} />}
               </div>
             </div>
           </div>
