@@ -17,6 +17,8 @@ import {
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { getApp } from "firebase/app";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import Header from "@/components/Header";
 import {
   firestoreDate,
@@ -184,12 +186,19 @@ export default function OrderDetailPage() {
   const [refundCmdDetail, setRefundCmdDetail] = useState<string | null>(null);
   const [refundAmountInput, setRefundAmountInput] = useState("");
 
+  const [directRefundSubmitting, setDirectRefundSubmitting] = useState(false);
+  const [directRefundResult, setDirectRefundResult] = useState<string | null>(null);
+  const [directRefundErr, setDirectRefundErr] = useState<string | null>(null);
+
   useEffect(() => {
     setRefundCmdId(null);
     setRefundSubmitErr(null);
     setRefundCmdStatus(null);
     setRefundCmdDetail(null);
     setRefundAmountInput("");
+    setDirectRefundSubmitting(false);
+    setDirectRefundResult(null);
+    setDirectRefundErr(null);
   }, [orderId]);
 
   useEffect(() => {
@@ -437,6 +446,16 @@ export default function OrderDetailPage() {
 
   const canQueueRemoteCardRefund =
     canShowRemoteCardRefundPanel && saleTransactionData.settled === true;
+
+  const canDirectRefund =
+    canQueueRemoteCardRefund &&
+    saleTransactionData != null &&
+    Array.isArray(saleTransactionData.payments) &&
+    (saleTransactionData.payments as Record<string, unknown>[]).some(
+      (p) =>
+        String(p.pnReferenceId || p.PNReferenceId || "").trim().length > 0 &&
+        !String(p.paymentType ?? "").toLowerCase().includes("cash")
+    );
 
   /** Same rule as Android `OrderDetailActivity`: full strike metadata only when order is fully refunded. */
   const fullyRefundedForStrike =
@@ -879,6 +898,64 @@ export default function OrderDetailPage() {
                     </p>
                     {refundCmdDetail ? (
                       <p className="text-emerald-900/90 break-words">{refundCmdDetail}</p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {canDirectRefund ? (
+                  <div className="mt-3 pt-3 border-t border-emerald-200 space-y-2">
+                    <p className="text-xs text-emerald-800/90 leading-relaxed">
+                      Or refund <span className="font-semibold">without the card present</span> using the
+                      processor reference from the original sale. Processed server-side — no POS or terminal needed.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={directRefundSubmitting || refundSubmitting}
+                      onClick={async () => {
+                        if (!user) return;
+                        const dollars = parseFloat(refundAmountInput);
+                        if (!Number.isFinite(dollars) || dollars <= 0) {
+                          setDirectRefundErr("Enter a valid refund amount greater than zero.");
+                          return;
+                        }
+                        const amountInCents = Math.round(dollars * 100);
+                        setDirectRefundSubmitting(true);
+                        setDirectRefundErr(null);
+                        setDirectRefundResult(null);
+                        try {
+                          const region = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION;
+                          const app = getApp();
+                          const functions = region ? getFunctions(app, region) : getFunctions(app);
+                          const call = httpsCallable(functions, "processServerRefund");
+                          const res = await call({
+                            transactionId: saleIdForRefund,
+                            orderId,
+                            amountInCents,
+                          });
+                          const d = res.data as Record<string, unknown>;
+                          if (d.success) {
+                            setDirectRefundResult(String(d.message ?? "Refund processed."));
+                          } else {
+                            setDirectRefundErr(String(d.error ?? "Refund failed."));
+                          }
+                        } catch (err) {
+                          console.error("[Order detail] direct refund", err);
+                          setDirectRefundErr(
+                            err instanceof Error ? err.message : "Could not process refund"
+                          );
+                        } finally {
+                          setDirectRefundSubmitting(false);
+                        }
+                      }}
+                      className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-indigo-700 text-white text-sm font-semibold hover:bg-indigo-800 disabled:opacity-60"
+                    >
+                      {directRefundSubmitting ? "Processing…" : "Direct refund (no card)"}
+                    </button>
+                    {directRefundErr ? (
+                      <p className="text-xs text-red-700 break-words">{directRefundErr}</p>
+                    ) : null}
+                    {directRefundResult ? (
+                      <p className="text-xs text-emerald-800 font-medium break-words">{directRefundResult}</p>
                     ) : null}
                   </div>
                 ) : null}
