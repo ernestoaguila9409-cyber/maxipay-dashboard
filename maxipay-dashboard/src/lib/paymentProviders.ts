@@ -96,7 +96,18 @@ const SPIN_P_CREDENTIAL_SCHEMA: PaymentCredentialField[] = [
   },
 ];
 
-const SPIN_CAPABILITIES: PaymentCapabilities = {
+const SPIN_Z_CAPABILITIES: PaymentCapabilities = {
+  supportsPreAuth: true,
+  supportsCapture: true,
+  supportsTipAdjust: true,
+  supportsSale: true,
+  supportsVoid: true,
+  supportsRefund: false,
+  supportsSettle: true,
+  supportsStatusCheck: true,
+};
+
+const SPIN_P_CAPABILITIES: PaymentCapabilities = {
   supportsPreAuth: true,
   supportsCapture: true,
   supportsTipAdjust: true,
@@ -140,7 +151,7 @@ export const PAYMENT_PROVIDERS: Record<PaymentProviderId, PaymentProviderCatalog
     deviceModels: ["Z8", "P17", "P20", "Dejavoo QD3", "Dejavoo QD4", "Other"],
     baseUrl: "https://spinpos.net/v2",
     endpoints: SPIN_ENDPOINTS_Z,
-    capabilities: SPIN_CAPABILITIES,
+    capabilities: SPIN_Z_CAPABILITIES,
     credentialSchema: SPIN_CREDENTIAL_SCHEMA,
   },
   SPIN_Z: {
@@ -151,7 +162,7 @@ export const PAYMENT_PROVIDERS: Record<PaymentProviderId, PaymentProviderCatalog
     deviceModels: ["Z8", "Dejavoo QD3", "Dejavoo QD4", "Other"],
     baseUrl: "https://spinpos.net/v2",
     endpoints: SPIN_ENDPOINTS_Z,
-    capabilities: SPIN_CAPABILITIES,
+    capabilities: SPIN_Z_CAPABILITIES,
     credentialSchema: SPIN_CREDENTIAL_SCHEMA,
   },
   SPIN_P: {
@@ -162,7 +173,7 @@ export const PAYMENT_PROVIDERS: Record<PaymentProviderId, PaymentProviderCatalog
     deviceModels: ["P17", "P20", "Other"],
     baseUrl: "https://spinpos.net/v2",
     endpoints: SPIN_ENDPOINTS_P,
-    capabilities: SPIN_CAPABILITIES,
+    capabilities: SPIN_P_CAPABILITIES,
     credentialSchema: SPIN_P_CREDENTIAL_SCHEMA,
   },
 };

@@ -19,6 +19,7 @@ import { getApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useActiveTerminalCapabilities } from "@/hooks/useActiveTerminalCapabilities";
 import { Banknote, CreditCard, Layers, Loader2, Plus, Search, X } from "lucide-react";
 import { startOfLocalDay } from "@/lib/dashboardFinance";
 import {
@@ -471,6 +472,7 @@ function refundSubcardLines(refundDocs: TxDocRow[]): string {
 
 export default function SalesActivityClient() {
   const { user } = useAuth();
+  const { capabilities: termCaps } = useActiveTerminalCapabilities();
   const [tab, setTab] = useState<TabId>("orders");
   const [datePreset, setDatePreset] = useState<DatePreset>("today");
   const [customStart, setCustomStart] = useState(() => {
@@ -1675,7 +1677,7 @@ export default function SalesActivityClient() {
               <p className="text-xs text-red-600">{receiptErr}</p>
             ) : null}
 
-            {txModal && canShowRemoteRefundSection(txModal.data) ? (
+            {txModal && termCaps.supportsRefund && canShowRemoteRefundSection(txModal.data) ? (
               <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-3 space-y-2">
                 <p className="text-xs font-medium text-emerald-900">Remote card refund</p>
                 {canRequestRemoteRefund(txModal.data) ? (

@@ -17,6 +17,7 @@ import {
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useActiveTerminalCapabilities } from "@/hooks/useActiveTerminalCapabilities";
 import { getApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Header from "@/components/Header";
@@ -159,6 +160,7 @@ export default function OrderDetailPage() {
   const searchParams = useSearchParams();
   const orderId = typeof params.orderId === "string" ? params.orderId : "";
   const { user } = useAuth();
+  const { capabilities: termCaps } = useActiveTerminalCapabilities();
 
   const fromSalesActivity =
     searchParams.get("from")?.trim().toLowerCase() === SALES_ACTIVITY_FROM;
@@ -817,7 +819,7 @@ export default function OrderDetailPage() {
               )}
             </div>
 
-            {canShowRemoteCardRefundPanel ? (
+            {termCaps.supportsRefund && canShowRemoteCardRefundPanel ? (
               <div className="bg-emerald-50/90 rounded-2xl border border-emerald-100 shadow-sm p-6 space-y-3">
                 <h3 className="text-sm font-semibold text-emerald-900">
                   Remote card refund (POS)
