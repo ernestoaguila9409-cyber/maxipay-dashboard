@@ -22,8 +22,12 @@ import { useAuth } from "@/context/AuthContext";
 import { Banknote, CreditCard, Layers, Loader2, Plus, Search, X } from "lucide-react";
 import { startOfLocalDay } from "@/lib/dashboardFinance";
 import {
+  buildAndroidOrdersListTitle,
   effectivePosOrderStatus,
-  isWebOnlineOrder,
+  formatOrdersListTime,
+  orderListNetCents,
+  orderListStatusBadgeStyle,
+  orderListStatusBarColor,
   orderTypeBadgeStyle,
 } from "@/lib/orderDisplayUtils";
 
@@ -41,23 +45,6 @@ function docDate(data: DocumentData): Date | null {
     return (data.timestamp as Timestamp).toDate();
   }
   return null;
-}
-
-function statusPill(statusRaw: string): { label: string; className: string } {
-  const u = String(statusRaw || "").trim().toUpperCase();
-  if (u === "OPEN") {
-    return { label: "OPEN", className: "bg-orange-100 text-orange-800" };
-  }
-  if (u === "VOIDED") {
-    return { label: "VOIDED", className: "bg-red-100 text-red-800" };
-  }
-  if (u === "REFUNDED" || u === "PARTIALLY_REFUNDED" || u === "REFUNDED_FULLY") {
-    return { label: "REFUNDED", className: "bg-violet-100 text-violet-800" };
-  }
-  if (!u) {
-    return { label: "—", className: "bg-slate-100 text-slate-700" };
-  }
-  return { label: u, className: "bg-emerald-100 text-emerald-800" };
 }
 
 type TabId = "orders" | "transactions" | "cash";
@@ -825,19 +812,6 @@ export default function SalesActivityClient() {
     });
   }, [orderDocs, batchId, qLower, orderIdsMatchingSearch]);
 
-  const txnCountByOrder = useMemo(() => {
-    const m = new Map<string, number>();
-    txDocs.forEach(({ data }) => {
-      const oid = String(data.orderId ?? "").trim();
-      if (!oid) return;
-      const t = String(data.type ?? "");
-      if (["SALE", "CAPTURE", "REFUND"].includes(t)) {
-        m.set(oid, (m.get(oid) ?? 0) + 1);
-      }
-    });
-    return m;
-  }, [txDocs]);
-
   const transactionGroups = useMemo(
     () =>
       buildTransactionGroups(
@@ -1280,60 +1254,77 @@ export default function SalesActivityClient() {
                 filteredOrders.map(({ id, data }) => {
                   const rec = data as Record<string, unknown>;
                   const status = effectivePosOrderStatus(rec);
-                  const pill = statusPill(status);
+                  const title = buildAndroidOrdersListTitle(rec);
                   const num = data.orderNumber as number | undefined;
-                  const refunded = Number(data.totalRefundedInCents ?? 0) > 0;
-                  const multi = (txnCountByOrder.get(id) ?? 0) >= 2;
-                  const table = String(data.tableName ?? "").trim();
-                  const cust = String(data.customerName ?? "").trim();
-                  const emp = String(data.employeeName ?? "").trim();
-                  const online = isWebOnlineOrder(rec);
-                  const sub = online
-                    ? [table].filter(Boolean).join(" · ") || "Online order"
-                    : (() => {
-                        const parts: string[] = [];
-                        if (emp) parts.push(emp);
-                        if (table) parts.push(table);
-                        if (cust && cust !== emp) parts.push(cust);
-                        return parts.join(" · ") || "—";
-                      })();
-                  const typeBadge = orderTypeBadgeStyle(String(data.orderType ?? ""));
-                  const total = Number(data.totalInCents ?? 0);
+                  const headline =
+                    title.trim() ||
+                    (num ? `#${num}` : `Order ${id.slice(0, 8)}`);
+                  const netC = orderListNetCents(rec);
+                  const barColor = orderListStatusBarColor(status);
+                  const stBadge = orderListStatusBadgeStyle(status);
+                  const otRaw = String(data.orderType ?? "").trim();
+                  const typeBadge = orderTypeBadgeStyle(otRaw);
                   const ts = data.createdAt?.toDate?.() ?? new Date();
+                  const preAuthCents = Math.round(Number(data.preAuthAmount ?? 0) * 100);
+                  const refundedCents = Math.round(Number(data.totalRefundedInCents ?? 0));
+                  const hasRefund = refundedCents > 0;
+                  const preAuthLabel =
+                    String(status).toUpperCase() === "CLOSED" ? "PostAuth" : "PreAuth";
+
                   return (
                     <Link
                       key={id}
                       href={`/dashboard/orders/${id}?from=sales-activity`}
-                      className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:border-violet-200 hover:shadow transition-all"
+                      className="relative block rounded-2xl border border-slate-200/90 bg-white shadow-sm hover:border-violet-200 hover:shadow transition-all overflow-hidden"
                     >
-                      <div className="flex justify-between gap-2">
-                        <span className="font-semibold text-slate-900">
-                          {num ? `#${num}` : id.slice(0, 8)}
-                        </span>
-                        <span className="font-semibold">{fmtMoney(total)}</span>
-                      </div>
-                      <p className="text-sm text-slate-600 mt-1">{sub}</p>
-                      <div className="flex flex-wrap gap-2 mt-2 items-center text-xs">
-                        <span
-                          className="px-2 py-0.5 rounded-full font-semibold text-white"
-                          style={{ backgroundColor: typeBadge.backgroundColor }}
-                        >
-                          {typeBadge.label}
-                        </span>
-                        <span
-                          className={`px-2 py-0.5 rounded-full font-semibold ${pill.className}`}
-                        >
-                          {pill.label}
-                        </span>
-                        <span className="text-slate-400">{ts.toLocaleString()}</span>
-                        {multi ? (
-                          <span className="text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
-                            Multiple payments
+                      <div
+                        className="absolute left-0 top-0 bottom-0 w-[5px] rounded-l-2xl"
+                        style={{ backgroundColor: barColor }}
+                        aria-hidden
+                      />
+                      <div className="pl-5 pr-4 py-3.5">
+                        <div className="flex justify-between gap-3 items-start">
+                          <span className="text-base font-bold text-[#1A1A1A] leading-snug truncate min-w-0">
+                            {headline}
                           </span>
-                        ) : null}
-                        {refunded ? (
-                          <span className="text-red-700 bg-red-50 px-2 py-0.5 rounded">Refund</span>
-                        ) : null}
+                          <span className="text-lg font-bold text-[#1A1A1A] tabular-nums shrink-0">
+                            {fmtMoney(netC)}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 mt-2">
+                          <span
+                            className="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0"
+                            style={{
+                              backgroundColor: stBadge.backgroundColor,
+                              color: stBadge.color,
+                            }}
+                          >
+                            {stBadge.label}
+                          </span>
+                          {preAuthCents > 0 ? (
+                            <span className="text-xs font-bold text-[#6A4FB3] shrink-0">
+                              {preAuthLabel} {fmtMoney(preAuthCents)}
+                            </span>
+                          ) : null}
+                          {hasRefund ? (
+                            <span className="text-xs font-bold text-[#E65100] shrink-0">
+                              Refund -{fmtMoney(refundedCents)}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="flex justify-between items-baseline gap-3 mt-2">
+                          <span className="text-xs text-[#888888] truncate min-w-0">
+                            {formatOrdersListTime(ts)}
+                          </span>
+                          {otRaw ? (
+                            <span
+                              className="text-[10px] font-bold text-white px-2.5 py-1 rounded-full shrink-0 uppercase tracking-wide"
+                              style={{ backgroundColor: typeBadge.backgroundColor }}
+                            >
+                              {typeBadge.label}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     </Link>
                   );

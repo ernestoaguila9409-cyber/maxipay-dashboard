@@ -181,11 +181,13 @@ export function orderTypeBadgeStyle(orderTypeRaw: string): {
         ? "TO-GO"
         : u === "ONLINE_PICKUP"
           ? "ONLINE ORDER"
-          : u === "BAR_TAB"
-            ? "BAR TAB"
-            : u === "BAR"
-              ? "BAR"
-              : formatOrderTypeLabel(u).toUpperCase();
+          : u === "UBER_EATS"
+            ? "UBER EATS"
+            : u === "BAR_TAB"
+              ? "BAR TAB"
+              : u === "BAR"
+                ? "BAR"
+                : formatOrderTypeLabel(u).toUpperCase();
   const backgroundColor =
     u === "DINE_IN"
       ? "#4CAF50"
@@ -193,10 +195,107 @@ export function orderTypeBadgeStyle(orderTypeRaw: string): {
         ? "#FF9800"
         : u === "ONLINE_PICKUP"
           ? "#43A047"
-          : u === "BAR" || u === "BAR_TAB"
-            ? "#00897B"
-            : "#64748B";
+          : u === "UBER_EATS"
+            ? "#06C167"
+            : u === "BAR" || u === "BAR_TAB"
+              ? "#00897B"
+              : "#64748B";
   return { backgroundColor, label };
+}
+
+/** Left accent strip — matches Android `OrdersAdapter.bindStatusBar`. */
+export function orderListStatusBarColor(statusRaw: string): string {
+  const u = statusRaw.trim().toUpperCase();
+  switch (u) {
+    case "OPEN":
+      return "#2196F3";
+    case "ACCEPTED":
+      return "#2E7D32";
+    case "READY":
+      return "#1565C0";
+    case "DENIED":
+      return "#C62828";
+    case "CANCELLED":
+      return "#795548";
+    case "CLOSED":
+      return "#9E9E9E";
+    case "VOIDED":
+      return "#F44336";
+    case "REFUNDED":
+    case "PARTIALLY_REFUNDED":
+    case "REFUNDED_FULLY":
+      return "#FF9800";
+    default:
+      return "#BDBDBD";
+  }
+}
+
+/** Pill on row 2 — matches Android `OrdersAdapter.bindStatusBadge`. */
+export function orderListStatusBadgeStyle(statusRaw: string): {
+  label: string;
+  backgroundColor: string;
+  color: string;
+} {
+  const label = statusRaw.trim().toUpperCase() || "—";
+  const u = label;
+  const table: Record<string, readonly [string, string]> = {
+    OPEN: ["#E3F2FD", "#1565C0"],
+    ACCEPTED: ["#E8F5E9", "#2E7D32"],
+    READY: ["#E3F2FD", "#1565C0"],
+    DENIED: ["#FFEBEE", "#C62828"],
+    CANCELLED: ["#EFEBE9", "#795548"],
+    CLOSED: ["#F5F5F5", "#616161"],
+    VOIDED: ["#FFEBEE", "#C62828"],
+    REFUNDED: ["#FFF3E0", "#E65100"],
+    PARTIALLY_REFUNDED: ["#FFF3E0", "#E65100"],
+    REFUNDED_FULLY: ["#FFF3E0", "#E65100"],
+  };
+  const pair = table[u] ?? (["#F5F5F5", "#424242"] as const);
+  return { label, backgroundColor: pair[0], color: pair[1] };
+}
+
+/**
+ * Primary title on order list cards (`OrdersAdapter` / `item_order.xml`):
+ * `#392 · Server` for POS, or `#392 · N items` when `orderSource` is set (online / third-party).
+ */
+export function buildAndroidOrdersListTitle(data: Record<string, unknown>): string {
+  const isOnline = String(data.orderSource ?? "").trim().length > 0;
+  const orderNumber = Math.round(Number(data.orderNumber ?? 0));
+  let s = "";
+  if (orderNumber > 0) s += `#${orderNumber}`;
+
+  if (!isOnline) {
+    const rawStatus = effectivePosOrderStatus(data).toUpperCase();
+    const empRaw = String(data.employeeName ?? "").trim();
+    const voidedBy = String(data.voidedBy ?? "").trim();
+    const displayName =
+      rawStatus === "VOIDED" && voidedBy ? voidedBy : empRaw;
+    if (displayName && displayName !== "—") {
+      if (s) s += " \u00b7 ";
+      s += displayName;
+    }
+  } else {
+    const itemsCount = Math.round(Number(data.itemsCount ?? 0));
+    if (itemsCount > 0) {
+      if (s) s += " \u00b7 ";
+      s += `${itemsCount} item${itemsCount !== 1 ? "s" : ""}`;
+    }
+  }
+  return s;
+}
+
+/** Net $ shown on list card: `totalInCents - totalRefundedInCents`, floored at 0 — matches `OrderRow.netCents`. */
+export function orderListNetCents(data: Record<string, unknown>): number {
+  const total = Math.round(Number(data.totalInCents ?? 0));
+  const refunded = Math.round(Number(data.totalRefundedInCents ?? 0));
+  return Math.max(0, total - refunded);
+}
+
+/** Same pattern as Android `DateFormat.format("MMM dd · h:mm a", …)`. */
+export function formatOrdersListTime(d: Date): string {
+  const md = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const tm = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  return `${md} \u00b7 ${tm}`;
 }
 
 /**
