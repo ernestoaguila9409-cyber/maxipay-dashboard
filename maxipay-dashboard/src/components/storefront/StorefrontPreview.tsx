@@ -65,7 +65,6 @@ export function StorefrontPreview({ storefront, menu }: StorefrontPreviewProps) 
         <div className="px-4 pt-4 pb-2">
           <StoreHeader
             businessName={storefront.businessName}
-            logoUrl={storefront.logoUrl}
             isOpen={storefront.isOpen}
             prepTimeLabel={storefront.prepTimeLabel}
             compact

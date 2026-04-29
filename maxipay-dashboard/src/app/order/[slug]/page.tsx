@@ -876,7 +876,6 @@ function PublicOrderPageInner() {
           <div className="flex items-center justify-between h-16 gap-4">
             <StoreHeader
               businessName={cfg.businessName}
-              logoUrl={cfg.logoUrl}
               isOpen={cfg.isOpen}
               prepTimeLabel={cfg.prepTimeLabel}
             />
