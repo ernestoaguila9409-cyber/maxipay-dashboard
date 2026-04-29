@@ -285,6 +285,8 @@ export default function OnlineOrderingSettingsPage() {
             />
           </label>
 
+          {settings.enabled && (
+            <>
           <label className="flex items-center justify-between gap-4 cursor-pointer">
             <div className="flex gap-2">
               <Store size={18} className="text-slate-400 shrink-0 mt-0.5" />
@@ -420,6 +422,8 @@ export default function OnlineOrderingSettingsPage() {
               </p>
             </div>
           </div>
+            </>
+          )}
 
           {saveState === "saving" && (
             <p className="text-sm text-slate-500 flex items-center gap-2">
@@ -430,6 +434,7 @@ export default function OnlineOrderingSettingsPage() {
           {saveState === "error" && <p className="text-sm text-red-600">Save failed. Try again.</p>}
         </div>
 
+        {settings.enabled && (
         <div className="bg-slate-50 rounded-2xl border border-slate-200 p-6 text-sm text-slate-700 space-y-2">
           <p className="font-semibold text-slate-800">Deployment tip</p>
           <p>
@@ -437,6 +442,7 @@ export default function OnlineOrderingSettingsPage() {
             to your live dashboard URL so links and redirects stay correct in production.
           </p>
         </div>
+        )}
       </div>
     </>
   );
