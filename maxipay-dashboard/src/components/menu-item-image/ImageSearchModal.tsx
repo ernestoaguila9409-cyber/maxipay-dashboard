@@ -4,24 +4,36 @@ import { useEffect, useState } from "react";
 import { Loader2, Search, X } from "lucide-react";
 import { useImageSearch } from "@/hooks/useImageSearch";
 
-export interface ImageSearchModalProps {
-  open: boolean;
-  onClose: () => void;
-  itemName: string;
-  itemId: string;
-  getIdToken: () => Promise<string>;
-  /** Called after image is in Firebase Storage with a Firebase download URL. */
-  onCommitted: (firebaseDownloadUrl: string) => void | Promise<void>;
-}
+export type ImageSearchModalProps =
+  | {
+      mode?: "menu";
+      open: boolean;
+      onClose: () => void;
+      itemName: string;
+      itemId: string;
+      getIdToken: () => Promise<string>;
+      onCommitted: (
+        firebaseDownloadUrl: string,
+        storagePath?: string
+      ) => void | boolean | Promise<void | boolean>;
+    }
+  | {
+      mode: "storefront";
+      open: boolean;
+      onClose: () => void;
+      businessName: string;
+      heroSlideId: string;
+      getIdToken: () => Promise<string>;
+      onCommitted: (
+        firebaseDownloadUrl: string,
+        storagePath?: string
+      ) => void | boolean | Promise<void | boolean>;
+    };
 
-export function ImageSearchModal({
-  open,
-  onClose,
-  itemName,
-  itemId,
-  getIdToken,
-  onCommitted,
-}: ImageSearchModalProps) {
+export function ImageSearchModal(props: ImageSearchModalProps) {
+  const isStorefront = props.mode === "storefront";
+  const seedForSearch = isStorefront ? props.businessName : props.itemName;
+  const searchKind = isStorefront ? "storefront" : "menu";
   const { images, query, setQuery, loading, error, reset, searchFromItemName, searchWithQuery } =
     useImageSearch();
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -29,23 +41,24 @@ export function ImageSearchModal({
   const [commitError, setCommitError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) {
+    if (!props.open) {
       reset();
       setSelectedId(null);
       setCommitError(null);
       return;
     }
-    void searchFromItemName(itemName, getIdToken);
-  }, [open, itemName, getIdToken, searchFromItemName, reset]);
+    const seed = seedForSearch.trim() || (isStorefront ? "restaurant" : "");
+    void searchFromItemName(seed, props.getIdToken, searchKind);
+  }, [props.open, seedForSearch, isStorefront, searchKind, props.getIdToken, reset, searchFromItemName]);
 
-  if (!open) return null;
+  if (!props.open) return null;
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const q = query.trim();
     if (!q || loading) return;
     setSelectedId(null);
-    void searchWithQuery(q, getIdToken);
+    void searchWithQuery(q, props.getIdToken, searchKind);
   };
 
   const handleSelect = async (sourceUrl: string, id: number) => {
@@ -53,27 +66,45 @@ export function ImageSearchModal({
     setCommitError(null);
     setCommitting(true);
     try {
-      const token = await getIdToken();
+      const token = await props.getIdToken();
+      const body = isStorefront
+        ? { heroSlideId: props.heroSlideId, sourceUrl }
+        : { itemId: props.itemId, sourceUrl };
       const res = await fetch("/api/menu/item-image-commit-pexels", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ itemId, sourceUrl }),
+        body: JSON.stringify(body),
       });
-      const data = (await res.json()) as { error?: string; imageUrl?: string };
+      const data = (await res.json()) as {
+        error?: string;
+        imageUrl?: string;
+        storagePath?: string;
+      };
       if (!res.ok || !data.imageUrl) {
         throw new Error(data.error || "Could not save image");
       }
-      await onCommitted(data.imageUrl);
-      onClose();
+      const committed = await props.onCommitted(data.imageUrl, data.storagePath);
+      if (committed !== false) {
+        props.onClose();
+      }
     } catch (err) {
       setCommitError(err instanceof Error ? err.message : String(err));
     } finally {
       setCommitting(false);
     }
   };
+
+  const title = isStorefront ? "Find storefront picture" : "Select image";
+  const searchPlaceholder = isStorefront
+    ? "Describe the banner image…"
+    : "Describe the food photo…";
+  const cellAspect = isStorefront ? "aspect-[16/9]" : "aspect-square";
+  const gridClass = isStorefront
+    ? "grid grid-cols-1 sm:grid-cols-2 gap-2"
+    : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2";
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -82,14 +113,14 @@ export function ImageSearchModal({
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         aria-label="Close"
         disabled={committing}
-        onClick={() => !committing && onClose()}
+        onClick={() => !committing && props.onClose()}
       />
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 shrink-0">
-          <h3 className="text-lg font-semibold text-slate-900">Select image</h3>
+          <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
           <button
             type="button"
-            onClick={() => !committing && onClose()}
+            onClick={() => !committing && props.onClose()}
             className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
             disabled={committing}
           >
@@ -104,7 +135,7 @@ export function ImageSearchModal({
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Describe the food photo…"
+              placeholder={searchPlaceholder}
               className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
               disabled={loading || committing}
             />
@@ -143,7 +174,7 @@ export function ImageSearchModal({
           )}
 
           {images.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            <div className={gridClass}>
               {images.map((img) => {
                 const selected = selectedId === img.id;
                 return (
@@ -152,7 +183,7 @@ export function ImageSearchModal({
                     type="button"
                     disabled={committing}
                     onClick={() => void handleSelect(img.sourceUrl, img.id)}
-                    className={`relative aspect-square rounded-xl overflow-hidden border-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                    className={`relative ${cellAspect} rounded-xl overflow-hidden border-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                       selected
                         ? "border-blue-600 ring-2 ring-blue-500/30"
                         : "border-transparent hover:border-slate-300"

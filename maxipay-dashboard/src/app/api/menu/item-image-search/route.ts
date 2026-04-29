@@ -36,6 +36,32 @@ async function buildSearchQueryFromItemName(itemName: string): Promise<string> {
   return cleaned || itemName.trim();
 }
 
+async function buildStorefrontBannerQuery(seed: string): Promise<string> {
+  const openai = getOpenAI();
+  const completion = await openai.chat.completions.create({
+    model: OPENAI_MODEL,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Convert a restaurant or business name (and optional vibe) into a short English stock-photo search query " +
+          "for a wide website hero banner: food, dining atmosphere, kitchen, or appetizing spread — professional, " +
+          "not text-heavy, no logos. Output ONLY the query phrase: 4–12 words, no quotes, no brand names as literal trademarks, " +
+          "no punctuation at the end.",
+      },
+      {
+        role: "user",
+        content: `Suggest a hero banner image search query for this restaurant / storefront: ${seed.trim()}`,
+      },
+    ],
+    temperature: 0.45,
+    max_tokens: 80,
+  });
+  const raw = completion.choices[0]?.message?.content?.trim() ?? "";
+  const cleaned = raw.replace(/^["']|["']$/g, "").replace(/\s+/g, " ").trim();
+  return cleaned || seed.trim();
+}
+
 export interface PexelsImageHit {
   id: number;
   /** Medium-sized preview URL (picker grid). */
@@ -45,13 +71,19 @@ export interface PexelsImageHit {
   photographer: string;
 }
 
-async function searchPexels(query: string): Promise<PexelsImageHit[]> {
+async function searchPexels(
+  query: string,
+  opts?: { orientation?: "landscape" | "portrait" | "square" }
+): Promise<PexelsImageHit[]> {
   const apiKey = process.env.PEXELS_API_KEY;
   if (!apiKey) throw new Error("PEXELS_API_KEY is not configured");
 
   const url = new URL("https://api.pexels.com/v1/search");
   url.searchParams.set("query", query);
   url.searchParams.set("per_page", "12");
+  if (opts?.orientation) {
+    url.searchParams.set("orientation", opts.orientation);
+  }
 
   const res = await fetch(url.toString(), {
     // Pexels expects the raw API key in Authorization (not Bearer).
@@ -83,22 +115,31 @@ async function searchPexels(query: string): Promise<PexelsImageHit[]> {
 }
 
 /**
- * POST body: { itemName?: string, query?: string }
+ * POST body: { itemName?: string, query?: string, searchKind?: "menu" | "storefront" }
  * - If `query` is non-empty, searches Pexels directly (manual refine).
  * - Else uses OpenAI to turn `itemName` into a query, then Pexels.
+ *   When searchKind is "storefront", the AI prompt targets wide hero/banner imagery instead of a single dish.
  */
 export async function POST(req: Request) {
   try {
     await verifyIdToken(req.headers.get("authorization"));
-    const body = (await req.json()) as { itemName?: string; query?: string };
+    const body = (await req.json()) as {
+      itemName?: string;
+      query?: string;
+      searchKind?: string;
+    };
     const manual = typeof body.query === "string" ? body.query.trim() : "";
     const itemName = typeof body.itemName === "string" ? body.itemName.trim() : "";
+    const searchKind = body.searchKind === "storefront" ? "storefront" : "menu";
 
     let finalQuery: string;
     if (manual) {
       finalQuery = manual;
     } else if (itemName) {
-      finalQuery = await buildSearchQueryFromItemName(itemName);
+      finalQuery =
+        searchKind === "storefront"
+          ? await buildStorefrontBannerQuery(itemName)
+          : await buildSearchQueryFromItemName(itemName);
     } else {
       return NextResponse.json(
         { error: "Provide itemName or query." },
@@ -106,7 +147,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const images = await searchPexels(finalQuery);
+    const images = await searchPexels(finalQuery, {
+      orientation: searchKind === "storefront" ? "landscape" : undefined,
+    });
     return NextResponse.json({ query: finalQuery, images });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

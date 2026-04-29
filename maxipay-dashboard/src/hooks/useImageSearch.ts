@@ -25,7 +25,7 @@ export function useImageSearch() {
   const runSearch = useCallback(
     async (
       getToken: () => Promise<string>,
-      payload: { itemName?: string; query?: string }
+      payload: { itemName?: string; query?: string; searchKind?: "menu" | "storefront" }
     ) => {
       setLoading(true);
       setError(null);
@@ -59,18 +59,26 @@ export function useImageSearch() {
     []
   );
 
-  /** OpenAI-assisted query from menu item name, then Pexels. */
+  /** OpenAI-assisted query from menu item name (or storefront seed), then Pexels. */
   const searchFromItemName = useCallback(
-    async (itemName: string, getToken: () => Promise<string>) => {
-      await runSearch(getToken, { itemName });
+    async (
+      itemName: string,
+      getToken: () => Promise<string>,
+      searchKind: "menu" | "storefront" = "menu"
+    ) => {
+      await runSearch(getToken, { itemName, searchKind });
     },
     [runSearch]
   );
 
-  /** Pexels only with the given query string. */
+  /** Pexels with the given query string (optional searchKind for storefront landscape bias). */
   const searchWithQuery = useCallback(
-    async (q: string, getToken: () => Promise<string>) => {
-      await runSearch(getToken, { query: q });
+    async (
+      q: string,
+      getToken: () => Promise<string>,
+      searchKind: "menu" | "storefront" = "menu"
+    ) => {
+      await runSearch(getToken, { query: q, searchKind });
     },
     [runSearch]
   );

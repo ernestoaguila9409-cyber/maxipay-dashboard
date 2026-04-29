@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { getStorage } from "firebase-admin/storage";
 import { getFirebaseAdminApp, verifyIdToken } from "@/lib/firebaseAdmin";
+import { HERO_STORAGE_PREFIX } from "@/lib/storefrontShared";
 
 export const runtime = "nodejs";
 
@@ -16,23 +17,45 @@ function isAllowedPexelsUrl(urlStr: string): boolean {
   }
 }
 
+function isValidHeroSlideId(id: string): boolean {
+  return /^[a-zA-Z0-9_-]{1,128}$/.test(id);
+}
+
 /**
  * Downloads a Pexels image (validated host), uploads to Firebase Storage, returns a Firebase
- * download URL (never the Pexels URL) for storing on MenuItems.
+ * download URL (never the Pexels URL) for storing on MenuItems or online-ordering hero slides.
  *
- * POST body: { itemId: string, sourceUrl: string }
+ * POST body: { itemId: string, sourceUrl: string } | { heroSlideId: string, sourceUrl: string }
  */
 export async function POST(req: Request) {
   try {
     await verifyIdToken(req.headers.get("authorization"));
     getFirebaseAdminApp();
 
-    const body = (await req.json()) as { itemId?: string; sourceUrl?: string };
+    const body = (await req.json()) as {
+      itemId?: string;
+      heroSlideId?: string;
+      sourceUrl?: string;
+    };
     const itemId = typeof body.itemId === "string" ? body.itemId.trim() : "";
+    const heroSlideId =
+      typeof body.heroSlideId === "string" ? body.heroSlideId.trim() : "";
     const sourceUrl = typeof body.sourceUrl === "string" ? body.sourceUrl.trim() : "";
-    if (!itemId || !sourceUrl || !isAllowedPexelsUrl(sourceUrl)) {
+
+    const heroMode = Boolean(heroSlideId);
+    if (!sourceUrl || !isAllowedPexelsUrl(sourceUrl)) {
       return NextResponse.json(
-        { error: "Invalid itemId or sourceUrl (must be a https://images.pexels.com/… URL)." },
+        { error: "Invalid sourceUrl (must be a https://images.pexels.com/… URL)." },
+        { status: 400 }
+      );
+    }
+    if (heroMode) {
+      if (!isValidHeroSlideId(heroSlideId)) {
+        return NextResponse.json({ error: "Invalid heroSlideId." }, { status: 400 });
+      }
+    } else if (!itemId) {
+      return NextResponse.json(
+        { error: "Provide itemId for menu images, or heroSlideId for storefront banner." },
         { status: 400 }
       );
     }
@@ -63,7 +86,9 @@ export async function POST(req: Request) {
     }
 
     const ext = contentType.includes("png") ? "png" : "jpg";
-    const storagePath = `menuItems/${itemId}_${Date.now()}.${ext}`;
+    const storagePath = heroMode
+      ? `${HERO_STORAGE_PREFIX}/${heroSlideId}.${ext}`
+      : `menuItems/${itemId}_${Date.now()}.${ext}`;
     const bucket = getStorage().bucket(bucketName);
     const file = bucket.file(storagePath);
     const token = randomUUID();

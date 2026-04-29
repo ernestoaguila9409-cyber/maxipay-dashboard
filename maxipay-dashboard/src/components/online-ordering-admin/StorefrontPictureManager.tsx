@@ -8,7 +8,6 @@ import {
   doc,
   onSnapshot,
   serverTimestamp,
-  setDoc,
   writeBatch,
 } from "firebase/firestore";
 import {
@@ -18,6 +17,9 @@ import {
   uploadBytes,
 } from "firebase/storage";
 import { AlertTriangle, ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { AutoImageSearchButton } from "@/components/menu-item-image/AutoImageSearchButton";
+import { ImageSearchModal } from "@/components/menu-item-image/ImageSearchModal";
+import { useAuth } from "@/context/AuthContext";
 import { db, storage } from "@/firebase/firebaseConfig";
 import { resizeImageToBlob } from "@/lib/imageUpload";
 import {
@@ -36,13 +38,21 @@ function newSlideId(): string {
  * Single storefront banner image. Persists as the first `OnlineHeroSlides` doc (order 0).
  * Replacing the image removes any extra slides so the public page shows one picture only.
  */
-export default function StorefrontPictureManager() {
+export default function StorefrontPictureManager({ businessName }: { businessName: string }) {
+  const { user } = useAuth();
   const [slides, setSlides] = useState<HeroSlide[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [imageSearchOpen, setImageSearchOpen] = useState(false);
+  const [heroSearchSlideId, setHeroSearchSlideId] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const getIdToken = useCallback(() => {
+    if (!user) throw new Error("Not signed in");
+    return user.getIdToken();
+  }, [user]);
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -75,6 +85,42 @@ export default function StorefrontPictureManager() {
       /* may already be gone */
     }
   }, []);
+
+  const syncHeroPrimaryFromRemote = useCallback(
+    async (targetId: string, imageUrl: string, storagePath: string) => {
+      const batch = writeBatch(db);
+      batch.set(
+        doc(db, HERO_SLIDES_COLLECTION, targetId),
+        {
+          imageUrl,
+          storagePath,
+          title: "",
+          subtitle: "",
+          ctaLabel: DEFAULT_HERO_CTA,
+          actionType: "NONE",
+          actionValue: "",
+          order: 0,
+          updatedAt: serverTimestamp(),
+          ...(slides.some((s) => s.id === targetId) ? {} : { createdAt: serverTimestamp() }),
+        },
+        { merge: true }
+      );
+
+      for (const s of slides) {
+        if (s.id !== targetId) {
+          batch.delete(doc(db, HERO_SLIDES_COLLECTION, s.id));
+        }
+      }
+      await batch.commit();
+
+      for (const s of slides) {
+        if (s.id !== targetId && s.storagePath && s.storagePath !== storagePath) {
+          await deleteSlideStorage(s);
+        }
+      }
+    },
+    [deleteSlideStorage, slides]
+  );
 
   const removePicture = useCallback(async () => {
     if (!primary) return;
@@ -117,38 +163,7 @@ export default function StorefrontPictureManager() {
         const sref = storageRef(storage, path);
         await uploadBytes(sref, blob, { contentType: "image/jpeg" });
         const url = await getDownloadURL(sref);
-
-        const batch = writeBatch(db);
-        batch.set(
-          doc(db, HERO_SLIDES_COLLECTION, targetId),
-          {
-            imageUrl: url,
-            storagePath: path,
-            title: "",
-            subtitle: "",
-            ctaLabel: DEFAULT_HERO_CTA,
-            actionType: "NONE",
-            actionValue: "",
-            order: 0,
-            updatedAt: serverTimestamp(),
-            ...(primary ? {} : { createdAt: serverTimestamp() }),
-          },
-          { merge: true }
-        );
-
-        for (const s of slides) {
-          if (s.id !== targetId) {
-            batch.delete(doc(db, HERO_SLIDES_COLLECTION, s.id));
-          }
-        }
-        await batch.commit();
-
-        // Delete old storage objects for removed slides (new file overwrote target path if same id).
-        for (const s of slides) {
-          if (s.id !== targetId && s.storagePath && s.storagePath !== path) {
-            await deleteSlideStorage(s);
-          }
-        }
+        await syncHeroPrimaryFromRemote(targetId, url, path);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Upload failed";
         setError(msg);
@@ -156,7 +171,7 @@ export default function StorefrontPictureManager() {
         setUploading(false);
       }
     },
-    [deleteSlideStorage, extraCount, primary, slides]
+    [extraCount, primary, slides, syncHeroPrimaryFromRemote]
   );
 
   const onFilePicked = useCallback(
@@ -167,6 +182,11 @@ export default function StorefrontPictureManager() {
     },
     [handleFile]
   );
+
+  const openImageSearch = useCallback(() => {
+    setHeroSearchSlideId(primary?.id ?? newSlideId());
+    setImageSearchOpen(true);
+  }, [primary]);
 
   const keepFirstOnly = useCallback(async () => {
     if (slides.length <= 1) return;
@@ -203,6 +223,8 @@ export default function StorefrontPictureManager() {
         <h2 className="text-lg font-semibold text-slate-900">Store Front picture</h2>
         <p className="text-sm text-slate-500 mt-0.5 max-w-xl">
           One banner image at the top of your public ordering page (above categories and menu).
+          Auto find uses the same AI + Pexels flow as menu item images, tuned for wide banner
+          photos.
         </p>
       </div>
 
@@ -283,6 +305,10 @@ export default function StorefrontPictureManager() {
             >
               {primary?.imageUrl ? "Replace picture" : "Upload picture"}
             </button>
+            <AutoImageSearchButton
+              onClick={() => openImageSearch()}
+              disabled={uploading || busy || !user}
+            />
             {primary?.imageUrl ? (
               <button
                 type="button"
@@ -297,6 +323,39 @@ export default function StorefrontPictureManager() {
           </div>
         </div>
       )}
+
+      <ImageSearchModal
+        mode="storefront"
+        open={imageSearchOpen}
+        onClose={() => setImageSearchOpen(false)}
+        businessName={businessName.trim() || "Restaurant"}
+        heroSlideId={heroSearchSlideId}
+        getIdToken={getIdToken}
+        onCommitted={async (url, storagePath) => {
+          if (!storagePath || !heroSearchSlideId) {
+            setError("Could not save image (missing storage path). Try again.");
+            return false;
+          }
+          const willRemoveExtras = slides.length > 1;
+          if (
+            willRemoveExtras &&
+            !confirm(
+              `You have ${slides.length} banner images. Only one storefront picture is kept. Remove the other ${extraCount}?`
+            )
+          ) {
+            return false;
+          }
+          setError(null);
+          try {
+            await syncHeroPrimaryFromRemote(heroSearchSlideId, url, storagePath);
+            return true;
+          } catch (e) {
+            console.error("[storefront-picture] pexels commit", e);
+            setError("Could not save the storefront image. Try again.");
+            return false;
+          }
+        }}
+      />
     </div>
   );
 }
