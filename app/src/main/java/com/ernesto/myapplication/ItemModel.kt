@@ -34,6 +34,8 @@ data class ItemModel(
     val subcategoryId: String = "",
     /** Single kitchen routing label; must match a label on a kitchen printer. */
     val printerLabel: String? = null,
+    /** Firebase Storage / HTTPS URL from dashboard item image. */
+    val imageUrl: String? = null,
 ) {
     fun getPrice(channel: String): Double = when (channel) {
         "pos" -> pricing?.pos ?: price

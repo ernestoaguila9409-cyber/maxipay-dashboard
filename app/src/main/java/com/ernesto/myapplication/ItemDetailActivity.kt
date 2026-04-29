@@ -9,11 +9,13 @@ import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import coil.load
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -42,6 +44,10 @@ class ItemDetailActivity : AppCompatActivity() {
     private lateinit var cardItemStock: MaterialCardView
     private lateinit var txtItemDetailStock: TextView
     private lateinit var txtItemDetailStockStatus: TextView
+    private lateinit var itemDetailPhotoPreviewHost: View
+    private lateinit var imgItemDetailPhoto: ImageView
+    private lateinit var btnFindPexelsImage: MaterialButton
+    private lateinit var btnRemoveItemImage: MaterialButton
 
     private var stockCountingEnabled = true
     private var itemLoadComplete = false
@@ -49,6 +55,7 @@ class ItemDetailActivity : AppCompatActivity() {
 
     private var itemId = ""
     private var itemName = ""
+    private var itemImageUrl: String? = null
     private var itemPrice = 0.0
     private var itemPrices: Map<String, Double> = emptyMap()
     private var itemCategoryId = ""
@@ -91,6 +98,11 @@ class ItemDetailActivity : AppCompatActivity() {
         cardItemStock = findViewById(R.id.cardItemStock)
         txtItemDetailStock = findViewById(R.id.txtItemDetailStock)
         txtItemDetailStockStatus = findViewById(R.id.txtItemDetailStockStatus)
+        itemDetailPhotoPreviewHost = findViewById(R.id.itemDetailPhotoPreviewHost)
+        imgItemDetailPhoto = findViewById(R.id.imgItemDetailPhoto)
+        btnFindPexelsImage = findViewById(R.id.btnFindPexelsImage)
+        btnRemoveItemImage = findViewById(R.id.btnRemoveItemImage)
+        btnFindPexelsImage.isEnabled = false
 
         findViewById<View>(R.id.btnEditItemName).setOnClickListener { showEditNameDialog() }
         txtPrice.setOnClickListener { showEditPriceDialog() }
@@ -101,6 +113,9 @@ class ItemDetailActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.btnDeleteItem).setOnClickListener { confirmDelete() }
         findViewById<MaterialButton>(R.id.btnEditStock).setOnClickListener { showEditStockDialog() }
         txtItemDetailStock.setOnClickListener { showEditStockDialog() }
+
+        btnFindPexelsImage.setOnClickListener { openPexelsImagePicker() }
+        btnRemoveItemImage.setOnClickListener { confirmRemoveItemImage() }
 
         loadStockSetting()
         loadItem()
@@ -218,6 +233,7 @@ class ItemDetailActivity : AppCompatActivity() {
                 applyStockSectionVisibility()
 
                 itemName = doc.getString("name").orEmpty()
+                itemImageUrl = doc.getString("imageUrl")?.trim()?.takeIf { it.isNotEmpty() }
                 itemPrice = doc.getDouble("price") ?: 0.0
                 @Suppress("UNCHECKED_CAST")
                 itemPrices = (doc.get("prices") as? Map<String, Double>) ?: emptyMap()
@@ -245,6 +261,8 @@ class ItemDetailActivity : AppCompatActivity() {
                 }
 
                 bindHeader()
+                bindImageSection()
+                btnFindPexelsImage.isEnabled = true
                 loadCategoryAndSubcategoryMeta()
                 loadAssignedTaxes()
                 loadAssignedModifiers()
@@ -261,6 +279,62 @@ class ItemDetailActivity : AppCompatActivity() {
         txtName.text = itemName
         val displayPrice = itemPrices.values.firstOrNull() ?: itemPrice
         txtPrice.text = String.format("$%.2f", displayPrice)
+    }
+
+    private fun bindImageSection() {
+        val url = itemImageUrl?.trim()?.takeIf { it.isNotEmpty() }
+        if (url != null) {
+            itemDetailPhotoPreviewHost.visibility = View.VISIBLE
+            imgItemDetailPhoto.load(url) { crossfade(true) }
+            btnRemoveItemImage.visibility = View.VISIBLE
+        } else {
+            itemDetailPhotoPreviewHost.visibility = View.GONE
+            imgItemDetailPhoto.setImageDrawable(null)
+            btnRemoveItemImage.visibility = View.GONE
+        }
+    }
+
+    private fun openPexelsImagePicker() {
+        if (itemId.isEmpty() || itemName.isBlank()) {
+            Toast.makeText(this, R.string.item_detail_load_failed, Toast.LENGTH_SHORT).show()
+            return
+        }
+        MenuItemPexelsImageSearchDialog(
+            this,
+            itemId,
+            itemName,
+        ) { firebaseUrl ->
+            db.collection("MenuItems").document(itemId)
+                .update("imageUrl", firebaseUrl)
+                .addOnSuccessListener {
+                    itemImageUrl = firebaseUrl
+                    bindImageSection()
+                    Toast.makeText(this, R.string.item_detail_saved, Toast.LENGTH_SHORT).show()
+                }
+                .addOnFailureListener { e ->
+                    Toast.makeText(this, e.message ?: getString(R.string.item_detail_pexels_failed), Toast.LENGTH_LONG).show()
+                }
+        }.show()
+    }
+
+    private fun confirmRemoveItemImage() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.item_detail_remove_image)
+            .setMessage(R.string.item_detail_remove_image_confirm)
+            .setPositiveButton(R.string.item_detail_remove_image_action) { _, _ ->
+                db.collection("MenuItems").document(itemId)
+                    .update(mapOf("imageUrl" to FieldValue.delete()))
+                    .addOnSuccessListener {
+                        itemImageUrl = null
+                        bindImageSection()
+                        Toast.makeText(this, R.string.item_detail_saved, Toast.LENGTH_SHORT).show()
+                    }
+                    .addOnFailureListener { e ->
+                        Toast.makeText(this, e.message ?: getString(R.string.item_detail_pexels_failed), Toast.LENGTH_LONG).show()
+                    }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     /**

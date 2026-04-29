@@ -23,6 +23,7 @@ class PaymentEngine(private val db: FirebaseFirestore) {
         batchNumber: String = "",
         transactionNumber: String = "",
         invoiceNumber: String = "",
+        pnReferenceId: String = "",
 
         cashTenderedInCents: Long = 0L,
         cashChangeInCents: Long = 0L,
@@ -68,7 +69,8 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                 "clientReferenceId" to clientReferenceId,
                 "batchNumber" to batchNumber,
                 "transactionNumber" to transactionNumber,
-                "invoiceNumber" to invoiceNumber
+                "invoiceNumber" to invoiceNumber,
+                "pnReferenceId" to pnReferenceId,
             )
 
             if (cashTenderedInCents > 0L) {

@@ -3,6 +3,7 @@ package com.ernesto.myapplication
 import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -16,7 +17,6 @@ import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import java.util.Locale
-import java.util.concurrent.Executors
 
 /**
  * POS dashboard host. **Back key:** pops [androidx.fragment.app.FragmentManager] when
@@ -44,6 +44,15 @@ class MainActivity : AppCompatActivity() {
     private var openOrdersListener: ListenerRegistration? = null
     private var dashboardConfigListener: ListenerRegistration? = null
     private var uberOrdersListener: ListenerRegistration? = null
+    private var currentSalesListener: ListenerRegistration? = null
+    /** Latest modules from Firestore [Settings/dashboard] before ONLINE visibility merge. */
+    private var lastRawDashboardModules: List<DashboardModule>? = null
+
+    private val onlineOrderingOpenStateListener: () -> Unit = {
+        if (!isDestroyed) {
+            applyMergedDashboardFromCache()
+        }
+    }
     private val knownUberOrderIds = mutableSetOf<String>()
     private var uberAlertDialog: AlertDialog? = null
     private var currentBatchId: String = ""
@@ -82,6 +91,8 @@ class MainActivity : AppCompatActivity() {
         txtTodayCount = findViewById(R.id.txtTodayCount)
 
         setupDashboardGrid()
+        OnlineOrderingDashboardSync.start(db)
+        OnlineOrderingDashboardSync.addListener(onlineOrderingOpenStateListener)
         listenForOpenOrders()
         listenForUberOrders()
         ensureOpenBatch()
@@ -100,7 +111,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
-        loadCurrentSales()
+        attachCurrentSalesListener()
         // Register last so this callback runs before any library-added default back behavior.
         registerDashboardBackHandling()
     }
@@ -162,36 +173,38 @@ class MainActivity : AppCompatActivity() {
             db,
             onUpdate = { modules ->
                 if (!isDestroyed) {
-                    dashboardAdapter.setModules(
-                        DashboardModule.mergeTipDashboardTile(
-                            this,
-                            DashboardModule.mergeReservationDashboardTile(
-                                DashboardModule.mergeOnlineOrdersDashboardTile(
-                                    DashboardModule.mergePrintersDashboardTile(modules)
-                                )
-                            ),
-                        )
-                    )
-                    updatePageIndicator(dashboardPager.currentItem)
-                    applyOrderTypeVisibility()
+                    setDashboardModulesRaw(modules)
                 }
             },
             onCacheThenServer = { serverModules ->
                 if (!isDestroyed && serverModules.isNotEmpty()) {
-                    dashboardAdapter.setModules(
-                        DashboardModule.mergeTipDashboardTile(
-                            this,
-                            DashboardModule.mergeReservationDashboardTile(
-                                DashboardModule.mergeOnlineOrdersDashboardTile(
-                                    DashboardModule.mergePrintersDashboardTile(serverModules)
-                                )
-                            ),
-                        )
-                    )
-                    updatePageIndicator(dashboardPager.currentItem)
+                    setDashboardModulesRaw(serverModules)
                 }
             }
         )
+    }
+
+    private fun setDashboardModulesRaw(modules: List<DashboardModule>) {
+        lastRawDashboardModules = modules
+        applyMergedDashboardFromCache()
+    }
+
+    private fun applyMergedDashboardFromCache() {
+        val raw = lastRawDashboardModules ?: return
+        val showOnline = OnlineOrderingDashboardSync.shouldShowOnlineOrdersTile()
+        dashboardAdapter.setModules(
+            DashboardModule.mergeTipDashboardTile(
+                this,
+                DashboardModule.mergeReservationDashboardTile(
+                    DashboardModule.mergeOnlineOrdersDashboardTile(
+                        DashboardModule.mergePrintersDashboardTile(raw),
+                        showOnlineOrdersTile = showOnline,
+                    ),
+                ),
+            ),
+        )
+        updatePageIndicator(dashboardPager.currentItem)
+        applyOrderTypeVisibility()
     }
 
     private fun updatePageIndicator(selectedPage: Int) {
@@ -282,7 +295,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         CustomerDisplayManager.attach(this)
-        loadCurrentSales()
+        attachCurrentSalesListener()
         applyOrderTypeVisibility()
         refreshDashboardFromServer()
     }
@@ -290,17 +303,7 @@ class MainActivity : AppCompatActivity() {
     private fun refreshDashboardFromServer() {
         DashboardConfigManager.loadFromServer(db) { modules ->
             if (!isDestroyed && modules.isNotEmpty()) {
-                dashboardAdapter.setModules(
-                    DashboardModule.mergeTipDashboardTile(
-                        this,
-                        DashboardModule.mergeReservationDashboardTile(
-                            DashboardModule.mergeOnlineOrdersDashboardTile(
-                                DashboardModule.mergePrintersDashboardTile(modules)
-                            )
-                        ),
-                    )
-                )
-                updatePageIndicator(dashboardPager.currentItem)
+                setDashboardModulesRaw(modules)
             }
         }
     }
@@ -337,9 +340,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        OnlineOrderingDashboardSync.removeListener(onlineOrderingOpenStateListener)
+        OnlineOrderingDashboardSync.stop()
         openOrdersListener?.remove()
         dashboardConfigListener?.remove()
         uberOrdersListener?.remove()
+        currentSalesListener?.remove()
         uberAlertDialog?.dismiss()
     }
 
@@ -434,66 +440,19 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun loadCurrentSales() {
-        db.collection("Transactions")
+    private fun attachCurrentSalesListener() {
+        currentSalesListener?.remove()
+        currentSalesListener = db.collection("Transactions")
             .whereEqualTo("settled", false)
-            .get()
-            .addOnSuccessListener { documents ->
-                Executors.newSingleThreadExecutor().execute {
-                    var total = 0.0
-                    var count = 0
-
-                    for (doc in documents) {
-                        val voided = doc.getBoolean("voided") ?: false
-                        if (voided) continue
-
-                        val type = doc.getString("type") ?: "SALE"
-                        if (type == "PRE_AUTH") continue
-
-                        if (type == "SALE" || type == "CAPTURE") {
-                            // Prefer totalPaidInCents — includes tips after Tip Adjustment / Order Detail flows;
-                            // payment line amounts are not updated when tips are added.
-                            val totalPaidInCentsField = doc.getLong("totalPaidInCents")
-                            if (totalPaidInCentsField != null) {
-                                total += totalPaidInCentsField / 100.0
-                            } else {
-                                val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
-                                var totalCents = 0L
-
-                                for (p in payments) {
-                                    val map = p as? Map<*, *> ?: continue
-                                    val status = (map["status"] as? String) ?: ""
-                                    if (status.equals("VOIDED", ignoreCase = true)) continue
-                                    val amountInCents = (map["amountInCents"] as? Number)?.toLong() ?: 0L
-                                    totalCents += amountInCents
-                                }
-
-                                if (totalCents > 0L) {
-                                    total += totalCents / 100.0
-                                } else {
-                                    val amount = doc.getDouble("amount")
-                                        ?: doc.getDouble("totalPaid")
-                                        ?: 0.0
-                                    total += amount
-                                }
-                            }
-                        } else if (type == "REFUND") {
-                            val amount = doc.getDouble("amount") ?: 0.0
-                            total -= amount
-                        }
-
-                        count++
-                    }
-
-                    val finalTotal = if (total < 0.005) 0.0 else total
-                    val finalCount = count
-                    runOnUiThread {
-                        if (!isDestroyed) {
-                            txtTodayTotal.text = String.format(Locale.US, "$%.2f", finalTotal)
-                            txtTodayCount.text = "$finalCount transactions"
-                        }
-                    }
+            .addSnapshotListener { snapshots, error ->
+                if (error != null) {
+                    Log.e("MainActivity", "Current sales query failed", error)
+                    return@addSnapshotListener
                 }
+                if (snapshots == null || isDestroyed) return@addSnapshotListener
+                val (finalTotal, finalCount) = UnsettledSalesSummary.compute(snapshots)
+                txtTodayTotal.text = String.format(Locale.US, "$%.2f", finalTotal)
+                txtTodayCount.text = "$finalCount transactions"
             }
     }
 }

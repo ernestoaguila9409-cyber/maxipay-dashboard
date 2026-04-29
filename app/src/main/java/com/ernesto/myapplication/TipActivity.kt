@@ -17,7 +17,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.ernesto.myapplication.engine.MoneyUtils
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Source
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.Date
@@ -59,25 +61,31 @@ class TipActivity : AppCompatActivity() {
     private fun loadOrderAndShowTips() {
         val oid = orderId ?: return
 
-        db.collection("Orders").document(oid).get()
-            .addOnSuccessListener { doc ->
-                totalCents = doc.getLong("totalInCents") ?: 0L
+        fun applyDoc(doc: DocumentSnapshot) {
+            totalCents = (doc.get("totalInCents") as? Number)?.toLong() ?: 0L
 
-                @Suppress("UNCHECKED_CAST")
-                val taxBreakdown = doc.get("taxBreakdown") as? List<Map<String, Any>>
-                taxCents = 0L
-                taxBreakdown?.forEach { tax ->
-                    taxCents += (tax["amountInCents"] as? Long)
-                        ?: (tax["amountInCents"] as? Number)?.toLong() ?: 0L
-                }
-                subtotalCents = totalCents - taxCents
-
-                setupUI()
+            @Suppress("UNCHECKED_CAST")
+            val taxBreakdown = doc.get("taxBreakdown") as? List<Map<String, Any>>
+            taxCents = 0L
+            taxBreakdown?.forEach { tax ->
+                taxCents += (tax["amountInCents"] as? Long)
+                    ?: (tax["amountInCents"] as? Number)?.toLong() ?: 0L
             }
+            subtotalCents = totalCents - taxCents
+
+            setupUI()
+        }
+
+        db.collection("Orders").document(oid).get(Source.SERVER)
+            .addOnSuccessListener { doc -> applyDoc(doc) }
             .addOnFailureListener {
-                Toast.makeText(this, "Failed to load order", Toast.LENGTH_SHORT).show()
-                setResult(RESULT_CANCELED)
-                finish()
+                db.collection("Orders").document(oid).get()
+                    .addOnSuccessListener { doc -> applyDoc(doc) }
+                    .addOnFailureListener {
+                        Toast.makeText(this, "Failed to load order", Toast.LENGTH_SHORT).show()
+                        setResult(RESULT_CANCELED)
+                        finish()
+                    }
             }
     }
 
@@ -197,25 +205,30 @@ class TipActivity : AppCompatActivity() {
 
         val newTotalCents = totalCents + tipCents
 
-        db.collection("Orders").document(oid)
-            .get()
-            .addOnSuccessListener { doc ->
-                val totalPaidInCents = doc.getLong("totalPaidInCents") ?: 0L
-                val newRemainingCents = (newTotalCents - totalPaidInCents).coerceAtLeast(0L)
+        fun commitFromDoc(doc: DocumentSnapshot) {
+            val totalPaidInCents = (doc.get("totalPaidInCents") as? Number)?.toLong() ?: 0L
+            val newRemainingCents = (newTotalCents - totalPaidInCents).coerceAtLeast(0L)
 
-                db.collection("Orders").document(oid)
-                    .update(
-                        mapOf(
-                            "tipAmountInCents" to tipCents,
-                            "totalInCents" to newTotalCents,
-                            "remainingInCents" to newRemainingCents,
-                            "updatedAt" to Date()
-                        )
+            db.collection("Orders").document(oid)
+                .update(
+                    mapOf(
+                        "tipAmountInCents" to tipCents,
+                        "totalInCents" to newTotalCents,
+                        "remainingInCents" to newRemainingCents,
+                        "updatedAt" to Date()
                     )
-                    .addOnSuccessListener { navigateToPayment() }
-                    .addOnFailureListener { e ->
-                        Toast.makeText(this, "Failed to save tip: ${e.message}", Toast.LENGTH_SHORT).show()
-                    }
+                )
+                .addOnSuccessListener { navigateToPayment() }
+                .addOnFailureListener { e ->
+                    Toast.makeText(this, "Failed to save tip: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+        }
+
+        db.collection("Orders").document(oid).get(Source.SERVER)
+            .addOnSuccessListener { doc -> commitFromDoc(doc) }
+            .addOnFailureListener {
+                db.collection("Orders").document(oid).get()
+                    .addOnSuccessListener { doc -> commitFromDoc(doc) }
             }
     }
 
@@ -244,7 +257,8 @@ class TipActivity : AppCompatActivity() {
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        super.onBackPressed()
+        // Skip tip and continue to payment; do not finish() here (that would return to the menu
+        // and could race with starting payment).
         applyTip(0L)
     }
 }

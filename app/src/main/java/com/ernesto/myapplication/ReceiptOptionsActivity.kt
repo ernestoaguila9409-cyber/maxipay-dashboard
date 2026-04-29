@@ -411,34 +411,15 @@ class ReceiptOptionsActivity : AppCompatActivity() {
             )
         )
 
-        // ── Payment Info ──
-        for (p in payments) {
-            val pType = p["paymentType"]?.toString() ?: ""
-            if (pType.equals("Cash", ignoreCase = true)) {
-                footer("Paid with Cash")
-            } else {
-                val brand = p["cardBrand"]?.toString() ?: ""
-                val last4 = p["last4"]?.toString() ?: ""
-                val authCode = p["authCode"]?.toString() ?: ""
-                if (brand.isNotBlank() || last4.isNotBlank()) {
-                    val cardLine = buildString {
-                        if (brand.isNotBlank()) append(brand)
-                        if (last4.isNotBlank()) {
-                            if (isNotEmpty()) append(" ")
-                            append("**** $last4")
-                        }
-                    }
-                    footer(cardLine)
-                }
-                if (authCode.isNotBlank()) {
-                    footer("Auth: $authCode")
-                }
-                if (pType.isNotBlank()) {
-                    footer("Type: $pType")
-                }
-                receiptLabelForCardEntryType(p["entryType"]?.toString())?.let { method ->
-                    footer("Payment method: $method")
-                }
+        // ── Payments (split / mixed) ──
+        val paymentLines = ReceiptPaymentFormatting.buildPaymentsSectionLines(
+            totalInCents = totalInCents,
+            payments = payments,
+            width = lwt,
+        )
+        if (paymentLines.isNotEmpty()) {
+            for (line in paymentLines) {
+                total(line)
             }
             segs += EscPosPrinter.Segment("")
         }

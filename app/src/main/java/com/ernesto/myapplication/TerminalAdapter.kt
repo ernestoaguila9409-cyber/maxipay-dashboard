@@ -5,6 +5,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import com.ernesto.myapplication.payments.PaymentTerminalConfig
 import java.util.concurrent.TimeUnit
 
 data class Terminal(
@@ -15,7 +16,9 @@ data class Terminal(
     val registerId: String = "",
     val authKey: String = "",
     var status: String = "OFFLINE",
-    var lastSeen: Long? = null
+    var lastSeen: Long? = null,
+    /** Per-row config for SPIn Status health checks (same as web `payment_terminals`). */
+    val paymentConfig: PaymentTerminalConfig? = null,
 )
 
 class TerminalAdapter(

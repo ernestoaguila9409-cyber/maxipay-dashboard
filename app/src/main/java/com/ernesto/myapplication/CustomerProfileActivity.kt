@@ -524,6 +524,7 @@ class OrderHistoryAdapter(
                 "DINE_IN" -> "DINE IN"
                 "TO_GO" -> "TO GO"
                 "BAR_TAB", "BAR" -> "BAR TAB"
+                "ONLINE_PICKUP" -> "Online Order"
                 else -> item.orderType
             }
             txtOrderType.text = typeLabel

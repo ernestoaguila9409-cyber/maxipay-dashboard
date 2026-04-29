@@ -7,8 +7,16 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.ernesto.myapplication.payments.SpinDefaults
 
+/**
+ * Add / edit a payment terminal. Reads and writes the same `payment_terminals`
+ * collection and document shape as the maxipay web dashboard (Payments page).
+ * Legacy [Terminals] is no longer used here — import legacy data from the
+ * dashboard if needed.
+ */
 class PaymentTerminalActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
@@ -20,6 +28,8 @@ class PaymentTerminalActivity : AppCompatActivity() {
     private lateinit var btnDelete: MaterialButton
 
     private var terminalId: String? = null
+    private var existingDeviceModel: String = ""
+    private var existingActive: Boolean = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,14 +59,24 @@ class PaymentTerminalActivity : AppCompatActivity() {
     }
 
     private fun loadTerminal(id: String) {
-        db.collection("Terminals").document(id).get()
+        db.collection("payment_terminals").document(id).get()
             .addOnSuccessListener { doc ->
-                if (!doc.exists()) return@addOnSuccessListener
+                if (!doc.exists()) {
+                    Toast.makeText(this, "Terminal not found (sync with web dashboard: payment_terminals)", Toast.LENGTH_LONG).show()
+                    return@addOnSuccessListener
+                }
+                @Suppress("UNCHECKED_CAST")
+                val config = (doc.get("config") as? Map<*, *>)?.mapValues { (_, v) -> v?.toString().orEmpty() }.orEmpty()
                 edtName.setText(doc.getString("name") ?: "")
-                edtTpn.setText(doc.getString("tpn") ?: "")
-                edtIpAddress.setText(doc.getString("ipAddress") ?: "")
-                edtRegisterId.setText(doc.getString("registerId") ?: "")
-                edtAuthKey.setText(doc.getString("authKey") ?: "")
+                edtTpn.setText(config["tpn"] ?: doc.getString("tpn") ?: "")
+                edtRegisterId.setText(config["registerId"] ?: doc.getString("registerId") ?: "")
+                edtAuthKey.setText(config["authKey"] ?: doc.getString("authKey") ?: "")
+                edtIpAddress.setText(config["ipAddress"] ?: doc.getString("ipAddress") ?: "")
+                existingDeviceModel = doc.getString("deviceModel")?.trim() ?: ""
+                existingActive = doc.getBoolean("active") ?: true
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to load: ${it.message}", Toast.LENGTH_LONG).show()
             }
     }
 
@@ -71,40 +91,66 @@ class PaymentTerminalActivity : AppCompatActivity() {
             Toast.makeText(this, "Terminal name is required", Toast.LENGTH_SHORT).show()
             return
         }
-        if (tpn.isBlank() || authKey.isBlank()) {
-            Toast.makeText(this, "TPN and Auth Key are required", Toast.LENGTH_SHORT).show()
+        if (tpn.isBlank() || registerId.isBlank() || authKey.isBlank()) {
+            Toast.makeText(this, "TPN, Register ID, and Auth Key are required", Toast.LENGTH_SHORT).show()
             return
         }
 
-        val data = mapOf(
-            "name" to name,
+        val config = mutableMapOf(
             "tpn" to tpn,
-            "ipAddress" to ipAddress,
             "registerId" to registerId,
-            "authKey" to authKey
+            "authKey" to authKey,
         )
+        if (ipAddress.isNotBlank()) config["ipAddress"] = ipAddress
 
-        val docRef = if (terminalId != null) {
-            db.collection("Terminals").document(terminalId!!)
+        if (terminalId != null) {
+            val id = terminalId!!
+            val updates: MutableMap<String, Any> = hashMapOf(
+                "name" to name,
+                "config" to config,
+                "deviceModel" to existingDeviceModel,
+                "active" to existingActive,
+                "updatedAt" to FieldValue.serverTimestamp(),
+            )
+            db.collection("payment_terminals").document(id).update(updates)
+                .addOnSuccessListener {
+                    TerminalPrefs.refreshCache()
+                    Toast.makeText(this, "Terminal saved", Toast.LENGTH_SHORT).show()
+                    finish()
+                }
+                .addOnFailureListener {
+                    Toast.makeText(this, "Failed to save: ${it.message}", Toast.LENGTH_LONG).show()
+                }
         } else {
-            db.collection("Terminals").document()
+            val newDoc: MutableMap<String, Any> = hashMapOf(
+                "name" to name,
+                "provider" to "SPIN_Z",
+                "deviceModel" to "",
+                "active" to true,
+                "baseUrl" to SpinDefaults.BASE_URL,
+                "endpoints" to SpinDefaults.ENDPOINTS,
+                "capabilities" to SpinDefaults.CAPABILITIES,
+                "config" to config,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp(),
+            )
+            db.collection("payment_terminals")
+                .add(newDoc)
+                .addOnSuccessListener {
+                    TerminalPrefs.refreshCache()
+                    Toast.makeText(this, "Terminal saved", Toast.LENGTH_SHORT).show()
+                    finish()
+                }
+                .addOnFailureListener {
+                    Toast.makeText(this, "Failed to save: ${it.message}", Toast.LENGTH_LONG).show()
+                }
         }
-
-        docRef.set(data)
-            .addOnSuccessListener {
-                TerminalPrefs.refreshCache()
-                Toast.makeText(this, "Terminal saved", Toast.LENGTH_SHORT).show()
-                finish()
-            }
-            .addOnFailureListener {
-                Toast.makeText(this, "Failed to save: ${it.message}", Toast.LENGTH_LONG).show()
-            }
     }
 
     private fun confirmDelete() {
         AlertDialog.Builder(this)
             .setTitle("Delete Terminal")
-            .setMessage("Are you sure you want to delete this terminal?")
+            .setMessage("Are you sure you want to delete this terminal? This removes it for all devices and the web dashboard.")
             .setPositiveButton("Delete") { _, _ -> deleteTerminal() }
             .setNegativeButton("Cancel", null)
             .show()
@@ -112,7 +158,7 @@ class PaymentTerminalActivity : AppCompatActivity() {
 
     private fun deleteTerminal() {
         val id = terminalId ?: return
-        db.collection("Terminals").document(id).delete()
+        db.collection("payment_terminals").document(id).delete()
             .addOnSuccessListener {
                 TerminalPrefs.refreshCache()
                 Toast.makeText(this, "Terminal deleted", Toast.LENGTH_SHORT).show()

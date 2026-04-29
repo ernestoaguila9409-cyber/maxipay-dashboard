@@ -389,8 +389,12 @@ function totalsHtml({
 function paymentHtml(payments) {
   if (!payments || payments.length === 0) return "";
 
+  const count = Array.isArray(payments) ? payments.length : 0;
   let html =
     '<hr style="border:none;border-top:1px solid #ddd;margin:20px 0 12px 0;">' +
+    (count > 1
+      ? `<div style="font-size:14px;font-weight:800;color:#222;margin-bottom:8px;text-align:center;letter-spacing:0.6px;">MIX PAYMENTS (${count} methods)</div>`
+      : "") +
     '<div style="font-size:13px;font-weight:bold;color:#444;margin-bottom:12px;text-align:center;">Payment information</div>';
 
   payments.forEach((p) => {
@@ -406,7 +410,7 @@ function paymentHtml(payments) {
       const brand = (p.cardBrand || "").trim();
       const last4 = (p.last4 || "").trim();
       const cardLine = last4
-        ? `${escapeHtml(brand || "Card")} •••• ${escapeHtml(last4)}`
+        ? `${escapeHtml(brand || "Card")} **** ${escapeHtml(last4)}`
         : escapeHtml(brand || "Card");
       html += `<div style="${block}">`;
       html += `<div style="font-weight:600;margin-bottom:8px;">${cardLine}</div>`;
@@ -724,6 +728,78 @@ function shouldIncludeTipLineOnPrintedReceipt(tipConfig, tipAmountInCents) {
   return (tipAmountInCents ?? 0) > 0;
 }
 
+function centsToDisplaySigned(cents) {
+  const n = Number(cents) || 0;
+  const abs = Math.abs(n);
+  const base = (abs / 100).toFixed(2);
+  return n < 0 ? `-$${base}` : `$${base}`;
+}
+
+function parseAmountToCents(rawAmount, rawAmountInCents) {
+  if (rawAmountInCents != null && rawAmountInCents !== "") {
+    const n = Number(rawAmountInCents);
+    return Number.isFinite(n) ? Math.round(n) : 0;
+  }
+  const n = Number(rawAmount);
+  return Number.isFinite(n) ? Math.round(n * 100) : 0;
+}
+
+async function fetchOrderReversedTransactions(db, orderId) {
+  const snap = await db.collection("Orders").doc(orderId).collection("transactions").get();
+  if (snap.empty) return [];
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+}
+
+function formatRightAlignedText(left, right, width) {
+  const l = String(left ?? "").trimEnd();
+  const r = String(right ?? "").trimStart();
+  const minGap = 1;
+  const maxLeftLen = Math.max(0, width - r.length - minGap);
+  const clippedLeft = l.length <= maxLeftLen ? l : l.slice(0, maxLeftLen);
+  const spaces = Math.max(minGap, width - clippedLeft.length - r.length);
+  return clippedLeft + " ".repeat(spaces) + r;
+}
+
+function reversedPaymentsHtml(reversedTxns) {
+  if (!Array.isArray(reversedTxns) || reversedTxns.length === 0) return "";
+
+  const width = 42; // matches typical 80mm receipt-ish line length for mono blocks
+  const sep = "-".repeat(width);
+  const count = reversedTxns.length;
+  const header = count > 1
+    ? `Reversed Payments (${count} methods):`
+    : "Reversed Payment:";
+
+  const lines = [];
+  lines.push(sep, "", header, sep);
+
+  let totalRefundedCents = 0;
+
+  reversedTxns.forEach((t, idx) => {
+    const brand = String(t.cardBrand || "Card").trim() || "Card";
+    const last4 = String(t.last4 || "").trim();
+    const entry = String(t.entryMethod || "").trim();
+    const auth = String(t.authCode || "").trim();
+    const cents = -Math.abs(parseAmountToCents(t.amount, t.amountInCents));
+    totalRefundedCents += cents;
+
+    const left = [brand, last4 ? `**** ${last4}` : "", entry ? `(${entry})` : ""].filter(Boolean).join(" ");
+    lines.push(formatRightAlignedText(left, centsToDisplaySigned(cents), width));
+    if (auth) lines.push(`  Auth: ${auth}`);
+    if (idx !== reversedTxns.length - 1) lines.push("");
+  });
+
+  lines.push(sep);
+  lines.push(formatRightAlignedText("Total Refunded:", centsToDisplaySigned(totalRefundedCents), width));
+  lines.push(formatRightAlignedText("Balance:", "$0.00", width));
+
+  // Render as a monospaced block so spacing aligns like the thermal receipt.
+  return (
+    '<hr style="border:none;border-top:1px solid #ddd;margin:20px 0 12px 0;">' +
+    `<pre style="margin:0 auto;max-width:500px;font-family:Menlo,Consolas,Monaco,monospace;font-size:13px;line-height:1.45;color:#222;white-space:pre-wrap;">${escapeHtml(lines.join("\n"))}</pre>`
+  );
+}
+
 function receiptTitleHtml(title) {
   return `<div style="text-align:center;margin:4px 0 14px 0;font-weight:bold;font-size:17px;letter-spacing:0.5px;color:#222;">${escapeHtml(title)}</div>`;
 }
@@ -819,9 +895,10 @@ async function composeVoidReceiptWrappedHtml(db, orderId) {
   const { items, subtotalInCents } = parseItems(itemsSnap);
   const taxInCents = parseTax(taxBreakdown);
   const tipConfig = await fetchTipConfig(db);
+  const reversedTxns = await fetchOrderReversedTransactions(db, orderId);
   const saleTxSnap = await fetchSaleTransactionForOrder(db, orderId, order);
   const txData = saleTxSnap ? saleTxSnap.data() : null;
-  const payments = txData && txData.payments && txData.payments.length > 0
+  const fallbackPayments = txData && txData.payments && txData.payments.length > 0
     ? txData.payments
     : await fetchSalePayments(db, orderId);
 
@@ -857,7 +934,7 @@ async function composeVoidReceiptWrappedHtml(db, orderId) {
       tipAmountInCents,
       omitTipLine: true,
     }) +
-    paymentHtml(payments) +
+    (reversedTxns.length > 0 ? reversedPaymentsHtml(reversedTxns) : paymentHtml(fallbackPayments)) +
     footerHtml('<span style="color:#D32F2F;">This transaction has been voided.</span>');
 
   return wrapEmail(body);
@@ -1619,5 +1696,405 @@ exports.uberEnrichNewOrder = uberTriggers.uberEnrichNewOrder;
 
 const uberCallables = require("./uber-callables");
 exports.uberGetStores = uberCallables.uberGetStores;
+exports.uberActivateIntegration = uberCallables.uberActivateIntegration;
 exports.uberSyncMenu = uberCallables.uberSyncMenu;
+exports.uberUpdateItem = uberCallables.uberUpdateItem;
+exports.uberUpdateModifier = uberCallables.uberUpdateModifier;
+exports.uberSuspendItem = uberCallables.uberSuspendItem;
+exports.uberAdjustOrder = uberCallables.uberAdjustOrder;
+exports.uberReleaseOrder = uberCallables.uberReleaseOrder;
+exports.uberResolveFulfillmentIssue = uberCallables.uberResolveFulfillmentIssue;
+exports.uberRunCertificationTests = uberCallables.uberRunCertificationTests;
 exports.uberGetReports = uberCallables.uberGetReports;
+
+// ---------------------------------------------------------------------------
+// Server-side card refund (no card present) — iPOS Transact API
+// ---------------------------------------------------------------------------
+//
+// SPIn (/Payment/Return) always routes through the physical terminal.
+// For card-not-present refunds we use the iPOS Transact API instead, which
+// processes refunds server-side using the original transaction's RRN
+// (Retrieval Reference Number = pnReferenceId from SPIn sales).
+//
+// Docs: https://docs.ipospays.com/ipos-transact/apidocs
+// Endpoint: POST /api/v1/iposTransact  (or v2/v3)
+// transactionType 3 = Refund
+// ---------------------------------------------------------------------------
+
+const { randomUUID } = require("crypto");
+
+const IPOS_TRANSACT_PROD = "https://payment.ipospays.com/api/v1/iposTransact";
+const IPOS_TRANSACT_SANDBOX = "https://payment.ipospays.tech/api/v1/iposTransact";
+
+/**
+ * Resolves iPOS Transact credentials.
+ *
+ * Priority:
+ *   1. Active `payment_terminals` doc — `config.tpn` + `config.iposTransactAuthToken`
+ *      (P-series terminals store the token alongside SPIn creds)
+ *   2. Fallback auth token: `Settings/onlineOrdering` (iposTransactAuthToken / iposHppAuthToken)
+ *   3. Fallback auth token: env IPOS_HPP_AUTH_TOKEN
+ *   4. Fallback TPN: Settings/onlineOrdering iposHppTpn → env IPOS_HPP_TPN
+ */
+async function resolveIposTransactCredentials(db) {
+  let terminalTpn = "";
+  let authToken = "";
+  let useSandbox = false;
+
+  // 1. Terminal config (TPN + optional iPOS Transact auth token from P-series)
+  const termSnap = await db.collection("payment_terminals").where("active", "==", true).limit(1).get();
+  if (!termSnap.empty) {
+    const cfg = termSnap.docs[0].data().config || {};
+    terminalTpn = String(cfg.tpn || "").trim();
+    authToken = String(cfg.iposTransactAuthToken || "").trim();
+  }
+
+  // 2. Fallback auth token: Settings/onlineOrdering → env
+  if (!authToken) {
+    try {
+      const snap = await db.collection("Settings").doc("onlineOrdering").get();
+      const d = snap.exists ? snap.data() : {};
+      authToken = String(d.iposTransactAuthToken || d.iposHppAuthToken || "").trim();
+      if (d.iposTransactSandbox === true || d.iposHppSandbox === true) useSandbox = true;
+    } catch (e) {
+      logger.warn("[processServerRefund] Firestore credential read", e?.message || e);
+    }
+  }
+  if (!authToken) authToken = (process.env.IPOS_HPP_AUTH_TOKEN || "").trim();
+
+  // 3. Fallback TPN: Settings/onlineOrdering → env
+  if (!terminalTpn) {
+    try {
+      const snap = await db.collection("Settings").doc("onlineOrdering").get();
+      const d = snap.exists ? snap.data() : {};
+      terminalTpn = String(d.iposHppTpn || "").trim();
+    } catch (_) { /* */ }
+    if (!terminalTpn) terminalTpn = (process.env.IPOS_HPP_TPN || "").trim();
+  }
+
+  const baseUrl = (process.env.IPOS_HPP_BASE_URL || "").includes("ipospays.tech") || useSandbox
+    ? IPOS_TRANSACT_SANDBOX
+    : IPOS_TRANSACT_PROD;
+
+  return { tpn: terminalTpn, authToken, baseUrl };
+}
+
+exports.processServerRefund = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    return { success: false, error: "You must be signed in to process a refund." };
+  }
+  const {
+    transactionId,
+    orderId,
+    amountInCents,
+    refundedLineKey,
+    refundedItemName,
+  } = request.data || {};
+
+  if (!transactionId || !orderId) {
+    return { success: false, error: "transactionId and orderId are required." };
+  }
+  if (!Number.isFinite(amountInCents) || amountInCents <= 0) {
+    return { success: false, error: "amountInCents must be a positive integer." };
+  }
+
+  const db = admin.firestore();
+
+  // --- 1. Load + validate the sale transaction ---
+  const txDoc = await db.collection("Transactions").doc(transactionId).get();
+  if (!txDoc.exists) {
+    return { success: false, error: "Transaction not found." };
+  }
+  const tx = txDoc.data();
+  const txType = String(tx.type ?? "");
+  if (!["SALE", "CAPTURE", "PRE_AUTH"].includes(txType)) {
+    return { success: false, error: `Unsupported transaction type: ${txType}` };
+  }
+  if (tx.voided === true) {
+    return { success: false, error: "Transaction is already voided." };
+  }
+  if (tx.ecommerce === true) {
+    return {
+      success: false,
+      error: "Online / hosted card payments cannot be refunded through this endpoint.",
+    };
+  }
+  if (tx.settled !== true) {
+    return {
+      success: false,
+      error: "Sale must be settled before a server-side refund. Use void on the POS for unsettled sales.",
+    };
+  }
+
+  // Find the first card payment leg with a PNReferenceId (= RRN for iPOS Transact)
+  const payments = Array.isArray(tx.payments) ? tx.payments : [];
+  const cardLeg = payments.find(
+    (p) =>
+      !String(p.paymentType ?? "").toLowerCase().includes("cash") &&
+      String(p.pnReferenceId || p.PNReferenceId || "").trim().length > 0
+  );
+  if (!cardLeg) {
+    return {
+      success: false,
+      error:
+        "No processor reference (RRN) found on this sale. A server-side refund requires the RRN from the original sale.",
+    };
+  }
+  const rrn = String(cardLeg.pnReferenceId || cardLeg.PNReferenceId || "").trim();
+
+  // --- 2. Validate against the order ---
+  const orderDoc = await db.collection("Orders").doc(orderId).get();
+  if (!orderDoc.exists) {
+    return { success: false, error: "Order not found." };
+  }
+  const order = orderDoc.data();
+  const orderTotalInCents = Number(order.totalInCents ?? 0);
+  const alreadyRefunded = Number(order.totalRefundedInCents ?? 0);
+  const remainingRefundable = orderTotalInCents - alreadyRefunded;
+  if (remainingRefundable <= 0) {
+    return { success: false, error: "Order is already fully refunded." };
+  }
+  const saleTotalPaidCents = Number(tx.totalPaidInCents ?? 0);
+  const cappedAmount = Math.min(amountInCents, remainingRefundable, saleTotalPaidCents);
+  if (cappedAmount <= 0) {
+    return { success: false, error: "Nothing to refund after capping to order/sale limits." };
+  }
+
+  // --- 3. Resolve iPOS Transact credentials ---
+  const creds = await resolveIposTransactCredentials(db);
+  if (!creds.tpn || !creds.authToken) {
+    return {
+      success: false,
+      error:
+        "iPOS Transact credentials not configured. Set iposHppTpn + iposHppAuthToken in Settings/onlineOrdering, or IPOS_HPP_TPN + IPOS_HPP_AUTH_TOKEN env vars.",
+    };
+  }
+
+  const refReferenceId = `REF${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const originalPaymentType = String(cardLeg.paymentType ?? "Credit");
+
+  const iposPayload = {
+    merchantAuthentication: {
+      merchantId: creds.tpn,
+      transactionReferenceId: refReferenceId,
+    },
+    transactionRequest: {
+      transactionType: 3,
+      rrn: rrn,
+      amount: String(cappedAmount),
+    },
+  };
+
+  logger.info("[processServerRefund] Calling iPOS Transact", {
+    url: creds.baseUrl,
+    transactionId,
+    orderId,
+    amountInCents: cappedAmount,
+    rrn,
+    tpn: creds.tpn,
+  });
+
+  // --- 4. Call iPOS Transact /api/v1/iposTransact ---
+  let iposResponse;
+  let httpStatus;
+  try {
+    const resp = await fetch(creds.baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        token: creds.authToken,
+      },
+      body: JSON.stringify(iposPayload),
+    });
+    httpStatus = resp.status;
+    iposResponse = await resp.json();
+  } catch (err) {
+    logger.error("[processServerRefund] iPOS Transact network error", {
+      error: err.message,
+    });
+    return {
+      success: false,
+      error: `Network error calling iPOS Transact: ${err.message}`,
+    };
+  }
+
+  logger.info("[processServerRefund] iPOS Transact response", {
+    httpStatus,
+    iposResponse: JSON.stringify(iposResponse).slice(0, 2000),
+    transactionId,
+  });
+
+  // iPOS Transact returns { iposTransactResponse: { responseCode, responseMessage, ... } }
+  // or { errors: [...] } for validation failures
+  if (iposResponse.errors) {
+    const errMsg = iposResponse.errors
+      .map((e) => `${e.field}: ${e.message}`)
+      .join("; ");
+    return { success: false, error: errMsg, iposResponse };
+  }
+
+  const txnResp = iposResponse.iposhpresponse
+    || iposResponse.iposTransactResponse
+    || iposResponse.iposHPResponse
+    || iposResponse;
+  const responseCode = Number(txnResp.responseCode ?? -1);
+  const responseMessage = String(txnResp.responseMessage ?? "").trim();
+  const errResponseCode = String(txnResp.errResponseCode ?? "").trim();
+  const errResponseMessage = String(txnResp.errResponseMessage ?? "").trim();
+
+  if (responseCode !== 200) {
+    const rawSnippet = JSON.stringify(iposResponse).slice(0, 500);
+    const detail = [
+      errResponseMessage,
+      responseMessage,
+      errResponseCode ? `errCode=${errResponseCode}` : "",
+      `responseCode=${responseCode}`,
+      `HTTP=${httpStatus}`,
+      `TPN=${creds.tpn}`,
+      `RRN=${rrn}`,
+      `RAW=${rawSnippet}`,
+    ].filter(Boolean).join(" | ");
+    return {
+      success: false,
+      error: detail,
+      iposResponse,
+    };
+  }
+
+  // --- 5. Persist refund in Firestore (mirrors RemoteRefundExecutor) ---
+  const refundDollars = cappedAmount / 100;
+  const refundedByLabel = `Dashboard: ${request.auth.token?.email || request.auth.uid}`;
+  const refundAmountCents = cappedAmount;
+
+  let batchSnap = await db
+    .collection("Batches")
+    .where("closed", "==", false)
+    .limit(1)
+    .get();
+  let openBatchId = batchSnap.empty ? "" : batchSnap.docs[0].id;
+  if (!openBatchId) {
+    const newBatchId = `BATCH_${Date.now()}`;
+    await db.collection("Batches").doc(newBatchId).set({
+      batchId: newBatchId,
+      total: 0,
+      count: 0,
+      closed: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      type: "OPEN",
+      transactionCounter: 0,
+    });
+    openBatchId = newBatchId;
+    logger.info("[processServerRefund] Created open batch for refund", { openBatchId });
+  }
+
+  const refundMap = {
+    referenceId: refReferenceId,
+    originalReferenceId: transactionId,
+    amount: refundDollars,
+    amountInCents: refundAmountCents,
+    type: "REFUND",
+    paymentType: originalPaymentType,
+    cardBrand: String(txnResp.cardType || cardLeg.cardBrand || ""),
+    last4: String(cardLeg.last4 ?? ""),
+    entryType: String(cardLeg.entryType ?? ""),
+    voided: false,
+    settled: false,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    refundedBy: refundedByLabel,
+    batchId: openBatchId,
+    orderId,
+    orderNumber: Number(order.orderNumber ?? 0),
+    serverRefund: true,
+    approvalCode: String(txnResp.responseApprovalCode || ""),
+    gatewayTransactionId: String(txnResp.transactionId || ""),
+    refundRrn: String(txnResp.rrn || ""),
+    hostResponseCode: String(txnResp.hostResponseCode || ""),
+    hostResponseMessage: String(txnResp.hostResponseMessage || ""),
+  };
+  if (refundedLineKey) refundMap.refundedLineKey = refundedLineKey;
+  if (refundedItemName) refundMap.refundedItemName = refundedItemName;
+
+  try {
+    await db.runTransaction(async (firestoreTxn) => {
+      if (openBatchId) {
+        const batchRef = db.collection("Batches").doc(openBatchId);
+        const batchDoc = await firestoreTxn.get(batchRef);
+        const counter = Number(batchDoc.data()?.transactionCounter ?? 0);
+        firestoreTxn.update(batchRef, { transactionCounter: counter + 1 });
+        refundMap.appTransactionNumber = counter + 1;
+      }
+      const refundRef = db.collection("Transactions").doc();
+      firestoreTxn.set(refundRef, refundMap);
+    });
+  } catch (err) {
+    logger.error("[processServerRefund] Firestore write failed", {
+      error: err.message,
+    });
+    return {
+      success: false,
+      error: `Refund approved by processor but failed to save: ${err.message}`,
+    };
+  }
+
+  if (openBatchId) {
+    await db
+      .collection("Batches")
+      .doc(openBatchId)
+      .update({
+        totalRefundsInCents: admin.firestore.FieldValue.increment(refundAmountCents),
+        netTotalInCents: admin.firestore.FieldValue.increment(-refundAmountCents),
+        transactionCount: admin.firestore.FieldValue.increment(1),
+      })
+      .catch((e) =>
+        logger.warn("[processServerRefund] batch counter update", e.message)
+      );
+  }
+
+  const currentRefunded = Number(order.totalRefundedInCents ?? 0);
+  const newTotalRefunded = currentRefunded + refundAmountCents;
+  const orderUpdates = {
+    totalRefundedInCents: newTotalRefunded,
+    refundedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+  if (newTotalRefunded >= orderTotalInCents) {
+    orderUpdates.status = "REFUNDED";
+  }
+  await db
+    .collection("Orders")
+    .doc(orderId)
+    .update(orderUpdates)
+    .catch((e) =>
+      logger.warn("[processServerRefund] order update", e.message)
+    );
+
+  logger.info("[processServerRefund] Refund complete", {
+    transactionId,
+    orderId,
+    refundAmountCents,
+  });
+
+  const approvalCode = String(txnResp.responseApprovalCode || "");
+  const approvalSuffix = approvalCode ? ` Approval: ${approvalCode}` : "";
+  return {
+    success: true,
+    message: `Refund of $${refundDollars.toFixed(2)} approved.${approvalSuffix}`,
+    iposResponse,
+  };
+});
+
+// ---------------------------------------------------------------------------
+// iPOSpays Hosted Payment Page — online ordering payments
+// ---------------------------------------------------------------------------
+
+const iposHpp = require("./ipos-hpp");
+exports.createHppPaymentLink = iposHpp.createHppPaymentLink;
+exports.iposPaymentWebhook = iposHpp.iposPaymentWebhook;
+exports.queryHppPaymentStatus = iposHpp.queryHppPaymentStatus;
+
+// ---------------------------------------------------------------------------
+// Menu item images — Pexels search + Storage commit (Android + dashboard parity)
+// ---------------------------------------------------------------------------
+
+const menuItemImage = require("./menu-item-image");
+exports.menuItemImageSearch = menuItemImage.menuItemImageSearch;
+exports.menuItemImageCommitPexels = menuItemImage.menuItemImageCommitPexels;

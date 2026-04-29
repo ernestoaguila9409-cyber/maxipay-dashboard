@@ -15,6 +15,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.ernesto.myapplication.payments.SpinApiUrls
+import com.ernesto.myapplication.payments.SpinCallTracker
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
 import okhttp3.*
@@ -296,9 +297,11 @@ class BatchManagementActivity : AppCompatActivity() {
             .addHeader("Content-Type", "application/json")
             .build()
 
+        SpinCallTracker.beginCall()
         httpClient.newCall(request).enqueue(object : Callback {
 
             override fun onFailure(call: Call, e: IOException) {
+                SpinCallTracker.endCall()
                 Log.e("SETTLE_ERROR", "Network error: ${e.message}", e)
                 runOnUiThread {
                     setSettlingState(false)
@@ -311,6 +314,7 @@ class BatchManagementActivity : AppCompatActivity() {
             }
 
             override fun onResponse(call: Call, response: Response) {
+                SpinCallTracker.endCall()
 
                 val responseText = response.body?.string() ?: ""
                 Log.d("SETTLE_RESPONSE", responseText)

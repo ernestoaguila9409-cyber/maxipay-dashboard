@@ -48,6 +48,22 @@
         { "fieldPath": "batchId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "Transactions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "voided", "order": "ASCENDING" },
+        { "fieldPath": "voidedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "Orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "voidedAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

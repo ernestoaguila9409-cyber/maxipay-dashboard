@@ -12,6 +12,8 @@ const uberApi = require("./uber-api");
  *   OPEN → DENIED     =>  denyOrder
  *   * → CANCELLED     =>  cancelOrder
  *   ACCEPTED → READY  =>  markOrderReady
+ *   * → ADJUSTED      =>  adjustOrder       (uses order.uberAdjustment payload)
+ *   * → RELEASED      =>  releaseOrder      (uses order.releaseReason / details)
  */
 exports.uberOnOrderStatusChange = onDocumentUpdated(
   "Orders/{orderId}",
@@ -69,6 +71,26 @@ exports.uberOnOrderStatusChange = onDocumentUpdated(
           logger.info("[uber-triggers] Calling markOrderReady", { orderId, oldStatus });
           await uberApi.markOrderReady(orderId);
           logger.info("[uber-triggers] Order marked ready on Uber", { orderId });
+          break;
+        }
+
+        case "ADJUSTED": {
+          const adjustment = after.uberAdjustment || {
+            reason: after.adjustReason || "OUT_OF_STOCK",
+          };
+          logger.info("[uber-triggers] Calling adjustOrder", { orderId, adjustment });
+          await uberApi.adjustOrder(orderId, adjustment);
+          logger.info("[uber-triggers] Order adjusted on Uber", { orderId });
+          break;
+        }
+
+        case "RELEASED": {
+          logger.info("[uber-triggers] Calling releaseOrder", { orderId });
+          await uberApi.releaseOrder(orderId, {
+            reason: after.releaseReason,
+            details: after.releaseDetails,
+          });
+          logger.info("[uber-triggers] Order released to Uber", { orderId });
           break;
         }
 

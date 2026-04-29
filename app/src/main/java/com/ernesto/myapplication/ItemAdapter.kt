@@ -4,8 +4,10 @@ import android.content.Context
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import coil.load
 class ItemAdapter(
     private val context: Context,
     private val itemList: List<ItemModel>,
@@ -18,6 +20,7 @@ class ItemAdapter(
     private var filteredList: List<ItemModel> = itemList
 
     inner class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val imgThumb: ImageView = view.findViewById(R.id.imgItemThumb)
         val txtItemName: TextView = view.findViewById(R.id.txtItemName)
         val txtItemPrice: TextView = view.findViewById(R.id.txtItemPrice)
         val txtItemStock: TextView = view.findViewById(R.id.txtItemStock)
@@ -46,6 +49,15 @@ class ItemAdapter(
 
         holder.txtItemName.text = item.name
         holder.txtItemPrice.text = "$${String.format("%.2f", item.getPrice("pos"))}"
+
+        val img = item.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
+        if (img != null) {
+            holder.imgThumb.visibility = View.VISIBLE
+            holder.imgThumb.load(img) { crossfade(true) }
+        } else {
+            holder.imgThumb.visibility = View.GONE
+            holder.imgThumb.setImageDrawable(null)
+        }
 
         if (stockCountingEnabled) {
             holder.txtItemStock.visibility = View.VISIBLE

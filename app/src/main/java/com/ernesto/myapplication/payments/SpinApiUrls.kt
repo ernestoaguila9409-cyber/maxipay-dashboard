@@ -42,6 +42,21 @@ object SpinApiUrls {
             ?.takeIf { it.isNotBlank() }
             ?: SpinDefaults.BASE_URL
 
+    /**
+     * Resolves the SPIn Status URL for a specific terminal (not necessarily the
+     * device’s active one). Used by the payment-terminal list to health-check
+     * every configured row, matching the dashboard.
+     */
+    fun statusUrlForConfig(cfg: PaymentTerminalConfig): String {
+        val full = cfg.endpointUrl(PaymentTerminalConfig.Companion.EndpointKey.STATUS)
+        if (full.isNotBlank()) return full
+        val fallbackPath =
+            SpinDefaults.ENDPOINTS[PaymentTerminalConfig.Companion.EndpointKey.STATUS].orEmpty()
+        val base = (cfg.baseUrl.ifBlank { SpinDefaults.BASE_URL }).trimEnd('/')
+        val path = if (fallbackPath.startsWith("/")) fallbackPath else "/$fallbackPath"
+        return "$base$path"
+    }
+
     private fun url(context: Context, endpointKey: String): String {
         val cfg = PaymentTerminalRepository.getActiveConfig(context)
         val configured = cfg?.endpointUrl(endpointKey).orEmpty()

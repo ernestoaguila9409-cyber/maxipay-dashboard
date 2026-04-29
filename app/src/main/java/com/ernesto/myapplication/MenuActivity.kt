@@ -23,6 +23,8 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
+import coil.load
+import coil.transform.RoundedCornersTransformation
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
@@ -58,6 +60,7 @@ data class CartItem(
     val taxMode: String = "INHERIT",
     val taxIds: List<String> = emptyList(),
     val printerLabel: String? = null,
+    val imageUrl: String? = null,
 )
 
 class MenuActivity : AppCompatActivity() {
@@ -364,6 +367,9 @@ class MenuActivity : AppCompatActivity() {
             isCheckoutPending = true
             syncCartButtonStates()
 
+            // Ensure Firestore reflects the current cart quantities before recomputing totals.
+            syncCartToFirestoreForCheckout()
+
             orderEngine.waitForPendingWrites {
                 if (!preAuthReferenceId.isNullOrBlank() && !preAuthAuthCode.isNullOrBlank()) {
                     isCheckoutPending = false
@@ -608,6 +614,7 @@ class MenuActivity : AppCompatActivity() {
                             @Suppress("UNCHECKED_CAST")
                             val lineTaxIds = (doc.get("taxIds") as? List<String>) ?: emptyList()
                             val linePrinterLabel = doc.getString("printerLabel")?.trim()?.takeIf { it.isNotEmpty() }
+                            val lineImageUrl = trimMenuImageUrl(doc.getString("imageUrl"))
 
                             cartMap[lineKey] = CartItem(
                                 itemId = itemId,
@@ -620,6 +627,7 @@ class MenuActivity : AppCompatActivity() {
                                 taxMode = lineTaxMode,
                                 taxIds = lineTaxIds,
                                 printerLabel = linePrinterLabel,
+                                imageUrl = lineImageUrl,
                             )
                         }
 
@@ -998,13 +1006,20 @@ class MenuActivity : AppCompatActivity() {
         val taxMode: String,
         val taxIds: List<String>,
         val printerLabel: String?,
-        val subcategoryId: String
+        val subcategoryId: String,
+        val imageUrl: String? = null,
     )
+
+    private fun trimMenuImageUrl(raw: String?): String? =
+        raw?.trim()?.takeIf { it.isNotEmpty() }
 
     private fun onGridItemClicked(item: MenuGridItem) {
         if (item.isOutOfStock) return
         val effectiveStock = if (stockCountingEnabled) item.stock else Long.MAX_VALUE
-        checkAndShowModifiers(item.itemId, item.name, item.price, effectiveStock, item.taxMode, item.taxIds)
+        checkAndShowModifiers(
+            item.itemId, item.name, item.price, effectiveStock,
+            item.taxMode, item.taxIds, imageUrl = item.imageUrl,
+        )
     }
 
     private fun applySearchFilter() {
@@ -1123,6 +1138,7 @@ class MenuActivity : AppCompatActivity() {
                     val catLabel = categoryKitchenLabels[itemCatId]
                     val printerLabel = MenuItemRoutingLabel.resolve(itemLabel, subLabel, catLabel)
 
+                    val imgUrl = trimMenuImageUrl(doc.getString("imageUrl"))
                     items.add(
                         MenuGridItem(
                             itemId = itemId,
@@ -1134,7 +1150,8 @@ class MenuActivity : AppCompatActivity() {
                             taxMode = itemTaxMode,
                             taxIds = itemTaxIds,
                             printerLabel = printerLabel,
-                            subcategoryId = itemSubId
+                            subcategoryId = itemSubId,
+                            imageUrl = imgUrl,
                         )
                     )
                 }
@@ -1224,6 +1241,7 @@ class MenuActivity : AppCompatActivity() {
                     val catLabel = categoryKitchenLabels[categoryId]
                     val printerLabel = MenuItemRoutingLabel.resolve(itemLabel, subLabel, catLabel)
 
+                    val imgUrl = trimMenuImageUrl(doc.getString("imageUrl"))
                     items.add(
                         MenuGridItem(
                             itemId = itemId,
@@ -1235,7 +1253,8 @@ class MenuActivity : AppCompatActivity() {
                             taxMode = itemTaxMode,
                             taxIds = itemTaxIds,
                             printerLabel = printerLabel,
-                            subcategoryId = subcategoryId
+                            subcategoryId = subcategoryId,
+                            imageUrl = imgUrl,
                         )
                     )
                 }
@@ -1271,6 +1290,7 @@ class MenuActivity : AppCompatActivity() {
 
         inner class VH(v: View) : RecyclerView.ViewHolder(v) {
             private val root: View = v.findViewById(R.id.cardRoot)
+            private val imgThumb: ImageView = v.findViewById(R.id.imgItemThumb)
             private val txtName: TextView = v.findViewById(R.id.txtItemName)
             private val txtPrice: TextView = v.findViewById(R.id.txtItemPrice)
             private val txtStock: TextView = v.findViewById(R.id.txtItemStock)
@@ -1278,6 +1298,16 @@ class MenuActivity : AppCompatActivity() {
             fun bind(item: MenuGridItem) {
                 txtName.text = item.name
                 txtPrice.text = "$${String.format(Locale.US, "%.2f", item.price)}"
+                val img = trimMenuImageUrl(item.imageUrl)
+                if (img != null) {
+                    imgThumb.visibility = View.VISIBLE
+                    imgThumb.load(img) {
+                        crossfade(true)
+                    }
+                } else {
+                    imgThumb.visibility = View.GONE
+                    imgThumb.setImageDrawable(null)
+                }
 
                 if (item.isOutOfStock) {
                     root.setBackgroundResource(R.drawable.bg_menu_item_card_disabled)
@@ -1322,10 +1352,13 @@ class MenuActivity : AppCompatActivity() {
         basePrice: Double,
         stock: Long,
         taxMode: String = "INHERIT",
-        taxIds: List<String> = emptyList()
+        taxIds: List<String> = emptyList(),
+        imageUrl: String? = null,
     ) {
         db.collection("MenuItems").document(itemId).get()
             .addOnSuccessListener { itemDoc ->
+                val resolvedImage =
+                    trimMenuImageUrl(imageUrl) ?: trimMenuImageUrl(itemDoc.getString("imageUrl"))
                 val itemLabel = MenuItemRoutingLabel.fromMenuItemDoc(itemDoc)
                 val itemCatId = itemDoc.getString("categoryId").orEmpty()
                 val itemSubId = itemDoc.getString("subcategoryId").orEmpty()
@@ -1341,7 +1374,10 @@ class MenuActivity : AppCompatActivity() {
                 val merged = (embedded + assigned).distinct()
 
                 if (merged.isNotEmpty()) {
-                    showModifierDialog(itemId, name, basePrice, stock, merged, taxMode, taxIds, printerLabel)
+                    showModifierDialog(
+                        itemId, name, basePrice, stock, merged, taxMode, taxIds, printerLabel,
+                        imageUrl = resolvedImage,
+                    )
                 } else {
                     db.collection("ItemModifierGroups")
                         .whereEqualTo("itemId", itemId)
@@ -1349,10 +1385,16 @@ class MenuActivity : AppCompatActivity() {
                         .get()
                         .addOnSuccessListener { documents ->
                             if (documents.isEmpty) {
-                                addToCart(itemId, name, basePrice, stock, emptyList(), taxMode, taxIds, printerLabel)
+                                addToCart(
+                                    itemId, name, basePrice, stock, emptyList(),
+                                    taxMode, taxIds, printerLabel, imageUrl = resolvedImage,
+                                )
                             } else {
                                 val groupIds = documents.mapNotNull { it.getString("groupId") }
-                                showModifierDialog(itemId, name, basePrice, stock, groupIds, taxMode, taxIds, printerLabel)
+                                showModifierDialog(
+                                    itemId, name, basePrice, stock, groupIds, taxMode, taxIds, printerLabel,
+                                    imageUrl = resolvedImage,
+                                )
                             }
                         }
                 }
@@ -1387,6 +1429,7 @@ class MenuActivity : AppCompatActivity() {
         taxMode: String = "INHERIT",
         taxIds: List<String> = emptyList(),
         printerLabel: String? = null,
+        imageUrl: String? = null,
         preselectedModifiers: List<SummaryModifier> = emptyList(),
         titlePrefix: String? = null,
         primaryButtonLabel: String? = null,
@@ -1396,7 +1439,10 @@ class MenuActivity : AppCompatActivity() {
     ) {
         if (groupIds.isEmpty()) {
             repeat(quantityOverride.coerceAtLeast(1)) {
-                addToCart(itemId, name, basePrice, stock, emptyList(), taxMode, taxIds, printerLabel)
+                addToCart(
+                    itemId, name, basePrice, stock, emptyList(),
+                    taxMode, taxIds, printerLabel, imageUrl = imageUrl,
+                )
             }
             onConfirmed?.invoke()
             return
@@ -1480,6 +1526,7 @@ class MenuActivity : AppCompatActivity() {
                         itemId, name, basePrice, stock,
                         allGroupInfos, orderIndex, triggeredGroupIds,
                         taxMode, taxIds, printerLabel,
+                        imageUrl = imageUrl,
                         preselectedModifiers = preselectedModifiers,
                         titlePrefix = titlePrefix,
                         primaryButtonLabel = primaryButtonLabel,
@@ -1525,6 +1572,7 @@ class MenuActivity : AppCompatActivity() {
         taxMode: String,
         taxIds: List<String>,
         printerLabel: String? = null,
+        imageUrl: String? = null,
         preselectedModifiers: List<SummaryModifier> = emptyList(),
         titlePrefix: String? = null,
         primaryButtonLabel: String? = null,
@@ -1724,7 +1772,10 @@ class MenuActivity : AppCompatActivity() {
                 )
                 val units = quantityOverride.coerceAtLeast(1)
                 repeat(units) {
-                    addToCart(itemId, name, basePrice, stock, modifiers, taxMode, taxIds, printerLabel)
+                    addToCart(
+                        itemId, name, basePrice, stock, modifiers,
+                        taxMode, taxIds, printerLabel, imageUrl = imageUrl,
+                    )
                 }
                 confirmedOnce = true
                 dialog.dismiss()
@@ -2039,11 +2090,44 @@ class MenuActivity : AppCompatActivity() {
                 taxMode = cartItem.taxMode,
                 taxIds = cartItem.taxIds,
                 printerLabel = cartItem.printerLabel,
+                imageUrl = cartItem.imageUrl,
             ),
             isNewLine = isNewLine,
             onSuccess = { },
             onFailure = onFailure,
         )
+    }
+
+    /**
+     * Defensive sync: ensure Firestore item docs reflect the current cartMap quantities/prices
+     * before recomputing totals for checkout. This prevents undercharging when cart UI and
+     * Firestore are temporarily out of sync.
+     */
+    private fun syncCartToFirestoreForCheckout() {
+        val oid = currentOrderId ?: return
+        if (cartMap.isEmpty()) return
+        for ((lineKey, item) in cartMap) {
+            orderEngine.upsertLineItem(
+                orderId = oid,
+                lineKey = lineKey,
+                input = OrderEngine.LineItemInput(
+                    itemId = item.itemId,
+                    name = item.name,
+                    quantity = item.quantity,
+                    basePrice = item.basePrice,
+                    modifiers = item.modifiers,
+                    guestNumber = item.guestNumber,
+                    taxMode = item.taxMode,
+                    taxIds = item.taxIds,
+                    printerLabel = item.printerLabel,
+                    imageUrl = item.imageUrl,
+                ),
+                // Using isNewLine=false is safe; OrderEngine will create/merge the doc if missing.
+                isNewLine = false,
+                onSuccess = { },
+                onFailure = { },
+            )
+        }
     }
 
     private fun syncCartButtonStates() {
@@ -2244,6 +2328,7 @@ class MenuActivity : AppCompatActivity() {
                     taxMode = cartItem.taxMode,
                     taxIds = cartItem.taxIds,
                     printerLabel = cartItem.printerLabel,
+                    imageUrl = cartItem.imageUrl,
                 ),
                 isNewLine = true,
                 onSuccess = { doneOne() },
@@ -2607,6 +2692,7 @@ class MenuActivity : AppCompatActivity() {
         taxMode: String = "INHERIT",
         taxIds: List<String> = emptyList(),
         printerLabel: String? = null,
+        imageUrl: String? = null,
     ) {
 
         if (currentOrderId == null && isCreatingOrder) {
@@ -2671,6 +2757,7 @@ class MenuActivity : AppCompatActivity() {
                         taxMode = taxMode,
                         taxIds = taxIds,
                         printerLabel = printerLabel,
+                        imageUrl = trimMenuImageUrl(imageUrl),
                     )
                 }
 
@@ -2913,10 +3000,13 @@ class MenuActivity : AppCompatActivity() {
             }
             if (taxableBase <= 0.0) continue
             val taxAmount = if (tax.type == "PERCENTAGE") taxableBase * tax.amount / 100.0 else tax.amount
-            totalAmount += taxAmount
+            // Round each tax to whole cents before adding so the total matches the sum of displayed
+            // tax lines (fractional cents from several % taxes must not accumulate in totalAmount).
+            val taxCents = Math.round(taxAmount * 100)
+            totalAmount += taxCents / 100.0
             val taxLine = TextView(this)
             val label = if (tax.type == "PERCENTAGE") "${tax.name} (${String.format(Locale.US, "%.1f", tax.amount)}%)" else tax.name
-            taxLine.text = "$label: ${MoneyUtils.centsToDisplay(Math.round(taxAmount * 100))}"
+            taxLine.text = "$label: ${MoneyUtils.centsToDisplay(taxCents)}"
             taxLine.textSize = 13f
             taxLine.setTextColor(Color.parseColor("#5D4E7B"))
             cartTaxSummary.addView(taxLine)
@@ -3106,19 +3196,80 @@ class MenuActivity : AppCompatActivity() {
     }
 
     private fun buildCartItemView(lineKey: String, item: CartItem): View {
-        val itemLayout = LinearLayout(this)
-        itemLayout.orientation = LinearLayout.VERTICAL
-        itemLayout.setPadding(0, 4, 0, 16)
+        val density = resources.displayMetrics.density
+        val padH = (10 * density).toInt()
+        val padV = (8 * density).toInt()
+        val thumbPx = (44 * density).toInt()
+        val thumbMargin = (10 * density).toInt()
+        val cornerRadiusPx = 6f * density
 
-        val nameText = TextView(this)
-        nameText.text = "${item.name} (Qty: ${item.quantity})"
-        nameText.textSize = 14f
-        nameText.setTypeface(null, Typeface.BOLD)
-        itemLayout.addView(nameText)
+        val cartLineRoot = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+            setBackgroundResource(R.drawable.bg_cart_line)
+            setPadding(padH, padV, padH, padV)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                bottomMargin = (8 * density).toInt()
+            }
+        }
+
+        val thumbColumn = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                thumbPx + thumbMargin,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+        }
+        val thumb = ImageView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(thumbPx, thumbPx, Gravity.TOP)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+        }
+        val cartImg = trimMenuImageUrl(item.imageUrl)
+        if (cartImg != null) {
+            thumb.visibility = View.VISIBLE
+            thumb.load(cartImg) {
+                crossfade(true)
+                transformations(RoundedCornersTransformation(cornerRadiusPx))
+            }
+        } else {
+            thumb.visibility = View.INVISIBLE
+            thumb.setImageDrawable(null)
+        }
+        thumbColumn.addView(thumb)
+        cartLineRoot.addView(thumbColumn)
+
+        val textColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f,
+            )
+        }
+
+        val nameText = TextView(this).apply {
+            text = item.name
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#1E1B2E"))
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        textColumn.addView(nameText)
 
         val modifiersTotal = sumModifierPrices(item.modifiers)
+        val unitPrice = item.basePrice + modifiersTotal
+        val qtyLine = TextView(this).apply {
+            text = "Qty ${item.quantity} · ${MoneyUtils.centsToDisplay((unitPrice * 100).toLong())} ea"
+            textSize = 12f
+            setTextColor(Color.parseColor("#6B6478"))
+            setPadding(0, (2 * density).toInt(), 0, 0)
+        }
+        textColumn.addView(qtyLine)
 
-        fun addModifierViews(modifiers: List<OrderModifier>, indent: String = "") {
+        fun addModifierViews(parent: LinearLayout, modifiers: List<OrderModifier>, indent: String = "") {
             for (modifier in modifiers) {
                 val line = TextView(this).apply {
                     textSize = 12f
@@ -3129,26 +3280,26 @@ class MenuActivity : AppCompatActivity() {
                     } else {
                         text = "${indent}• ${modifier.name}"
                     }
+                    setPadding(0, (2 * density).toInt(), 0, 0)
                 }
-                itemLayout.addView(line)
+                parent.addView(line)
                 if (modifier.children.isNotEmpty()) {
-                    addModifierViews(modifier.children, "$indent    ")
+                    addModifierViews(parent, modifier.children, "$indent    ")
                 }
             }
         }
-        addModifierViews(item.modifiers)
+        addModifierViews(textColumn, item.modifiers)
 
-        val unitPrice = item.basePrice + modifiersTotal
         val lineTotal = unitPrice * item.quantity
 
         val lineDiscounts = appliedDiscounts.filter { it.lineKey == lineKey }
         for (ld in lineDiscounts) {
-            val discountLine = TextView(this).apply {
+            textColumn.addView(TextView(this).apply {
                 textSize = 12f
                 setTextColor(Color.parseColor("#666666"))
                 text = DiscountDisplay.formatBullet(ld.discountName, ld.type, ld.value)
-            }
-            itemLayout.addView(discountLine)
+                setPadding(0, (2 * density).toInt(), 0, 0)
+            })
         }
 
         val orderDiscount = appliedDiscounts.find {
@@ -3164,7 +3315,7 @@ class MenuActivity : AppCompatActivity() {
                 (orderDiscount.amountInCents.toDouble() * lineCents / subtotalAll).toLong()
             } else 0L
             if (share > 0L) {
-                itemLayout.addView(TextView(this).apply {
+                textColumn.addView(TextView(this).apply {
                     textSize = 12f
                     setTextColor(Color.parseColor("#666666"))
                     text = DiscountDisplay.formatBullet(
@@ -3172,6 +3323,7 @@ class MenuActivity : AppCompatActivity() {
                         orderDiscount.type,
                         orderDiscount.value
                     )
+                    setPadding(0, (2 * density).toInt(), 0, 0)
                 })
             }
         }
@@ -3179,12 +3331,15 @@ class MenuActivity : AppCompatActivity() {
         val lineDiscountCents = lineDiscounts.sumOf { it.amountInCents }
         val effectiveTotal = (lineTotal * 100).toLong() - lineDiscountCents
 
-        val subtotalText = TextView(this)
-        subtotalText.text = "Line Total: ${MoneyUtils.centsToDisplay(effectiveTotal)}"
-        subtotalText.setTextColor(Color.parseColor("#1B5E20"))
-        subtotalText.setTypeface(null, Typeface.BOLD)
-        subtotalText.textSize = 13f
-        itemLayout.addView(subtotalText)
+        textColumn.addView(TextView(this).apply {
+            text = "Line total: ${MoneyUtils.centsToDisplay(effectiveTotal)}"
+            setTextColor(Color.parseColor("#1B5E20"))
+            setTypeface(null, Typeface.BOLD)
+            textSize = 13f
+            setPadding(0, (6 * density).toInt(), 0, 0)
+        })
+
+        cartLineRoot.addView(textColumn)
 
         val onTap = {
             if (stockCountingEnabled) {
@@ -3227,7 +3382,7 @@ class MenuActivity : AppCompatActivity() {
             removeCartItem(lineKey)
         }
 
-        return wrapWithSwipeToDelete(itemLayout, onTap, onMinus, onTrash)
+        return wrapWithSwipeToDelete(cartLineRoot, onTap, onMinus, onTrash)
     }
 
     private fun removeCartItem(lineKey: String) {
@@ -3288,6 +3443,12 @@ class MenuActivity : AppCompatActivity() {
             )
         }
 
+        val syncActionStripToSwipePosition: () -> Unit = {
+            val thresholdPx = -2f * density
+            buttonsContainer.visibility =
+                if (contentView.translationX < thresholdPx) View.VISIBLE else View.INVISIBLE
+        }
+
         val minusBtn = FrameLayout(this).apply {
             setBackgroundColor(Color.parseColor("#FF9800"))
             layoutParams = LinearLayout.LayoutParams(buttonWidthPx, LinearLayout.LayoutParams.MATCH_PARENT)
@@ -3295,7 +3456,9 @@ class MenuActivity : AppCompatActivity() {
             isFocusable = true
             setOnClickListener {
                 onMinus()
-                contentView.animate().translationX(0f).setDuration(150).start()
+                contentView.animate().translationX(0f).setDuration(150)
+                    .withEndAction { syncActionStripToSwipePosition() }
+                    .start()
             }
         }
         val minusIcon = ImageView(this@MenuActivity).apply {
@@ -3332,10 +3495,12 @@ class MenuActivity : AppCompatActivity() {
         buttonsContainer.addView(minusBtn)
         buttonsContainer.addView(trashBtn)
 
-        contentView.setBackgroundColor(Color.WHITE)
-
         wrapper.addView(buttonsContainer)
         wrapper.addView(contentView)
+
+        // Orange/red swipe actions sit under the card; hide until the row is actually swiped open
+        // so a closed row never shows colored slivers at the edge.
+        buttonsContainer.visibility = View.INVISIBLE
 
         var downX = 0f
         var downY = 0f
@@ -3366,6 +3531,7 @@ class MenuActivity : AppCompatActivity() {
                         val newTx = (v.translationX + delta).coerceIn(-swipeMax, 0f)
                         v.translationX = newTx
                         prevX = event.rawX
+                        syncActionStripToSwipePosition()
                     }
                     true
                 }
@@ -3379,9 +3545,13 @@ class MenuActivity : AppCompatActivity() {
                         onTap()
                     } else if (swiping) {
                         if (v.translationX < -swipeMax / 2) {
-                            v.animate().translationX(-swipeMax).setDuration(120).start()
+                            v.animate().translationX(-swipeMax).setDuration(120)
+                                .withEndAction { syncActionStripToSwipePosition() }
+                                .start()
                         } else {
-                            v.animate().translationX(0f).setDuration(150).start()
+                            v.animate().translationX(0f).setDuration(150)
+                                .withEndAction { syncActionStripToSwipePosition() }
+                                .start()
                         }
                     }
                     swiping = false
@@ -3390,7 +3560,9 @@ class MenuActivity : AppCompatActivity() {
 
                 MotionEvent.ACTION_CANCEL -> {
                     v.parent?.requestDisallowInterceptTouchEvent(false)
-                    v.animate().translationX(0f).setDuration(150).start()
+                    v.animate().translationX(0f).setDuration(150)
+                        .withEndAction { syncActionStripToSwipePosition() }
+                        .start()
                     swiping = false
                     true
                 }
@@ -3560,6 +3732,7 @@ class MenuActivity : AppCompatActivity() {
 
                 val modifiers = next.modifiers.map { it.toOrderModifier() }
                 val name = itemDoc.getString("name")?.takeIf { it.isNotBlank() } ?: next.name
+                val repeatImageUrl = trimMenuImageUrl(itemDoc.getString("imageUrl"))
 
                 val units = next.quantity.coerceAtLeast(1)
                 repeat(units) {
@@ -3572,6 +3745,7 @@ class MenuActivity : AppCompatActivity() {
                         taxMode = taxMode,
                         taxIds = taxIds,
                         printerLabel = printerLabel,
+                        imageUrl = repeatImageUrl,
                     )
                 }
                 addRepeatItemsSequentially(queue)
@@ -3669,6 +3843,7 @@ class MenuActivity : AppCompatActivity() {
                 val printerLabel = MenuItemRoutingLabel.resolve(itemLabel, subLabel, catLabel)
 
                 val displayName = itemDoc.getString("name")?.takeIf { it.isNotBlank() } ?: next.name
+                val editFlowImageUrl = trimMenuImageUrl(itemDoc.getString("imageUrl"))
                 val units = next.quantity.coerceAtLeast(1)
                 val advance: () -> Unit = { processNextEditItem(queue, currentIndex + 1, total) }
                 val cancelStep: () -> Unit = {
@@ -3693,6 +3868,7 @@ class MenuActivity : AppCompatActivity() {
                         taxMode = taxMode,
                         taxIds = taxIds,
                         printerLabel = printerLabel,
+                        imageUrl = editFlowImageUrl,
                         preselectedModifiers = next.modifiers,
                         titlePrefix = "Item $currentIndex of $total",
                         primaryButtonLabel = "Confirm",
@@ -3714,6 +3890,7 @@ class MenuActivity : AppCompatActivity() {
                             taxMode = taxMode,
                             taxIds = taxIds,
                             printerLabel = printerLabel,
+                            imageUrl = editFlowImageUrl,
                         )
                     }
                     advance()

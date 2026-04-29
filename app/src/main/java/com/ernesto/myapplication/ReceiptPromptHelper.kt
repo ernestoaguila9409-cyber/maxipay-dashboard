@@ -127,22 +127,33 @@ object ReceiptPromptHelper {
                     db.collection("Orders").document(orderId).collection("items").get()
                         .addOnSuccessListener { itemsSnap ->
                             val rsVoid = ReceiptSettings.load(activity)
-                            val fetchPayments: (List<Map<String, Any>>) -> Unit = { payments ->
-                                val segs = buildDetailedVoidSegments(activity, orderDoc, itemsSnap.documents, payments)
+                            val fetchReversedTransactions: (List<Map<String, Any>>) -> Unit = { reversedTxns ->
+                                val segs = buildDetailedVoidSegments(activity, orderDoc, itemsSnap.documents, reversedTxns)
                                 EscPosPrinter.print(activity, segs, rsVoid)
                                 onDismiss?.invoke()
                             }
-                            if (transactionId.isNotBlank()) {
-                                db.collection("Transactions").document(transactionId).get()
-                                    .addOnSuccessListener { txDoc ->
-                                        @Suppress("UNCHECKED_CAST")
-                                        val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
-                                        fetchPayments(payments)
+                            db.collection("Orders").document(orderId).collection("transactions").get()
+                                .addOnSuccessListener { txnsSnap ->
+                                    @Suppress("UNCHECKED_CAST")
+                                    val reversed = txnsSnap.documents.mapNotNull { it.data as? Map<String, Any> }
+                                    if (reversed.isNotEmpty()) {
+                                        fetchReversedTransactions(reversed)
+                                        return@addOnSuccessListener
                                     }
-                                    .addOnFailureListener { fetchPayments(emptyList()) }
-                            } else {
-                                fetchPayments(emptyList())
-                            }
+                                    // Fallback: use original transaction payments when subcollection isn't present.
+                                    if (transactionId.isNotBlank()) {
+                                        db.collection("Transactions").document(transactionId).get()
+                                            .addOnSuccessListener { txDoc ->
+                                                @Suppress("UNCHECKED_CAST")
+                                                val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                                                fetchReversedTransactions(payments)
+                                            }
+                                            .addOnFailureListener { fetchReversedTransactions(emptyList()) }
+                                    } else {
+                                        fetchReversedTransactions(emptyList())
+                                    }
+                                }
+                                .addOnFailureListener { fetchReversedTransactions(emptyList()) }
                         }
                         .addOnFailureListener { printSimpleLabelReceipt(activity, type.label, orderId, onDismiss) }
                 }
@@ -325,7 +336,7 @@ object ReceiptPromptHelper {
         activity: Activity,
         orderDoc: com.google.firebase.firestore.DocumentSnapshot,
         items: List<com.google.firebase.firestore.DocumentSnapshot>,
-        payments: List<Map<String, Any>>
+        reversedTransactions: List<Map<String, Any>>
     ): List<EscPosPrinter.Segment> {
         val rs = ReceiptSettings.load(activity)
         val segs = mutableListOf<EscPosPrinter.Segment>()
@@ -432,30 +443,18 @@ object ReceiptPromptHelper {
         segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
         segs += EscPosPrinter.Segment("")
 
-        for (p in payments) {
-            val pType = p["paymentType"]?.toString() ?: ""
-            if (pType.equals("Cash", ignoreCase = true)) {
-                segs += EscPosPrinter.Segment("Paid with Cash", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-            } else {
-                val brand = p["cardBrand"]?.toString() ?: ""
-                val l4 = p["last4"]?.toString() ?: ""
-                val auth = p["authCode"]?.toString() ?: ""
-                if (brand.isNotBlank() || l4.isNotBlank()) {
-                    segs += EscPosPrinter.Segment(buildString { if (brand.isNotBlank()) append(brand); if (l4.isNotBlank()) { if (isNotEmpty()) append(" "); append("**** $l4") } }, bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-                }
-                if (auth.isNotBlank()) segs += EscPosPrinter.Segment("Auth: $auth", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-                if (pType.isNotBlank()) segs += EscPosPrinter.Segment("Type: $pType", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-                receiptLabelForCardEntryType(p["entryType"]?.toString())?.let { method ->
-                    segs += EscPosPrinter.Segment(
-                        "Payment method: $method",
-                        bold = rs.boldFooter,
-                        fontSize = rs.fontSizeFooter,
-                        centered = true
-                    )
-                }
+        // ── Reversed payments (from Orders/{orderId}/transactions) ──
+        val reversedLines = ReceiptPaymentFormatting.buildReversedPaymentsSectionLines(
+            reversedTransactions = reversedTransactions,
+            width = lwt
+        )
+        if (reversedLines.isNotEmpty()) {
+            reversedLines.forEach { line ->
+                segs += EscPosPrinter.Segment(line, bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
             }
             segs += EscPosPrinter.Segment("")
         }
+
         segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
         return segs
     }

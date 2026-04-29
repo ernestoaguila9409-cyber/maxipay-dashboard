@@ -22,6 +22,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.chip.ChipGroup
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentChange
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
@@ -305,7 +306,7 @@ class OrdersActivity : AppCompatActivity() {
                     val result = mutableListOf<OrderRow>()
                     for (doc in snap.documents) {
                         val id = doc.id
-                        val status = doc.getString("status") ?: "OPEN"
+                        val status = effectiveOrderListStatus(doc)
                         val totalCents = doc.getLong("totalInCents") ?: 0L
                         val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
                         val employee = doc.getString("employeeName") ?: "—"
@@ -568,5 +569,20 @@ class OrdersActivity : AppCompatActivity() {
         }
 
         orderRef.delete().await()
+    }
+
+    /**
+     * Firestore may still say OPEN after online card pay if POS tax recompute has not
+     * run yet; list badge should show Closed when fully paid.
+     */
+    private fun effectiveOrderListStatus(doc: DocumentSnapshot): String {
+        val raw = doc.getString("status") ?: "OPEN"
+        when (raw.uppercase()) {
+            "VOIDED", "REFUNDED" -> return raw
+        }
+        val total = doc.getLong("totalInCents") ?: 0L
+        val paid = doc.getLong("totalPaidInCents") ?: 0L
+        if (total > 0L && paid >= total) return "CLOSED"
+        return raw
     }
 }

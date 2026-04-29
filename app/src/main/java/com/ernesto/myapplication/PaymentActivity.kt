@@ -37,6 +37,8 @@ import com.ernesto.myapplication.engine.PaymentEngine
 import com.ernesto.myapplication.engine.SplitReceiptCalculator
 import com.ernesto.myapplication.engine.SplitReceiptPayload
 import com.ernesto.myapplication.payments.SpinApiUrls
+import com.ernesto.myapplication.payments.SpinCallTracker
+import com.ernesto.myapplication.payments.SpinGatewayP
 import android.util.Log
 import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
@@ -216,7 +218,7 @@ class PaymentActivity : AppCompatActivity() {
     }
 
     private fun updateMixPaymentsVisibility() {
-        if (orderType == "TO_GO" || orderType == "DINE_IN" || orderType == "BAR_TAB") {
+        if (orderType == "TO_GO" || orderType == "DINE_IN" || orderType == "BAR_TAB" || orderType == "ONLINE_PICKUP") {
             btnMixMode.visibility = if (OrderTypePaymentConfig.isMixPaymentsEnabled(this, orderType)) View.VISIBLE else View.GONE
             btnCredit.visibility = if (OrderTypePaymentConfig.isCreditEnabled(this, orderType)) View.VISIBLE else View.GONE
             btnDebit.visibility = if (OrderTypePaymentConfig.isDebitEnabled(this, orderType)) View.VISIBLE else View.GONE
@@ -266,6 +268,28 @@ class PaymentActivity : AppCompatActivity() {
             }
     }
 
+    /**
+     * [remainingInCents] may be 0 for stale/unfinished writes (e.g. before recompute) or bad data.
+     * Only return success to the caller when the order is actually paid or clearly has nothing to collect.
+     */
+    private fun orderLooksFullyPaid(snap: DocumentSnapshot, remainingInCents: Long): Boolean {
+        if (remainingInCents > 0L) return false
+        val status = snap.getString("status")?.uppercase(Locale.US) ?: ""
+        if (status == "CLOSED" || status == "COMPLETED" || status == "CANCELLED" || status == "VOIDED") {
+            return true
+        }
+        val totalInCents = (snap.get("totalInCents") as? Number)?.toLong() ?: 0L
+        val totalPaidInCents = (snap.get("totalPaidInCents") as? Number)?.toLong() ?: 0L
+        if (totalInCents > 0L && totalPaidInCents >= totalInCents) {
+            return true
+        }
+        // $0.00 check — nothing to collect
+        if (totalInCents <= 0L) {
+            return true
+        }
+        return false
+    }
+
     private fun loadRemainingBalance() {
         val oid = orderId ?: return
 
@@ -277,20 +301,31 @@ class PaymentActivity : AppCompatActivity() {
                 bindOrderSummary(snap)
 
                 val remainingInCents =
-                    snap.getLong("remainingInCents")
-                        ?: snap.getLong("totalInCents")
+                    (snap.get("remainingInCents") as? Number)?.toLong()
+                        ?: (snap.get("totalInCents") as? Number)?.toLong()
                         ?: 0L
 
                 remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
                 remainingCents = remainingInCents
 
                 if (remainingInCents <= 0L) {
-                    setResult(RESULT_OK)
-                    finish()
+                    if (orderLooksFullyPaid(snap, remainingInCents)) {
+                        setResult(RESULT_OK)
+                        finish()
+                    } else {
+                        Toast.makeText(
+                            this,
+                            "Order is not ready to pay. Try checkout again in a moment.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        setResult(RESULT_CANCELED)
+                        finish()
+                    }
                     return@addOnSuccessListener
                 }
 
                 txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
+                CustomerDisplayManager.showPaymentWaiting(this, businessName, remainingInCents)
 
                 showSplitPayShareDialogIfNeeded()
             }
@@ -303,20 +338,31 @@ class PaymentActivity : AppCompatActivity() {
                         bindOrderSummary(snap)
 
                         val remainingInCents =
-                            snap.getLong("remainingInCents")
-                                ?: snap.getLong("totalInCents")
+                            (snap.get("remainingInCents") as? Number)?.toLong()
+                                ?: (snap.get("totalInCents") as? Number)?.toLong()
                                 ?: 0L
 
                         remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
                         remainingCents = remainingInCents
 
                         if (remainingInCents <= 0L) {
-                            setResult(RESULT_OK)
-                            finish()
+                            if (orderLooksFullyPaid(snap, remainingInCents)) {
+                                setResult(RESULT_OK)
+                                finish()
+                            } else {
+                                Toast.makeText(
+                                    this,
+                                    "Order is not ready to pay. Try checkout again in a moment.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                setResult(RESULT_CANCELED)
+                                finish()
+                            }
                             return@addOnSuccessListener
                         }
 
                         txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
+                        CustomerDisplayManager.showPaymentWaiting(this, businessName, remainingInCents)
 
                         showSplitPayShareDialogIfNeeded()
                     }
@@ -337,6 +383,7 @@ class PaymentActivity : AppCompatActivity() {
                 if (guestCount > 0) parts.add("$guestCount Guest${if (guestCount > 1) "s" else ""}")
             }
             "TO_GO" -> parts.add("To-Go")
+            "ONLINE_PICKUP" -> parts.add("Online Order")
             "BAR", "BAR_TAB" -> parts.add("Bar")
             else -> if (type.isNotBlank()) parts.add(type.replace("_", " "))
         }
@@ -1337,6 +1384,7 @@ class PaymentActivity : AppCompatActivity() {
         batchNumber: String = "",
         transactionNumber: String = "",
         invoiceNumber: String = "",
+        pnReferenceId: String = "",
         cashTenderedInCents: Long = 0L,
         cashChangeInCents: Long = 0L,
         onSuccess: (Long) -> Unit,
@@ -1364,6 +1412,7 @@ class PaymentActivity : AppCompatActivity() {
                 batchNumber = batchNumber,
                 transactionNumber = transactionNumber,
                 invoiceNumber = invoiceNumber,
+                pnReferenceId = pnReferenceId,
                 cashTenderedInCents = cashTenderedInCents,
                 cashChangeInCents = cashChangeInCents,
                 splitReceipt = null,
@@ -1398,6 +1447,7 @@ class PaymentActivity : AppCompatActivity() {
                             batchNumber = batchNumber,
                             transactionNumber = transactionNumber,
                             invoiceNumber = invoiceNumber,
+                            pnReferenceId = pnReferenceId,
                             cashTenderedInCents = cashTenderedInCents,
                             cashChangeInCents = cashChangeInCents,
                             splitReceipt = payload?.toFirestoreMap(),
@@ -1424,6 +1474,7 @@ class PaymentActivity : AppCompatActivity() {
                             batchNumber = batchNumber,
                             transactionNumber = transactionNumber,
                             invoiceNumber = invoiceNumber,
+                            pnReferenceId = pnReferenceId,
                             cashTenderedInCents = cashTenderedInCents,
                             cashChangeInCents = cashChangeInCents,
                             splitReceipt = null,
@@ -1448,6 +1499,7 @@ class PaymentActivity : AppCompatActivity() {
                     batchNumber = batchNumber,
                     transactionNumber = transactionNumber,
                     invoiceNumber = invoiceNumber,
+                    pnReferenceId = pnReferenceId,
                     cashTenderedInCents = cashTenderedInCents,
                     cashChangeInCents = cashChangeInCents,
                     splitReceipt = null,
@@ -1833,21 +1885,17 @@ class PaymentActivity : AppCompatActivity() {
 
     private fun processCardPayment(paymentType: String) {
 
-        val formattedAmount =
-            String.format(Locale.US, "%.2f", paymentAmount)
-
         val clientReferenceId = UUID.randomUUID().toString()
 
-        val json = JSONObject().apply {
-            put("Amount", formattedAmount)
-            put("PaymentType", paymentType)
-            put("ReferenceId", clientReferenceId)
-            put("PrintReceipt", "No")
-            put("GetReceipt", "No")
-            put("Tpn", TerminalPrefs.getTpn(this@PaymentActivity))
-            put("RegisterId", TerminalPrefs.getRegisterId(this@PaymentActivity))
-            put("Authkey", TerminalPrefs.getAuthKey(this@PaymentActivity))
-        }
+        val jsonBody = SpinGatewayP.saleRequestJson(
+            context = this@PaymentActivity,
+            amount = paymentAmount,
+            paymentType = paymentType,
+            referenceId = clientReferenceId,
+        )
+
+        val saleUrl = SpinApiUrls.sale(this@PaymentActivity)
+        Log.d("DEJAVOO_SALE", "[SALE_REQ] PaymentType=$paymentType URL=$saleUrl Body=$jsonBody")
 
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -1855,24 +1903,27 @@ class PaymentActivity : AppCompatActivity() {
             .writeTimeout(30, TimeUnit.SECONDS)
             .build()
 
-        val body = json.toString()
-            .toRequestBody("application/json".toMediaType())
+        val body = jsonBody.toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
-            .url(SpinApiUrls.sale(this@PaymentActivity))
+            .url(saleUrl)
             .post(body)
             .build()
 
+        SpinCallTracker.beginCall()
         client.newCall(request).enqueue(object : Callback {
 
             override fun onFailure(call: Call, e: IOException) {
+                SpinCallTracker.endCall()
+                Log.e("DEJAVOO_SALE", "[SALE] Network error PaymentType=$paymentType", e)
                 runOnUiThread { showDeclined("Payment Failed") }
             }
 
             override fun onResponse(call: Call, response: Response) {
+                SpinCallTracker.endCall()
 
                 val responseText = response.body?.string() ?: ""
-                Log.d("DEVAVOO_RAW", responseText)
+                Log.d("DEJAVOO_SALE", "[SALE] HTTP ${response.code} PaymentType=$paymentType Response=$responseText")
 
                 runOnUiThread {
 
@@ -1900,6 +1951,9 @@ class PaymentActivity : AppCompatActivity() {
                         val transactionNumber = jsonObj.optString("TransactionNumber", "")
                             .ifBlank { jsonObj.optJSONObject("GeneralResponse")?.optString("TransactionNumber", "") ?: "" }
                         val invoiceNumber = jsonObj.optString("InvoiceNumber", "")
+                        val pnReferenceId = jsonObj.optString("PNReferenceId", "")
+                            .ifBlank { jsonObj.optJSONObject("GeneralResponse")?.optString("PNReferenceId", "") ?: "" }
+                            .ifBlank { jsonObj.optJSONObject("Transaction")?.optString("PNReferenceId", "") ?: "" }
 
                         Log.d("PAYMENT_SALE", "ReferenceId(saved for Void)=$referenceId BatchNumber=$batchNumber TransactionNumber=$transactionNumber topLevelRef=${jsonObj.optString("ReferenceId", "")} PNRef=${jsonObj.optString("PNReferenceId", "")}")
 
@@ -1918,7 +1972,8 @@ class PaymentActivity : AppCompatActivity() {
                             clientReferenceId = clientReferenceId,
                             batchNumber = batchNumber,
                             transactionNumber = transactionNumber,
-                            invoiceNumber = invoiceNumber
+                            invoiceNumber = invoiceNumber,
+                            pnReferenceId = pnReferenceId,
                         )
 
                     } else {
@@ -1938,7 +1993,8 @@ class PaymentActivity : AppCompatActivity() {
         clientReferenceId: String,
         batchNumber: String,
         transactionNumber: String,
-        invoiceNumber: String = ""
+        invoiceNumber: String = "",
+        pnReferenceId: String = "",
     ) {
 
         val oid = orderId ?: return
@@ -1962,6 +2018,7 @@ class PaymentActivity : AppCompatActivity() {
             batchNumber = batchNumber,
             transactionNumber = transactionNumber,
             invoiceNumber = invoiceNumber,
+            pnReferenceId = pnReferenceId,
             onSuccess = { remainingInCents ->
 
                 if (remainingInCents <= 0L) {
@@ -1970,18 +2027,27 @@ class PaymentActivity : AppCompatActivity() {
 
                 runOnUiThread {
                     showApproved(paymentType)
+                    remainingCents = remainingInCents
                     remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
                     if (isSplitPayMode()) {
                         txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
                         setButtonsEnabled(true)
-                        showSplitReceiptChoiceAfterPayment(remainingInCents)
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            statusContainer.visibility = View.GONE
+                            fireworksView.visibility = View.GONE
+                            showSplitReceiptChoiceAfterPayment(remainingInCents)
+                        }, 800L)
                     } else if (remainingInCents <= 0L) {
                         clearSplitState()
                         Handler(Looper.getMainLooper()).postDelayed({ onOrderFullyPaid() }, 2000)
                     } else {
                         txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
                         setButtonsEnabled(true)
+                        Handler(Looper.getMainLooper()).postDelayed(
+                            { clearApprovedOverlayForPartialPayment(remainingInCents) },
+                            1000L
+                        )
                     }
                 }
             },
@@ -2026,13 +2092,18 @@ class PaymentActivity : AppCompatActivity() {
 
                     showApproved(paymentType)
 
+                    remainingCents = remainingInCents
                     remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
 
                     if (isSplitPayMode()) {
                         txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
                         progressBar.visibility = View.GONE
                         setButtonsEnabled(true)
-                        showSplitReceiptChoiceAfterPayment(remainingInCents)
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            statusContainer.visibility = View.GONE
+                            fireworksView.visibility = View.GONE
+                            showSplitReceiptChoiceAfterPayment(remainingInCents)
+                        }, 800L)
                     } else if (remainingInCents <= 0L) {
                         clearSplitState()
                         onOrderFullyPaid()
@@ -2040,6 +2111,10 @@ class PaymentActivity : AppCompatActivity() {
                         txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
                         progressBar.visibility = View.GONE
                         setButtonsEnabled(true)
+                        Handler(Looper.getMainLooper()).postDelayed(
+                            { clearApprovedOverlayForPartialPayment(remainingInCents) },
+                            1000L
+                        )
                     }
                 }
             },
@@ -2052,7 +2127,20 @@ class PaymentActivity : AppCompatActivity() {
             }
         )
     }
+    /**
+     * The status overlay is full-screen and consumes touches; it must be hidden when more tenders
+     * are expected (e.g. mix mode), or the register stays "stuck" on APPROVED with no way to use the UI.
+     */
+    private fun clearApprovedOverlayForPartialPayment(remainingInCents: Long) {
+        remainingCents = remainingInCents
+        statusContainer.visibility = View.GONE
+        fireworksView.visibility = View.GONE
+        CustomerDisplayManager.showPaymentWaiting(this, businessName, remainingInCents)
+    }
+
     private fun showApproved(paymentType: String) {
+        statusContainer.visibility = View.VISIBLE
+        fireworksView.visibility = View.VISIBLE
         progressBar.visibility = View.GONE
         txtStatus.text = "APPROVED ✅"
         txtStatus.setTextColor(android.graphics.Color.parseColor("#2E7D32"))
@@ -2069,6 +2157,7 @@ class PaymentActivity : AppCompatActivity() {
         CustomerDisplayManager.showPaymentApproved(this, info)
     }
     private fun showWaitingStatus() {
+        fireworksView.visibility = View.GONE
         statusContainer.visibility = View.VISIBLE
         progressBar.visibility = View.VISIBLE
         txtStatus.text = "Waiting..."

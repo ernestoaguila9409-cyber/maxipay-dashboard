@@ -170,6 +170,21 @@
     <string name="category_no_kds_devices">No KDS devices found. Add them in the web dashboard first.</string>
     <string name="category_no_kds_active_devices">No active paired KDS devices. Check the web dashboard or pair a tablet first.</string>
     <string name="category_kds_saved">KDS assignment updated</string>
+    <string name="item_detail_photo_heading">Item photo</string>
+    <string name="item_detail_find_pexels_image">Find image (Pexels)</string>
+    <string name="item_detail_remove_image">Remove image</string>
+    <string name="item_detail_remove_image_confirm">Clear the saved photo for this item? POS and dashboard will no longer show an image until you add a new one.</string>
+    <string name="item_detail_remove_image_action">Remove</string>
+    <string name="item_detail_pexels_dialog_title">Select image</string>
+    <string name="item_detail_pexels_search_hint">Search (refine results)</string>
+    <string name="item_detail_pexels_search">Search</string>
+    <string name="item_detail_pexels_no_results">No images found. Try another search.</string>
+    <string name="item_detail_pexels_auth_failed">Could not sign in for image search. Try again.</string>
+    <string name="item_detail_pexels_failed">Image search or save failed.</string>
+    <string name="item_detail_pexels_error_not_found">Image search is not available yet: deploy Cloud Functions menuItemImageSearch and menuItemImageCommitPexels (us-central1), then try again. See functions/README.md.</string>
+    <string name="item_detail_pexels_error_unauthenticated">Sign-in required for image search. In Firebase Console → Authentication → Sign-in method, enable Anonymous. Then log out and back into the POS (or restart the app) and try again.</string>
+    <string name="item_detail_pexels_credits">Photos provided by Pexels. Saved copy is stored in your Firebase project.</string>
+
     <string name="item_detail_delete">Delete item</string>
     <string name="item_detail_delete_title">Delete %1$s?</string>
     <string name="item_detail_delete_message">This will permanently remove this item.</string>
@@ -289,4 +304,37 @@
     <string name="customer_profile_section_expand_collapse">Expand or collapse section</string>
 
     <string name="customers_frequent_visitor_star_cd">Frequent visitor: more than five visits</string>
+
+    <!-- Order detail: labels shown on TextViews / buttons (translatable) -->
+    <string name="order_detail_accept">Accept</string>
+    <string name="order_detail_deny">Deny</string>
+    <string name="order_detail_order_number">Order #%1$d</string>
+    <string name="order_detail_voided_by">Voided by: %1$s</string>
+    <string name="order_detail_employee">Employee: %1$s</string>
+    <string name="order_detail_customer">Customer: %1$s</string>
+    <string name="order_detail_uber_banner_accepted">Order accepted — mark ready when prepared</string>
+    <string name="order_detail_ready_pickup">Ready for Pickup</string>
+    <string name="order_detail_cancel">Cancel</string>
+    <string name="order_detail_uber_banner_ready">Order is ready — waiting for driver pickup</string>
+    <string name="order_detail_partial_refund_by">By: %1$s</string>
+    <string name="order_detail_discounts">Discounts</string>
+    <string name="order_detail_taxes">Taxes</string>
+    <string name="order_detail_discount_line">• Discount</string>
+    <string name="order_detail_discount_bullet_label">• %1$s</string>
+    <string name="order_detail_tax_default">Tax</string>
+    <string name="order_detail_tax_named_percent">%1$s (%2$s%%)</string>
+    <string name="order_detail_tip_with_percent">Tip (%1$s%%)</string>
+    <string name="order_detail_tip">Tip</string>
+    <string name="order_detail_voided">Voided</string>
+    <string name="order_detail_refunded">Refunded</string>
+    <string name="order_detail_refunded_amount_neg">-%1$s</string>
+    <string name="order_detail_split_evenly">SPLIT EVENLY (%1$d)</string>
+    <string name="order_detail_split_by_item">SPLIT BY ITEM</string>
+    <string name="order_detail_order_type_to_go">TO-GO</string>
+    <string name="order_detail_order_type_online_order">Online Order</string>
+    <string name="order_detail_order_type_uber">UBER EATS</string>
+    <string name="order_detail_order_type_dine_in">DINE IN</string>
+    <string name="order_detail_order_type_editable">%1$s  ✎</string>
+    <string name="order_detail_tip_adjust">Adjust Tip</string>
+    <string name="order_detail_tip_add">Add Tip</string>
 </resources>

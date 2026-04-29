@@ -81,8 +81,9 @@ class OrdersAdapter(
             val isOnline = order.orderSource.isNotBlank()
             val label = buildString {
                 if (order.orderNumber > 0L) append("#${order.orderNumber}")
+                // Customer / guest name: show only on order detail, not on list cards.
                 val displayName = if (isOnline) {
-                    order.customerName.takeIf { it.isNotBlank() }
+                    null
                 } else {
                     order.employeeName.takeIf { it.isNotBlank() && it != "—" }
                 }
@@ -193,6 +194,7 @@ class OrdersAdapter(
                 "BAR" -> "BAR"
                 "BAR_TAB" -> "BAR TAB"
                 "UBER_EATS" -> "UBER EATS"
+                "ONLINE_PICKUP" -> "Online Order"
                 else -> "TO-GO"
             }
 

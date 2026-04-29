@@ -2,6 +2,7 @@ package com.ernesto.myapplication
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
@@ -9,14 +10,15 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import java.util.Locale
-import java.util.concurrent.Executors
 
 class TodaySalesActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
     private lateinit var txtTodayTotal: TextView
     private lateinit var txtTodayCount: TextView
+    private var currentSalesListener: ListenerRegistration? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,7 +65,12 @@ class TodaySalesActivity : AppCompatActivity() {
                 }
         }
 
-        loadCurrentSales()
+        attachCurrentSalesListener()
+    }
+
+    override fun onDestroy() {
+        currentSalesListener?.remove()
+        super.onDestroy()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -73,69 +80,22 @@ class TodaySalesActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        loadCurrentSales()
+        attachCurrentSalesListener()
     }
 
-    private fun loadCurrentSales() {
-        db.collection("Transactions")
+    private fun attachCurrentSalesListener() {
+        currentSalesListener?.remove()
+        currentSalesListener = db.collection("Transactions")
             .whereEqualTo("settled", false)
-            .get()
-            .addOnSuccessListener { documents ->
-                Executors.newSingleThreadExecutor().execute {
-                    var total = 0.0
-                    var count = 0
-
-                    for (doc in documents) {
-                        val voided = doc.getBoolean("voided") ?: false
-                        if (voided) continue
-
-                        val type = doc.getString("type") ?: "SALE"
-                        if (type == "PRE_AUTH") continue
-
-                        if (type == "SALE" || type == "CAPTURE") {
-                            // Prefer totalPaidInCents — includes tips after Tip Adjustment / Order Detail flows;
-                            // payment line amounts are not updated when tips are added.
-                            val totalPaidInCentsField = doc.getLong("totalPaidInCents")
-                            if (totalPaidInCentsField != null) {
-                                total += totalPaidInCentsField / 100.0
-                            } else {
-                                val payments = doc.get("payments") as? List<*> ?: emptyList<Any>()
-                                var totalCents = 0L
-
-                                for (p in payments) {
-                                    val map = p as? Map<*, *> ?: continue
-                                    val status = (map["status"] as? String) ?: ""
-                                    if (status.equals("VOIDED", ignoreCase = true)) continue
-                                    val amountInCents = (map["amountInCents"] as? Number)?.toLong() ?: 0L
-                                    totalCents += amountInCents
-                                }
-
-                                if (totalCents > 0L) {
-                                    total += totalCents / 100.0
-                                } else {
-                                    val amount = doc.getDouble("amount")
-                                        ?: doc.getDouble("totalPaid")
-                                        ?: 0.0
-                                    total += amount
-                                }
-                            }
-                        } else if (type == "REFUND") {
-                            val amount = doc.getDouble("amount") ?: 0.0
-                            total -= amount
-                        }
-
-                        count++
-                    }
-
-                    val finalTotal = if (total < 0.005) 0.0 else total
-                    val finalCount = count
-                    runOnUiThread {
-                        if (!isDestroyed) {
-                            txtTodayTotal.text = String.format(Locale.US, "Current Sales: $%.2f", finalTotal)
-                            txtTodayCount.text = "Transactions: $finalCount"
-                        }
-                    }
+            .addSnapshotListener { snapshots, error ->
+                if (error != null) {
+                    Log.e("TodaySalesActivity", "Current sales query failed", error)
+                    return@addSnapshotListener
                 }
+                if (snapshots == null || isDestroyed) return@addSnapshotListener
+                val (finalTotal, finalCount) = UnsettledSalesSummary.compute(snapshots)
+                txtTodayTotal.text = String.format(Locale.US, "Current Sales: $%.2f", finalTotal)
+                txtTodayCount.text = "Transactions: $finalCount"
             }
     }
 }

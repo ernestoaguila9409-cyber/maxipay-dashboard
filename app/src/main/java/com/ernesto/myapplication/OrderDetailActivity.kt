@@ -1,8 +1,16 @@
+@file:SuppressLint("HardcodedText", "NotifyDataSetChanged")
+@file:Suppress("SpellCheckingInspection")
+
 package com.ernesto.myapplication
 
+import android.annotation.SuppressLint
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.Rect
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.widget.TextView
 import android.widget.Toast
@@ -16,17 +24,10 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 import com.ernesto.myapplication.data.TransactionPayment
-import org.json.JSONObject
-import java.io.IOException
 import android.widget.LinearLayout
 import java.text.SimpleDateFormat
 import java.util.*
-import java.util.concurrent.TimeUnit
-import java.util.Locale
 import android.util.Log
 import android.widget.EditText
 import android.Manifest
@@ -35,6 +36,8 @@ import android.os.Build
 import android.text.InputType
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.toColorInt
+import androidx.lifecycle.Lifecycle
 import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.ernesto.myapplication.SessionEmployee
@@ -42,10 +45,12 @@ import com.ernesto.myapplication.engine.OrderEngine
 import com.ernesto.myapplication.engine.SplitReceiptPayload
 import com.ernesto.myapplication.engine.SplitReceiptReprintHelper
 import com.ernesto.myapplication.engine.PaymentService
-import com.ernesto.myapplication.payments.SpinApiUrls
+import com.ernesto.myapplication.payments.SpinGatewayP
+import com.ernesto.myapplication.payments.TransactionVoidReferenceResolver
 import android.graphics.Typeface
 import com.google.firebase.Timestamp
 import com.google.firebase.functions.FirebaseFunctions
+import kotlin.math.roundToLong
 
 class OrderDetailActivity : AppCompatActivity() {
 
@@ -100,6 +105,8 @@ class OrderDetailActivity : AppCompatActivity() {
     private var dashboardListener: ListenerRegistration? = null
     private var orderItemsListener: ListenerRegistration? = null
 
+    private val voidSequenceHandler = Handler(Looper.getMainLooper())
+
     private enum class ReceiptContentType { ORIGINAL, REFUND, VOID }
 
     private sealed class OriginalPrintSplitChoice {
@@ -112,6 +119,17 @@ class OrderDetailActivity : AppCompatActivity() {
 
     companion object {
         private const val REQUEST_BT_CONNECT = 1001
+
+        // Below this elapsed time since Restaurant Accepted, the "Mark Ready"
+        // confirmation dialog escalates to a strong warning. Marking an Uber
+        // order ready prematurely triggers courier dispatch against food that
+        // isn't actually ready, which is the leading cause of merchant-side
+        // cancellations on the Uber Eats integration.
+        private const val MIN_PREP_SECONDS_WARNING: Long = 60L
+        /** SPIn often returns "Service Busy" if the next void is sent before the first completes. */
+        private const val VOID_GAP_BETWEEN_LEGS_MS = 1_800L
+        private const val VOID_BUSY_MAX_RETRIES = 5
+        private const val VOID_BUSY_RETRY_BASE_MS = 2_000L
     }
 
     private val tableSelectLauncher =
@@ -236,10 +254,10 @@ class OrderDetailActivity : AppCompatActivity() {
         uberActionsContainer.visibility = View.GONE
         btnAcceptUber.visibility = View.VISIBLE
         btnAcceptUber.isEnabled = true
-        btnAcceptUber.text = "Accept"
+        btnAcceptUber.text = getString(R.string.order_detail_accept)
         btnDenyUber.visibility = View.VISIBLE
         btnDenyUber.isEnabled = true
-        btnDenyUber.text = "Deny"
+        btnDenyUber.text = getString(R.string.order_detail_deny)
 
         db.collection("Orders").document(orderId)
             .get()
@@ -253,7 +271,7 @@ class OrderDetailActivity : AppCompatActivity() {
                 val orderNumber = doc.getLong("orderNumber") ?: 0L
 
                 if (orderNumber > 0L) {
-                    txtHeaderOrderNumber.text = "Order #$orderNumber"
+                    txtHeaderOrderNumber.text = getString(R.string.order_detail_order_number, orderNumber)
                     txtHeaderOrderNumber.visibility = View.VISIBLE
                 } else {
                     txtHeaderOrderNumber.visibility = View.GONE
@@ -261,28 +279,25 @@ class OrderDetailActivity : AppCompatActivity() {
 
                 if (status == "VOIDED") {
                     val voidedBy = doc.getString("voidedBy")?.takeIf { it.isNotBlank() } ?: "—"
-                    txtHeaderEmployee.text = "Voided by: $voidedBy"
+                    txtHeaderEmployee.text = getString(R.string.order_detail_voided_by, voidedBy)
                     val voidedAt = doc.getTimestamp("voidedAt")
-                    if (voidedAt != null) {
-                        val format = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US)
-                        txtHeaderTime.text = format.format(voidedAt.toDate())
+                    txtHeaderTime.text = if (voidedAt != null) {
+                        SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US).format(voidedAt.toDate())
                     } else {
-                        txtHeaderTime.text = ""
+                        ""
                     }
                 } else {
-                    txtHeaderEmployee.text = "Employee: $employee"
+                    txtHeaderEmployee.text = getString(R.string.order_detail_employee, employee)
                     val createdAt = doc.getTimestamp("createdAt")
-                    if (createdAt != null) {
-                        val date = createdAt.toDate()
-                        val format = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US)
-                        txtHeaderTime.text = format.format(date)
+                    txtHeaderTime.text = if (createdAt != null) {
+                        SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US).format(createdAt.toDate())
                     } else {
-                        txtHeaderTime.text = ""
+                        ""
                     }
                 }
 
                 if (customerName.isNotBlank()) {
-                    txtHeaderCustomer.text = "Customer: $customerName"
+                    txtHeaderCustomer.text = getString(R.string.order_detail_customer, customerName)
                     txtHeaderCustomer.visibility = View.VISIBLE
                     txtAddCustomer.visibility = View.GONE
                 } else {
@@ -322,19 +337,19 @@ class OrderDetailActivity : AppCompatActivity() {
                 if (orderType == "UBER_EATS" && status == "ACCEPTED") {
                     uberActionsContainer.visibility = View.VISIBLE
                     findViewById<TextView>(R.id.txtUberBanner).text =
-                        "Order Accepted — Mark ready when prepared"
-                    btnAcceptUber.text = "Ready for Pickup"
-                    btnAcceptUber.setOnClickListener { markUberOrderReady() }
-                    btnDenyUber.text = "Cancel"
+                        getString(R.string.order_detail_uber_banner_accepted)
+                    btnAcceptUber.text = getString(R.string.order_detail_ready_pickup)
+                    btnAcceptUber.setOnClickListener { confirmMarkUberOrderReady() }
+                    btnDenyUber.text = getString(R.string.order_detail_cancel)
                     btnDenyUber.setOnClickListener { confirmCancelUberOrder() }
                 }
 
                 if (orderType == "UBER_EATS" && status == "READY") {
                     uberActionsContainer.visibility = View.VISIBLE
                     findViewById<TextView>(R.id.txtUberBanner).text =
-                        "Order is ready — Waiting for driver pickup"
+                        getString(R.string.order_detail_uber_banner_ready)
                     btnAcceptUber.visibility = View.GONE
-                    btnDenyUber.text = "Cancel"
+                    btnDenyUber.text = getString(R.string.order_detail_cancel)
                     btnDenyUber.setOnClickListener { confirmCancelUberOrder() }
                 }
 
@@ -362,8 +377,11 @@ class OrderDetailActivity : AppCompatActivity() {
                     if (!fullyRefunded && totalFromRefunds > 0 && wholeOrderRefundEmployee != null) {
                         partialRefundContainer.visibility = View.VISIBLE
                         txtPartialRefundAmount.text = MoneyUtils.centsToDisplay(totalFromRefunds)
-                        if (!wholeOrderRefundEmployee.isNullOrBlank() && wholeOrderRefundEmployee != "—") {
-                            txtPartialRefundBy.text = "By: $wholeOrderRefundEmployee"
+                        if (wholeOrderRefundEmployee.isNotBlank() && wholeOrderRefundEmployee != "—") {
+                            txtPartialRefundBy.text = getString(
+                                R.string.order_detail_partial_refund_by,
+                                wholeOrderRefundEmployee
+                            )
                             txtPartialRefundBy.visibility = View.VISIBLE
                         } else {
                             txtPartialRefundBy.visibility = View.GONE
@@ -387,12 +405,8 @@ class OrderDetailActivity : AppCompatActivity() {
                     }
                     if (status == "CLOSED") {
                         bottomActions.visibility = View.VISIBLE
-                        if (!fullyRefunded) {
-                            btnRefund.visibility = View.VISIBLE
-                            btnRefund.setOnClickListener { confirmRefund() }
-                        } else {
-                            btnRefund.visibility = View.GONE
-                        }
+                        btnRefund.visibility = View.VISIBLE
+                        btnRefund.setOnClickListener { confirmRefund() }
                         btnReceipt.visibility = View.VISIBLE
                         btnReceipt.setOnClickListener { showOrderReceiptFlow() }
                         resolveBatchAndShowVoid(saleTransactionId)
@@ -463,6 +477,60 @@ class OrderDetailActivity : AppCompatActivity() {
             }
     }
 
+    /**
+     * Wraps [markUberOrderReady] with a confirmation dialog. If the order was
+     * accepted less than [MIN_PREP_SECONDS_WARNING] seconds ago, the dialog
+     * escalates to a strong warning instead of a routine prompt — this prevents
+     * accidental rapid-tap dispatches that cause Uber to send a courier before
+     * the food is actually ready.
+     */
+    private fun confirmMarkUberOrderReady() {
+        db.collection("Orders").document(orderId).get()
+            .addOnSuccessListener { doc ->
+                val acceptedAt = doc.getTimestamp("acceptedAt")
+                val elapsedSeconds = if (acceptedAt != null) {
+                    (System.currentTimeMillis() - acceptedAt.toDate().time) / 1000L
+                } else {
+                    Long.MAX_VALUE
+                }
+
+                val isPremature = elapsedSeconds in 0 until MIN_PREP_SECONDS_WARNING
+
+                val title = if (isPremature) "Food really ready?" else "Mark order ready?"
+                val message = if (isPremature) {
+                    buildString {
+                        append("This order was accepted only ")
+                        append(elapsedSeconds.coerceAtLeast(0))
+                        append(" second")
+                        if (elapsedSeconds != 1L) append("s")
+                        append(" ago.\n\n")
+                        append("Marking it ready now will dispatch an Uber courier ")
+                        append("immediately. If the food isn't actually ready when ")
+                        append("the courier arrives, the order will likely be ")
+                        append("cancelled.\n\n")
+                        append("Are you sure the food is ready for pickup?")
+                    }
+                } else {
+                    "Uber will dispatch a courier to pick up this order. Continue?"
+                }
+                val positiveLabel = if (isPremature) "Yes, mark ready anyway" else "Mark ready"
+
+                AlertDialog.Builder(this)
+                    .setTitle(title)
+                    .setMessage(message)
+                    .setPositiveButton(positiveLabel) { _, _ -> markUberOrderReady() }
+                    .setNegativeButton("Not yet", null)
+                    .show()
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(
+                    this,
+                    "Could not verify order timing: ${e.message}",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+    }
+
     private fun markUberOrderReady() {
         btnAcceptUber.isEnabled = false
         btnDenyUber.isEnabled = false
@@ -485,16 +553,38 @@ class OrderDetailActivity : AppCompatActivity() {
             }
     }
 
+    private val uberCancelReasons = linkedMapOf(
+        "ITEM_ISSUE"                to "Item issue",
+        "KITCHEN_CLOSED"            to "Kitchen closed",
+        "RESTAURANT_TOO_BUSY"       to "Restaurant too busy",
+        "STORE_CLOSED"              to "Store closed",
+        "CUSTOMER_CALLED_TO_CANCEL" to "Customer called to cancel",
+        "ORDER_VALIDATION"          to "Order validation problem",
+        "TECHNICAL_FAILURE"         to "Technical failure",
+        "POS_NOT_READY"             to "POS not ready",
+        "POS_OFFLINE"               to "POS offline",
+        "CAPACITY"                  to "At capacity",
+        "ADDRESS"                   to "Address issue",
+        "SPECIAL_INSTRUCTIONS"      to "Special instructions issue",
+        "PRICING"                   to "Pricing issue",
+        "OTHER"                     to "Other",
+    )
+
     private fun confirmCancelUberOrder() {
+        val labels = uberCancelReasons.values.toTypedArray()
+        val codes  = uberCancelReasons.keys.toList()
+
         AlertDialog.Builder(this)
-            .setTitle("Cancel Uber Eats Order?")
-            .setMessage("This will cancel the order and notify the customer.")
-            .setPositiveButton("Cancel Order") { _, _ -> cancelUberOrder() }
+            .setTitle("Cancel Uber Eats Order")
+            .setItems(labels) { _, which ->
+                val selectedCode = codes[which]
+                cancelUberOrder(selectedCode)
+            }
             .setNegativeButton("Go Back", null)
             .show()
     }
 
-    private fun cancelUberOrder() {
+    private fun cancelUberOrder(reason: String) {
         btnAcceptUber.isEnabled = false
         btnDenyUber.isEnabled = false
         db.collection("Orders").document(orderId)
@@ -503,7 +593,7 @@ class OrderDetailActivity : AppCompatActivity() {
                     "status" to "CANCELLED",
                     "cancelledAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp(),
-                    "cancelReason" to "OUT_OF_ITEMS",
+                    "cancelReason" to reason,
                 )
             )
             .addOnSuccessListener {
@@ -531,9 +621,9 @@ class OrderDetailActivity : AppCompatActivity() {
             }
 
             db.collection("Orders").document(orderId)
-                .update(updates as Map<String, Any>)
+                .update(updates)
                 .addOnSuccessListener {
-                    txtHeaderCustomer.text = "Customer: ${info.name}"
+                    txtHeaderCustomer.text = getString(R.string.order_detail_customer, info.name)
                     txtHeaderCustomer.visibility = View.VISIBLE
                     txtAddCustomer.visibility = View.GONE
                     saveCustomerToFirestoreIfNew(info)
@@ -549,7 +639,7 @@ class OrderDetailActivity : AppCompatActivity() {
 
         CustomerDuplicateChecker.checkExists(db, info.name, info.email, info.phone) { exists ->
             if (exists) {
-                resolveCustomerId(info.name, info.email)
+                resolveCustomerId(info.name)
             } else {
                 val customer = hashMapOf<String, Any>(
                     "name" to info.name,
@@ -568,7 +658,7 @@ class OrderDetailActivity : AppCompatActivity() {
         }
     }
 
-    private fun resolveCustomerId(name: String, email: String) {
+    private fun resolveCustomerId(name: String) {
         db.collection("Customers")
             .whereEqualTo("name", name)
             .limit(1)
@@ -655,31 +745,39 @@ class OrderDetailActivity : AppCompatActivity() {
         discountSummaryContainer.removeAllViews()
         taxBreakdownContainer.removeAllViews()
 
-        val summaryColor = 0xFF555555.toInt()
-        val dividerColor = 0xFFE0E0E0.toInt()
-
         val grouped = DiscountDisplay.groupByName(appliedDiscounts)
         val hasDiscounts = discountInCents > 0L || grouped.isNotEmpty()
 
         if (hasDiscounts) {
             discountSummaryContainer.visibility = View.VISIBLE
-            addOrderSummarySectionHeader(discountSummaryContainer, "Discounts", topMarginDp = 0, textColor = summaryColor)
-            addOrderSummaryDivider(discountSummaryContainer, dividerColor)
+            addOrderSummarySectionHeader(
+                discountSummaryContainer,
+                getString(R.string.order_detail_discounts),
+                topMarginDp = 0
+            )
+            addOrderSummaryDivider(discountSummaryContainer)
             if (grouped.isNotEmpty()) {
                 for (gd in grouped) {
                     addOrderSummaryAmountRow(
                         discountSummaryContainer,
-                        "• ${DiscountDisplay.formatReceiptLabel(gd.name, gd.type, gd.value)}",
-                        "-${MoneyUtils.centsToDisplay(gd.totalCents)}",
-                        summaryColor
+                        getString(
+                            R.string.order_detail_discount_bullet_label,
+                            DiscountDisplay.formatReceiptLabel(gd.name, gd.type, gd.value)
+                        ),
+                        getString(
+                            R.string.order_detail_refunded_amount_neg,
+                            MoneyUtils.centsToDisplay(gd.totalCents)
+                        )
                     )
                 }
             } else if (discountInCents > 0L) {
                 addOrderSummaryAmountRow(
                     discountSummaryContainer,
-                    "• Discount",
-                    "-${MoneyUtils.centsToDisplay(discountInCents)}",
-                    summaryColor
+                    getString(R.string.order_detail_discount_line),
+                    getString(
+                        R.string.order_detail_refunded_amount_neg,
+                        MoneyUtils.centsToDisplay(discountInCents)
+                    )
                 )
             }
         } else {
@@ -688,12 +786,16 @@ class OrderDetailActivity : AppCompatActivity() {
 
         if (taxBreakdown.isNotEmpty()) {
             val headerTop = if (hasDiscounts) 8 else 4
-            addOrderSummarySectionHeader(taxBreakdownContainer, "Taxes", topMarginDp = headerTop, textColor = summaryColor)
-            addOrderSummaryDivider(taxBreakdownContainer, dividerColor)
+            addOrderSummarySectionHeader(
+                taxBreakdownContainer,
+                getString(R.string.order_detail_taxes),
+                topMarginDp = headerTop
+            )
+            addOrderSummaryDivider(taxBreakdownContainer)
         }
 
         for (entry in taxBreakdown) {
-            val name = entry["name"]?.toString() ?: "Tax"
+            val name = entry["name"]?.toString() ?: getString(R.string.order_detail_tax_default)
             val amountCents = (entry["amountInCents"] as? Number)?.toLong() ?: 0L
             val rate = (entry["rate"] as? Number)?.toDouble()
             val taxType = entry["taxType"]?.toString() ?: ""
@@ -701,8 +803,8 @@ class OrderDetailActivity : AppCompatActivity() {
 
             val label = if (taxType == "PERCENTAGE" && rate != null && rate > 0) {
                 val pctStr = if (rate % 1.0 == 0.0) rate.toInt().toString()
-                else String.format(java.util.Locale.US, "%.2f", rate)
-                "$name ($pctStr%)"
+                else "%.2f".format(rate)
+                getString(R.string.order_detail_tax_named_percent, name, pctStr)
             } else {
                 name
             }
@@ -710,8 +812,7 @@ class OrderDetailActivity : AppCompatActivity() {
             addOrderSummaryAmountRow(
                 taxBreakdownContainer,
                 label,
-                MoneyUtils.centsToDisplay(amountCents),
-                summaryColor
+                MoneyUtils.centsToDisplay(amountCents)
             )
         }
 
@@ -723,32 +824,33 @@ class OrderDetailActivity : AppCompatActivity() {
             if (tipAmountInCents > 0L && subtotalCents > 0L) {
                 val tipPct = tipAmountInCents.toDouble() / subtotalCents * 100.0
                 val pctStr = if (tipPct % 1.0 == 0.0) tipPct.toInt().toString()
-                else String.format(java.util.Locale.US, "%.1f", tipPct)
-                txtTipLabel.text = "Tip ($pctStr%)"
+                else "%.1f".format(tipPct)
+                txtTipLabel.text = getString(R.string.order_detail_tip_with_percent, pctStr)
             } else {
-                txtTipLabel.text = "Tip"
+                txtTipLabel.text = getString(R.string.order_detail_tip)
             }
             txtTipAmount.text = MoneyUtils.centsToDisplay(tipAmountInCents)
         } else {
             tipRow.visibility = View.GONE
         }
 
-        val originalCents = totalInCents
-        txtOriginalTotal.text = MoneyUtils.centsToDisplay(originalCents)
+        txtOriginalTotal.text = MoneyUtils.centsToDisplay(totalInCents)
 
         if (isVoided) {
             refundedSummaryRow.visibility = View.VISIBLE
             val refundedLabel = refundedSummaryRow.getChildAt(0) as? TextView
-            refundedLabel?.text = "Voided"
-            txtRefundedAmount.text = "-${MoneyUtils.centsToDisplay(originalCents)}"
+            refundedLabel?.text = getString(R.string.order_detail_voided)
+            txtRefundedAmount.text = getString(
+                R.string.order_detail_refunded_amount_neg,
+                MoneyUtils.centsToDisplay(totalInCents)
+            )
             txtRemainingTotal.text = MoneyUtils.centsToDisplay(0L)
         } else {
-            val refundedCents = totalRefundedInCents
-            val remainingCents = (originalCents - refundedCents).coerceAtLeast(0L)
+            val remainingCents = (totalInCents - totalRefundedInCents).coerceAtLeast(0L)
             val refundedLabel = refundedSummaryRow.getChildAt(0) as? TextView
-            refundedLabel?.text = "Refunded"
-            txtRefundedAmount.text = MoneyUtils.centsToDisplay(refundedCents)
-            refundedSummaryRow.visibility = if (refundedCents > 0L) View.VISIBLE else View.GONE
+            refundedLabel?.text = getString(R.string.order_detail_refunded)
+            txtRefundedAmount.text = MoneyUtils.centsToDisplay(totalRefundedInCents)
+            refundedSummaryRow.visibility = if (totalRefundedInCents > 0L) View.VISIBLE else View.GONE
             txtRemainingTotal.text = MoneyUtils.centsToDisplay(remainingCents)
         }
         orderSummaryContainer.visibility = View.VISIBLE
@@ -761,8 +863,8 @@ class OrderDetailActivity : AppCompatActivity() {
         container: LinearLayout,
         title: String,
         topMarginDp: Int,
-        textColor: Int
     ) {
+        val textColor = 0xFF555555.toInt()
         container.addView(TextView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -778,7 +880,8 @@ class OrderDetailActivity : AppCompatActivity() {
         })
     }
 
-    private fun addOrderSummaryDivider(container: LinearLayout, lineColor: Int) {
+    private fun addOrderSummaryDivider(container: LinearLayout) {
+        val lineColor = 0xFFE0E0E0.toInt()
         container.addView(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -795,8 +898,8 @@ class OrderDetailActivity : AppCompatActivity() {
         container: LinearLayout,
         leftLabel: String,
         rightAmount: String,
-        textColor: Int
     ) {
+        val textColor = 0xFF555555.toInt()
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -824,9 +927,19 @@ class OrderDetailActivity : AppCompatActivity() {
 
     private var refundHistoryLines: String = ""
 
+    private fun isTransactionEcommerce(txDoc: DocumentSnapshot): Boolean {
+        if (txDoc.getBoolean("ecommerce") == true) return true
+        val payments = txDoc.get("payments") as? List<*> ?: return false
+        return payments.any { p ->
+            (p as? Map<*, *>)?.get("entryType")?.toString()?.equals("ECOMMERCE", true) == true
+        }
+    }
+
     /**
      * For CLOSED orders: load transaction to check if all-cash (then no Void), then resolve batchId
      * and show VOID button only when batch.closed == false and payment was not all cash.
+     * Ecommerce (online HPP) still uses the SPIn void API so Dejavoo/gateway matches Firestore;
+     * only the “batch must be open” gate is skipped so Void stays available after batch close.
      */
     private fun resolveBatchAndShowVoid(saleTransactionId: String?) {
         if (saleTransactionId.isNullOrBlank()) {
@@ -835,6 +948,11 @@ class OrderDetailActivity : AppCompatActivity() {
         }
         db.collection("Transactions").document(saleTransactionId).get()
             .addOnSuccessListener { txDoc ->
+                if (isTransactionEcommerce(txDoc)) {
+                    btnVoid.visibility = View.VISIBLE
+                    btnVoid.setOnClickListener { confirmVoid() }
+                    return@addOnSuccessListener
+                }
                 if (isTransactionAllCash(txDoc)) {
                     btnVoid.visibility = View.GONE
                     return@addOnSuccessListener
@@ -906,7 +1024,11 @@ class OrderDetailActivity : AppCompatActivity() {
                         }
 
                         val existingTipCents = txDoc.getLong("tipAmountInCents") ?: 0L
-                        btnTipAdjust.text = if (existingTipCents > 0L) "Adjust Tip" else "Add Tip"
+                        btnTipAdjust.text = if (existingTipCents > 0L) {
+                            getString(R.string.order_detail_tip_adjust)
+                        } else {
+                            getString(R.string.order_detail_tip_add)
+                        }
                         btnTipAdjust.visibility = View.VISIBLE
                         btnTipAdjust.setOnClickListener {
                             showTipAdjustDialog(saleTransactionId, txDoc, batchId)
@@ -917,6 +1039,7 @@ class OrderDetailActivity : AppCompatActivity() {
             .addOnFailureListener { btnTipAdjust.visibility = View.GONE }
     }
 
+    @SuppressLint("NewApi")
     private fun showTipAdjustDialog(saleTransactionId: String, txDoc: DocumentSnapshot, batchId: String) {
         val existingTipCents = txDoc.getLong("tipAmountInCents") ?: 0L
         val title = if (existingTipCents > 0L) "Adjust Tip" else "Add Tip"
@@ -926,7 +1049,7 @@ class OrderDetailActivity : AppCompatActivity() {
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             setPadding(48, 32, 48, 32)
             if (existingTipCents > 0L) {
-                setText(String.format(Locale.US, "%.2f", existingTipCents / 100.0))
+                setText("%.2f".format(existingTipCents / 100.0))
                 selectAll()
             }
         }
@@ -998,7 +1121,8 @@ class OrderDetailActivity : AppCompatActivity() {
         val deltaTipCents = newTipCents - oldTipCents
 
         db.runTransaction { transaction ->
-            val txSnap = transaction.get(txRef)
+            // Read txRef inside the transaction to ensure consistency.
+            transaction.get(txRef)
             val batchSnap = transaction.get(batchRef)
             val orderSnap = transaction.get(orderRef)
 
@@ -1016,11 +1140,10 @@ class OrderDetailActivity : AppCompatActivity() {
 
             val orderTotalCents = orderSnap.getLong("totalInCents") ?: 0L
             val orderTipCents = orderSnap.getLong("tipAmountInCents") ?: 0L
-            val newOrderTipCents = newTipCents
             val newOrderTotalCents = orderTotalCents - orderTipCents + newTipCents
 
             transaction.update(orderRef, mapOf(
-                "tipAmountInCents" to newOrderTipCents,
+                "tipAmountInCents" to newTipCents,
                 "totalInCents" to newOrderTotalCents
             ))
 
@@ -1052,12 +1175,11 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun getReferenceIdFromTransaction(txDoc: DocumentSnapshot): String {
-        val payments = txDoc.get("payments") as? List<*> ?: emptyList<Any>()
-        val first = payments.firstOrNull() as? Map<*, *>
-        return first?.get("referenceId")?.toString()?.takeIf { it.isNotBlank() }
-            ?: first?.get("terminalReference")?.toString()?.takeIf { it.isNotBlank() }
-            ?: txDoc.getString("referenceId")?.takeIf { it.isNotBlank() }
-            ?: ""
+        @Suppress("UNCHECKED_CAST")
+        val first = (txDoc.get("payments") as? List<*>)?.firstOrNull() as? Map<String, Any>
+        val fromLeg = TransactionVoidReferenceResolver.gatewayRefFromPaymentMap(first)
+        if (fromLeg.isNotBlank()) return fromLeg
+        return TransactionVoidReferenceResolver.firstGatewayRefFromTransactionDoc(txDoc)
     }
 
     private fun loadRefundHistory(saleTransactionId: String?, onLoaded: (totalRefundedCents: Long, refundedLineKeys: Set<String>, refundedNameAmountKeys: Set<String>, refundedLineKeyToEmployee: Map<String, String>, refundedNameAmountToEmployee: Map<String, String>, refundedLineKeyToDate: Map<String, String>, refundedNameAmountToDate: Map<String, String>, wholeOrderRefundEmployee: String?, wholeOrderRefundDate: String?) -> Unit) {
@@ -1118,8 +1240,9 @@ class OrderDetailActivity : AppCompatActivity() {
     private enum class SplitPayBannerKind { EVEN, BY_ITEMS }
 
     /**
-     * Split receipts on sale payments: even splits use [SplitReceiptLine.originalItemName] or a non-empty
-     * [SplitReceiptPayload.sharedItemsNote]; split-by-item receipts have line items without original names.
+     * Split receipts on sale payments: even splits use the Firestore `originalItemName` field on split
+     * receipt line rows (see `SplitReceiptLine`) or a non-empty `SplitReceiptPayload.sharedItemsNote`;
+     * split-by-item receipts have line items without original names.
      */
     @Suppress("UNCHECKED_CAST")
     private fun extractSplitBannerInfo(payments: List<*>): Pair<SplitPayBannerKind, Int>? {
@@ -1159,13 +1282,13 @@ class OrderDetailActivity : AppCompatActivity() {
                 }
                 val (kind, people) = info
                 txtSplitBanner.text = when (kind) {
-                    SplitPayBannerKind.EVEN -> "SPLIT EVENLY ($people)"
-                    SplitPayBannerKind.BY_ITEMS -> "SPLIT BY ITEM"
+                    SplitPayBannerKind.EVEN -> getString(R.string.order_detail_split_evenly, people)
+                    SplitPayBannerKind.BY_ITEMS -> getString(R.string.order_detail_split_by_item)
                 }
                 txtSplitBanner.visibility = View.VISIBLE
-                txtSplitBanner.setTextColor(android.graphics.Color.WHITE)
-                val bg = android.graphics.drawable.GradientDrawable()
-                bg.setColor(android.graphics.Color.parseColor("#6A4FB3"))
+                txtSplitBanner.setTextColor(Color.WHITE)
+                val bg = GradientDrawable()
+                bg.setColor("#6A4FB3".toColorInt())
                 bg.cornerRadius = 16f
                 txtSplitBanner.background = bg
             }
@@ -1175,7 +1298,7 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun updateOrderTypeBadge(status: String) {
-        val knownTypes = setOf("TO_GO", "DINE_IN", "UBER_EATS")
+        val knownTypes = setOf("TO_GO", "DINE_IN", "UBER_EATS", "ONLINE_PICKUP")
         if (orderType !in knownTypes) {
             txtOrderType.visibility = View.GONE
             return
@@ -1183,17 +1306,22 @@ class OrderDetailActivity : AppCompatActivity() {
 
         txtOrderType.visibility = View.VISIBLE
         val label = when (orderType) {
-            "TO_GO" -> "TO-GO"
-            "UBER_EATS" -> "UBER EATS"
-            else -> "DINE IN"
+            "TO_GO" -> getString(R.string.order_detail_order_type_to_go)
+            "UBER_EATS" -> getString(R.string.order_detail_order_type_uber)
+            "ONLINE_PICKUP" -> getString(R.string.order_detail_order_type_online_order)
+            else -> getString(R.string.order_detail_order_type_dine_in)
         }
         val bgArgb = OrderTypeColorResolver.colorArgbForOrderType(orderType)
 
-        val isEditable = status == "OPEN" && orderType != "UBER_EATS"
-        txtOrderType.text = if (isEditable) "$label  ✎" else label
-        txtOrderType.setTextColor(android.graphics.Color.WHITE)
+        val isEditable = status == "OPEN" && orderType != "UBER_EATS" && orderType != "ONLINE_PICKUP"
+        txtOrderType.text = if (isEditable) {
+            getString(R.string.order_detail_order_type_editable, label)
+        } else {
+            label
+        }
+        txtOrderType.setTextColor(Color.WHITE)
 
-        val bg = android.graphics.drawable.GradientDrawable()
+        val bg = GradientDrawable()
         bg.setColor(bgArgb)
         bg.cornerRadius = 16f
         txtOrderType.background = bg
@@ -1317,7 +1445,7 @@ class OrderDetailActivity : AppCompatActivity() {
         }
     }
 
-    /** Real-time line items (modifiers, [kdsStatus], payments on line, etc.). */
+    /** Real-time line items (modifiers, per-line `kdsStatus`, payments on line, etc.). */
     private fun attachOrderItemsRealtimeListener() {
         orderItemsListener?.remove()
         val orderRef = db.collection("Orders").document(orderId)
@@ -1330,7 +1458,7 @@ class OrderDetailActivity : AppCompatActivity() {
             val docs = snapshot?.documents ?: emptyList()
             orderRef.get()
                 .addOnSuccessListener { orderDoc ->
-                    if (isDestroyed) return@addOnSuccessListener
+                    if (lifecycle.currentState == Lifecycle.State.DESTROYED) return@addOnSuccessListener
                     if (!orderDoc.exists()) return@addOnSuccessListener
                     applyOrderItemsToUi(orderDoc, docs)
                 }
@@ -1338,7 +1466,7 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun applyOrderItemsToUi(orderDoc: DocumentSnapshot, itemDocuments: List<DocumentSnapshot>) {
-        if (isDestroyed) return
+        if (lifecycle.currentState == Lifecycle.State.DESTROYED) return
         @Suppress("UNCHECKED_CAST")
         guestNames = (orderDoc.get("guestNames") as? List<String>) ?: emptyList()
         @Suppress("UNCHECKED_CAST")
@@ -1386,7 +1514,31 @@ class OrderDetailActivity : AppCompatActivity() {
     // ===============================
 
     private fun confirmVoid() {
+        val txId = saleTransactionId
+        if (txId != null) {
+            db.collection("Transactions").document(txId).get()
+                .addOnSuccessListener { txDoc ->
+                    if (isTransactionEcommerce(txDoc)) {
+                        AlertDialog.Builder(this)
+                            .setTitle("Void Online Order")
+                            .setMessage(
+                                "This sends a void to your payment terminal (SPIn/Dejavoo) using the sale reference. " +
+                                    "If the host declines or the sale is already settled, use a refund from the portal or POS instead.",
+                            )
+                            .setPositiveButton("Void") { _, _ -> finalizeEcommerceVoid(txId) }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                        return@addOnSuccessListener
+                    }
+                    confirmVoidWithBatchCheck()
+                }
+                .addOnFailureListener { confirmVoidWithBatchCheck() }
+        } else {
+            confirmVoidWithBatchCheck()
+        }
+    }
 
+    private fun confirmVoidWithBatchCheck() {
         val batchId = currentBatchId ?: return
 
         db.collection("Batches")
@@ -1408,6 +1560,155 @@ class OrderDetailActivity : AppCompatActivity() {
                     .setPositiveButton("Void") { _, _ -> executeVoid() }
                     .setNegativeButton("Cancel", null)
                     .show()
+            }
+    }
+
+    /**
+     * Online / HPP sale: same Dejavoo+SPIn void as in-store (see [executeVoid]), then Firestore.
+     * Previously this path only updated Firestore, so the app showed “voided” while the terminal did not.
+     */
+    private fun finalizeEcommerceVoid(transactionId: String) {
+        startGatewayVoidSequenceForTransaction(transactionId)
+    }
+
+    private fun finalizeVoidFirestoreOnly(transactionId: String) {
+        val txRef = db.collection("Transactions").document(transactionId)
+        val orderRef = db.collection("Orders").document(orderId)
+        val voidedBy = intent.getStringExtra("employeeName")?.takeIf { it.isNotBlank() }
+            ?: SessionEmployee.getEmployeeName(this@OrderDetailActivity)
+
+        txRef.get().addOnSuccessListener { txDoc ->
+            if (!txDoc.exists()) return@addOnSuccessListener
+            @Suppress("UNCHECKED_CAST")
+            val paymentsRaw = txDoc.get("payments") as? List<Map<String, Any>> ?: emptyList()
+            val updatedPayments = paymentsRaw.map { p ->
+                val mutable = p.toMutableMap()
+                mutable["status"] = "VOIDED"
+                mutable
+            }
+            db.runBatch { batch ->
+                batch.update(
+                    txRef,
+                    mapOf(
+                        "voided" to true,
+                        "voidedBy" to voidedBy,
+                        "payments" to updatedPayments,
+                    ),
+                )
+                batch.update(
+                    orderRef,
+                    mapOf(
+                        "status" to "VOIDED",
+                        "voidedAt" to Date(),
+                        "voidedBy" to voidedBy,
+                    ),
+                )
+            }.addOnSuccessListener {
+                ReceiptPromptHelper.promptForReceipt(
+                    this, ReceiptPromptHelper.ReceiptType.VOID, orderId, transactionId
+                ) { loadHeader() }
+            }.addOnFailureListener { e ->
+                Toast.makeText(this, "Void saved on terminal but Firestore update failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun resolveEnrichedCardPaymentsForVoid(
+        txDoc: DocumentSnapshot,
+        cardPayments: List<TransactionPayment>,
+        onReady: (List<TransactionPayment>) -> Unit,
+    ) {
+        val step1 = TransactionVoidReferenceResolver.enrichPaymentsForVoid(txDoc, cardPayments)
+        if (!TransactionVoidReferenceResolver.anyCardLegMissingGatewayRef(step1)) {
+            onReady(step1)
+            return
+        }
+        db.collection("Orders").document(orderId).get()
+            .addOnSuccessListener { od ->
+                onReady(TransactionVoidReferenceResolver.enrichPaymentsFromOrderDoc(od, step1))
+            }
+            .addOnFailureListener { onReady(step1) }
+    }
+
+    /** Loads [Transactions] doc and runs SPIn void leg(s), then [finalizeVoid]. */
+    private fun startGatewayVoidSequenceForTransaction(transactionId: String) {
+        db.collection("Transactions")
+            .document(transactionId)
+            .get()
+            .addOnSuccessListener { txDoc ->
+                if (!txDoc.exists()) {
+                    Toast.makeText(this, "Transaction not found.", Toast.LENGTH_LONG).show()
+                    return@addOnSuccessListener
+                }
+                @Suppress("UNCHECKED_CAST")
+                val paymentsRaw = txDoc.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                val txType = txDoc.getString("type") ?: "SALE"
+                if (txType == "PRE_AUTH") {
+                    Toast.makeText(
+                        this,
+                        "Pre-authorization cannot be voided. Capture the tab first, then void the capture if needed.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    return@addOnSuccessListener
+                }
+                val payments = paymentsRaw.map { p ->
+                    val amountCents = (p["amountInCents"] as? Number)?.toLong() ?: 0L
+                    TransactionPayment(
+                        paymentType = p["paymentType"]?.toString() ?: "",
+                        cardBrand = p["cardBrand"]?.toString() ?: "",
+                        last4 = p["last4"]?.toString() ?: "",
+                        entryType = p["entryType"]?.toString() ?: "",
+                        amountInCents = amountCents,
+                        referenceId = TransactionVoidReferenceResolver.gatewayRefFromPaymentMap(p),
+                        clientReferenceId = TransactionVoidReferenceResolver.clientRefFromPaymentMap(p),
+                        authCode = p["authCode"]?.toString() ?: "",
+                        batchNumber = (p["batchNumber"] as? Number)?.toString() ?: p["batchNumber"]?.toString() ?: "",
+                        transactionNumber = (p["transactionNumber"] as? Number)?.toString()
+                            ?: p["transactionNumber"]?.toString() ?: "",
+                        invoiceNumber = p["invoiceNumber"]?.toString() ?: "",
+                        pnReferenceId = TransactionVoidReferenceResolver.pnReferenceFromPaymentMap(p),
+                        paymentId = p["paymentId"]?.toString() ?: "",
+                    )
+                }.ifEmpty {
+                    val firstRef = getReferenceIdFromTransaction(txDoc)
+                    val firstType = getPaymentTypeFromTransaction(txDoc).ifBlank { "Credit" }
+                    val amountCents = txDoc.getLong("totalPaidInCents") ?: 0L
+                    listOf(
+                        TransactionPayment(
+                            paymentType = firstType,
+                            amountInCents = amountCents,
+                            referenceId = firstRef,
+                            clientReferenceId = TransactionVoidReferenceResolver.firstClientRefFromTransactionDoc(txDoc),
+                            batchNumber = txDoc.getString("batchNumber") ?: "",
+                            transactionNumber = (txDoc.get("transactionNumber") as? Number)?.toString() ?: "",
+                        ),
+                    )
+                }
+
+                val cashPayments = payments.filter { it.paymentType.equals("Cash", true) }
+                val cardPayments = payments.filter { !it.paymentType.equals("Cash", true) }
+                val totalCashCents = cashPayments.sumOf { it.amountInCents }
+                val totalCashDollars = totalCashCents / 100.0
+
+                resolveEnrichedCardPaymentsForVoid(txDoc, cardPayments) { enriched ->
+                    if (totalCashCents > 0) {
+                        AlertDialog.Builder(this)
+                            .setTitle("Cash return required")
+                            .setMessage(
+                                "Return $%.2f in cash to the customer before completing the void.".format(totalCashDollars),
+                            )
+                            .setPositiveButton("I have returned the cash") { _, _ ->
+                                runVoidSequence(transactionId, enriched)
+                            }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    } else {
+                        runVoidSequence(transactionId, enriched)
+                    }
+                }
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to load transaction: ${it.message}", Toast.LENGTH_LONG).show()
             }
     }
 
@@ -1446,11 +1747,13 @@ class OrderDetailActivity : AppCompatActivity() {
                                 last4 = p["last4"]?.toString() ?: "",
                                 entryType = p["entryType"]?.toString() ?: "",
                                 amountInCents = amountCents,
-                                referenceId = p["referenceId"]?.toString() ?: p["terminalReference"]?.toString() ?: "",
-                                clientReferenceId = p["clientReferenceId"]?.toString() ?: "",
+                                referenceId = TransactionVoidReferenceResolver.gatewayRefFromPaymentMap(p),
+                                clientReferenceId = TransactionVoidReferenceResolver.clientRefFromPaymentMap(p),
                                 authCode = p["authCode"]?.toString() ?: "",
                                 batchNumber = (p["batchNumber"] as? Number)?.toString() ?: p["batchNumber"]?.toString() ?: "",
                                 transactionNumber = (p["transactionNumber"] as? Number)?.toString() ?: p["transactionNumber"]?.toString() ?: "",
+                                invoiceNumber = p["invoiceNumber"]?.toString() ?: "",
+                                pnReferenceId = TransactionVoidReferenceResolver.pnReferenceFromPaymentMap(p),
                                 paymentId = p["paymentId"]?.toString() ?: ""
                             )
                         }.ifEmpty {
@@ -1462,7 +1765,7 @@ class OrderDetailActivity : AppCompatActivity() {
                                     paymentType = firstType,
                                     amountInCents = amountCents,
                                     referenceId = firstRef,
-                                    clientReferenceId = txDoc.getString("clientReferenceId") ?: "",
+                                    clientReferenceId = TransactionVoidReferenceResolver.firstClientRefFromTransactionDoc(txDoc),
                                     batchNumber = txDoc.getString("batchNumber") ?: "",
                                     transactionNumber = (txDoc.get("transactionNumber") as? Number)?.toString() ?: ""
                                 )
@@ -1474,17 +1777,19 @@ class OrderDetailActivity : AppCompatActivity() {
                         val totalCashCents = cashPayments.sumOf { it.amountInCents }
                         val totalCashDollars = totalCashCents / 100.0
 
-                        if (totalCashCents > 0) {
-                            AlertDialog.Builder(this)
-                                .setTitle("Cash return required")
-                                .setMessage("Return $%.2f in cash to the customer before completing the void.".format(totalCashDollars))
-                                .setPositiveButton("I have returned the cash") { _, _ ->
-                                    runVoidSequence(transactionId, cardPayments)
-                                }
-                                .setNegativeButton("Cancel", null)
-                                .show()
-                        } else {
-                            runVoidSequence(transactionId, cardPayments)
+                        resolveEnrichedCardPaymentsForVoid(txDoc, cardPayments) { enriched ->
+                            if (totalCashCents > 0) {
+                                AlertDialog.Builder(this)
+                                    .setTitle("Cash return required")
+                                    .setMessage("Return $%.2f in cash to the customer before completing the void.".format(totalCashDollars))
+                                    .setPositiveButton("I have returned the cash") { _, _ ->
+                                        runVoidSequence(transactionId, enriched)
+                                    }
+                                    .setNegativeButton("Cancel", null)
+                                    .show()
+                            } else {
+                                runVoidSequence(transactionId, enriched)
+                            }
                         }
                     }
                     .addOnFailureListener {
@@ -1504,92 +1809,113 @@ class OrderDetailActivity : AppCompatActivity() {
         voidCardPaymentsSequentially(txDocId, cardPayments, 0)
     }
 
+    private fun voidLegLabelForDetail(payment: TransactionPayment, index: Int, legCount: Int): String {
+        val last4 = payment.last4.trim().ifBlank { "????" }
+        return "Card ${index + 1} of $legCount (••••$last4)"
+    }
+
+    private fun isHostBusyVoidMessage(msg: String): Boolean = SpinGatewayP.isVoidHostBusyMessage(msg)
+
     private fun voidCardPaymentsSequentially(
         txDocId: String,
         cardPayments: List<TransactionPayment>,
-        index: Int
+        index: Int,
+        busyRetryOnLeg: Int = 0
     ) {
         if (index >= cardPayments.size) {
             finalizeVoid(txDocId)
             return
         }
         val payment = cardPayments[index]
-        val refId = payment.referenceId.ifBlank { payment.clientReferenceId }
-        if (refId.isBlank()) {
-            Toast.makeText(this, "Cannot void: no ReferenceId for card payment.", Toast.LENGTH_LONG).show()
-            return
-        }
-        callVoidApiForPayment(payment, txDocId, cardPayments, index)
+        callVoidApiForPayment(payment, txDocId, cardPayments, index, busyRetryOnLeg)
     }
 
     private fun callVoidApiForPayment(
         payment: TransactionPayment,
         transactionId: String,
         cardPayments: List<TransactionPayment>,
-        index: Int
+        index: Int,
+        busyRetryOnLeg: Int = 0
     ) {
-        val refId = payment.referenceId.ifBlank { payment.clientReferenceId }
-        val amount = payment.amountInCents / 100.0
-        val json = JSONObject().apply {
-            put("Amount", amount)
-            put("PaymentType", payment.paymentType.ifBlank { "Credit" })
-            put("ReferenceId", refId)
-            if (payment.authCode.isNotBlank()) put("AuthCode", payment.authCode)
-            put("PrintReceipt", "No")
-            put("GetReceipt", "No")
-            put("CaptureSignature", false)
-            put("GetExtendedData", true)
-            put("Tpn", TerminalPrefs.getTpn(this@OrderDetailActivity))
-            put("RegisterId", TerminalPrefs.getRegisterId(this@OrderDetailActivity))
-            put("Authkey", TerminalPrefs.getAuthKey(this@OrderDetailActivity))
-            if (payment.batchNumber.isNotBlank()) {
-                put("BatchNumber", payment.batchNumber.toIntOrNull() ?: payment.batchNumber)
-            }
-            if (payment.transactionNumber.isNotBlank()) {
-                put("TransactionNumber", payment.transactionNumber.toIntOrNull() ?: payment.transactionNumber)
+        val leg = voidLegLabelForDetail(payment, index, cardPayments.size)
+        var refId = payment.referenceId.trim()
+        if (refId.isEmpty()) {
+            val client = payment.clientReferenceId.trim()
+            if (client.isNotEmpty()) {
+                Log.w("TX_API", "[$leg] Order detail void: using clientReferenceId (gateway referenceId was blank).")
+                refId = client
             }
         }
-        Log.d("TX_API", "[VOID_REQ] ${json.toString()}")
-
-        val client = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .build()
-        val body = json.toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder()
-            .url(SpinApiUrls.voidPayment(this@OrderDetailActivity))
-            .post(body)
-            .build()
-
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                runOnUiThread {
-                    Toast.makeText(this@OrderDetailActivity, "Void Failed: ${e.message}", Toast.LENGTH_LONG).show()
+        if (refId.isEmpty()) {
+            Toast.makeText(
+                this,
+                "Cannot void $leg: this payment is missing the gateway ReferenceId. Check the transaction in Firestore or try void from the Transactions list.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        SpinGatewayP.enqueueVoidPayment(
+            this,
+            payment,
+            refId,
+            readTimeoutSeconds = 120,
+        ) { result ->
+            val leg = voidLegLabelForDetail(payment, index, cardPayments.size)
+            runOnUiThread {
+                if (result.networkError != null) {
+                    Toast.makeText(this@OrderDetailActivity, "Void Failed: ${result.networkError}", Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
                 }
-            }
-            override fun onResponse(call: Call, response: Response) {
-                val responseText = response.body?.string() ?: ""
-                runOnUiThread {
-                    if (!response.isSuccessful) {
+                val responseText = result.responseBody
+                if (result.httpCode !in 200..299) {
+                    val reason = SpinGatewayP.voidDeclineMessage(responseText)
+                    Toast.makeText(
+                        this@OrderDetailActivity,
+                        "Void failed (HTTP ${result.httpCode}) $leg: $reason",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    Log.e("TX_API", "Void HTTP ${result.httpCode} body: $responseText")
+                    return@runOnUiThread
+                }
+                if (result.hostApproved) {
+                    val hasMoreLegs = index + 1 < cardPayments.size
+                    if (hasMoreLegs) {
+                        voidSequenceHandler.postDelayed(
+                            { voidCardPaymentsSequentially(transactionId, cardPayments, index + 1, 0) },
+                            VOID_GAP_BETWEEN_LEGS_MS,
+                        )
+                    } else {
+                        voidCardPaymentsSequentially(transactionId, cardPayments, index + 1, 0)
+                    }
+                } else {
+                    val reason = SpinGatewayP.voidDeclineMessage(responseText)
+                    if (isHostBusyVoidMessage(reason) && busyRetryOnLeg < VOID_BUSY_MAX_RETRIES) {
+                        val waitMs = VOID_BUSY_RETRY_BASE_MS * (busyRetryOnLeg + 1)
                         Toast.makeText(
                             this@OrderDetailActivity,
-                            "Void error ${response.code}: $responseText",
-                            Toast.LENGTH_LONG
+                            "$leg\nHost busy (${reason.trim()}). Retrying in ${waitMs / 1000}s (${busyRetryOnLeg + 1}/$VOID_BUSY_MAX_RETRIES)…",
+                            Toast.LENGTH_SHORT,
                         ).show()
+                        voidSequenceHandler.postDelayed(
+                            { voidCardPaymentsSequentially(transactionId, cardPayments, index, busyRetryOnLeg + 1) },
+                            waitMs,
+                        )
                         return@runOnUiThread
                     }
-                    val resultCode = JSONObject(responseText)
-                        .optJSONObject("GeneralResponse")
-                        ?.optString("ResultCode")
-                    if (resultCode == "0") {
-                        voidCardPaymentsSequentially(transactionId, cardPayments, index + 1)
+                    val partial = if (index > 0) {
+                        " Earlier void attempt(s) may have succeeded on the host—check the terminal before trying again."
                     } else {
-                        Toast.makeText(this@OrderDetailActivity, "Void Declined", Toast.LENGTH_LONG).show()
+                        ""
                     }
+                    Log.w("TX_API", "Void declined full=$responseText")
+                    Toast.makeText(
+                        this@OrderDetailActivity,
+                        "VOID declined: $leg\n$reason$partial",
+                        Toast.LENGTH_LONG,
+                    ).show()
                 }
             }
-        })
+        }
     }
 
     private fun finalizeVoid(transactionId: String) {
@@ -1603,7 +1929,9 @@ class OrderDetailActivity : AppCompatActivity() {
                         .addOnSuccessListener { txDoc ->
                             batchId = txDoc.getString("batchId")?.takeIf { it.isNotBlank() }
                             if (!batchId.isNullOrBlank()) {
-                                runFinalizeVoidBatch(transactionId, orderDoc, batchId!!)
+                                runFinalizeVoidBatch(transactionId, batchId!!)
+                            } else if (isTransactionEcommerce(txDoc)) {
+                                finalizeVoidFirestoreOnly(transactionId)
                             } else {
                                 Toast.makeText(this, "Cannot void: batch not found", Toast.LENGTH_LONG).show()
                             }
@@ -1613,11 +1941,11 @@ class OrderDetailActivity : AppCompatActivity() {
                         }
                     return@addOnSuccessListener
                 }
-                runFinalizeVoidBatch(transactionId, orderDoc, batchId!!)
+                runFinalizeVoidBatch(transactionId, batchId!!)
             }
     }
 
-    private fun runFinalizeVoidBatch(transactionId: String, orderDoc: DocumentSnapshot, batchId: String) {
+    private fun runFinalizeVoidBatch(transactionId: String, batchId: String) {
         val txRef = db.collection("Transactions").document(transactionId)
         txRef.get()
             .addOnSuccessListener { txDoc ->
@@ -1758,7 +2086,7 @@ class OrderDetailActivity : AppCompatActivity() {
             val orderTotalInCents = orderDoc.getLong("totalInCents") ?: 0L
             val subtotalInCents = itemDocs.sumOf { it.getLong("lineTotalInCents") ?: 0L }
             if (subtotalInCents > 0L && orderTotalInCents > subtotalInCents) {
-                Math.round(orderTotalInCents.toDouble() * lineTotalInCents / subtotalInCents)
+                (orderTotalInCents.toDouble() * lineTotalInCents / subtotalInCents).roundToLong()
             } else {
                 lineTotalInCents
             }
@@ -1788,12 +2116,13 @@ class OrderDetailActivity : AppCompatActivity() {
             minOf(itemRefundBase, remainingBalance)
         }
 
-        val amountStr = String.format(Locale.US, "%.2f", refundAmount / 100.0)
+        val amountStr = "%.2f".format(refundAmount / 100.0)
         val includesTax = refundAmount > lineTotalInCents
+        val dollar = "$"
         val message = if (includesTax) {
-            "Refunding:\n$itemName\n\nAmount:\n\$$amountStr (includes tax)"
+            "Refunding:\n$itemName\n\nAmount:\n$dollar$amountStr (includes tax)"
         } else {
-            "Refunding:\n$itemName\n\nAmount:\n\$$amountStr"
+            "Refunding:\n$itemName\n\nAmount:\n$dollar$amountStr"
         }
 
         AlertDialog.Builder(this)
@@ -1806,6 +2135,7 @@ class OrderDetailActivity : AppCompatActivity() {
             .show()
     }
 
+    @Suppress("UNCHECKED_CAST")
     private fun executeRefundForAmount(amountInCents: Long?, finishAfter: Boolean, refundedItemName: String? = null, refundedLineKey: String? = null) {
 
         db.collection("Orders")
@@ -1847,36 +2177,40 @@ class OrderDetailActivity : AppCompatActivity() {
                             return@addOnSuccessListener
                         }
 
+                        if (isTransactionEcommerce(txDoc)) {
+                            finalizeRefund(transactionId, refundAmountInCents, finishAfter, refundedItemName, refundedLineKey, "Credit")
+                            return@addOnSuccessListener
+                        }
+
                         val payments = txDoc.get("payments") as? List<Map<String, Any>> ?: emptyList()
                         val firstPayment = payments.firstOrNull()
                         val paymentType = firstPayment?.get("paymentType")?.toString() ?: "Credit"
-                        val referenceId = firstPayment?.get("referenceId")?.toString()
-                            ?: firstPayment?.get("terminalReference")?.toString()
 
                         if (paymentType.equals("Cash", ignoreCase = true)) {
                             finalizeRefund(transactionId, refundAmountInCents, finishAfter, refundedItemName, refundedLineKey)
                             return@addOnSuccessListener
                         }
 
-                        if (!referenceId.isNullOrBlank()) {
-                            callRefundApi(
-                                referenceId = referenceId,
-                                paymentType = paymentType,
-                                amount = refundAmountInCents / 100.0,
-                                originalTransactionId = transactionId,
-                                amountInCents = refundAmountInCents,
-                                finishAfter = finishAfter,
-                                refundedItemName = refundedItemName,
-                                refundedLineKey = refundedLineKey
-                            )
-                        } else {
+                        val leg = SpinGatewayP.cardLegForHostReturnFromTxDoc(txDoc)
+                        if (leg.referenceId.isBlank() && leg.clientReferenceId.isBlank()) {
                             Toast.makeText(this, "Cannot refund: no reference for this transaction.", Toast.LENGTH_LONG).show()
+                            return@addOnSuccessListener
                         }
+                        callRefundApi(
+                            leg = leg,
+                            paymentType = paymentType,
+                            amount = refundAmountInCents / 100.0,
+                            originalTransactionId = transactionId,
+                            amountInCents = refundAmountInCents,
+                            finishAfter = finishAfter,
+                            refundedItemName = refundedItemName,
+                            refundedLineKey = refundedLineKey
+                        )
                     }
             }
     }
     private fun callRefundApi(
-        referenceId: String,
+        leg: TransactionPayment,
         paymentType: String,
         amount: Double,
         originalTransactionId: String,
@@ -1885,87 +2219,29 @@ class OrderDetailActivity : AppCompatActivity() {
         refundedItemName: String? = null,
         refundedLineKey: String? = null
     ) {
-        // Debit refunds use the same flow as credit (Credit Return); do not send Debit Return (Z8)
         val requestPaymentType = if (paymentType.equals("Debit", true)) "Credit" else paymentType
-        val json = JSONObject().apply {
-            put("Amount", amount)
-            put("PaymentType", requestPaymentType)
-            put("ReferenceId", referenceId)
-            put("PrintReceipt", "No")
-            put("GetReceipt", "No")
-            put("CaptureSignature", false)
-            put("GetExtendedData", true)
-            put("CallbackInfo", JSONObject().apply { put("Url", "") })
-            put("Tpn", TerminalPrefs.getTpn(this@OrderDetailActivity))
-            put("Authkey", TerminalPrefs.getAuthKey(this@OrderDetailActivity))
-        }
-
-        val body = json.toString()
-            .toRequestBody("application/json".toMediaType())
-
-        val request = Request.Builder()
-            .url(SpinApiUrls.refund(this@OrderDetailActivity))
-            .post(body)
-            .build()
-
-        val client = OkHttpClient.Builder()
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(180, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
-            .build()
-
-        client.newCall(request).enqueue(object : Callback {
-
-            override fun onFailure(call: Call, e: IOException) {
-                runOnUiThread {
+        SpinGatewayP.enqueueRefundPayment(this, amount, requestPaymentType, leg) { result ->
+            runOnUiThread {
+                if (result.networkError != null) {
                     Toast.makeText(
                         this@OrderDetailActivity,
-                        "Refund Failed: ${e.message}",
+                        "Refund Failed: ${result.networkError}",
                         Toast.LENGTH_LONG
                     ).show()
+                    return@runOnUiThread
                 }
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-
-                val responseText = response.body?.string() ?: ""
-
-                runOnUiThread {
-
-                    if (!response.isSuccessful) {
-                        Toast.makeText(
-                            this@OrderDetailActivity,
-                            "Refund error ${response.code}: $responseText",
-                            Toast.LENGTH_LONG
-                        ).show()
-                        return@runOnUiThread
-                    }
-
-                    try {
-                        val jsonResponse = JSONObject(responseText)
-                        val general = jsonResponse.optJSONObject("GeneralResponse")
-                        val resultCode = general?.optString("ResultCode") ?: ""
-
-                        if (resultCode == "0") {
-                            finalizeRefund(originalTransactionId, amountInCents, finishAfter, refundedItemName, refundedLineKey, paymentType)
-                        } else {
-                            Toast.makeText(
-                                this@OrderDetailActivity,
-                                "Refund Declined",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-
-                    } catch (e: Exception) {
-                        Toast.makeText(
-                            this@OrderDetailActivity,
-                            "Refund parse error: $responseText",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
+                if (!result.hostApproved) {
+                    val reason = SpinGatewayP.voidDeclineMessage(result.responseBody)
+                    Toast.makeText(
+                        this@OrderDetailActivity,
+                        if (reason.isNotBlank()) "Refund Declined: $reason" else "Refund Declined",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@runOnUiThread
                 }
+                finalizeRefund(originalTransactionId, amountInCents, finishAfter, refundedItemName, refundedLineKey, paymentType)
             }
-        })
+        }
     }
     // ===============================
     // RECEIPT FLOW
@@ -2062,9 +2338,9 @@ class OrderDetailActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Email which receipt?")
             .setItems(labels.toTypedArray()) { _, which ->
-                when {
-                    which == labels.lastIndex -> Unit
-                    which == payloads.size -> showTypedEmailDialog(orderId, "sendReceiptEmail", "")
+                when (which) {
+                    labels.lastIndex -> Unit
+                    payloads.size -> showTypedEmailDialog(orderId, "sendReceiptEmail", "")
                     else -> showSplitReceiptEmailEntryDialog(orderId, payloads[which])
                 }
             }
@@ -2174,9 +2450,9 @@ class OrderDetailActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Print which receipt?")
             .setItems(labels.toTypedArray()) { _, which ->
-                when {
-                    which == labels.lastIndex -> Unit
-                    which == payloads.size -> {
+                when (which) {
+                    labels.lastIndex -> Unit
+                    payloads.size -> {
                         originalPrintSplitChoice = OriginalPrintSplitChoice.CombinedReceipt
                         runAfterBluetoothPermission { executePrint(ReceiptContentType.ORIGINAL) }
                     }
@@ -2259,8 +2535,8 @@ class OrderDetailActivity : AppCompatActivity() {
 
     @Suppress("UNCHECKED_CAST")
     private fun buildOriginalSegments(
-        orderDoc: com.google.firebase.firestore.DocumentSnapshot,
-        items: List<com.google.firebase.firestore.DocumentSnapshot>,
+        orderDoc: DocumentSnapshot,
+        items: List<DocumentSnapshot>,
         payments: List<Map<String, Any>>,
         transactionStatus: String? = null,
         transactionVoided: Boolean = false
@@ -2280,11 +2556,18 @@ class OrderDetailActivity : AppCompatActivity() {
         val oType = orderDoc.getString("orderType") ?: ""
         val empName = orderDoc.getString("employeeName") ?: ""
         val custName = orderDoc.getString("customerName") ?: ""
-        val dateStr = java.text.SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
+        val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
 
         segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         if (oType.isNotBlank()) {
-            val label = when (oType) { "DINE_IN" -> "Dine In"; "TO_GO" -> "To Go"; "BAR_TAB" -> "Bar Tab"; "UBER_EATS" -> "Uber Eats"; else -> oType }
+            val label = when (oType) {
+                "DINE_IN" -> "Dine In"
+                "TO_GO" -> "To Go"
+                "BAR_TAB" -> "Bar Tab"
+                "UBER_EATS" -> "Uber Eats"
+                "ONLINE_PICKUP" -> "Online Order"
+                else -> oType
+            }
             segs += EscPosPrinter.Segment("Type: $label", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
         if (rs.showServerName && empName.isNotBlank()) segs += EscPosPrinter.Segment("Server: $empName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
@@ -2313,11 +2596,11 @@ class OrderDetailActivity : AppCompatActivity() {
                     val modName = mod["name"]?.toString() ?: continue
                     val modAction = mod["action"]?.toString() ?: "ADD"
                     val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
-                    val modCents = kotlin.math.round(modPrice * 100).toLong()
+                    val modCents = (modPrice * 100).roundToLong()
                     when {
-                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("${indent}  ${ModifierRemoveDisplay.receiptNoLine(modName)}", bold = rs.boldItems, fontSize = rs.fontSizeItems)
-                        modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("${indent}  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
-                        else -> segs += EscPosPrinter.Segment("${indent}  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("$indent  ${ModifierRemoveDisplay.receiptNoLine(modName)}", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("$indent  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        else -> segs += EscPosPrinter.Segment("$indent  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
                     }
                     @Suppress("UNCHECKED_CAST")
                     val children = mod["children"] as? List<Map<String, Any>>
@@ -2386,27 +2669,15 @@ class OrderDetailActivity : AppCompatActivity() {
             )
         )
 
-        for (p in payments) {
-            val pType = p["paymentType"]?.toString() ?: ""
-            if (pType.equals("Cash", ignoreCase = true)) {
-                segs += EscPosPrinter.Segment("Paid with Cash", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-            } else {
-                val brand = p["cardBrand"]?.toString() ?: ""
-                val l4 = p["last4"]?.toString() ?: ""
-                val auth = p["authCode"]?.toString() ?: ""
-                if (brand.isNotBlank() || l4.isNotBlank()) {
-                    segs += EscPosPrinter.Segment(buildString { if (brand.isNotBlank()) append(brand); if (l4.isNotBlank()) { if (isNotEmpty()) append(" "); append("**** $l4") } }, bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-                }
-                if (auth.isNotBlank()) segs += EscPosPrinter.Segment("Auth: $auth", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-                if (pType.isNotBlank()) segs += EscPosPrinter.Segment("Type: $pType", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-                receiptLabelForCardEntryType(p["entryType"]?.toString())?.let { method ->
-                    segs += EscPosPrinter.Segment(
-                        "Payment method: $method",
-                        bold = rs.boldFooter,
-                        fontSize = rs.fontSizeFooter,
-                        centered = true
-                    )
-                }
+        // ── Payments (split / mixed) ──
+        val paymentLines = ReceiptPaymentFormatting.buildPaymentsSectionLines(
+            totalInCents = totalInCents,
+            payments = payments,
+            width = lwt,
+        )
+        if (paymentLines.isNotEmpty()) {
+            for (line in paymentLines) {
+                segs += EscPosPrinter.Segment(line, bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
             }
             segs += EscPosPrinter.Segment("")
         }
@@ -2452,9 +2723,9 @@ class OrderDetailActivity : AppCompatActivity() {
 
     @Suppress("UNCHECKED_CAST")
     private fun buildDetailedRefundSegments(
-        orderDoc: com.google.firebase.firestore.DocumentSnapshot,
-        items: List<com.google.firebase.firestore.DocumentSnapshot>,
-        refundDocs: List<com.google.firebase.firestore.DocumentSnapshot>,
+        orderDoc: DocumentSnapshot,
+        items: List<DocumentSnapshot>,
+        refundDocs: List<DocumentSnapshot>,
         payments: List<Map<String, Any>> = emptyList()
     ): List<EscPosPrinter.Segment> {
         val rs = ReceiptSettings.load(this)
@@ -2472,7 +2743,7 @@ class OrderDetailActivity : AppCompatActivity() {
         if (orderNumber > 0L) {
             segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
-        val dateStr = java.text.SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
+        val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
         if (rs.showDateTime) segs += EscPosPrinter.Segment("Date: $dateStr", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
 
         val refundedByName = refundDocs.firstOrNull()?.getString("refundedBy")?.trim()?.takeIf { it.isNotBlank() }
@@ -2556,9 +2827,9 @@ class OrderDetailActivity : AppCompatActivity() {
                 val taxRate = (tax["rate"] as? Number)?.toDouble() ?: 0.0
                 val orderTaxAmount = (tax["amountInCents"] as? Number)?.toLong() ?: 0L
                 val prorated = if (taxRate > 0) {
-                    Math.round(refundedBaseCents * taxRate / 100.0)
+                    (refundedBaseCents * taxRate / 100.0).roundToLong()
                 } else if (orderSubtotalCents > 0) {
-                    Math.round(orderTaxAmount.toDouble() * refundedBaseCents / orderSubtotalCents)
+                    (orderTaxAmount.toDouble() * refundedBaseCents / orderSubtotalCents).roundToLong()
                 } else {
                     orderTaxAmount
                 }
@@ -2572,8 +2843,7 @@ class OrderDetailActivity : AppCompatActivity() {
             for ((_, group) in taxGroupMap) {
                 val (name, rate, totalAmount) = group
                 val pctStr = if (rate > 0) {
-                    val pct = rate
-                    if (pct % 1.0 == 0.0) "${pct.toInt()}%" else String.format(Locale.US, "%.2f%%", pct)
+                    if (rate % 1.0 == 0.0) "${rate.toInt()}%" else "%.2f%%".format(rate)
                 } else ""
                 val taxLabel = if (pctStr.isNotBlank()) "$name ($pctStr)" else name
                 segs += EscPosPrinter.Segment(
@@ -2621,7 +2891,7 @@ class OrderDetailActivity : AppCompatActivity() {
         return segs
     }
 
-    private fun buildSimpleRefundSegments(orderDoc: com.google.firebase.firestore.DocumentSnapshot): List<EscPosPrinter.Segment> {
+    private fun buildSimpleRefundSegments(orderDoc: DocumentSnapshot): List<EscPosPrinter.Segment> {
         val rs = ReceiptSettings.load(this)
         val segs = mutableListOf<EscPosPrinter.Segment>()
         val lwg = ReceiptSettings.lineWidthForSize(rs.fontSizeGrandTotal)
@@ -2635,7 +2905,7 @@ class OrderDetailActivity : AppCompatActivity() {
         if (orderNumber > 0L) {
             segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
-        val dateStr = java.text.SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
+        val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
         segs += EscPosPrinter.Segment("Date: $dateStr", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         segs += EscPosPrinter.Segment("")
 
@@ -2659,21 +2929,39 @@ class OrderDetailActivity : AppCompatActivity() {
                 if (!orderDoc.exists()) return@addOnSuccessListener
                 db.collection("Orders").document(orderId).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
-                        val txId = saleTransactionId ?: ""
-                        val printSegments: (List<Map<String, Any>>) -> Unit = { payments ->
-                            val segs = buildDetailedVoidReceiptSegments(orderDoc, itemsSnap.documents, payments)
-                            EscPosPrinter.print(this, segs, rs)
-                        }
-                        if (txId.isNotBlank()) {
-                            db.collection("Transactions").document(txId).get()
-                                .addOnSuccessListener { txDoc ->
-                                    val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
-                                    printSegments(payments)
+                        db.collection("Orders").document(orderId).collection("transactions").get()
+                            .addOnSuccessListener { txnsSnap ->
+                                @Suppress("UNCHECKED_CAST")
+                                val reversed = txnsSnap.documents.mapNotNull { it.data as? Map<String, Any> }
+                                if (reversed.isNotEmpty()) {
+                                    val segs = buildDetailedVoidReceiptSegments(orderDoc, itemsSnap.documents, reversed)
+                                    EscPosPrinter.print(this, segs, rs)
+                                    return@addOnSuccessListener
                                 }
-                                .addOnFailureListener { printSegments(emptyList()) }
-                        } else {
-                            printSegments(emptyList())
-                        }
+
+                                // Fallback: older orders may not have Orders/{orderId}/transactions yet.
+                                val txId = saleTransactionId ?: ""
+                                if (txId.isNotBlank()) {
+                                    db.collection("Transactions").document(txId).get()
+                                        .addOnSuccessListener { txDoc ->
+                                            @Suppress("UNCHECKED_CAST")
+                                            val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                                            val segs = buildDetailedVoidReceiptSegments(orderDoc, itemsSnap.documents, payments)
+                                            EscPosPrinter.print(this, segs, rs)
+                                        }
+                                        .addOnFailureListener {
+                                            val segs = buildDetailedVoidReceiptSegments(orderDoc, itemsSnap.documents, emptyList())
+                                            EscPosPrinter.print(this, segs, rs)
+                                        }
+                                } else {
+                                    val segs = buildDetailedVoidReceiptSegments(orderDoc, itemsSnap.documents, emptyList())
+                                    EscPosPrinter.print(this, segs, rs)
+                                }
+                            }
+                            .addOnFailureListener {
+                                val segs = buildDetailedVoidReceiptSegments(orderDoc, itemsSnap.documents, emptyList())
+                                EscPosPrinter.print(this, segs, rs)
+                            }
                     }
             }
     }
@@ -2682,7 +2970,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun buildDetailedVoidReceiptSegments(
         orderDoc: DocumentSnapshot,
         items: List<DocumentSnapshot>,
-        payments: List<Map<String, Any>>
+        reversedTransactions: List<Map<String, Any>>
     ): List<EscPosPrinter.Segment> {
         val rs = ReceiptSettings.load(this)
         val segs = mutableListOf<EscPosPrinter.Segment>()
@@ -2706,7 +2994,14 @@ class OrderDetailActivity : AppCompatActivity() {
             segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
         if (orderType.isNotBlank()) {
-            val label = when (orderType) { "DINE_IN" -> "Dine In"; "TO_GO" -> "To Go"; "BAR_TAB" -> "Bar Tab"; "UBER_EATS" -> "Uber Eats"; else -> orderType }
+            val label = when (orderType) {
+                "DINE_IN" -> "Dine In"
+                "TO_GO" -> "To Go"
+                "BAR_TAB" -> "Bar Tab"
+                "UBER_EATS" -> "Uber Eats"
+                "ONLINE_PICKUP" -> "Online Order"
+                else -> orderType
+            }
             segs += EscPosPrinter.Segment("Type: $label", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
         if (rs.showServerName && empName.isNotBlank()) segs += EscPosPrinter.Segment("Server: $empName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
@@ -2733,11 +3028,11 @@ class OrderDetailActivity : AppCompatActivity() {
                     val modName = mod["name"]?.toString() ?: continue
                     val modAction = mod["action"]?.toString() ?: "ADD"
                     val modPrice = (mod["price"] as? Number)?.toDouble() ?: 0.0
-                    val modCents = kotlin.math.round(modPrice * 100).toLong()
+                    val modCents = (modPrice * 100).roundToLong()
                     when {
-                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("${indent}  ${ModifierRemoveDisplay.receiptNoLine(modName)}", bold = rs.boldItems, fontSize = rs.fontSizeItems)
-                        modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("${indent}  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
-                        else -> segs += EscPosPrinter.Segment("${indent}  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        modAction == "REMOVE" -> segs += EscPosPrinter.Segment("$indent  ${ModifierRemoveDisplay.receiptNoLine(modName)}", bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        modCents > 0 -> segs += EscPosPrinter.Segment(formatLine("$indent  + $modName", MoneyUtils.centsToDisplay(modCents), lwi), bold = rs.boldItems, fontSize = rs.fontSizeItems)
+                        else -> segs += EscPosPrinter.Segment("$indent  + $modName", bold = rs.boldItems, fontSize = rs.fontSizeItems)
                     }
                     @Suppress("UNCHECKED_CAST")
                     val children = mod["children"] as? List<Map<String, Any>>
@@ -2789,30 +3084,18 @@ class OrderDetailActivity : AppCompatActivity() {
         segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
         segs += EscPosPrinter.Segment("")
 
-        for (p in payments) {
-            val pType = p["paymentType"]?.toString() ?: ""
-            if (pType.equals("Cash", ignoreCase = true)) {
-                segs += EscPosPrinter.Segment("Cash", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-            } else {
-                val brand = p["cardBrand"]?.toString() ?: ""
-                val l4 = p["last4"]?.toString() ?: ""
-                val auth = p["authCode"]?.toString() ?: ""
-                if (brand.isNotBlank() || l4.isNotBlank()) {
-                    segs += EscPosPrinter.Segment(buildString { if (brand.isNotBlank()) append(brand); if (l4.isNotBlank()) { if (isNotEmpty()) append(" "); append("**** $l4") } }, bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-                }
-                if (auth.isNotBlank()) segs += EscPosPrinter.Segment("Auth: $auth", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-                if (pType.isNotBlank()) segs += EscPosPrinter.Segment("Type: $pType", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-                receiptLabelForCardEntryType(p["entryType"]?.toString())?.let { method ->
-                    segs += EscPosPrinter.Segment(
-                        "Payment method: $method",
-                        bold = rs.boldFooter,
-                        fontSize = rs.fontSizeFooter,
-                        centered = true
-                    )
-                }
+        // ── Reversed payments (from Orders/{orderId}/transactions) ──
+        val reversedLines = ReceiptPaymentFormatting.buildReversedPaymentsSectionLines(
+            reversedTransactions = reversedTransactions,
+            width = lwt
+        )
+        if (reversedLines.isNotEmpty()) {
+            reversedLines.forEach { line ->
+                segs += EscPosPrinter.Segment(line, bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
             }
             segs += EscPosPrinter.Segment("")
         }
+
         segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
         return segs
     }

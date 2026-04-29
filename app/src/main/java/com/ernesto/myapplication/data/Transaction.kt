@@ -14,6 +14,10 @@ data class TransactionPayment(
     val authCode: String = "",
     val batchNumber: String = "",
     val transactionNumber: String = "",
+    /** Dejavoo invoice number from the sale (some void flows need it; optional). */
+    val invoiceNumber: String = "",
+    /** Processor PN reference from sale (`PNReferenceId`); some Return/refund flows need it with ReferenceId. */
+    val pnReferenceId: String = "",
     val paymentId: String = ""
 )
 

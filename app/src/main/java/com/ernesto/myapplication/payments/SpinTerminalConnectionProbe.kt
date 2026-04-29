@@ -71,13 +71,16 @@ object SpinTerminalConnectionProbe {
         val body = json.toString().toRequestBody("application/json".toMediaType())
         val request = Request.Builder().url(url).post(body).build()
 
+        SpinCallTracker.beginCall()
         httpClient.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
+                SpinCallTracker.endCall()
                 Log.w(TAG, "Probe failed: ${e.message}")
                 callback(false)
             }
 
             override fun onResponse(call: Call, response: Response) {
+                SpinCallTracker.endCall()
                 val responseText = response.body?.string().orEmpty()
                 callback(parseConnectionStatus(response.code, responseText))
             }

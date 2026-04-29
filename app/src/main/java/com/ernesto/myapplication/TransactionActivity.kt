@@ -3,6 +3,8 @@ package com.ernesto.myapplication
 import android.app.DatePickerDialog
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.LayoutInflater
 import android.widget.EditText
 import android.widget.ImageButton
@@ -16,12 +18,6 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.ernesto.myapplication.data.Transaction
 import com.ernesto.myapplication.data.TransactionPayment
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.IOException
-import java.util.concurrent.TimeUnit
-import org.json.JSONObject
 import android.util.Log
 import java.util.*
 import android.text.InputType
@@ -38,7 +34,8 @@ import com.ernesto.myapplication.engine.MoneyUtils
 import com.ernesto.myapplication.engine.PaymentService
 import com.ernesto.myapplication.engine.SplitReceiptPayload
 import com.ernesto.myapplication.engine.SplitReceiptReprintHelper
-import com.ernesto.myapplication.payments.SpinApiUrls
+import com.ernesto.myapplication.payments.SpinGatewayP
+import com.ernesto.myapplication.payments.TransactionVoidReferenceResolver
 import com.google.firebase.Timestamp
 import java.text.SimpleDateFormat
 
@@ -55,7 +52,13 @@ class TransactionActivity : AppCompatActivity() {
 
     companion object {
         private const val REQUEST_BT_CONNECT = 1001
+        /** SPIn/Dejavoo often returns "Service Busy" if a second void hits before the first finishes. */
+        private const val VOID_GAP_BETWEEN_LEGS_MS = 1_800L
+        private const val VOID_BUSY_MAX_RETRIES = 5
+        private const val VOID_BUSY_RETRY_BASE_MS = 2_000L
     }
+
+    private val voidSequenceHandler = Handler(Looper.getMainLooper())
 
     private enum class ReceiptContentType { ORIGINAL, REFUND, VOID }
 
@@ -174,11 +177,13 @@ class TransactionActivity : AppCompatActivity() {
                             last4 = p["last4"]?.toString() ?: "",
                             entryType = p["entryType"]?.toString() ?: "",
                             amountInCents = amountCents,
-                            referenceId = p["referenceId"]?.toString() ?: p["terminalReference"]?.toString() ?: "",
-                            clientReferenceId = p["clientReferenceId"]?.toString() ?: "",
+                            referenceId = TransactionVoidReferenceResolver.gatewayRefFromPaymentMap(p),
+                            clientReferenceId = TransactionVoidReferenceResolver.clientRefFromPaymentMap(p),
                             authCode = p["authCode"]?.toString() ?: "",
                             batchNumber = (p["batchNumber"] as? Number)?.toString() ?: p["batchNumber"]?.toString() ?: "",
                             transactionNumber = (p["transactionNumber"] as? Number)?.toString() ?: p["transactionNumber"]?.toString() ?: "",
+                            invoiceNumber = p["invoiceNumber"]?.toString() ?: "",
+                            pnReferenceId = TransactionVoidReferenceResolver.pnReferenceFromPaymentMap(p),
                             paymentId = p["paymentId"]?.toString() ?: ""
                         )
                     }
@@ -190,9 +195,10 @@ class TransactionActivity : AppCompatActivity() {
                     val entryType = firstPayment?.entryType ?: doc.getString("entryType") ?: ""
                     // Dejavoo sale response fields for Void: referenceId, batchNumber, transactionNumber (from first payment)
                     val firstRaw = paymentsRaw.firstOrNull()
-                    val gatewayRef = firstRaw?.get("referenceId")?.toString()
-                        ?: firstRaw?.get("terminalReference")?.toString() ?: ""
-                    val clientRef = firstRaw?.get("clientReferenceId")?.toString() ?: ""
+                    val gatewayRef = TransactionVoidReferenceResolver.gatewayRefFromPaymentMap(firstRaw)
+                        .ifBlank { doc.getString("referenceId") ?: doc.getString("gatewayReferenceId") ?: "" }
+                    val clientRef = TransactionVoidReferenceResolver.clientRefFromPaymentMap(firstRaw)
+                        .ifBlank { doc.getString("clientReferenceId") ?: doc.getString("hppTransactionRefId") ?: "" }
                     val batchNum = firstRaw?.get("batchNumber")?.toString() ?: ""
                     val txNum = firstRaw?.get("transactionNumber")?.toString() ?: ""
                     val invNum = firstRaw?.get("invoiceNumber")?.toString() ?: ""
@@ -1238,10 +1244,35 @@ class TransactionActivity : AppCompatActivity() {
                 }
                 db.collection("Orders").document(orderId).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
-                        val segments = buildDetailedVoidSegments(
-                            transaction, orderDoc, itemsSnap.documents
-                        )
-                        EscPosPrinter.print(this, segments, ReceiptSettings.load(this))
+                        db.collection("Orders").document(orderId).collection("transactions").get()
+                            .addOnSuccessListener { txnsSnap ->
+                                @Suppress("UNCHECKED_CAST")
+                                val reversed = txnsSnap.documents.mapNotNull { it.data as? Map<String, Any> }
+                                val fallback = if (reversed.isNotEmpty()) {
+                                    reversed
+                                } else {
+                                    // Fallback: for older data, use the transaction's stored payments.
+                                    transaction.payments.map {
+                                        mapOf(
+                                            "amountInCents" to it.amountInCents,
+                                            "cardBrand" to it.cardBrand,
+                                            "last4" to it.last4,
+                                            "entryMethod" to it.entryType,
+                                            "authCode" to it.authCode,
+                                        )
+                                    }
+                                }
+                                val segments = buildDetailedVoidSegments(
+                                    transaction, orderDoc, itemsSnap.documents, fallback
+                                )
+                                EscPosPrinter.print(this, segments, ReceiptSettings.load(this))
+                            }
+                            .addOnFailureListener {
+                                val segments = buildDetailedVoidSegments(
+                                    transaction, orderDoc, itemsSnap.documents, emptyList()
+                                )
+                                EscPosPrinter.print(this, segments, ReceiptSettings.load(this))
+                            }
                     }
                     .addOnFailureListener { printSimpleReceipt(transaction, "VOID") }
             }
@@ -1252,7 +1283,8 @@ class TransactionActivity : AppCompatActivity() {
     private fun buildDetailedVoidSegments(
         transaction: Transaction,
         orderDoc: com.google.firebase.firestore.DocumentSnapshot,
-        items: List<com.google.firebase.firestore.DocumentSnapshot>
+        items: List<com.google.firebase.firestore.DocumentSnapshot>,
+        reversedTransactions: List<Map<String, Any>>
     ): List<EscPosPrinter.Segment> {
         val rs = ReceiptSettings.load(this)
         val segs = mutableListOf<EscPosPrinter.Segment>()
@@ -1362,27 +1394,18 @@ class TransactionActivity : AppCompatActivity() {
         segs += EscPosPrinter.Segment("=".repeat(lwg), bold = rs.boldGrandTotal, fontSize = rs.fontSizeGrandTotal)
         segs += EscPosPrinter.Segment("")
 
-        for (p in transaction.payments) {
-            val pType = p.paymentType
-            if (pType.equals("Cash", ignoreCase = true)) {
-                segs += EscPosPrinter.Segment("Paid with Cash", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-            } else {
-                if (p.cardBrand.isNotBlank() || p.last4.isNotBlank()) {
-                    segs += EscPosPrinter.Segment(buildString { if (p.cardBrand.isNotBlank()) append(p.cardBrand); if (p.last4.isNotBlank()) { if (isNotEmpty()) append(" "); append("**** ${p.last4}") } }, bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-                }
-                if (p.authCode.isNotBlank()) segs += EscPosPrinter.Segment("Auth: ${p.authCode}", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-                if (pType.isNotBlank()) segs += EscPosPrinter.Segment("Type: $pType", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
-                receiptLabelForCardEntryType(p.entryType)?.let { method ->
-                    segs += EscPosPrinter.Segment(
-                        "Payment method: $method",
-                        bold = rs.boldFooter,
-                        fontSize = rs.fontSizeFooter,
-                        centered = true
-                    )
-                }
+        // ── Reversed payments (from Orders/{orderId}/transactions) ──
+        val reversedLines = ReceiptPaymentFormatting.buildReversedPaymentsSectionLines(
+            reversedTransactions = reversedTransactions,
+            width = lwt
+        )
+        if (reversedLines.isNotEmpty()) {
+            reversedLines.forEach { line ->
+                segs += EscPosPrinter.Segment(line, bold = rs.boldTotals, fontSize = rs.fontSizeTotals)
             }
             segs += EscPosPrinter.Segment("")
         }
+
         segs += EscPosPrinter.Segment("Thank you", bold = rs.boldFooter, fontSize = rs.fontSizeFooter, centered = true)
         return segs
     }
@@ -1608,39 +1631,68 @@ class TransactionActivity : AppCompatActivity() {
             Toast.makeText(this, "Batch already closed. Cannot void. Use Refund instead.", Toast.LENGTH_LONG).show()
             return
         }
-        val payments = transaction.payments.ifEmpty {
-            // Fallback: single payment from legacy fields (no authCode for legacy)
-            listOf(
-                TransactionPayment(
-                    paymentType = transaction.paymentType,
-                    cardBrand = transaction.cardBrand,
-                    last4 = transaction.last4,
-                    entryType = transaction.entryType,
-                    amountInCents = transaction.amountInCents,
-                    referenceId = transaction.gatewayReferenceId,
-                    clientReferenceId = transaction.clientReferenceId,
-                    batchNumber = transaction.batchNumber,
-                    transactionNumber = transaction.transactionNumber
-                )
-            )
-        }
-        val cashPayments = payments.filter { it.paymentType.equals("Cash", true) }
-        val cardPayments = payments.filter { !it.paymentType.equals("Cash", true) }
-        val totalCashCents = cashPayments.sumOf { it.amountInCents }
-        val totalCashDollars = totalCashCents / 100.0
-
-        if (totalCashCents > 0) {
-            AlertDialog.Builder(this)
-                .setTitle("Cash return required")
-                .setMessage("Return $%.2f in cash to the customer before completing the void.".format(totalCashDollars))
-                .setPositiveButton("I have returned the cash") { _, _ ->
-                    runVoidSequence(transaction.referenceId, cardPayments)
+        val txDocId = transaction.referenceId
+        db.collection("Transactions").document(txDocId).get()
+            .addOnSuccessListener { doc ->
+                if (!doc.exists()) {
+                    Toast.makeText(this, "Transaction not found.", Toast.LENGTH_LONG).show()
+                    return@addOnSuccessListener
                 }
-                .setNegativeButton("Cancel", null)
-                .show()
-        } else {
-            runVoidSequence(transaction.referenceId, cardPayments)
-        }
+                val txParsed = RemoteVoidExecutor.parseTransactionForVoid(doc) ?: run {
+                    Toast.makeText(this, "Transaction not found.", Toast.LENGTH_LONG).show()
+                    return@addOnSuccessListener
+                }
+                val payments = txParsed.payments.ifEmpty {
+                    listOf(
+                        TransactionPayment(
+                            paymentType = txParsed.paymentType.ifBlank { "Credit" },
+                            cardBrand = txParsed.cardBrand,
+                            last4 = txParsed.last4,
+                            entryType = txParsed.entryType,
+                            amountInCents = txParsed.amountInCents,
+                            referenceId = txParsed.gatewayReferenceId,
+                            clientReferenceId = txParsed.clientReferenceId,
+                            batchNumber = txParsed.batchNumber,
+                            transactionNumber = txParsed.transactionNumber,
+                            invoiceNumber = txParsed.invoiceNumber,
+                        ),
+                    )
+                }
+                val cashPayments = payments.filter { it.paymentType.equals("Cash", true) }
+                var cardPayments = payments.filter { !it.paymentType.equals("Cash", true) }
+                cardPayments = TransactionVoidReferenceResolver.enrichPaymentsForVoid(doc, cardPayments)
+                fun runAfterEnrichment(enriched: List<TransactionPayment>) {
+                    val totalCashCents = cashPayments.sumOf { it.amountInCents }
+                    val totalCashDollars = totalCashCents / 100.0
+                    if (totalCashCents > 0) {
+                        AlertDialog.Builder(this)
+                            .setTitle("Cash return required")
+                            .setMessage("Return $%.2f in cash to the customer before completing the void.".format(totalCashDollars))
+                            .setPositiveButton("I have returned the cash") { _, _ ->
+                                runVoidSequence(txDocId, enriched)
+                            }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    } else {
+                        runVoidSequence(txDocId, enriched)
+                    }
+                }
+                if (TransactionVoidReferenceResolver.anyCardLegMissingGatewayRef(cardPayments)) {
+                    val oid = txParsed.orderId.trim()
+                    if (oid.isNotEmpty()) {
+                        db.collection("Orders").document(oid).get()
+                            .addOnSuccessListener { od ->
+                                runAfterEnrichment(TransactionVoidReferenceResolver.enrichPaymentsFromOrderDoc(od, cardPayments))
+                            }
+                            .addOnFailureListener { runAfterEnrichment(cardPayments) }
+                        return@addOnSuccessListener
+                    }
+                }
+                runAfterEnrichment(cardPayments)
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Failed to load transaction: ${it.message}", Toast.LENGTH_LONG).show()
+            }
     }
 
     private fun runVoidSequence(txDocId: String, cardPayments: List<TransactionPayment>) {
@@ -1656,13 +1708,16 @@ class TransactionActivity : AppCompatActivity() {
             }
             return
         }
-        voidCardPaymentsSequentially(txDocId, cardPayments, 0)
+        voidCardPaymentsSequentially(txDocId, cardPayments, 0, 0)
     }
+
+    private fun isHostBusyVoidMessage(msg: String): Boolean = SpinGatewayP.isVoidHostBusyMessage(msg)
 
     private fun voidCardPaymentsSequentially(
         txDocId: String,
         cardPayments: List<TransactionPayment>,
-        index: Int
+        index: Int,
+        busyRetryOnLeg: Int = 0
     ) {
         if (index >= cardPayments.size) {
             doFinalVoidUpdate(txDocId) { orderId ->
@@ -1677,82 +1732,90 @@ class TransactionActivity : AppCompatActivity() {
             return
         }
         val payment = cardPayments[index]
-        val refId = payment.referenceId.ifBlank { payment.clientReferenceId }
-        if (refId.isBlank()) {
-            Toast.makeText(this, "Cannot void: no ReferenceId for card payment.", Toast.LENGTH_LONG).show()
-            return
-        }
-        sendVoidRequestForOnePayment(payment, txDocId, cardPayments, index)
+        sendVoidRequestForOnePayment(payment, txDocId, cardPayments, index, busyRetryOnLeg)
+    }
+
+    private fun voidLegLabel(payment: TransactionPayment, index: Int, legCount: Int): String {
+        val last4 = payment.last4.trim().ifBlank { "????" }
+        return "Card ${index + 1} of $legCount (••••$last4)"
     }
 
     private fun sendVoidRequestForOnePayment(
         payment: TransactionPayment,
         txDocId: String,
         cardPayments: List<TransactionPayment>,
-        index: Int
+        index: Int,
+        busyRetryOnLeg: Int = 0
     ) {
-        val refId = payment.referenceId.ifBlank { payment.clientReferenceId }
-        val amountNumber = payment.amountInCents / 100.0
-        val json = org.json.JSONObject().apply {
-            put("Amount", amountNumber)
-            put("PaymentType", payment.paymentType.ifBlank { "Credit" })
-            put("ReferenceId", refId)
-            if (payment.authCode.isNotBlank()) put("AuthCode", payment.authCode)
-            put("PrintReceipt", "No")
-            put("GetReceipt", "No")
-            put("CaptureSignature", false)
-            put("GetExtendedData", true)
-            put("Tpn", TerminalPrefs.getTpn(this@TransactionActivity))
-            put("RegisterId", TerminalPrefs.getRegisterId(this@TransactionActivity))
-            put("Authkey", TerminalPrefs.getAuthKey(this@TransactionActivity))
-            if (payment.batchNumber.isNotBlank()) {
-                put("BatchNumber", payment.batchNumber.toIntOrNull() ?: payment.batchNumber)
+        val leg = voidLegLabel(payment, index, cardPayments.size)
+        var refId = payment.referenceId.trim()
+        if (refId.isBlank()) {
+            val client = payment.clientReferenceId.trim()
+            if (client.isNotBlank()) {
+                Log.w("TX_API", "[$leg] Void using clientReferenceId (gateway referenceId was blank; fix sale logging if void fails)")
+                refId = client
             }
-            if (payment.transactionNumber.isNotBlank()) {
-                put("TransactionNumber", payment.transactionNumber.toIntOrNull() ?: payment.transactionNumber)
-            }
-        }.toString()
-        Log.d("TX_API", "[VOID_REQ] $json")
-
-        val client = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(180, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .build()
-        val body = json.toRequestBody("application/json".toMediaType())
-        val request = Request.Builder()
-            .url(SpinApiUrls.voidPayment(this@TransactionActivity))
-            .post(body)
-            .build()
-
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                Log.e("TX_API", "[VOID] Network error", e)
-                runOnUiThread {
-                    Toast.makeText(this@TransactionActivity, "VOID Failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+        if (refId.isBlank()) {
+            Toast.makeText(
+                this,
+                "Cannot void $leg: sale is missing the gateway ReferenceId. Check the payment terminal/SPIn response for this leg.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        SpinGatewayP.enqueueVoidPayment(this, payment, refId, readTimeoutSeconds = 180) { result ->
+            runOnUiThread {
+                if (result.networkError != null) {
+                    val partial = if (index > 0) {
+                        "\nEarlier card leg(s) may already be voided on the host—check the terminal or batch before retrying."
+                    } else {
+                        ""
+                    }
+                    Toast.makeText(
+                        this@TransactionActivity,
+                        "VOID failed ($leg): ${result.networkError}$partial",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    return@runOnUiThread
                 }
-            }
-            override fun onResponse(call: Call, response: Response) {
-                val responseText = response.body?.string() ?: ""
-                Log.d("TX_API", "[VOID] HTTP ${response.code} Response: $responseText")
-                val approved = try {
-                    val obj = org.json.JSONObject(responseText)
-                    obj.optJSONObject("GeneralResponse")?.optString("ResultCode", "") == "0"
-                } catch (e: Exception) { false }
-                runOnUiThread {
-                    if (!response.isSuccessful || !approved) {
-                        val reason = try {
-                            val gen = org.json.JSONObject(responseText).optJSONObject("GeneralResponse")
-                            gen?.optString("DetailedMessage", "")?.ifBlank { gen?.optString("Message", "") } ?: ""
-                        } catch (e: Exception) { "" }
-                        val msg = if (reason.isNotBlank()) "VOID Declined: $reason" else "VOID Declined"
-                        Toast.makeText(this@TransactionActivity, msg, Toast.LENGTH_LONG).show()
+                val responseText = result.responseBody
+                Log.d("TX_API", "[VOID] HTTP ${result.httpCode} Response: $responseText")
+                if (!result.hostApproved) {
+                    val reason = SpinGatewayP.voidDeclineMessage(responseText)
+                    if (isHostBusyVoidMessage(reason) && busyRetryOnLeg < VOID_BUSY_MAX_RETRIES) {
+                        val waitMs = VOID_BUSY_RETRY_BASE_MS * (busyRetryOnLeg + 1)
+                        Toast.makeText(
+                            this@TransactionActivity,
+                            "$leg\nHost busy (${reason.trim()}). Retrying in ${waitMs / 1000}s (${busyRetryOnLeg + 1}/$VOID_BUSY_MAX_RETRIES)…",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        voidSequenceHandler.postDelayed(
+                            { voidCardPaymentsSequentially(txDocId, cardPayments, index, busyRetryOnLeg + 1) },
+                            waitMs,
+                        )
                         return@runOnUiThread
                     }
-                    voidCardPaymentsSequentially(txDocId, cardPayments, index + 1)
+                    val base = if (reason.isNotBlank()) "VOID declined: $reason" else "VOID declined"
+                    val partial = if (index > 0) {
+                        "\n\nEarlier leg(s) may already be voided on the host. Check the terminal, then re-open Transactions or use your processor portal if the app state does not match."
+                    } else {
+                        ""
+                    }
+                    Toast.makeText(this@TransactionActivity, "$leg\n$base$partial", Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                val hasMoreLegs = index + 1 < cardPayments.size
+                if (hasMoreLegs) {
+                    voidSequenceHandler.postDelayed(
+                        { voidCardPaymentsSequentially(txDocId, cardPayments, index + 1, 0) },
+                        VOID_GAP_BETWEEN_LEGS_MS,
+                    )
+                } else {
+                    voidCardPaymentsSequentially(txDocId, cardPayments, index + 1, 0)
                 }
             }
-        })
+        }
     }
 
     private fun doFinalVoidUpdate(txDocId: String, onComplete: ((orderId: String) -> Unit)? = null) {
@@ -1775,6 +1838,7 @@ class TransactionActivity : AppCompatActivity() {
                 txRef.update(mapOf(
                     "voided" to true,
                     "voidedBy" to currentEmployeeName,
+                    "voidedAt" to Date(),
                     "payments" to updatedPayments
                 ))
                     .addOnSuccessListener {
@@ -1917,213 +1981,137 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun sendRefundRequest(transaction: Transaction, amount: Double) {
-        val refForGateway = transaction.gatewayReferenceId.ifBlank { transaction.clientReferenceId }
-        if (refForGateway.isBlank()) {
+        val leg = SpinGatewayP.cardLegForRefund(transaction)
+        if (leg.referenceId.isBlank() && leg.clientReferenceId.isBlank()) {
             Toast.makeText(this, "Cannot refund: no gateway reference for this transaction.", Toast.LENGTH_LONG).show()
             return
         }
 
         // Debit refunds use the same flow as credit (Credit Return); do not send Debit Return (Z8)
         val returnPaymentType = if (transaction.paymentType.equals("Debit", true)) "Credit" else transaction.paymentType
-        val json = org.json.JSONObject().apply {
-            put("Amount", amount)
-            put("PaymentType", returnPaymentType)
-            put("ReferenceId", refForGateway)
-            put("PrintReceipt", "No")
-            put("GetReceipt", "No")
-            put("Tpn", TerminalPrefs.getTpn(this@TransactionActivity))
-            put("RegisterId", TerminalPrefs.getRegisterId(this@TransactionActivity))
-            put("Authkey", TerminalPrefs.getAuthKey(this@TransactionActivity))
-        }.toString()
-
-        sendApiRequest(
-            url = SpinApiUrls.refund(this@TransactionActivity),
-            json = json,
-            type = "REFUND",
-            referenceId = transaction.referenceId,
-            refundAmount = amount,
-            paymentType = transaction.paymentType,
-            refundedBy = currentEmployeeName,
-            orderId = transaction.orderId,
-            orderNumber = transaction.orderNumber
-        )
+        SpinGatewayP.enqueueRefundPayment(this, amount, returnPaymentType, leg) { result ->
+            runOnUiThread {
+                if (result.networkError != null) {
+                    Toast.makeText(
+                        this@TransactionActivity,
+                        "REFUND Failed: ${result.networkError}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    return@runOnUiThread
+                }
+                if (!result.hostApproved) {
+                    val reason = SpinGatewayP.voidDeclineMessage(result.responseBody)
+                    val message = if (reason.isNotBlank()) "REFUND Declined: $reason" else "REFUND Declined"
+                    Toast.makeText(this@TransactionActivity, message, Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                completeCardRefundAfterHostApproved(
+                    saleReferenceId = transaction.referenceId,
+                    refundAmount = amount,
+                    paymentType = transaction.paymentType,
+                    refundedBy = currentEmployeeName,
+                    orderId = transaction.orderId,
+                    orderNumber = transaction.orderNumber,
+                )
+            }
+        }
     }
 
-    private fun sendApiRequest(
-        url: String,
-        json: String,
-        type: String,
-        referenceId: String? = null,
-        refundAmount: Double? = null,
-        paymentType: String? = null,
-        refundedBy: String = "",
-        orderId: String = "",
-        orderNumber: Long = 0L
+    private fun completeCardRefundAfterHostApproved(
+        saleReferenceId: String,
+        refundAmount: Double,
+        paymentType: String,
+        refundedBy: String,
+        orderId: String,
+        orderNumber: Long,
     ) {
-        Log.d("TX_API", "[$type] URL: $url")
-        Log.d("TX_API", "[$type] Request: $json")
+        val refundAmountCents = (refundAmount * 100).toLong()
 
-        val client = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(180, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .build()
+        db.collection("Batches")
+            .whereEqualTo("closed", false)
+            .limit(1)
+            .get()
+            .addOnSuccessListener batchLookup@{ batchSnap ->
+                val openBatchId = if (!batchSnap.isEmpty) batchSnap.documents.first().id else ""
 
-        val body = json.toRequestBody("application/json".toMediaType())
+                val refundMap = hashMapOf<String, Any>(
+                    "referenceId" to UUID.randomUUID().toString(),
+                    "originalReferenceId" to saleReferenceId,
+                    "amount" to refundAmount,
+                    "amountInCents" to refundAmountCents,
+                    "type" to "REFUND",
+                    "paymentType" to paymentType,
+                    "cardBrand" to "",
+                    "last4" to "",
+                    "entryType" to "",
+                    "voided" to false,
+                    "settled" to false,
+                    "createdAt" to Date(),
+                    "refundedBy" to refundedBy,
+                    "batchId" to openBatchId,
+                    "orderId" to orderId,
+                    "orderNumber" to orderNumber
+                )
 
-        val request = Request.Builder()
-            .url(url)
-            .post(body)
-            .build()
-
-        client.newCall(request).enqueue(object : Callback {
-
-            override fun onFailure(call: Call, e: IOException) {
-                Log.e("TX_API", "[$type] Network error", e)
-                runOnUiThread {
-                    Toast.makeText(
-                        this@TransactionActivity,
-                        "$type Failed: ${e.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-
-                val responseText = response.body?.string() ?: ""
-                Log.d("TX_API", "[$type] HTTP ${response.code}")
-                Log.d("TX_API", "[$type] Response: $responseText")
-
-                runOnUiThread {
-
-                    // Same success check as PaymentActivity: GeneralResponse.ResultCode == "0"
-                    val approved = try {
-                        val obj = org.json.JSONObject(responseText)
-                        val resultCode = obj.optJSONObject("GeneralResponse")?.optString("ResultCode", "") ?: ""
-                        resultCode == "0"
-                    } catch (e: Exception) {
-                        false
+                val refundRef = db.collection("Transactions").document()
+                db.runTransaction { firestoreTxn ->
+                    if (openBatchId.isNotBlank()) {
+                        val batchRef = db.collection("Batches").document(openBatchId)
+                        val batchDoc = firestoreTxn.get(batchRef)
+                        val counter = batchDoc.getLong("transactionCounter") ?: 0L
+                        val next = counter + 1
+                        firestoreTxn.update(batchRef, "transactionCounter", next)
+                        refundMap["appTransactionNumber"] = next
+                    }
+                    firestoreTxn.set(refundRef, refundMap)
+                }.addOnSuccessListener {
+                    if (openBatchId.isNotBlank()) {
+                        db.collection("Batches").document(openBatchId)
+                            .update(mapOf(
+                                "totalRefundsInCents" to FieldValue.increment(refundAmountCents),
+                                "netTotalInCents" to FieldValue.increment(-refundAmountCents),
+                                "transactionCount" to FieldValue.increment(1)
+                            ))
                     }
 
-                    if (!response.isSuccessful || !approved) {
-                        val reason = try {
-                            val gen = org.json.JSONObject(responseText).optJSONObject("GeneralResponse")
-                            gen?.optString("DetailedMessage", "")?.ifBlank { gen.optString("Message", "") } ?: ""
-                        } catch (e: Exception) { "" }
-                        val message = if (reason.isNotBlank()) "$type Declined: $reason" else "$type Declined"
-                        val hint = if (type == "VOID" && reason.contains("not found", ignoreCase = true))
-                            "\n(Use Refund if batch was already closed.)" else ""
-                        Log.w("TX_API", "[$type] Declined. Reason: $reason")
-                        Toast.makeText(
-                            this@TransactionActivity,
-                            message + hint,
-                            Toast.LENGTH_LONG
-                        ).show()
-                        return@runOnUiThread
-                    }
-
-                    // ================= REFUND (CARD) =================
-                    if (type == "REFUND" && referenceId != null && refundAmount != null) {
-
-                        val refundAmountCents = (refundAmount * 100).toLong()
-
-                        db.collection("Batches")
-                            .whereEqualTo("closed", false)
-                            .limit(1)
-                            .get()
-                            .addOnSuccessListener batchLookup@{ batchSnap ->
-                                val openBatchId = if (!batchSnap.isEmpty) batchSnap.documents.first().id else ""
-
-                                val refundMap = hashMapOf<String, Any>(
-                                    "referenceId" to UUID.randomUUID().toString(),
-                                    "originalReferenceId" to referenceId,
-                                    "amount" to refundAmount,
-                                    "amountInCents" to refundAmountCents,
-                                    "type" to "REFUND",
-                                    "paymentType" to (paymentType ?: ""),
-                                    "cardBrand" to "",
-                                    "last4" to "",
-                                    "entryType" to "",
-                                    "voided" to false,
-                                    "settled" to false,
-                                    "createdAt" to Date(),
-                                    "refundedBy" to refundedBy,
-                                    "batchId" to openBatchId,
-                                    "orderId" to orderId,
-                                    "orderNumber" to orderNumber
-                                )
-
-                                val refundRef = db.collection("Transactions").document()
-                                db.runTransaction { firestoreTxn ->
-                                    if (openBatchId.isNotBlank()) {
-                                        val batchRef = db.collection("Batches").document(openBatchId)
-                                        val batchDoc = firestoreTxn.get(batchRef)
-                                        val counter = batchDoc.getLong("transactionCounter") ?: 0L
-                                        val next = counter + 1
-                                        firestoreTxn.update(batchRef, "transactionCounter", next)
-                                        refundMap["appTransactionNumber"] = next
-                                    }
-                                    firestoreTxn.set(refundRef, refundMap)
-                                }.addOnSuccessListener {
-                                        if (openBatchId.isNotBlank()) {
-                                            db.collection("Batches").document(openBatchId)
-                                                .update(mapOf(
-                                                    "totalRefundsInCents" to FieldValue.increment(refundAmountCents),
-                                                    "netTotalInCents" to FieldValue.increment(-refundAmountCents),
-                                                    "transactionCount" to FieldValue.increment(1)
-                                                ))
-                                        }
-
-                                        db.collection("Transactions").document(referenceId).get()
-                                            .addOnSuccessListener { saleDoc ->
-                                                val saleOrderId = saleDoc.getString("orderId")
-                                                if (!saleDoc.exists() || saleOrderId.isNullOrBlank()) {
-                                                    Toast.makeText(this@TransactionActivity, "REFUND APPROVED", Toast.LENGTH_LONG).show()
-                                                    return@addOnSuccessListener
-                                                }
-                                                val orderRef = db.collection("Orders").document(saleOrderId)
-                                                orderRef.get()
-                                                    .addOnSuccessListener { orderDoc ->
-                                                        if (!orderDoc.exists()) {
-                                                            ReceiptPromptHelper.promptForReceipt(this@TransactionActivity, ReceiptPromptHelper.ReceiptType.REFUND, saleOrderId, referenceId)
-                                                            return@addOnSuccessListener
-                                                        }
-                                                        val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
-                                                        val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
-                                                        val newTotalRefunded = currentRefunded + refundAmountCents
-                                                        val updates = mutableMapOf<String, Any>(
-                                                            "totalRefundedInCents" to newTotalRefunded,
-                                                            "refundedAt" to Date()
-                                                        )
-                                                        if (newTotalRefunded >= totalInCents) {
-                                                            updates["status"] = "REFUNDED"
-                                                        }
-                                                        orderRef.update(updates)
-                                                            .addOnSuccessListener {
-                                                                ReceiptPromptHelper.promptForReceipt(this@TransactionActivity, ReceiptPromptHelper.ReceiptType.REFUND, saleOrderId, referenceId)
-                                                            }
-                                                    }
-                                            }
-                                            .addOnFailureListener {
-                                                Toast.makeText(this@TransactionActivity, "REFUND APPROVED", Toast.LENGTH_LONG).show()
-                                            }
-                                    }
-                                    .addOnFailureListener {
-                                        Toast.makeText(this@TransactionActivity, "REFUND APPROVED but failed to save: ${it.message}", Toast.LENGTH_LONG).show()
-                                    }
+                    db.collection("Transactions").document(saleReferenceId).get()
+                        .addOnSuccessListener { saleDoc ->
+                            val saleOrderId = saleDoc.getString("orderId")
+                            if (!saleDoc.exists() || saleOrderId.isNullOrBlank()) {
+                                Toast.makeText(this@TransactionActivity, "REFUND APPROVED", Toast.LENGTH_LONG).show()
+                                return@addOnSuccessListener
                             }
-                        return@runOnUiThread
-                    }
-
-                    Toast.makeText(
-                        this@TransactionActivity,
-                        "$type APPROVED",
-                        Toast.LENGTH_LONG
-                    ).show()
+                            val orderRef = db.collection("Orders").document(saleOrderId)
+                            orderRef.get()
+                                .addOnSuccessListener { orderDoc ->
+                                    if (!orderDoc.exists()) {
+                                        ReceiptPromptHelper.promptForReceipt(this@TransactionActivity, ReceiptPromptHelper.ReceiptType.REFUND, saleOrderId, saleReferenceId)
+                                        return@addOnSuccessListener
+                                    }
+                                    val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+                                    val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
+                                    val newTotalRefunded = currentRefunded + refundAmountCents
+                                    val updates = mutableMapOf<String, Any>(
+                                        "totalRefundedInCents" to newTotalRefunded,
+                                        "refundedAt" to Date()
+                                    )
+                                    if (newTotalRefunded >= totalInCents) {
+                                        updates["status"] = "REFUNDED"
+                                    }
+                                    orderRef.update(updates)
+                                        .addOnSuccessListener {
+                                            ReceiptPromptHelper.promptForReceipt(this@TransactionActivity, ReceiptPromptHelper.ReceiptType.REFUND, saleOrderId, saleReferenceId)
+                                        }
+                                }
+                        }
+                        .addOnFailureListener {
+                            Toast.makeText(this@TransactionActivity, "REFUND APPROVED", Toast.LENGTH_LONG).show()
+                        }
+                }
+                .addOnFailureListener {
+                    Toast.makeText(this@TransactionActivity, "REFUND APPROVED but failed to save: ${it.message}", Toast.LENGTH_LONG).show()
                 }
             }
-        })
     }
 
     private fun showEmailReceiptForTransaction(transactionDocId: String) {

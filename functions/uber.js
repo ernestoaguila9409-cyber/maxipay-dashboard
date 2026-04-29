@@ -314,11 +314,109 @@ async function handleOrderCancelled(db, payload) {
 
   await orderRef.update({
     status: "CANCELLED",
+    _uberStatusSynced: "CANCELLED",
     cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     ...(reason && { cancelReason: reason }),
   });
   logger.info("[uber] Order cancelled:", uberOrderId, reason ? `reason: ${reason}` : "");
+}
+
+/**
+ * orders.scheduled.notification — eater placed a future order.
+ * We persist the order in Firestore exactly like a normal create, but tag
+ * it with `scheduled: true` and the requested fulfillment time so the POS
+ * can choose when to show / accept it.
+ */
+async function handleOrderScheduled(db, payload, rawPayload) {
+  logger.info("[uber] handleOrderScheduled — start");
+  await handleOrderCreated(db, payload, rawPayload);
+
+  const order = payload.order || payload || {};
+  const uberOrderId =
+    safeString(order.id, null) ||
+    safeString(order.order_id, null) ||
+    safeString(payload.meta?.resource_id, null);
+
+  if (!uberOrderId) return;
+
+  const fulfillAt =
+    order.estimated_ready_for_pickup_at ||
+    order.scheduled_for ||
+    order.placed_at ||
+    null;
+
+  await db.collection("Orders").doc(uberOrderId).update({
+    scheduled: true,
+    scheduledFor: fulfillAt,
+    uberStatus: "SCHEDULED",
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  logger.info("[uber] Order scheduled:", uberOrderId, fulfillAt || "");
+}
+
+/**
+ * orders.fulfillment_issue.resolution — Uber tells us the eater (or Uber
+ * support) resolved a fulfillment issue. We persist the resolution payload
+ * so the POS can surface it; actual response (if any) goes through the
+ * `resolveFulfillmentIssue` callable.
+ */
+async function handleFulfillmentIssueResolution(db, payload) {
+  logger.info("[uber] handleFulfillmentIssueResolution — start");
+
+  const order = payload.order || payload || {};
+  const uberOrderId =
+    safeString(order.id, null) ||
+    safeString(order.order_id, null) ||
+    safeString(payload.meta?.resource_id, null);
+
+  if (!uberOrderId) {
+    logger.error("[uber] handleFulfillmentIssueResolution — no order ID");
+    return;
+  }
+
+  const orderRef = db.collection("Orders").doc(uberOrderId);
+  const existing = await orderRef.get();
+  if (!existing.exists) {
+    logger.warn("[uber] handleFulfillmentIssueResolution — order not found:",
+      uberOrderId);
+    return;
+  }
+
+  await orderRef.update({
+    fulfillmentIssue: payload.fulfillment_issue || payload.resolution || payload,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  logger.info("[uber] Fulfillment issue resolution stored:", uberOrderId);
+}
+
+/**
+ * orders.cancel.failure / orders.release.failure — Uber rejected our
+ * cancel/release call. We log it on the order so the POS UI can show
+ * an error and let the cashier retry.
+ */
+async function handleNegativeAck(db, payload, kind) {
+  const order = payload.order || payload || {};
+  const uberOrderId =
+    safeString(order.id, null) ||
+    safeString(order.order_id, null) ||
+    safeString(payload.meta?.resource_id, null);
+
+  if (!uberOrderId) {
+    logger.error(`[uber] ${kind} — no order ID`);
+    return;
+  }
+
+  const orderRef = db.collection("Orders").doc(uberOrderId);
+  const existing = await orderRef.get();
+  if (!existing.exists) return;
+
+  const failureField = kind === "cancel.failure" ? "cancelFailure" : "releaseFailure";
+  await orderRef.update({
+    [failureField]: payload.failure || payload.error || payload,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  logger.warn(`[uber] ${kind} stored:`, uberOrderId);
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +452,11 @@ async function processWebhookAsync(body) {
         await handleOrderCreated(db, body, body);
         break;
 
+      case "orders.scheduled.notification":
+      case "orders.scheduled":
+        await handleOrderScheduled(db, body, body);
+        break;
+
       case "orders.updated":
       case "order.updated":
         await handleOrderUpdated(db, body);
@@ -364,6 +467,19 @@ async function processWebhookAsync(body) {
       case "order.cancelled":
       case "orders.cancel.notification":
         await handleOrderCancelled(db, body);
+        break;
+
+      case "orders.cancel.failure":
+        await handleNegativeAck(db, body, "cancel.failure");
+        break;
+
+      case "orders.release.failure":
+        await handleNegativeAck(db, body, "release.failure");
+        break;
+
+      case "orders.fulfillment_issue.resolution":
+      case "orders.fulfillment_issue":
+        await handleFulfillmentIssueResolution(db, body);
         break;
 
       default:

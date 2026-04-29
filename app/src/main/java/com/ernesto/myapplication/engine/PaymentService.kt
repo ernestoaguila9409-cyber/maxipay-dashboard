@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.ernesto.myapplication.TerminalPrefs
 import com.ernesto.myapplication.payments.SpinApiUrls
+import com.ernesto.myapplication.payments.SpinCallTracker
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -73,14 +74,17 @@ class PaymentService(private val context: Context) {
             .post(body)
             .build()
 
+        SpinCallTracker.beginCall()
         client.newCall(request).enqueue(object : Callback {
 
             override fun onFailure(call: Call, e: IOException) {
+                SpinCallTracker.endCall()
                 Log.e("PREAUTH", "Network error", e)
                 onFailure("Network error: ${e.message}")
             }
 
             override fun onResponse(call: Call, response: Response) {
+                SpinCallTracker.endCall()
                 val responseText = response.body?.string() ?: ""
                 Log.d("PREAUTH_RAW", responseText)
 
@@ -178,14 +182,17 @@ class PaymentService(private val context: Context) {
             .post(body)
             .build()
 
+        SpinCallTracker.beginCall()
         client.newCall(request).enqueue(object : Callback {
 
             override fun onFailure(call: Call, e: IOException) {
+                SpinCallTracker.endCall()
                 Log.e("CAPTURE", "Network error", e)
                 onFailure("Network error: ${e.message}")
             }
 
             override fun onResponse(call: Call, response: Response) {
+                SpinCallTracker.endCall()
                 val responseText = response.body?.string() ?: ""
                 Log.d("CAPTURE_RAW", responseText)
 
@@ -291,14 +298,17 @@ class PaymentService(private val context: Context) {
             .post(body)
             .build()
 
+        SpinCallTracker.beginCall()
         client.newCall(request).enqueue(object : Callback {
 
             override fun onFailure(call: Call, e: IOException) {
+                SpinCallTracker.endCall()
                 Log.e("TIP_ADJUST", "Network error", e)
                 onFailure("Network error: ${e.message}")
             }
 
             override fun onResponse(call: Call, response: Response) {
+                SpinCallTracker.endCall()
                 val responseText = response.body?.string() ?: ""
                 Log.d("TIP_ADJUST_RAW", responseText)
 

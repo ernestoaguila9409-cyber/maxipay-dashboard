@@ -6,39 +6,61 @@
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:background="@drawable/bg_menu_item_card"
-    android:padding="12dp"
     android:layout_margin="4dp"
     android:gravity="center_horizontal"
-    android:minHeight="80dp">
+    android:minHeight="80dp"
+    android:clipToOutline="true">
 
-    <TextView
-        android:id="@+id/txtItemName"
+    <ImageView
+        android:id="@+id/imgItemThumb"
+        android:layout_width="match_parent"
+        android:layout_height="120dp"
+        android:scaleType="centerCrop"
+        android:contentDescription="@null"
+        android:visibility="gone"
+        android:background="#33FFFFFF"/>
+
+    <LinearLayout
+        android:id="@+id/cardTextSection"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textColor="#FFFFFF"
-        android:textSize="13sp"
-        android:textStyle="bold"
-        android:gravity="center"
-        android:maxLines="2"
-        android:ellipsize="end"/>
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="12dp"
+        android:gravity="center_horizontal">
 
-    <TextView
-        android:id="@+id/txtItemPrice"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textColor="#E0D6F5"
-        android:textSize="13sp"
-        android:layout_marginTop="4dp"
-        android:gravity="center"/>
+        <TextView
+            android:id="@+id/txtItemName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:maxLines="2"
+            android:ellipsize="end"/>
 
-    <TextView
-        android:id="@+id/txtItemStock"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textColor="#CCCCCC"
-        android:textSize="11sp"
-        android:layout_marginTop="2dp"
-        android:gravity="center"
-        android:visibility="gone"/>
+        <TextView
+            android:id="@+id/txtItemPrice"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#E0D6F5"
+            android:textSize="13sp"
+            android:layout_marginTop="4dp"
+            android:gravity="center"/>
+
+        <TextView
+            android:id="@+id/txtItemStock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#CCCCCC"
+            android:textSize="11sp"
+            android:layout_marginTop="2dp"
+            android:gravity="center"
+            android:visibility="gone"/>
+
+    </LinearLayout>
 
 </LinearLayout>

@@ -53,5 +53,17 @@ data class PaymentTerminalConfig(
         }
 
         const val PROVIDER_SPIN = "SPIN"
+        const val PROVIDER_SPIN_Z = "SPIN_Z"
+        const val PROVIDER_SPIN_P = "SPIN_P"
+
+        /** Returns true for any SPIn-family provider (legacy SPIN, SPIN_Z, SPIN_P). */
+        fun isSpinFamily(provider: String): Boolean =
+            provider.equals(PROVIDER_SPIN, ignoreCase = true) ||
+            provider.equals(PROVIDER_SPIN_Z, ignoreCase = true) ||
+            provider.equals(PROVIDER_SPIN_P, ignoreCase = true)
+
+        /** Catalog id **SPIN_P** — SPIn (SPInPos Gateway) P-series integration. */
+        fun isSpinPosGatewayP(provider: String): Boolean =
+            provider.equals(PROVIDER_SPIN_P, ignoreCase = true)
     }
 }

@@ -67,7 +67,10 @@ object PaymentTerminalReachabilitySync {
 
     private fun tick(context: Context) {
         val cfg = PaymentTerminalRepository.getActiveConfig(context) ?: return
-        if (!cfg.provider.equals(PaymentTerminalConfig.PROVIDER_SPIN, ignoreCase = true)) return
+        if (!PaymentTerminalConfig.isSpinFamily(cfg.provider)) return
+
+        if (cfg.provider.equals(PaymentTerminalConfig.PROVIDER_SPIN_P, ignoreCase = true)
+            && SpinCallTracker.isInFlight) return
 
         if (cfg.id != lastProbedConfigId) {
             lastProbedConfigId = cfg.id

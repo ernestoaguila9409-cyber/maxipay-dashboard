@@ -27,6 +27,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
         val taxMode: String = "INHERIT",
         val taxIds: List<String> = emptyList(),
         val printerLabel: String? = null,
+        /** Firebase Storage or HTTPS URL for menu item photo (dashboard / online ordering). */
+        val imageUrl: String? = null,
     )
 
     /** Create an order if orderId is null; otherwise keep existing orderId */
@@ -190,6 +192,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
         if (input.guestNumber > 0) itemMap["guestNumber"] = input.guestNumber
         val pl = input.printerLabel?.trim()
         if (!pl.isNullOrEmpty()) itemMap["printerLabel"] = pl
+        val img = input.imageUrl?.trim()
+        if (!img.isNullOrEmpty()) itemMap["imageUrl"] = img
 
         val orderRef = db.collection("Orders").document(orderId)
         val lineRef = orderRef.collection("items").document(lineKey)
@@ -437,14 +441,29 @@ class OrderEngine(private val db: FirebaseFirestore) {
 
                                 val totalPaidInCents =
                                     orderSnap.getLong("totalPaidInCents") ?: 0L
+                                val priorTotalInCents =
+                                    orderSnap.getLong("totalInCents") ?: 0L
+                                val priorStatus = orderSnap.getString("status") ?: "OPEN"
+                                val orderSource = orderSnap.getString("orderSource") ?: ""
 
+                                // Online HPP orders are created at a pre-tax total; opening the order on POS
+                                // recomputes totals with tax so newTotal > totalPaid and the naive rule below
+                                // would flip CLOSED -> OPEN. Keep them closed and align paid to the new total.
+                                val onlinePaidTaxCatchUp =
+                                    orderSource == "online_ordering" &&
+                                        priorStatus == "CLOSED" &&
+                                        totalPaidInCents > 0L &&
+                                        newTotalInCents > totalPaidInCents &&
+                                        totalPaidInCents >= priorTotalInCents
+
+                                val effectivePaidInCents =
+                                    if (onlinePaidTaxCatchUp) newTotalInCents else totalPaidInCents
                                 val remainingInCents =
-                                    (newTotalInCents - totalPaidInCents)
-                                        .coerceAtLeast(0L)
+                                    (newTotalInCents - effectivePaidInCents).coerceAtLeast(0L)
 
                                 val newStatus = when {
                                     remainingInCents > 0L -> "OPEN"
-                                    totalPaidInCents > 0L -> "CLOSED"
+                                    effectivePaidInCents > 0L -> "CLOSED"
                                     else -> orderSnap.getString("status") ?: "OPEN"
                                 }
 
@@ -454,6 +473,9 @@ class OrderEngine(private val db: FirebaseFirestore) {
                                     "status" to newStatus,
                                     "updatedAt" to Date()
                                 )
+                                if (onlinePaidTaxCatchUp) {
+                                    updates["totalPaidInCents"] = effectivePaidInCents
+                                }
                                 if (taxBreakdown.isNotEmpty()) {
                                     updates["taxBreakdown"] = taxBreakdown
                                 }

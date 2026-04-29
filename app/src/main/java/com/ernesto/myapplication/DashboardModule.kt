@@ -53,13 +53,22 @@ data class DashboardModule(
         /**
          * Ensures the ONLINE ORDERS tile exists when the saved Firestore layout predates it.
          * Inserts it right after BAR when possible; otherwise appends. Re-indexes positions.
+         * @param showOnlineOrdersTile when false, removes the ONLINE tile (e.g. storefront is closed).
          */
-        fun mergeOnlineOrdersDashboardTile(modules: List<DashboardModule>): List<DashboardModule> {
+        fun mergeOnlineOrdersDashboardTile(
+            modules: List<DashboardModule>,
+            showOnlineOrdersTile: Boolean = true,
+        ): List<DashboardModule> {
+            if (!showOnlineOrdersTile) {
+                return modules.filter { it.key != "online_orders" }
+                    .sortedBy { it.position }
+                    .mapIndexed { index, m -> m.copy(position = index) }
+            }
             if (modules.any { it.key == "online_orders" }) {
-                return modules.sortedBy { it.position }
+                return modules.sortedBy { it.position }.mapIndexed { index, m -> m.copy(position = index) }
             }
             val def = getDefaults().find { it.key == "online_orders" }
-                ?: return modules.sortedBy { it.position }
+                ?: return modules.sortedBy { it.position }.mapIndexed { index, m -> m.copy(position = index) }
             val sorted = modules.sortedBy { it.position }.toMutableList()
             val barIdx = sorted.indexOfFirst { it.key == "bar" }
             if (barIdx >= 0) {

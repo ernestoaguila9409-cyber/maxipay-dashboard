@@ -14,8 +14,13 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.ernesto.myapplication.payments.PaymentTerminalConfig
+import com.ernesto.myapplication.payments.PaymentTerminalRepository
 import com.ernesto.myapplication.payments.SpinApiUrls
+import com.ernesto.myapplication.payments.SpinCallTracker
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -49,6 +54,7 @@ class TerminalListActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
     private val terminals = mutableListOf<Terminal>()
+    private var terminalsListener: ListenerRegistration? = null
     private lateinit var adapter: TerminalAdapter
     private lateinit var recycler: RecyclerView
     private lateinit var txtEmpty: TextView
@@ -86,9 +92,19 @@ class TerminalListActivity : AppCompatActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        attachPaymentTerminalsListener()
+    }
+
+    override fun onStop() {
+        terminalsListener?.remove()
+        terminalsListener = null
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
-        loadTerminals()
         startHealthCheck()
     }
 
@@ -119,7 +135,7 @@ class TerminalListActivity : AppCompatActivity() {
 
     private fun runHealthCheck() {
         val toCheck = terminals.filter {
-            it.tpn.isNotBlank() && it.authKey.isNotBlank()
+            it.tpn.isNotBlank() && it.registerId.isNotBlank() && it.authKey.isNotBlank()
         }
         if (toCheck.isEmpty()) return
 
@@ -129,6 +145,7 @@ class TerminalListActivity : AppCompatActivity() {
     }
 
     private fun checkTerminalViaSpIn(terminal: Terminal) {
+        val cfg = terminal.paymentConfig ?: return
         val healthCheckRef = "hc-${terminal.tpn}-${System.currentTimeMillis()}"
         val json = JSONObject().apply {
             put("PaymentType", "Credit")
@@ -146,19 +163,22 @@ class TerminalListActivity : AppCompatActivity() {
         val body = json.toString().toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
-            .url(SpinApiUrls.status(this))
+            .url(SpinApiUrls.statusUrlForConfig(cfg))
             .post(body)
             .build()
 
         Log.d(TAG, "Health-check request for ${terminal.name}")
 
+        SpinCallTracker.beginCall()
         httpClient.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
+                SpinCallTracker.endCall()
                 Log.w(TAG, "Health-check network error for ${terminal.name}: ${e.message}")
                 applyStatus(terminal, isOnline = false)
             }
 
             override fun onResponse(call: Call, response: Response) {
+                SpinCallTracker.endCall()
                 val responseText = response.body?.string() ?: ""
                 Log.d(TAG, "Health-check response [${response.code}] for ${terminal.name}: $responseText")
 
@@ -227,40 +247,62 @@ class TerminalListActivity : AppCompatActivity() {
     // ── Firestore persistence ──────────────────────────────────────
 
     private fun persistStatusToFirestore(terminalId: String, status: String, lastSeenMs: Long?) {
-        val data = mutableMapOf<String, Any>("status" to status)
+        val data = hashMapOf<String, Any>("posConnectionStatus" to status)
         if (lastSeenMs != null) {
-            data["lastSeen"] = Timestamp(
+            data["posLastSeen"] = Timestamp(
                 lastSeenMs / 1000,
                 ((lastSeenMs % 1000) * 1_000_000).toInt()
             )
         }
-        db.collection("Terminals").document(terminalId).update(data)
+        data["updatedAt"] = FieldValue.serverTimestamp()
+        db.collection("payment_terminals").document(terminalId).update(data)
             .addOnFailureListener { Log.w(TAG, "Firestore status update failed: ${it.message}") }
     }
 
-    // ── Load terminals ─────────────────────────────────────────────
+    // ── Load terminals (real-time, same collection as maxipay dashboard) ──
 
-    private fun loadTerminals() {
-        db.collection("Terminals")
-            .orderBy("name")
-            .get()
-            .addOnSuccessListener { snap ->
+    private fun attachPaymentTerminalsListener() {
+        terminalsListener?.remove()
+        terminalsListener = db.collection("payment_terminals")
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    Log.w(TAG, "payment_terminals listener: ${err.message}")
+                    runOnUiThread {
+                        Toast.makeText(
+                            this@TerminalListActivity,
+                            "Could not load terminals: ${err.message}",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                    return@addSnapshotListener
+                }
+                if (snap == null) return@addSnapshotListener
                 terminals.clear()
                 for (doc in snap.documents) {
-                    val lastSeenMs = readLastSeenMillis(doc)
+                    val cfg = PaymentTerminalRepository.parsePaymentTerminalDocument(doc) ?: continue
+                    val tpn = cfg.credential(PaymentTerminalConfig.Companion.ConfigKey.TPN)
+                    val reg = cfg.credential(PaymentTerminalConfig.Companion.ConfigKey.REGISTER_ID)
+                    val auth = cfg.credential(PaymentTerminalConfig.Companion.ConfigKey.AUTH_KEY)
+                    val ip = cfg.credential("ipAddress")
+                    val st = doc.getString("posConnectionStatus")?.takeIf { it.isNotBlank() }
+                        ?: doc.getString("status")?.takeIf { it.isNotBlank() }
+                        ?: "OFFLINE"
+                    val lastMs = readDisplayLastSeenMs(doc)
                     terminals.add(
                         Terminal(
                             id = doc.id,
-                            name = doc.getString("name") ?: "",
-                            tpn = doc.getString("tpn") ?: "",
-                            ipAddress = doc.getString("ipAddress") ?: "",
-                            registerId = doc.getString("registerId") ?: "",
-                            authKey = doc.getString("authKey") ?: "",
-                            status = doc.getString("status") ?: "OFFLINE",
-                            lastSeen = lastSeenMs
+                            name = cfg.name,
+                            tpn = tpn,
+                            ipAddress = ip,
+                            registerId = reg,
+                            authKey = auth,
+                            status = st,
+                            lastSeen = lastMs,
+                            paymentConfig = cfg,
                         )
                     )
                 }
+                terminals.sortBy { it.name.trim().lowercase() }
                 adapter.notifyDataSetChanged()
                 if (terminals.isEmpty()) {
                     recycler.visibility = View.GONE
@@ -271,9 +313,12 @@ class TerminalListActivity : AppCompatActivity() {
                 }
                 runHealthCheck()
             }
-            .addOnFailureListener {
-                Toast.makeText(this, "Failed to load terminals: ${it.message}", Toast.LENGTH_LONG).show()
-            }
+    }
+
+    /** Same fields the web dashboard uses for reachability. */
+    private fun readDisplayLastSeenMs(doc: DocumentSnapshot): Long? {
+        doc.getTimestamp("posLastSeen")?.let { return it.toDate().time }
+        return readLastSeenMillis(doc)
     }
 
     /**

@@ -451,6 +451,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                     @Suppress("UNCHECKED_CAST")
                     val scheduleIds = (doc.get("scheduleIds") as? List<String>) ?: emptyList()
 
+                    val imgUrl = doc.getString("imageUrl")?.trim()?.takeIf { it.isNotEmpty() }
                     itemList.add(
                         ItemModel(
                             id = doc.id,
@@ -468,6 +469,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                             channels = channelsObj,
                             subcategoryId = doc.getString("subcategoryId") ?: "",
                             printerLabel = MenuItemRoutingLabel.fromMenuItemDoc(doc),
+                            imageUrl = imgUrl,
                         )
                     )
                 }
@@ -560,6 +562,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                     val scheduleIds =
                         (doc.get("scheduleIds") as? List<String>) ?: emptyList()
 
+                    val imgUrl = doc.getString("imageUrl")?.trim()?.takeIf { it.isNotEmpty() }
                     itemList.add(
                         ItemModel(
                             id = doc.id,
@@ -577,6 +580,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                             channels = channelsObj,
                             subcategoryId = subcategoryId,
                             printerLabel = MenuItemRoutingLabel.fromMenuItemDoc(doc),
+                            imageUrl = imgUrl,
                         )
                     )
                 }

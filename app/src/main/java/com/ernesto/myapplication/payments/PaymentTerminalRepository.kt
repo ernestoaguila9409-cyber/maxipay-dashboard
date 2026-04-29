@@ -82,6 +82,13 @@ object PaymentTerminalRepository {
         if (terminalsById.isNotEmpty()) terminalsById.values.toList()
         else legacyById.values.toList()
 
+    /**
+     * Parses a [payment_terminals] document for screens that list or edit
+     * terminals (same shape as the web dashboard).
+     */
+    fun parsePaymentTerminalDocument(doc: DocumentSnapshot): PaymentTerminalConfig? =
+        parseNew(doc)
+
     fun setActiveTerminalId(context: Context, id: String?) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
         if (id.isNullOrBlank()) prefs.remove(KEY_ACTIVE_TERMINAL_ID)
@@ -136,7 +143,7 @@ object PaymentTerminalRepository {
         return PaymentTerminalConfig(
             id = doc.id,
             name = doc.getString("name") ?: doc.id,
-            provider = provider.ifBlank { PaymentTerminalConfig.PROVIDER_SPIN },
+            provider = provider.ifBlank { PaymentTerminalConfig.PROVIDER_SPIN_Z },
             deviceModel = doc.getString("deviceModel").orEmpty(),
             baseUrl = baseUrl,
             endpoints = endpoints,
