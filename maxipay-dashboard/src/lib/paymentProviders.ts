@@ -83,6 +83,19 @@ const SPIN_CREDENTIAL_SCHEMA: PaymentCredentialField[] = [
   },
 ];
 
+const SPIN_P_CREDENTIAL_SCHEMA: PaymentCredentialField[] = [
+  ...SPIN_CREDENTIAL_SCHEMA,
+  {
+    key: "iposTransactAuthToken",
+    label: "iPOS Transact Auth Token",
+    placeholder: "e.g. abc123...",
+    required: false,
+    secret: true,
+    helperText:
+      "Merchant auth token from iPOSpays portal. Required for direct refunds (no card present) from the dashboard.",
+  },
+];
+
 const SPIN_CAPABILITIES: PaymentCapabilities = {
   supportsPreAuth: true,
   supportsCapture: true,
@@ -150,7 +163,7 @@ export const PAYMENT_PROVIDERS: Record<PaymentProviderId, PaymentProviderCatalog
     baseUrl: "https://spinpos.net/v2",
     endpoints: SPIN_ENDPOINTS_P,
     capabilities: SPIN_CAPABILITIES,
-    credentialSchema: SPIN_CREDENTIAL_SCHEMA,
+    credentialSchema: SPIN_P_CREDENTIAL_SCHEMA,
   },
 };
 
