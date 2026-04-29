@@ -127,6 +127,28 @@ function transactionHasCashTender(data: DocumentData): boolean {
   return false;
 }
 
+function transactionIsEcommerce(data: DocumentData): boolean {
+  if (data.ecommerce === true) return true;
+  const pays = data.payments as unknown[] | undefined;
+  if (!Array.isArray(pays)) return false;
+  return pays.some(
+    (p) =>
+      String((p as Record<string, unknown>).entryType ?? "").toUpperCase() === "ECOMMERCE"
+  );
+}
+
+/** Settled card-only sales — dashboard queues SPIn Return on the POS (same host as void). */
+function canRequestRemoteRefund(data: DocumentData): boolean {
+  if (!inFinancialTx(data)) return false;
+  const type = String(data.type ?? "");
+  if (!["SALE", "CAPTURE", "PRE_AUTH"].includes(type)) return false;
+  if (data.voided === true) return false;
+  if (data.settled !== true) return false;
+  if (transactionHasCashTender(data)) return false;
+  if (transactionIsEcommerce(data)) return false;
+  return true;
+}
+
 /** Cash tender on a sale/capture — same idea as POS Cash Flow. */
 function cashTenderCentsForSale(data: DocumentData): number {
   const type = String(data.type ?? "");
@@ -516,11 +538,28 @@ export default function SalesActivityClient() {
   const [voidCmdStatus, setVoidCmdStatus] = useState<string | null>(null);
   const [voidCmdDetail, setVoidCmdDetail] = useState<string | null>(null);
 
+  const [refundCmdId, setRefundCmdId] = useState<string | null>(null);
+  const [refundSubmitting, setRefundSubmitting] = useState(false);
+  const [refundSubmitErr, setRefundSubmitErr] = useState<string | null>(null);
+  const [refundCmdStatus, setRefundCmdStatus] = useState<string | null>(null);
+  const [refundCmdDetail, setRefundCmdDetail] = useState<string | null>(null);
+  const [refundAmountInput, setRefundAmountInput] = useState("");
+
   useEffect(() => {
     setVoidCmdId(null);
     setVoidSubmitErr(null);
     setVoidCmdStatus(null);
     setVoidCmdDetail(null);
+    setRefundCmdId(null);
+    setRefundSubmitErr(null);
+    setRefundCmdStatus(null);
+    setRefundCmdDetail(null);
+    setRefundAmountInput("");
+    if (txModal) {
+      const t = String(txModal.data.type ?? "");
+      const c = txAmountCents(txModal.data, t);
+      if (c > 0) setRefundAmountInput((c / 100).toFixed(2));
+    }
   }, [txModal?.id]);
 
   useEffect(() => {
@@ -549,17 +588,42 @@ export default function SalesActivityClient() {
     return () => unsub();
   }, [voidCmdId]);
 
-  // Auto-close the transaction modal a beat after a remote void finishes successfully.
-  // We wait ~1.2s so the merchant can see the "completed" confirmation before the modal vanishes.
   useEffect(() => {
-    if (voidCmdStatus !== "completed") return;
+    if (!refundCmdId || !db) {
+      setRefundCmdStatus(null);
+      setRefundCmdDetail(null);
+      return;
+    }
+    const ref = doc(db, REMOTE_PAYMENT_COMMANDS, refundCmdId);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setRefundCmdStatus(null);
+          setRefundCmdDetail(null);
+          return;
+        }
+        const d = snap.data();
+        setRefundCmdStatus(String(d?.status ?? ""));
+        const err = typeof d?.errorMessage === "string" ? d.errorMessage : "";
+        const ok = typeof d?.resultMessage === "string" ? d.resultMessage : "";
+        setRefundCmdDetail(err || ok || null);
+      },
+      (e) => console.error("[SalesActivity] refund command", e)
+    );
+    return () => unsub();
+  }, [refundCmdId]);
+
+  // Auto-close the transaction modal a beat after a remote void/refund finishes successfully.
+  useEffect(() => {
+    if (voidCmdStatus !== "completed" && refundCmdStatus !== "completed") return;
     const t = window.setTimeout(() => {
       setReceiptPreview(null);
       setReceiptErr(null);
       setTxModal(null);
     }, 1200);
     return () => window.clearTimeout(t);
-  }, [voidCmdStatus]);
+  }, [voidCmdStatus, refundCmdStatus]);
 
   const { start, endExclusive } = useMemo(
     () => rangeFromPreset(datePreset, customStart, customEnd),
@@ -1586,6 +1650,91 @@ export default function SalesActivityClient() {
               <p className="text-xs text-red-600">{receiptErr}</p>
             ) : null}
 
+            {txModal && canRequestRemoteRefund(txModal.data) ? (
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-3 space-y-2">
+                <p className="text-xs font-medium text-emerald-900">Remote card refund</p>
+                <p className="text-[11px] text-emerald-800/90 leading-snug">
+                  Queues an SPIn <span className="font-mono">/Payment/Return</span> on the signed-in POS (settled
+                  card sales only). Amount is capped to the order&apos;s remaining refundable total on the device.
+                  Online / hosted card payments cannot use this queue.
+                </p>
+                {!user ? (
+                  <p className="text-xs text-emerald-900">Sign in to request a refund.</p>
+                ) : (
+                  <>
+                    <label className="block text-[11px] font-medium text-emerald-900">
+                      Refund amount (USD)
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={refundAmountInput}
+                        onChange={(e) => setRefundAmountInput(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-sm text-slate-800"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={refundSubmitting}
+                      onClick={async () => {
+                        if (!user || !txModal) return;
+                        const dollars = parseFloat(refundAmountInput);
+                        if (!Number.isFinite(dollars) || dollars <= 0) {
+                          setRefundSubmitErr("Enter a valid refund amount greater than zero.");
+                          return;
+                        }
+                        const amountInCents = Math.round(dollars * 100);
+                        const oid = String(txModal.data.orderId ?? "").trim();
+                        if (!oid) {
+                          setRefundSubmitErr("This transaction has no linked order id.");
+                          return;
+                        }
+                        setRefundSubmitting(true);
+                        setRefundSubmitErr(null);
+                        try {
+                          const ref = await addDoc(collection(db, REMOTE_PAYMENT_COMMANDS), {
+                            type: "refundTransaction",
+                            transactionId: txModal.id,
+                            orderId: oid,
+                            amountInCents,
+                            status: "pending",
+                            requestedByUid: user.uid,
+                            requestedByEmail: user.email ?? "",
+                            refundedByLabel: `Dashboard: ${user.email ?? user.uid}`,
+                            requestedAt: serverTimestamp(),
+                          });
+                          setRefundCmdId(ref.id);
+                        } catch (err) {
+                          console.error("[SalesActivity] remote refund queue", err);
+                          setRefundSubmitErr(
+                            err instanceof Error ? err.message : "Could not queue refund request"
+                          );
+                        } finally {
+                          setRefundSubmitting(false);
+                        }
+                      }}
+                      className="w-full py-2.5 rounded-xl bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:opacity-60"
+                    >
+                      {refundSubmitting ? "Queueing…" : "Request refund on POS"}
+                    </button>
+                    {refundSubmitErr ? (
+                      <p className="text-xs text-red-700">{refundSubmitErr}</p>
+                    ) : null}
+                    {refundCmdStatus ? (
+                      <div className="text-xs text-emerald-950 space-y-0.5">
+                        <p>
+                          <span className="font-semibold">Status:</span> {refundCmdStatus}
+                        </p>
+                        {refundCmdDetail ? (
+                          <p className="text-emerald-900/90 break-words">{refundCmdDetail}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ) : null}
+
             {txModal && canRequestRemoteVoid(txModal.data) ? (
               <div className="rounded-xl border border-amber-100 bg-amber-50/80 px-3 py-3 space-y-2">
                 <p className="text-xs font-medium text-amber-900">Remote card void</p>
@@ -1647,8 +1796,9 @@ export default function SalesActivityClient() {
             ) : null}
 
             <p className="text-xs text-slate-500">
-              Partial and full refunds (and voids that include cash) are done on the POS. Card-only voids
-              can also be queued above when the POS is online.
+              Partial and full card refunds on settled batches can be queued above when the POS
+              is online (SPIn Return). Unsettled card-only voids can be queued in the amber section. Mixed cash +
+              card, ecommerce / online pay, and cash refunds still require the POS (or iPOS portal where applicable).
             </p>
           </div>
         </div>

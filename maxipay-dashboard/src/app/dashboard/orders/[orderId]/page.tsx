@@ -9,6 +9,9 @@ import {
   getDocs,
   query,
   where,
+  addDoc,
+  onSnapshot,
+  serverTimestamp,
   type Timestamp,
 } from "firebase/firestore";
 import { ArrowLeft, Loader2 } from "lucide-react";
@@ -122,6 +125,31 @@ function buildRefundStrikeIndex(
 }
 
 const SALES_ACTIVITY_FROM = "sales-activity";
+const REMOTE_PAYMENT_COMMANDS = "RemotePaymentCommands";
+
+function txRecordHasCashTender(tx: Record<string, unknown>): boolean {
+  const pays = tx.payments;
+  if (Array.isArray(pays)) {
+    for (const p of pays) {
+      const o = p as Record<string, unknown>;
+      const pt = String(o.paymentType ?? "").trim().toLowerCase();
+      const cents = Number(o.amountInCents ?? 0);
+      if (pt === "cash" && cents > 0) return true;
+    }
+    return false;
+  }
+  return String(tx.paymentType ?? "").trim().toLowerCase() === "cash";
+}
+
+function txRecordIsEcommerce(tx: Record<string, unknown>): boolean {
+  if (tx.ecommerce === true) return true;
+  const pays = tx.payments;
+  if (!Array.isArray(pays)) return false;
+  return pays.some(
+    (p) =>
+      String((p as Record<string, unknown>).entryType ?? "").toUpperCase() === "ECOMMERCE"
+  );
+}
 
 export default function OrderDetailPage() {
   const params = useParams();
@@ -149,6 +177,47 @@ export default function OrderDetailPage() {
     null
   );
 
+  const [refundCmdId, setRefundCmdId] = useState<string | null>(null);
+  const [refundSubmitting, setRefundSubmitting] = useState(false);
+  const [refundSubmitErr, setRefundSubmitErr] = useState<string | null>(null);
+  const [refundCmdStatus, setRefundCmdStatus] = useState<string | null>(null);
+  const [refundCmdDetail, setRefundCmdDetail] = useState<string | null>(null);
+  const [refundAmountInput, setRefundAmountInput] = useState("");
+
+  useEffect(() => {
+    setRefundCmdId(null);
+    setRefundSubmitErr(null);
+    setRefundCmdStatus(null);
+    setRefundCmdDetail(null);
+    setRefundAmountInput("");
+  }, [orderId]);
+
+  useEffect(() => {
+    if (!refundCmdId || !db) {
+      setRefundCmdStatus(null);
+      setRefundCmdDetail(null);
+      return;
+    }
+    const ref = doc(db, REMOTE_PAYMENT_COMMANDS, refundCmdId);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setRefundCmdStatus(null);
+          setRefundCmdDetail(null);
+          return;
+        }
+        const d = snap.data();
+        setRefundCmdStatus(String(d?.status ?? ""));
+        const err = typeof d?.errorMessage === "string" ? d.errorMessage : "";
+        const ok = typeof d?.resultMessage === "string" ? d.resultMessage : "";
+        setRefundCmdDetail(err || ok || null);
+      },
+      (e) => console.error("[Order detail] refund command", e)
+    );
+    return () => unsub();
+  }, [refundCmdId]);
+
   useEffect(() => {
     if (!user || !orderId) {
       setLoading(false);
@@ -169,10 +238,17 @@ export default function OrderDetailPage() {
           setOrderData(null);
           setLines([]);
           setRefundLineIndex(null);
+          setRefundAmountInput("");
           return;
         }
         const data = snap.data() as Record<string, unknown>;
         setOrderData(data);
+        if (!cancelled) {
+          const totalIn = Number(data.totalInCents ?? 0);
+          const refIn = Number(data.totalRefundedInCents ?? 0);
+          const remIn = Math.max(0, totalIn - refIn);
+          setRefundAmountInput(remIn > 0 ? (remIn / 100).toFixed(2) : "");
+        }
 
         const saleId = String(
           data.saleTransactionId ?? data.transactionId ?? ""
@@ -344,6 +420,21 @@ export default function OrderDetailPage() {
   const tipLabel = formatTipSummaryLabel(tipAmountInCents, subtotalCents);
   const remainingInCents = Math.max(0, totalInCents - totalRefundedInCents);
   const typeBadge = orderTypeBadgeStyle(orderTypeRaw);
+
+  const saleIdForRefund = String(
+    orderData?.saleTransactionId ?? orderData?.transactionId ?? ""
+  ).trim();
+  const canQueueRemoteCardRefund =
+    user != null &&
+    orderData != null &&
+    saleTransactionData != null &&
+    status === "CLOSED" &&
+    remainingInCents > 0 &&
+    saleIdForRefund.length > 0 &&
+    saleTransactionData.voided !== true &&
+    saleTransactionData.settled === true &&
+    !txRecordHasCashTender(saleTransactionData) &&
+    !txRecordIsEcommerce(saleTransactionData);
 
   /** Same rule as Android `OrderDetailActivity`: full strike metadata only when order is fully refunded. */
   const fullyRefundedForStrike =
@@ -704,6 +795,84 @@ export default function OrderDetailPage() {
                 </div>
               )}
             </div>
+
+            {canQueueRemoteCardRefund ? (
+              <div className="bg-emerald-50/90 rounded-2xl border border-emerald-100 shadow-sm p-6 space-y-3">
+                <h3 className="text-sm font-semibold text-emerald-900">
+                  Remote card refund (POS)
+                </h3>
+                <p className="text-xs text-emerald-800/95 leading-relaxed">
+                  Sends a <span className="font-mono">refundTransaction</span> command to{" "}
+                  <span className="font-mono">RemotePaymentCommands</span>. A tablet with MaxiPay
+                  signed in runs SPIn <span className="font-mono">/Payment/Return</span> on this sale.
+                  The amount is capped to the order&apos;s remaining refundable total and the card
+                  sale total on the device.
+                </p>
+                <label className="block text-xs font-medium text-emerald-900">
+                  Refund amount (USD)
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={refundAmountInput}
+                    onChange={(e) => setRefundAmountInput(e.target.value)}
+                    className="mt-1 w-full max-w-xs rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-800"
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={refundSubmitting}
+                  onClick={async () => {
+                    if (!user) return;
+                    const dollars = parseFloat(refundAmountInput);
+                    if (!Number.isFinite(dollars) || dollars <= 0) {
+                      setRefundSubmitErr("Enter a valid refund amount greater than zero.");
+                      return;
+                    }
+                    const amountInCents = Math.round(dollars * 100);
+                    setRefundSubmitting(true);
+                    setRefundSubmitErr(null);
+                    try {
+                      const ref = await addDoc(collection(db, REMOTE_PAYMENT_COMMANDS), {
+                        type: "refundTransaction",
+                        transactionId: saleIdForRefund,
+                        orderId,
+                        amountInCents,
+                        status: "pending",
+                        requestedByUid: user.uid,
+                        requestedByEmail: user.email ?? "",
+                        refundedByLabel: `Dashboard: ${user.email ?? user.uid}`,
+                        requestedAt: serverTimestamp(),
+                      });
+                      setRefundCmdId(ref.id);
+                    } catch (err) {
+                      console.error("[Order detail] remote refund queue", err);
+                      setRefundSubmitErr(
+                        err instanceof Error ? err.message : "Could not queue refund request"
+                      );
+                    } finally {
+                      setRefundSubmitting(false);
+                    }
+                  }}
+                  className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:opacity-60"
+                >
+                  {refundSubmitting ? "Queueing…" : "Request refund on POS"}
+                </button>
+                {refundSubmitErr ? (
+                  <p className="text-xs text-red-700">{refundSubmitErr}</p>
+                ) : null}
+                {refundCmdStatus ? (
+                  <div className="text-xs text-emerald-950 space-y-0.5">
+                    <p>
+                      <span className="font-semibold">Command status:</span> {refundCmdStatus}
+                    </p>
+                    {refundCmdDetail ? (
+                      <p className="text-emerald-900/90 break-words">{refundCmdDetail}</p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             <p className="text-xs text-slate-400">
               Read-only view of Firestore{" "}
