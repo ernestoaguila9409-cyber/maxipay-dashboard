@@ -137,16 +137,23 @@ function transactionIsEcommerce(data: DocumentData): boolean {
   );
 }
 
-/** Settled card-only sales — dashboard queues SPIn Return on the POS (same host as void). */
-function canRequestRemoteRefund(data: DocumentData): boolean {
+/**
+ * Card-only, non-ecommerce sale/capture/pre-auth — show the refund panel (explains void vs refund).
+ * The queue button stays disabled until settled; SPIn Return requires a settled sale on the POS.
+ */
+function canShowRemoteRefundSection(data: DocumentData): boolean {
   if (!inFinancialTx(data)) return false;
   const type = String(data.type ?? "");
   if (!["SALE", "CAPTURE", "PRE_AUTH"].includes(type)) return false;
   if (data.voided === true) return false;
-  if (data.settled !== true) return false;
   if (transactionHasCashTender(data)) return false;
   if (transactionIsEcommerce(data)) return false;
   return true;
+}
+
+/** Settled card-only sales — dashboard may queue SPIn Return on the POS. */
+function canRequestRemoteRefund(data: DocumentData): boolean {
+  return canShowRemoteRefundSection(data) && data.settled === true;
 }
 
 /** Cash tender on a sale/capture — same idea as POS Cash Flow. */
@@ -1650,14 +1657,22 @@ export default function SalesActivityClient() {
               <p className="text-xs text-red-600">{receiptErr}</p>
             ) : null}
 
-            {txModal && canRequestRemoteRefund(txModal.data) ? (
+            {txModal && canShowRemoteRefundSection(txModal.data) ? (
               <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-3 space-y-2">
                 <p className="text-xs font-medium text-emerald-900">Remote card refund</p>
-                <p className="text-[11px] text-emerald-800/90 leading-snug">
-                  Queues an SPIn <span className="font-mono">/Payment/Return</span> on the signed-in POS (settled
-                  card sales only). Amount is capped to the order&apos;s remaining refundable total on the device.
-                  Online / hosted card payments cannot use this queue.
-                </p>
+                {canRequestRemoteRefund(txModal.data) ? (
+                  <p className="text-[11px] text-emerald-800/90 leading-snug">
+                    Queues an SPIn <span className="font-mono">/Payment/Return</span> on the signed-in POS (settled
+                    card sales only). Amount is capped to the order&apos;s remaining refundable total on the device.
+                    Online / hosted card payments cannot use this queue.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-amber-900/95 leading-snug rounded-lg border border-amber-200 bg-amber-50/90 px-2.5 py-2">
+                    This card sale is <span className="font-semibold">not settled</span> yet (open batch). Refund
+                    cannot be queued until the batch settles at the processor. For the full card amount while still
+                    unsettled, use <span className="font-semibold">Request void on POS</span> below.
+                  </p>
+                )}
                 {!user ? (
                   <p className="text-xs text-emerald-900">Sign in to request a refund.</p>
                 ) : (
@@ -1670,12 +1685,13 @@ export default function SalesActivityClient() {
                         step="0.01"
                         value={refundAmountInput}
                         onChange={(e) => setRefundAmountInput(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-sm text-slate-800"
+                        disabled={!canRequestRemoteRefund(txModal.data)}
+                        className="mt-1 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-sm text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                     </label>
                     <button
                       type="button"
-                      disabled={refundSubmitting}
+                      disabled={refundSubmitting || !canRequestRemoteRefund(txModal.data)}
                       onClick={async () => {
                         if (!user || !txModal) return;
                         const dollars = parseFloat(refundAmountInput);
@@ -1796,9 +1812,10 @@ export default function SalesActivityClient() {
             ) : null}
 
             <p className="text-xs text-slate-500">
-              Partial and full card refunds on settled batches can be queued above when the POS
-              is online (SPIn Return). Unsettled card-only voids can be queued in the amber section. Mixed cash +
-              card, ecommerce / online pay, and cash refunds still require the POS (or iPOS portal where applicable).
+              The green card refund section is always shown for eligible card-only sales; the queue button works
+              only after the sale is <span className="font-medium">settled</span> (SPIn Return). Unsettled card-only
+              reversals use the amber void section. Mixed cash + card, ecommerce / online pay, and cash refunds still
+              require the POS (or iPOS portal where applicable).
             </p>
           </div>
         </div>

@@ -424,7 +424,7 @@ export default function OrderDetailPage() {
   const saleIdForRefund = String(
     orderData?.saleTransactionId ?? orderData?.transactionId ?? ""
   ).trim();
-  const canQueueRemoteCardRefund =
+  const canShowRemoteCardRefundPanel =
     user != null &&
     orderData != null &&
     saleTransactionData != null &&
@@ -432,9 +432,11 @@ export default function OrderDetailPage() {
     remainingInCents > 0 &&
     saleIdForRefund.length > 0 &&
     saleTransactionData.voided !== true &&
-    saleTransactionData.settled === true &&
     !txRecordHasCashTender(saleTransactionData) &&
     !txRecordIsEcommerce(saleTransactionData);
+
+  const canQueueRemoteCardRefund =
+    canShowRemoteCardRefundPanel && saleTransactionData.settled === true;
 
   /** Same rule as Android `OrderDetailActivity`: full strike metadata only when order is fully refunded. */
   const fullyRefundedForStrike =
@@ -796,18 +798,26 @@ export default function OrderDetailPage() {
               )}
             </div>
 
-            {canQueueRemoteCardRefund ? (
+            {canShowRemoteCardRefundPanel ? (
               <div className="bg-emerald-50/90 rounded-2xl border border-emerald-100 shadow-sm p-6 space-y-3">
                 <h3 className="text-sm font-semibold text-emerald-900">
                   Remote card refund (POS)
                 </h3>
-                <p className="text-xs text-emerald-800/95 leading-relaxed">
-                  Sends a <span className="font-mono">refundTransaction</span> command to{" "}
-                  <span className="font-mono">RemotePaymentCommands</span>. A tablet with MaxiPay
-                  signed in runs SPIn <span className="font-mono">/Payment/Return</span> on this sale.
-                  The amount is capped to the order&apos;s remaining refundable total and the card
-                  sale total on the device.
-                </p>
+                {canQueueRemoteCardRefund ? (
+                  <p className="text-xs text-emerald-800/95 leading-relaxed">
+                    Sends a <span className="font-mono">refundTransaction</span> command to{" "}
+                    <span className="font-mono">RemotePaymentCommands</span>. A tablet with MaxiPay
+                    signed in runs SPIn <span className="font-mono">/Payment/Return</span> on this sale.
+                    The amount is capped to the order&apos;s remaining refundable total and the card
+                    sale total on the device.
+                  </p>
+                ) : (
+                  <p className="text-xs text-amber-900/95 leading-relaxed rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2.5">
+                    This card sale is <span className="font-semibold">not settled</span> yet. The POS cannot run a
+                    card return until the batch settles. Use <span className="font-semibold">Sales activity</span>{" "}
+                    → void on the POS for an unsettled reversal, or queue a refund after settlement.
+                  </p>
+                )}
                 <label className="block text-xs font-medium text-emerald-900">
                   Refund amount (USD)
                   <input
@@ -816,12 +826,13 @@ export default function OrderDetailPage() {
                     step="0.01"
                     value={refundAmountInput}
                     onChange={(e) => setRefundAmountInput(e.target.value)}
-                    className="mt-1 w-full max-w-xs rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-800"
+                    disabled={!canQueueRemoteCardRefund}
+                    className="mt-1 w-full max-w-xs rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </label>
                 <button
                   type="button"
-                  disabled={refundSubmitting}
+                  disabled={refundSubmitting || !canQueueRemoteCardRefund}
                   onClick={async () => {
                     if (!user) return;
                     const dollars = parseFloat(refundAmountInput);
