@@ -159,7 +159,7 @@ export default function OnlineOrderingSettingsPage() {
     <>
       <Header title="Online ordering" />
       <div className="p-6 max-w-3xl space-y-6">
-        {/* Control center entry — links to /dashboard/online-ordering (hero, featured, storefront, live preview) */}
+        {/* Control center entry — links to /dashboard/online-ordering */}
         <Link
           href="/dashboard/online-ordering"
           className="group block bg-gradient-to-br from-blue-600 to-violet-600 text-white rounded-2xl shadow-sm hover:shadow-lg transition-shadow no-underline"
@@ -173,8 +173,8 @@ export default function OnlineOrderingSettingsPage() {
                 Online ordering control center
               </h2>
               <p className="text-sm text-white/85 mt-0.5">
-                Hero carousel, featured items, store logo &amp; prep time, with a live preview of
-                your storefront.
+                Storefront banner, hours, prep time, and payment options. Open the public storefront
+                anytime from there.
               </p>
             </div>
             <ChevronRight

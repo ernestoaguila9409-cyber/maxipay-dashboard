@@ -19,16 +19,7 @@ import { getApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
-import {
-  Banknote,
-  CornerDownRight,
-  CreditCard,
-  Layers,
-  Loader2,
-  Plus,
-  Search,
-  X,
-} from "lucide-react";
+import { Banknote, CreditCard, Layers, Loader2, Plus, Search, X } from "lucide-react";
 import { startOfLocalDay } from "@/lib/dashboardFinance";
 import {
   effectivePosOrderStatus,
@@ -335,37 +326,120 @@ function buildTransactionGroups(
   return groups;
 }
 
-function transactionListRowMeta(data: DocumentData): {
-  display: string;
-  icon: string;
-  st: string;
-  stCls: string;
-  last4: string;
-  ts: Date;
-} {
+/** First payment row — mirrors Android `TransactionAdapter` primary payment. */
+function firstPaymentMap(data: DocumentData): Record<string, unknown> | undefined {
+  const pays = data.payments as unknown[] | undefined;
+  if (!Array.isArray(pays) || pays.length === 0) return undefined;
+  return pays[0] as Record<string, unknown>;
+}
+
+/** Icon + title row (AMEX PAYMENT, CASH PAYMENT, …) — matches POS `item_transaction.xml`. */
+function saleTypeHeader(data: DocumentData): { icon: string; title: string } {
   const type = String(data.type ?? "");
-  const voided = data.voided === true;
-  const cents = txAmountCents(data, type);
-  const display =
-    type === "REFUND" ? `-${fmtMoney(Math.abs(cents))}` : fmtMoney(cents);
-  const pt = primaryPaymentType(data);
-  const icon =
-    pt.toLowerCase() === "cash" ? "💵" : type === "REFUND" ? "↩" : "💳";
-  let st = "APPROVED";
-  let stCls = "bg-emerald-100 text-emerald-800";
-  if (voided && type !== "REFUND") {
-    st = "VOIDED";
-    stCls = "bg-red-100 text-red-800";
-  } else if (type === "REFUND") {
-    st = "REFUNDED";
-    stCls = "bg-red-100 text-red-800";
-  } else if (type === "PRE_AUTH") {
-    st = "PENDING";
-    stCls = "bg-orange-100 text-orange-800";
+  if (type === "REFUND") return { icon: "↩️", title: "REFUND" };
+  if (type === "PRE_AUTH") return { icon: "💳", title: "PRE-AUTHORIZATION" };
+  if (type === "CAPTURE") return { icon: "💳", title: "CAPTURE" };
+
+  const pays = data.payments as Record<string, unknown>[] | undefined;
+  const isMix =
+    Array.isArray(pays) &&
+    pays.length > 1 &&
+    pays.some((p) => String(p.paymentType ?? "").toLowerCase() === "cash") &&
+    pays.some((p) => String(p.paymentType ?? "").toLowerCase() !== "cash");
+  if (isMix) return { icon: "💵💳", title: "MIX PAYMENT" };
+
+  const p0 = firstPaymentMap(data);
+  const pt = String(p0?.paymentType ?? data.paymentType ?? "");
+  if (pt.toLowerCase() === "cash") return { icon: "💵", title: "CASH PAYMENT" };
+
+  const cardBrand = String(p0?.cardBrand ?? data.cardBrand ?? "").toUpperCase();
+  const brandKey = cardBrand.includes("VISA")
+    ? "VISA"
+    : cardBrand.includes("MASTER")
+      ? "MASTERCARD"
+      : cardBrand.includes("AMEX") || cardBrand.includes("AMERICAN")
+        ? "AMEX"
+        : cardBrand.includes("DISCOVER")
+          ? "DISCOVER"
+          : "CARD";
+  return { icon: "💳", title: `${brandKey} PAYMENT` };
+}
+
+function friendlyCardBrand(cardBrand: string): string {
+  const u = cardBrand.toUpperCase();
+  if (u.includes("VISA")) return "Visa";
+  if (u.includes("MASTER")) return "Mastercard";
+  if (u.includes("AMEX") || u.includes("AMERICAN")) return "Amex";
+  if (u.includes("DISCOVER")) return "Discover";
+  return cardBrand.trim() || "Card";
+}
+
+/** Second row left column — "Amex •••• 9786" / Cash / mixed legs. */
+function paymentMethodLine(data: DocumentData): string {
+  const pays = data.payments as Record<string, unknown>[] | undefined;
+  if (Array.isArray(pays) && pays.length > 1) {
+    return pays
+      .map((p) => {
+        if (String(p.paymentType ?? "").toLowerCase() === "cash") return "Cash";
+        const b = String(p.cardBrand ?? "").trim() || String(p.paymentType ?? "").trim() || "Card";
+        const l4 = String(p.last4 ?? "").trim();
+        return l4 ? `${friendlyCardBrand(b)} •••• ${l4}` : friendlyCardBrand(b);
+      })
+      .join(" + ");
   }
-  const last4 = paymentsLast4s(data)[0] ?? String(data.last4 ?? "");
-  const ts = docDate(data) ?? new Date();
-  return { display, icon, st, stCls, last4, ts };
+  const p0 = firstPaymentMap(data);
+  const pt = String(p0?.paymentType ?? data.paymentType ?? "");
+  if (pt.toLowerCase() === "cash") return "Cash";
+  const rawBrand = String(p0?.cardBrand ?? data.cardBrand ?? "");
+  const l4 = String(p0?.last4 ?? data.last4 ?? "").trim();
+  if (rawBrand && l4) return `${friendlyCardBrand(rawBrand)} •••• ${l4}`;
+  return pt.trim() || "Card";
+}
+
+/** "Order #392 • Txn #17" when `appTransactionNumber` is set (POS batch seq). */
+function orderAndAppTxnLine(data: DocumentData): string | null {
+  const parts: string[] = [];
+  const on = Number(data.orderNumber ?? 0);
+  if (on > 0) parts.push(`Order #${on}`);
+  const appTxn = Number(data.appTransactionNumber ?? 0);
+  if (appTxn > 0) parts.push(`Txn #${appTxn}`);
+  return parts.length > 0 ? parts.join(" \u2022 ") : null;
+}
+
+/** Processor transaction # — shown only when app txn # is absent (Android `bindTxnNumber`). */
+function processorTxnLineIfNeeded(data: DocumentData): string | null {
+  if (Number(data.appTransactionNumber ?? 0) > 0) return null;
+  const pays = data.payments as Record<string, unknown>[] | undefined;
+  const tn = String(
+    (pays?.[0] as Record<string, unknown> | undefined)?.transactionNumber ??
+      data.transactionNumber ??
+      ""
+  ).trim();
+  if (!tn) return null;
+  return `Txn #${tn}`;
+}
+
+function formatTxnCardDate(d: Date): string {
+  const md = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const tm = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  return `${md} \u00b7 ${tm}`;
+}
+
+function netCentsAfterRefunds(saleData: DocumentData, refundDocs: TxDocRow[]): number {
+  const saleType = String(saleData.type ?? "");
+  const saleCents = txAmountCents(saleData, saleType);
+  const refSum = refundDocs.reduce((acc, r) => acc + txAmountCents(r.data, "REFUND"), 0);
+  return saleCents - refSum;
+}
+
+/** Orange block: one line per refund, "↵ Refund -$0.01". */
+function refundSubcardLines(refundDocs: TxDocRow[]): string {
+  return refundDocs
+    .map((r) => {
+      const c = txAmountCents(r.data, "REFUND");
+      return `\u21b5 Refund -${fmtMoney(Math.abs(c))}`;
+    })
+    .join("\n");
 }
 
 export default function SalesActivityClient() {
@@ -1274,91 +1348,118 @@ export default function SalesActivityClient() {
                 <p className="text-slate-500 text-sm py-8 text-center">No transactions</p>
               ) : (
                 transactionGroups.map((grp) => {
-                  const renderRowButton = (id: string, data: DocumentData, compact: boolean) => {
-                    const type = String(data.type ?? "");
-                    const { display, icon, st, stCls, last4, ts } = transactionListRowMeta(data);
+                  if (grp.parent) {
+                    const sale = grp.parent.data;
+                    const voided = sale.voided === true;
+                    const voidedBy = String(sale.voidedBy ?? "").trim();
+                    const { icon, title } = saleTypeHeader(sale);
+                    const payLine = paymentMethodLine(sale);
+                    const netCents = netCentsAfterRefunds(sale, grp.refunds);
+                    const displayNet = Math.max(0, netCents);
+                    const orderLine = orderAndAppTxnLine(sale);
+                    const procLine = processorTxnLineIfNeeded(sale);
+                    const when = docDate(sale) ?? new Date();
+                    const refundBlock =
+                      grp.refunds.length > 0 ? refundSubcardLines(grp.refunds) : "";
+
                     return (
                       <button
-                        key={id}
+                        key={grp.key}
                         type="button"
-                        onClick={() => setTxModal({ id, data })}
-                        className={`w-full text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:border-violet-200 ${
-                          compact ? "px-3 py-2.5" : "p-4"
+                        onClick={() => setTxModal({ id: grp.parent!.id, data: grp.parent!.data })}
+                        className={`w-full text-left rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:border-violet-200 transition-colors ${
+                          voided ? "opacity-60" : ""
                         }`}
                       >
-                        <div className={`flex ${compact ? "gap-2" : "gap-3"}`}>
-                          {compact ? (
-                            <CornerDownRight
-                              className="shrink-0 w-4 h-4 text-slate-400 mt-0.5"
-                              aria-hidden
-                            />
-                          ) : (
-                            <span className="text-2xl">{icon}</span>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex justify-between gap-2">
-                              <span
-                                className={`font-bold text-slate-900 tabular-nums ${
-                                  compact ? "text-sm" : ""
-                                }`}
-                              >
-                                {display}
-                              </span>
-                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${stCls}`}>
-                                {st}
-                              </span>
-                            </div>
-                            <p className={`text-slate-600 ${compact ? "text-xs mt-0.5" : "text-sm mt-1"}`}>
-                              {compact ? (
-                                <>
-                                  Refund
-                                  {last4 ? ` · •••• ${last4}` : ""} · {type}
-                                </>
-                              ) : (
-                                <>
-                                  {last4 ? `•••• ${last4}` : "—"} · {type}
-                                </>
-                              )}
-                            </p>
-                            <p className="text-xs text-slate-400 mt-1">{ts.toLocaleString()}</p>
-                            {compact && grp.parent ? (
-                              <p className="text-[11px] text-violet-600/90 mt-1 font-mono truncate">
-                                Original txn {grp.parent.id}
-                              </p>
-                            ) : null}
-                          </div>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-lg shrink-0" aria-hidden>
+                            {icon}
+                          </span>
+                          <span className="text-[13px] font-bold text-[#555555] tracking-wide truncate flex-1 min-w-0">
+                            {title}
+                          </span>
+                          {voided ? (
+                            <span className="shrink-0 text-[11px] font-bold text-[#C62828] bg-[#FFEBEE] px-2 py-0.5 rounded-full">
+                              VOID
+                            </span>
+                          ) : null}
                         </div>
-                      </button>
-                    );
-                  };
-
-                  if (grp.parent) {
-                    return (
-                      <div
-                        key={grp.key}
-                        className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden"
-                      >
-                        {renderRowButton(grp.parent.id, grp.parent.data, false)}
-                        {grp.refunds.length > 0 ? (
-                          <div className="border-t border-slate-100 bg-slate-50/90 px-2 pb-2 pt-1 space-y-1">
-                            {grp.refunds.map((r) => renderRowButton(r.id, r.data, true))}
-                          </div>
+                        {voided && voidedBy ? (
+                          <p className="text-xs text-[#C62828] mt-0.5">Voided by: {voidedBy}</p>
                         ) : null}
-                      </div>
+                        <div className="flex items-start justify-between gap-3 mt-2">
+                          <p className="text-base text-[#1A1A1A] leading-snug min-w-0 flex-1">
+                            {payLine}
+                          </p>
+                          <p
+                            className={`text-lg font-bold tabular-nums text-[#2E7D32] shrink-0 ${
+                              voided ? "line-through" : ""
+                            }`}
+                          >
+                            +{fmtMoney(displayNet)}
+                          </p>
+                        </div>
+                        {orderLine ? (
+                          <p className="text-[13px] text-[#777777] mt-1.5">{orderLine}</p>
+                        ) : null}
+                        <p className="text-[13px] text-[#999999] mt-1">{formatTxnCardDate(when)}</p>
+                        {procLine ? (
+                          <p className="text-xs text-[#AAAAAA] mt-0.5">{procLine}</p>
+                        ) : null}
+                        {refundBlock ? (
+                          <p className="text-[13px] text-[#E65100] mt-2 whitespace-pre-line leading-snug">
+                            {refundBlock}
+                          </p>
+                        ) : null}
+                      </button>
                     );
                   }
 
                   const r = grp.refunds[0]!;
-                  const origRef = String(r.data.originalReferenceId ?? "").trim();
+                  const rd = r.data;
+                  const origRef = String(rd.originalReferenceId ?? "").trim();
+                  const voided = rd.voided === true;
+                  const { icon, title } = saleTypeHeader(rd);
+                  const payLine = paymentMethodLine(rd);
+                  const cents = txAmountCents(rd, "REFUND");
+                  const orderLine = orderAndAppTxnLine(rd);
+                  const procLine = processorTxnLineIfNeeded(rd);
+                  const when = docDate(rd) ?? new Date();
+
                   return (
-                    <div key={grp.key} className="rounded-2xl border border-amber-100 bg-amber-50/40">
-                      {renderRowButton(r.id, r.data, false)}
-                      <p className="px-4 pb-3 text-[11px] text-amber-800/90">
+                    <button
+                      key={grp.key}
+                      type="button"
+                      onClick={() => setTxModal({ id: r.id, data: rd })}
+                      className={`w-full text-left rounded-2xl border border-amber-100 bg-amber-50/50 p-4 shadow-sm hover:border-amber-200 transition-colors ${
+                        voided ? "opacity-60" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-lg shrink-0" aria-hidden>
+                          {icon}
+                        </span>
+                        <span className="text-[13px] font-bold text-[#555555] tracking-wide truncate flex-1">
+                          {title}
+                        </span>
+                      </div>
+                      <div className="flex items-start justify-between gap-3 mt-2">
+                        <p className="text-base text-[#1A1A1A] leading-snug min-w-0 flex-1">{payLine}</p>
+                        <p className="text-lg font-bold tabular-nums text-[#E65100] shrink-0">
+                          -{fmtMoney(Math.abs(cents))}
+                        </p>
+                      </div>
+                      {orderLine ? (
+                        <p className="text-[13px] text-[#777777] mt-1.5">{orderLine}</p>
+                      ) : null}
+                      <p className="text-[13px] text-[#999999] mt-1">{formatTxnCardDate(when)}</p>
+                      {procLine ? <p className="text-xs text-[#AAAAAA] mt-0.5">{procLine}</p> : null}
+                      <p className="text-[11px] text-amber-900/85 mt-2 leading-snug">
                         {origRef
-                          ? `Original sale txn is not in this list (${origRef.slice(0, 10)}…). Try a wider date range or All batches.`
-                          : "No original transaction id on this refund (legacy row)."}
+                          ? `Original sale is not in this list (${origRef.slice(0, 10)}…). Open a wider range or All batches to see the parent card.`
+                          : "No original transaction id (legacy refund)."}
                       </p>
-                    </div>
+                    </button>
                   );
                 })
               )}
