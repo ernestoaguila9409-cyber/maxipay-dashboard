@@ -62,6 +62,65 @@ interface RefundActivityRow {
   createdAtLabel: string | null;
 }
 
+/** Mirrors Android `OrderDetailActivity.loadRefundHistory` + `OrderItemsAdapter` matching. */
+interface RefundStrikeIndex {
+  lineKeys: Set<string>;
+  nameAmountKeys: Set<string>;
+  lineKeyMeta: Map<string, { by: string; at: string }>;
+  nameAmountMeta: Map<string, { by: string; at: string }>;
+  /** Set when a refund tx has no `refundedLineKey` / `refundedItemName` (whole-order refund); last doc wins. */
+  wholeOrderLast: { by: string; at: string } | null;
+  totalFromRefundTxnsCents: number;
+}
+
+function refundTxnAmountCentsAbs(rd: Record<string, unknown>): number {
+  const a = rd.amountInCents;
+  if (typeof a === "number" && Number.isFinite(a)) return Math.round(Math.abs(a));
+  const d = rd.amount;
+  if (typeof d === "number" && Number.isFinite(d)) return Math.round(Math.abs(d) * 100);
+  return 0;
+}
+
+function buildRefundStrikeIndex(
+  sortedRefundDocs: Array<{ data: () => Record<string, unknown> }>
+): RefundStrikeIndex {
+  const lineKeys = new Set<string>();
+  const nameAmountKeys = new Set<string>();
+  const lineKeyMeta = new Map<string, { by: string; at: string }>();
+  const nameAmountMeta = new Map<string, { by: string; at: string }>();
+  let wholeOrderLast: { by: string; at: string } | null = null;
+  let totalFromRefundTxnsCents = 0;
+
+  for (const d of sortedRefundDocs) {
+    const rd = d.data();
+    const amountCents = refundTxnAmountCentsAbs(rd);
+    totalFromRefundTxnsCents += amountCents;
+    const employee = String(rd.refundedBy ?? "").trim() || "—";
+    const dateStr = formatFirestoreTimestamp(rd.createdAt) ?? "";
+    const lk = String(rd.refundedLineKey ?? "").trim();
+    const itemName = String(rd.refundedItemName ?? "").trim();
+    if (lk) {
+      lineKeys.add(lk);
+      lineKeyMeta.set(lk, { by: employee, at: dateStr });
+    } else if (itemName) {
+      const nak = `${itemName}|${amountCents}`;
+      nameAmountKeys.add(nak);
+      nameAmountMeta.set(nak, { by: employee, at: dateStr });
+    } else {
+      wholeOrderLast = { by: employee, at: dateStr };
+    }
+  }
+
+  return {
+    lineKeys,
+    nameAmountKeys,
+    lineKeyMeta,
+    nameAmountMeta,
+    wholeOrderLast,
+    totalFromRefundTxnsCents,
+  };
+}
+
 const SALES_ACTIVITY_FROM = "sales-activity";
 
 export default function OrderDetailPage() {
@@ -86,6 +145,9 @@ export default function OrderDetailPage() {
     Record<string, unknown> | null
   >(null);
   const [refundActivity, setRefundActivity] = useState<RefundActivityRow[]>([]);
+  const [refundLineIndex, setRefundLineIndex] = useState<RefundStrikeIndex | null>(
+    null
+  );
 
   useEffect(() => {
     if (!user || !orderId) {
@@ -106,6 +168,7 @@ export default function OrderDetailPage() {
           setError("Order not found.");
           setOrderData(null);
           setLines([]);
+          setRefundLineIndex(null);
           return;
         }
         const data = snap.data() as Record<string, unknown>;
@@ -116,6 +179,7 @@ export default function OrderDetailPage() {
         ).trim();
         setSaleTransactionData(null);
         setRefundActivity([]);
+        setRefundLineIndex(null);
 
         if (saleId) {
           try {
@@ -167,12 +231,17 @@ export default function OrderDetailPage() {
                   createdAtLabel: formatFirestoreTimestamp(rd.createdAt),
                 };
               });
-              if (!cancelled) setRefundActivity(rows);
+              const strikeIndex = buildRefundStrikeIndex(sortedDocs);
+              if (!cancelled) {
+                setRefundActivity(rows);
+                setRefundLineIndex(strikeIndex);
+              }
             } catch (err) {
               console.error(
                 "[Order detail] Refund transactions query failed (index may be required):",
                 err
               );
+              if (!cancelled) setRefundLineIndex(null);
             }
           }
         }
@@ -202,7 +271,7 @@ export default function OrderDetailPage() {
             : [];
           parsed.push({
             id: d.id,
-            name: String(x.name ?? "Item"),
+            name: String(x.name ?? x.itemName ?? "Item"),
             quantity: Number.isFinite(qty) ? qty : 1,
             unitPriceInCents: unit,
             lineTotalInCents: lineTotal,
@@ -213,6 +282,7 @@ export default function OrderDetailPage() {
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Failed to load order");
+          setRefundLineIndex(null);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -274,6 +344,28 @@ export default function OrderDetailPage() {
   const tipLabel = formatTipSummaryLabel(tipAmountInCents, subtotalCents);
   const remainingInCents = Math.max(0, totalInCents - totalRefundedInCents);
   const typeBadge = orderTypeBadgeStyle(orderTypeRaw);
+
+  /** Same rule as Android `OrderDetailActivity`: full strike metadata only when order is fully refunded. */
+  const fullyRefundedForStrike =
+    totalInCents > 0 &&
+    (totalRefundedInCents >= totalInCents ||
+      (refundLineIndex?.totalFromRefundTxnsCents ?? 0) >= totalInCents);
+
+  function lineRefundStrike(line: LineItem): { by: string; at: string } | null {
+    if (!refundLineIndex) return null;
+    const idx = refundLineIndex;
+    if (idx.lineKeys.has(line.id)) {
+      return idx.lineKeyMeta.get(line.id) ?? null;
+    }
+    const nameKey = `${line.name.trim()}|${line.lineTotalInCents}`;
+    if (idx.nameAmountKeys.has(nameKey)) {
+      return idx.nameAmountMeta.get(nameKey) ?? null;
+    }
+    if (fullyRefundedForStrike && idx.wholeOrderLast) {
+      return idx.wholeOrderLast;
+    }
+    return null;
+  }
 
   const voidedByOrder = String(orderData?.voidedBy ?? "").trim();
   const voidedAtOrderLabel = formatFirestoreTimestamp(orderData?.voidedAt);
@@ -431,41 +523,91 @@ export default function OrderDetailPage() {
                 </p>
               ) : (
                 <ul className="divide-y divide-slate-50">
-                  {lines.map((line) => (
-                    <li key={line.id} className="px-6 py-4">
-                      <div className="flex justify-between gap-4">
-                        <div>
-                          <p className="font-medium text-slate-800">
-                            {line.name}{" "}
-                            <span className="text-slate-500 font-normal">
-                              ×{line.quantity}
-                            </span>
-                          </p>
-                          {line.modifiers.length > 0 && (
-                            <ul className="mt-1 text-xs text-slate-600 space-y-0.5">
-                              {line.modifiers.map((m, i) => (
-                                <li key={i}>
-                                  {m.action === "ADD" ? "+" : m.action === "NO" ? "−" : ""}{" "}
-                                  {m.name}
-                                  {m.price != null && m.price !== 0
-                                    ? ` ($${Number(m.price).toFixed(2)})`
-                                    : ""}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
+                  {lines.map((line) => {
+                    const strike = lineRefundStrike(line);
+                    const isRefunded = strike != null;
+                    return (
+                      <li
+                        key={line.id}
+                        className={`px-6 py-4 ${isRefunded ? "bg-[#FFF5F5]" : ""}`}
+                      >
+                        <div className="flex justify-between gap-4">
+                          <div className="min-w-0">
+                            <p
+                              className={`font-medium ${
+                                isRefunded
+                                  ? "text-[#999999] line-through decoration-[#999999]"
+                                  : "text-slate-800"
+                              }`}
+                            >
+                              {line.name}{" "}
+                              <span
+                                className={
+                                  isRefunded
+                                    ? "text-[#999999] font-normal"
+                                    : "text-slate-500 font-normal"
+                                }
+                              >
+                                ×{line.quantity}
+                              </span>
+                            </p>
+                            {line.modifiers.length > 0 && (
+                              <ul className="mt-1 text-xs text-slate-600 space-y-0.5">
+                                {line.modifiers.map((m, i) => (
+                                  <li key={i}>
+                                    {m.action === "ADD"
+                                      ? "+"
+                                      : m.action === "NO"
+                                        ? "−"
+                                        : ""}{" "}
+                                    {m.name}
+                                    {m.price != null && m.price !== 0
+                                      ? ` ($${Number(m.price).toFixed(2)})`
+                                      : ""}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            {isRefunded ? (
+                              <div className="mt-2 space-y-0.5">
+                                <p className="text-xs font-bold uppercase tracking-wide text-red-600">
+                                  Refunded
+                                </p>
+                                {strike.by && strike.by !== "—" ? (
+                                  <p className="text-xs text-red-600/90">
+                                    Refunded by {strike.by}
+                                  </p>
+                                ) : null}
+                                {strike.at ? (
+                                  <p className="text-xs text-red-600/90">{strike.at}</p>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p
+                              className={`text-sm font-semibold ${
+                                isRefunded
+                                  ? "text-[#999999] line-through decoration-[#999999]"
+                                  : "text-slate-800"
+                              }`}
+                            >
+                              ${centsToMoney(line.lineTotalInCents)}
+                            </p>
+                            <p
+                              className={`text-xs ${
+                                isRefunded
+                                  ? "text-[#999999] line-through"
+                                  : "text-slate-400"
+                              }`}
+                            >
+                              @ ${centsToMoney(line.unitPriceInCents)} each
+                            </p>
+                          </div>
                         </div>
-                        <div className="text-right shrink-0">
-                          <p className="text-sm font-semibold text-slate-800">
-                            ${centsToMoney(line.lineTotalInCents)}
-                          </p>
-                          <p className="text-xs text-slate-400">
-                            @ ${centsToMoney(line.unitPriceInCents)} each
-                          </p>
-                        </div>
-                      </div>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
 
@@ -546,7 +688,7 @@ export default function OrderDetailPage() {
                     </span>
                   </div>
                   {totalRefundedInCents > 0 && (
-                    <div className="flex justify-between gap-4">
+                    <div className="flex justify-between gap-4 text-red-600 font-medium">
                       <span>Refunded</span>
                       <span>${centsToMoney(totalRefundedInCents)}</span>
                     </div>
