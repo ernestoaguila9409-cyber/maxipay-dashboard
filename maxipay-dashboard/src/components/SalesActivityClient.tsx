@@ -19,7 +19,16 @@ import { getApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
-import { Banknote, CreditCard, Layers, Loader2, Plus, Search, X } from "lucide-react";
+import {
+  Banknote,
+  CornerDownRight,
+  CreditCard,
+  Layers,
+  Loader2,
+  Plus,
+  Search,
+  X,
+} from "lucide-react";
 import { startOfLocalDay } from "@/lib/dashboardFinance";
 import {
   effectivePosOrderStatus,
@@ -224,6 +233,139 @@ function receiptKindForTransaction(data: DocumentData): {
     return { receiptKind: "void", saleTransactionId: "" };
   }
   return { receiptKind: "standard", saleTransactionId: "" };
+}
+
+type TxDocRow = { id: string; data: DocumentData };
+
+function transactionRowMatchesSearch(
+  { id, data }: TxDocRow,
+  qLower: string,
+  orderIdsMatchingSearch: Set<string> | null
+): boolean {
+  if (!qLower) return true;
+  const oid = String(data.orderId ?? "").toLowerCase();
+  const onum = String(data.orderNumber ?? "");
+  if (id.toLowerCase().includes(qLower) || oid.includes(qLower) || onum.includes(qLower)) return true;
+  if (oid && orderIdsMatchingSearch?.has(String(data.orderId))) return true;
+  return paymentsLast4s(data).some((l4) => l4.includes(qLower));
+}
+
+function transactionMatchesPaymentFilter(data: DocumentData, filter: PaymentFilter): boolean {
+  if (filter === "all") return true;
+  const pt = primaryPaymentType(data);
+  const pl = pt.toLowerCase();
+  if (filter === "cash") return pl.includes("cash");
+  if (filter === "credit") return pl.includes("credit");
+  if (filter === "debit") return pl.includes("debit");
+  return true;
+}
+
+/** Align with POS: refunds nest under the original sale/capture/pre-auth (Firestore doc id = `originalReferenceId`). */
+function buildTransactionGroups(
+  txDocs: TxDocRow[],
+  batchId: string | null,
+  qLower: string,
+  paymentFilter: PaymentFilter,
+  orderIdsMatchingSearch: Set<string> | null
+): { key: string; parent: TxDocRow | null; refunds: TxDocRow[]; sortTime: number }[] {
+  const base = txDocs.filter(({ data }) => {
+    if (!inFinancialTx(data)) return false;
+    if (batchId && String(data.batchId ?? "") !== batchId) return false;
+    return true;
+  });
+
+  const byId = new Map(base.map((r) => [r.id, r]));
+  const parents = base.filter(({ data }) =>
+    ["SALE", "CAPTURE", "PRE_AUTH"].includes(String(data.type ?? ""))
+  );
+  const refunds = base.filter(({ data }) => String(data.type ?? "") === "REFUND");
+
+  const refundParentIdsFromSearch = new Set<string>();
+  if (qLower) {
+    for (const r of refunds) {
+      if (transactionRowMatchesSearch(r, qLower, orderIdsMatchingSearch)) {
+        const o = String(r.data.originalReferenceId ?? "").trim();
+        if (o) refundParentIdsFromSearch.add(o);
+      }
+    }
+  }
+
+  const parentIsVisible = (p: TxDocRow): boolean => {
+    const searchOk =
+      transactionRowMatchesSearch(p, qLower, orderIdsMatchingSearch) ||
+      refundParentIdsFromSearch.has(p.id);
+    if (!searchOk) return false;
+    return transactionMatchesPaymentFilter(p.data, paymentFilter);
+  };
+
+  const visibleParents = parents.filter(parentIsVisible);
+  const attachedRefundIds = new Set<string>();
+
+  const groups: { key: string; parent: TxDocRow | null; refunds: TxDocRow[]; sortTime: number }[] =
+    [];
+
+  for (const p of visibleParents) {
+    const rel = refunds
+      .filter((r) => String(r.data.originalReferenceId ?? "").trim() === p.id)
+      .sort((a, b) => (docDate(b.data)?.getTime() ?? 0) - (docDate(a.data)?.getTime() ?? 0));
+    rel.forEach((r) => attachedRefundIds.add(r.id));
+    const pt = docDate(p.data)?.getTime() ?? 0;
+    const rt = rel.length ? Math.max(...rel.map((r) => docDate(r.data)?.getTime() ?? 0)) : 0;
+    groups.push({
+      key: `grp-${p.id}`,
+      parent: p,
+      refunds: rel,
+      sortTime: Math.max(pt, rt),
+    });
+  }
+
+  for (const r of refunds) {
+    if (attachedRefundIds.has(r.id)) continue;
+    if (!transactionRowMatchesSearch(r, qLower, orderIdsMatchingSearch)) continue;
+    if (!transactionMatchesPaymentFilter(r.data, paymentFilter)) continue;
+    groups.push({
+      key: `orph-${r.id}`,
+      parent: null,
+      refunds: [r],
+      sortTime: docDate(r.data)?.getTime() ?? 0,
+    });
+  }
+
+  groups.sort((a, b) => b.sortTime - a.sortTime);
+  return groups;
+}
+
+function transactionListRowMeta(data: DocumentData): {
+  display: string;
+  icon: string;
+  st: string;
+  stCls: string;
+  last4: string;
+  ts: Date;
+} {
+  const type = String(data.type ?? "");
+  const voided = data.voided === true;
+  const cents = txAmountCents(data, type);
+  const display =
+    type === "REFUND" ? `-${fmtMoney(Math.abs(cents))}` : fmtMoney(cents);
+  const pt = primaryPaymentType(data);
+  const icon =
+    pt.toLowerCase() === "cash" ? "💵" : type === "REFUND" ? "↩" : "💳";
+  let st = "APPROVED";
+  let stCls = "bg-emerald-100 text-emerald-800";
+  if (voided && type !== "REFUND") {
+    st = "VOIDED";
+    stCls = "bg-red-100 text-red-800";
+  } else if (type === "REFUND") {
+    st = "REFUNDED";
+    stCls = "bg-red-100 text-red-800";
+  } else if (type === "PRE_AUTH") {
+    st = "PENDING";
+    stCls = "bg-orange-100 text-orange-800";
+  }
+  const last4 = paymentsLast4s(data)[0] ?? String(data.last4 ?? "");
+  const ts = docDate(data) ?? new Date();
+  return { display, icon, st, stCls, last4, ts };
 }
 
 export default function SalesActivityClient() {
@@ -622,27 +764,17 @@ export default function SalesActivityClient() {
     return m;
   }, [txDocs]);
 
-  const filteredTx = useMemo(() => {
-    return txDocs.filter(({ id, data }) => {
-      if (!inFinancialTx(data)) return false;
-      if (batchId && String(data.batchId ?? "") !== batchId) return false;
-      const type = String(data.type ?? "");
-      if (paymentFilter !== "all" && tab === "transactions") {
-        if (type === "REFUND") return false;
-        const pt = primaryPaymentType(data);
-        if (paymentFilter === "cash" && !pt.toLowerCase().includes("cash")) return false;
-        if (paymentFilter === "credit" && !pt.toLowerCase().includes("credit")) return false;
-        if (paymentFilter === "debit" && !pt.toLowerCase().includes("debit")) return false;
-      }
-      if (!qLower) return true;
-      const oid = String(data.orderId ?? "").toLowerCase();
-      const onum = String(data.orderNumber ?? "");
-      if (id.toLowerCase().includes(qLower) || oid.includes(qLower) || onum.includes(qLower))
-        return true;
-      if (oid && orderIdsMatchingSearch?.has(String(data.orderId))) return true;
-      return paymentsLast4s(data).some((l4) => l4.includes(qLower));
-    });
-  }, [txDocs, batchId, qLower, paymentFilter, tab, orderIdsMatchingSearch]);
+  const transactionGroups = useMemo(
+    () =>
+      buildTransactionGroups(
+        txDocs,
+        batchId,
+        qLower,
+        paymentFilter,
+        orderIdsMatchingSearch
+      ),
+    [txDocs, batchId, qLower, paymentFilter, orderIdsMatchingSearch]
+  );
 
   const summaryTx = useMemo(() => {
     return txDocs.filter(({ data }) => {
@@ -1138,59 +1270,95 @@ export default function SalesActivityClient() {
 
           {tab === "transactions" ? (
             <div className="space-y-2">
-              {filteredTx.length === 0 ? (
+              {transactionGroups.length === 0 ? (
                 <p className="text-slate-500 text-sm py-8 text-center">No transactions</p>
               ) : (
-                filteredTx.map(({ id, data }) => {
-                  const type = String(data.type ?? "");
-                  const voided = data.voided === true;
-                  const cents = txAmountCents(data, type);
-                  const display =
-                    type === "REFUND" ? `-${fmtMoney(Math.abs(cents))}` : fmtMoney(cents);
-                  const pt = primaryPaymentType(data);
-                  const icon =
-                    pt.toLowerCase() === "cash"
-                      ? "💵"
-                      : type === "REFUND"
-                        ? "↩"
-                        : "💳";
-                  let st = "APPROVED";
-                  let stCls = "bg-emerald-100 text-emerald-800";
-                  if (voided && type !== "REFUND") {
-                    st = "VOIDED";
-                    stCls = "bg-red-100 text-red-800";
-                  } else if (type === "REFUND") {
-                    st = "REFUNDED";
-                    stCls = "bg-red-100 text-red-800";
-                  } else if (type === "PRE_AUTH") {
-                    st = "PENDING";
-                    stCls = "bg-orange-100 text-orange-800";
-                  }
-                  const last4 = paymentsLast4s(data)[0] ?? String(data.last4 ?? "");
-                  const ts = docDate(data) ?? new Date();
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setTxModal({ id, data })}
-                      className="w-full text-left rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:border-violet-200"
-                    >
-                      <div className="flex gap-3">
-                        <span className="text-2xl">{icon}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex justify-between gap-2">
-                            <span className="font-bold text-slate-900">{display}</span>
-                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${stCls}`}>
-                              {st}
-                            </span>
+                transactionGroups.map((grp) => {
+                  const renderRowButton = (id: string, data: DocumentData, compact: boolean) => {
+                    const type = String(data.type ?? "");
+                    const { display, icon, st, stCls, last4, ts } = transactionListRowMeta(data);
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setTxModal({ id, data })}
+                        className={`w-full text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:border-violet-200 ${
+                          compact ? "px-3 py-2.5" : "p-4"
+                        }`}
+                      >
+                        <div className={`flex ${compact ? "gap-2" : "gap-3"}`}>
+                          {compact ? (
+                            <CornerDownRight
+                              className="shrink-0 w-4 h-4 text-slate-400 mt-0.5"
+                              aria-hidden
+                            />
+                          ) : (
+                            <span className="text-2xl">{icon}</span>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between gap-2">
+                              <span
+                                className={`font-bold text-slate-900 tabular-nums ${
+                                  compact ? "text-sm" : ""
+                                }`}
+                              >
+                                {display}
+                              </span>
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${stCls}`}>
+                                {st}
+                              </span>
+                            </div>
+                            <p className={`text-slate-600 ${compact ? "text-xs mt-0.5" : "text-sm mt-1"}`}>
+                              {compact ? (
+                                <>
+                                  Refund
+                                  {last4 ? ` · •••• ${last4}` : ""} · {type}
+                                </>
+                              ) : (
+                                <>
+                                  {last4 ? `•••• ${last4}` : "—"} · {type}
+                                </>
+                              )}
+                            </p>
+                            <p className="text-xs text-slate-400 mt-1">{ts.toLocaleString()}</p>
+                            {compact && grp.parent ? (
+                              <p className="text-[11px] text-violet-600/90 mt-1 font-mono truncate">
+                                Original txn {grp.parent.id}
+                              </p>
+                            ) : null}
                           </div>
-                          <p className="text-sm text-slate-600 mt-1">
-                            {last4 ? `•••• ${last4}` : "—"} · {type}
-                          </p>
-                          <p className="text-xs text-slate-400 mt-1">{ts.toLocaleString()}</p>
                         </div>
+                      </button>
+                    );
+                  };
+
+                  if (grp.parent) {
+                    return (
+                      <div
+                        key={grp.key}
+                        className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden"
+                      >
+                        {renderRowButton(grp.parent.id, grp.parent.data, false)}
+                        {grp.refunds.length > 0 ? (
+                          <div className="border-t border-slate-100 bg-slate-50/90 px-2 pb-2 pt-1 space-y-1">
+                            {grp.refunds.map((r) => renderRowButton(r.id, r.data, true))}
+                          </div>
+                        ) : null}
                       </div>
-                    </button>
+                    );
+                  }
+
+                  const r = grp.refunds[0]!;
+                  const origRef = String(r.data.originalReferenceId ?? "").trim();
+                  return (
+                    <div key={grp.key} className="rounded-2xl border border-amber-100 bg-amber-50/40">
+                      {renderRowButton(r.id, r.data, false)}
+                      <p className="px-4 pb-3 text-[11px] text-amber-800/90">
+                        {origRef
+                          ? `Original sale txn is not in this list (${origRef.slice(0, 10)}…). Try a wider date range or All batches.`
+                          : "No original transaction id on this refund (legacy row)."}
+                      </p>
+                    </div>
                   );
                 })
               )}
