@@ -819,28 +819,18 @@ export default function OrderDetailPage() {
               )}
             </div>
 
-            {termCaps.supportsRefund && canShowRemoteCardRefundPanel ? (
+            {termCaps.supportsRefund && canQueueRemoteCardRefund ? (
               <div className="bg-emerald-50/90 rounded-2xl border border-emerald-100 shadow-sm p-6 space-y-3">
                 <h3 className="text-sm font-semibold text-emerald-900">
                   Remote card refund (POS)
                 </h3>
-                {canQueueRemoteCardRefund ? (
-                  <p className="text-xs text-emerald-800/95 leading-relaxed">
-                    Sends a <span className="font-mono">refundTransaction</span> command to{" "}
-                    <span className="font-mono">RemotePaymentCommands</span>. A tablet with MaxiPay
-                    signed in runs SPIn <span className="font-mono">/Payment/Return</span> on this sale.
-                    The amount is capped to the order&apos;s remaining refundable total and the card
-                    sale total on the device.
-                  </p>
-                ) : (
-                  <p className="text-xs text-amber-900/95 leading-relaxed rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2.5">
-                    This card sale is <span className="font-semibold">not settled</span> yet —{" "}
-                    <span className="font-semibold">Request refund on POS</span> stays disabled until the batch settles.
-                    You can try <span className="font-semibold">Direct refund (no card)</span> below if a processor
-                    reference exists (iPOS may approve or decline). For a full reversal without a refund, use{" "}
-                    <span className="font-semibold">Sales activity</span> → void on the POS.
-                  </p>
-                )}
+                <p className="text-xs text-emerald-800/95 leading-relaxed">
+                  Sends a <span className="font-mono">refundTransaction</span> command to{" "}
+                  <span className="font-mono">RemotePaymentCommands</span>. A tablet with MaxiPay
+                  signed in runs SPIn <span className="font-mono">/Payment/Return</span> on this sale.
+                  The amount is capped to the order&apos;s remaining refundable total and the card
+                  sale total on the device.
+                </p>
                 <label className="block text-xs font-medium text-emerald-900">
                   Refund amount (USD)
                   <input
@@ -849,13 +839,12 @@ export default function OrderDetailPage() {
                     step="0.01"
                     value={refundAmountInput}
                     onChange={(e) => setRefundAmountInput(e.target.value)}
-                    disabled={!canQueueRemoteCardRefund && !canDirectRefund}
-                    className="mt-1 w-full max-w-xs rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="mt-1 w-full max-w-xs rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-800"
                   />
                 </label>
                 <button
                   type="button"
-                  disabled={refundSubmitting || !canQueueRemoteCardRefund}
+                  disabled={refundSubmitting}
                   onClick={async () => {
                     if (!user) return;
                     const dollars = parseFloat(refundAmountInput);

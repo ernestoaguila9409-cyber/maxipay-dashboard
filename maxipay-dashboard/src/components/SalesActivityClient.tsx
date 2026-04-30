@@ -1677,24 +1677,14 @@ export default function SalesActivityClient() {
               <p className="text-xs text-red-600">{receiptErr}</p>
             ) : null}
 
-            {txModal && termCaps.supportsRefund && canShowRemoteRefundSection(txModal.data) ? (
+            {txModal && termCaps.supportsRefund && canRequestRemoteRefund(txModal.data) ? (
               <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-3 space-y-2">
                 <p className="text-xs font-medium text-emerald-900">Remote card refund</p>
-                {canRequestRemoteRefund(txModal.data) ? (
-                  <p className="text-[11px] text-emerald-800/90 leading-snug">
-                    Queues an SPIn <span className="font-mono">/Payment/Return</span> on the signed-in POS (settled
-                    card sales only). Amount is capped to the order&apos;s remaining refundable total on the device.
-                    Online / hosted card payments cannot use this queue.
-                  </p>
-                ) : (
-                  <p className="text-[11px] text-amber-900/95 leading-snug rounded-lg border border-amber-200 bg-amber-50/90 px-2.5 py-2">
-                    This card sale is <span className="font-semibold">not settled</span> yet (open batch).{" "}
-                    <span className="font-semibold">Request refund on POS</span> stays disabled until the batch settles.
-                    You can still try <span className="font-semibold">Direct refund (no card)</span> below if a
-                    processor reference exists — iPOS may approve or decline while the batch is open. For a full
-                    reversal without a refund, use <span className="font-semibold">Request void on POS</span> below.
-                  </p>
-                )}
+                <p className="text-[11px] text-emerald-800/90 leading-snug">
+                  Queues an SPIn <span className="font-mono">/Payment/Return</span> on the signed-in POS (settled
+                  card sales only). Amount is capped to the order&apos;s remaining refundable total on the device.
+                  Online / hosted card payments cannot use this queue.
+                </p>
                 {!user ? (
                   <p className="text-xs text-emerald-900">Sign in to request a refund.</p>
                 ) : (
@@ -1707,15 +1697,12 @@ export default function SalesActivityClient() {
                         step="0.01"
                         value={refundAmountInput}
                         onChange={(e) => setRefundAmountInput(e.target.value)}
-                        disabled={
-                          !canRequestRemoteRefund(txModal.data) && !canRequestDirectRefund(txModal.data)
-                        }
-                        className="mt-1 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-sm text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="mt-1 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-sm text-slate-800"
                       />
                     </label>
                     <button
                       type="button"
-                      disabled={refundSubmitting || !canRequestRemoteRefund(txModal.data)}
+                      disabled={refundSubmitting}
                       onClick={async () => {
                         if (!user || !txModal) return;
                         const dollars = parseFloat(refundAmountInput);
@@ -1899,13 +1886,11 @@ export default function SalesActivityClient() {
             ) : null}
 
             <p className="text-xs text-slate-500">
-              The green card refund section appears for eligible card-only sales (when your terminal supports refunds).
-              <span className="font-medium"> Request refund on POS</span> works only after the sale is{" "}
-              <span className="font-medium">settled</span> (SPIn Return).{" "}
-              <span className="font-medium">Direct refund (no card)</span> may be available with a processor reference
-              even before settlement — success depends on iPOS. Unsettled full reversals without a refund can use the
-              amber void section. Mixed cash + card, ecommerce / online pay, and cash refunds still require the POS
-              (or iPOS portal where applicable).
+              The green card refund section appears only after the sale is{" "}
+              <span className="font-medium">settled</span> (closed batch) for eligible card-only sales when your
+              terminal supports refunds. Until then, use the amber void section for an unsettled reversal where
+              applicable. Mixed cash + card, ecommerce / online pay, and cash refunds still require the POS (or iPOS
+              portal where applicable).
             </p>
           </div>
         </div>
