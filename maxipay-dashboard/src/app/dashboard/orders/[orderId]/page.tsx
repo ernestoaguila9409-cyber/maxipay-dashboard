@@ -9,9 +9,6 @@ import {
   getDocs,
   query,
   where,
-  addDoc,
-  onSnapshot,
-  serverTimestamp,
   type Timestamp,
 } from "firebase/firestore";
 import { ArrowLeft, Loader2 } from "lucide-react";
@@ -128,7 +125,6 @@ function buildRefundStrikeIndex(
 }
 
 const SALES_ACTIVITY_FROM = "sales-activity";
-const REMOTE_PAYMENT_COMMANDS = "RemotePaymentCommands";
 
 function txRecordHasCashTender(tx: Record<string, unknown>): boolean {
   const pays = tx.payments;
@@ -181,11 +177,6 @@ export default function OrderDetailPage() {
     null
   );
 
-  const [refundCmdId, setRefundCmdId] = useState<string | null>(null);
-  const [refundSubmitting, setRefundSubmitting] = useState(false);
-  const [refundSubmitErr, setRefundSubmitErr] = useState<string | null>(null);
-  const [refundCmdStatus, setRefundCmdStatus] = useState<string | null>(null);
-  const [refundCmdDetail, setRefundCmdDetail] = useState<string | null>(null);
   const [refundAmountInput, setRefundAmountInput] = useState("");
 
   const [directRefundSubmitting, setDirectRefundSubmitting] = useState(false);
@@ -193,41 +184,11 @@ export default function OrderDetailPage() {
   const [directRefundErr, setDirectRefundErr] = useState<string | null>(null);
 
   useEffect(() => {
-    setRefundCmdId(null);
-    setRefundSubmitErr(null);
-    setRefundCmdStatus(null);
-    setRefundCmdDetail(null);
     setRefundAmountInput("");
     setDirectRefundSubmitting(false);
     setDirectRefundResult(null);
     setDirectRefundErr(null);
   }, [orderId]);
-
-  useEffect(() => {
-    if (!refundCmdId || !db) {
-      setRefundCmdStatus(null);
-      setRefundCmdDetail(null);
-      return;
-    }
-    const ref = doc(db, REMOTE_PAYMENT_COMMANDS, refundCmdId);
-    const unsub = onSnapshot(
-      ref,
-      (snap) => {
-        if (!snap.exists()) {
-          setRefundCmdStatus(null);
-          setRefundCmdDetail(null);
-          return;
-        }
-        const d = snap.data();
-        setRefundCmdStatus(String(d?.status ?? ""));
-        const err = typeof d?.errorMessage === "string" ? d.errorMessage : "";
-        const ok = typeof d?.resultMessage === "string" ? d.resultMessage : "";
-        setRefundCmdDetail(err || ok || null);
-      },
-      (e) => console.error("[Order detail] refund command", e)
-    );
-    return () => unsub();
-  }, [refundCmdId]);
 
   useEffect(() => {
     if (!user || !orderId) {
@@ -445,9 +406,6 @@ export default function OrderDetailPage() {
     saleTransactionData.voided !== true &&
     !txRecordHasCashTender(saleTransactionData) &&
     !txRecordIsEcommerce(saleTransactionData);
-
-  const canQueueRemoteCardRefund =
-    canShowRemoteCardRefundPanel && saleTransactionData.settled === true;
 
   const canDirectRefund =
     canShowRemoteCardRefundPanel &&
@@ -819,17 +777,16 @@ export default function OrderDetailPage() {
               )}
             </div>
 
-            {termCaps.supportsRefund && canQueueRemoteCardRefund ? (
+            {termCaps.supportsRefund && canDirectRefund ? (
               <div className="bg-emerald-50/90 rounded-2xl border border-emerald-100 shadow-sm p-6 space-y-3">
                 <h3 className="text-sm font-semibold text-emerald-900">
-                  Remote card refund (POS)
+                  Direct card refund (no card)
                 </h3>
                 <p className="text-xs text-emerald-800/95 leading-relaxed">
-                  Sends a <span className="font-mono">refundTransaction</span> command to{" "}
-                  <span className="font-mono">RemotePaymentCommands</span>. A tablet with MaxiPay
-                  signed in runs SPIn <span className="font-mono">/Payment/Return</span> on this sale.
-                  The amount is capped to the order&apos;s remaining refundable total and the card
-                  sale total on the device.
+                  Refund <span className="font-semibold">without the card present</span> using the processor
+                  reference (RRN) from the original sale. Processed server-side — no POS or terminal needed. The
+                  processor may decline while the original batch is still open; success is not guaranteed until the
+                  host settles.
                 </p>
                 <label className="block text-xs font-medium text-emerald-900">
                   Refund amount (USD)
@@ -844,113 +801,52 @@ export default function OrderDetailPage() {
                 </label>
                 <button
                   type="button"
-                  disabled={refundSubmitting}
+                  disabled={directRefundSubmitting}
                   onClick={async () => {
                     if (!user) return;
                     const dollars = parseFloat(refundAmountInput);
                     if (!Number.isFinite(dollars) || dollars <= 0) {
-                      setRefundSubmitErr("Enter a valid refund amount greater than zero.");
+                      setDirectRefundErr("Enter a valid refund amount greater than zero.");
                       return;
                     }
                     const amountInCents = Math.round(dollars * 100);
-                    setRefundSubmitting(true);
-                    setRefundSubmitErr(null);
+                    setDirectRefundSubmitting(true);
+                    setDirectRefundErr(null);
+                    setDirectRefundResult(null);
                     try {
-                      const ref = await addDoc(collection(db, REMOTE_PAYMENT_COMMANDS), {
-                        type: "refundTransaction",
+                      const region = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION;
+                      const app = getApp();
+                      const functions = region ? getFunctions(app, region) : getFunctions(app);
+                      const call = httpsCallable(functions, "processServerRefund");
+                      const res = await call({
                         transactionId: saleIdForRefund,
                         orderId,
                         amountInCents,
-                        status: "pending",
-                        requestedByUid: user.uid,
-                        requestedByEmail: user.email ?? "",
-                        refundedByLabel: `Dashboard: ${user.email ?? user.uid}`,
-                        requestedAt: serverTimestamp(),
                       });
-                      setRefundCmdId(ref.id);
+                      const d = res.data as Record<string, unknown>;
+                      if (d.success) {
+                        setDirectRefundResult(String(d.message ?? "Refund processed."));
+                      } else {
+                        setDirectRefundErr(String(d.error ?? "Refund failed."));
+                      }
                     } catch (err) {
-                      console.error("[Order detail] remote refund queue", err);
-                      setRefundSubmitErr(
-                        err instanceof Error ? err.message : "Could not queue refund request"
+                      console.error("[Order detail] direct refund", err);
+                      setDirectRefundErr(
+                        err instanceof Error ? err.message : "Could not process refund"
                       );
                     } finally {
-                      setRefundSubmitting(false);
+                      setDirectRefundSubmitting(false);
                     }
                   }}
-                  className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:opacity-60"
+                  className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-indigo-700 text-white text-sm font-semibold hover:bg-indigo-800 disabled:opacity-60"
                 >
-                  {refundSubmitting ? "Queueing…" : "Request refund on POS"}
+                  {directRefundSubmitting ? "Processing…" : "Direct refund (no card)"}
                 </button>
-                {refundSubmitErr ? (
-                  <p className="text-xs text-red-700">{refundSubmitErr}</p>
+                {directRefundErr ? (
+                  <p className="text-xs text-red-700 break-words">{directRefundErr}</p>
                 ) : null}
-                {refundCmdStatus ? (
-                  <div className="text-xs text-emerald-950 space-y-0.5">
-                    <p>
-                      <span className="font-semibold">Command status:</span> {refundCmdStatus}
-                    </p>
-                    {refundCmdDetail ? (
-                      <p className="text-emerald-900/90 break-words">{refundCmdDetail}</p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {canDirectRefund ? (
-                  <div className="mt-3 pt-3 border-t border-emerald-200 space-y-2">
-                    <p className="text-xs text-emerald-800/90 leading-relaxed">
-                      Or refund <span className="font-semibold">without the card present</span> using the
-                      processor reference from the original sale. Processed server-side — no POS or terminal needed.
-                    </p>
-                    <button
-                      type="button"
-                      disabled={directRefundSubmitting || refundSubmitting}
-                      onClick={async () => {
-                        if (!user) return;
-                        const dollars = parseFloat(refundAmountInput);
-                        if (!Number.isFinite(dollars) || dollars <= 0) {
-                          setDirectRefundErr("Enter a valid refund amount greater than zero.");
-                          return;
-                        }
-                        const amountInCents = Math.round(dollars * 100);
-                        setDirectRefundSubmitting(true);
-                        setDirectRefundErr(null);
-                        setDirectRefundResult(null);
-                        try {
-                          const region = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION;
-                          const app = getApp();
-                          const functions = region ? getFunctions(app, region) : getFunctions(app);
-                          const call = httpsCallable(functions, "processServerRefund");
-                          const res = await call({
-                            transactionId: saleIdForRefund,
-                            orderId,
-                            amountInCents,
-                          });
-                          const d = res.data as Record<string, unknown>;
-                          if (d.success) {
-                            setDirectRefundResult(String(d.message ?? "Refund processed."));
-                          } else {
-                            setDirectRefundErr(String(d.error ?? "Refund failed."));
-                          }
-                        } catch (err) {
-                          console.error("[Order detail] direct refund", err);
-                          setDirectRefundErr(
-                            err instanceof Error ? err.message : "Could not process refund"
-                          );
-                        } finally {
-                          setDirectRefundSubmitting(false);
-                        }
-                      }}
-                      className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-indigo-700 text-white text-sm font-semibold hover:bg-indigo-800 disabled:opacity-60"
-                    >
-                      {directRefundSubmitting ? "Processing…" : "Direct refund (no card)"}
-                    </button>
-                    {directRefundErr ? (
-                      <p className="text-xs text-red-700 break-words">{directRefundErr}</p>
-                    ) : null}
-                    {directRefundResult ? (
-                      <p className="text-xs text-emerald-800 font-medium break-words">{directRefundResult}</p>
-                    ) : null}
-                  </div>
+                {directRefundResult ? (
+                  <p className="text-xs text-emerald-800 font-medium break-words">{directRefundResult}</p>
                 ) : null}
               </div>
             ) : null}
