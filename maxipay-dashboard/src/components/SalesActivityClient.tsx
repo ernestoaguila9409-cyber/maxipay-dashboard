@@ -7,6 +7,7 @@ import {
   addDoc,
   collection,
   doc,
+  getDoc,
   limit,
   onSnapshot,
   orderBy,
@@ -568,6 +569,13 @@ export default function SalesActivityClient() {
   const [directRefundSubmitting, setDirectRefundSubmitting] = useState(false);
   const [directRefundResult, setDirectRefundResult] = useState<string | null>(null);
   const [directRefundErr, setDirectRefundErr] = useState<string | null>(null);
+  const [directRefundModalOpen, setDirectRefundModalOpen] = useState(false);
+  const [directRefundModalAmount, setDirectRefundModalAmount] = useState("");
+  const [directRefundModalErr, setDirectRefundModalErr] = useState<string | null>(null);
+  const [orderRefundCaps, setOrderRefundCaps] = useState<{
+    totalInCents: number;
+    remainingInCents: number;
+  } | null>(null);
 
   useEffect(() => {
     setVoidCmdId(null);
@@ -582,11 +590,42 @@ export default function SalesActivityClient() {
     setDirectRefundSubmitting(false);
     setDirectRefundResult(null);
     setDirectRefundErr(null);
+    setDirectRefundModalOpen(false);
+    setDirectRefundModalAmount("");
+    setDirectRefundModalErr(null);
+    setOrderRefundCaps(null);
     if (txModal) {
       const t = String(txModal.data.type ?? "");
       const c = txAmountCents(txModal.data, t);
       if (c > 0) setRefundAmountInput((c / 100).toFixed(2));
     }
+  }, [txModal?.id]);
+
+  useEffect(() => {
+    setOrderRefundCaps(null);
+    if (!txModal || !db) return;
+    const oid = String(txModal.data.orderId ?? "").trim();
+    if (!oid) return;
+    if (!canRequestDirectRefund(txModal.data)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "Orders", oid));
+        if (cancelled || !snap.exists()) return;
+        const d = snap.data() as Record<string, unknown>;
+        const totalInCents = Number(d.totalInCents ?? 0);
+        const totalRefundedInCents = Number(d.totalRefundedInCents ?? 0);
+        const remainingInCents = Math.max(0, totalInCents - totalRefundedInCents);
+        if (!cancelled) {
+          setOrderRefundCaps({ totalInCents, remainingInCents });
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [txModal?.id]);
 
   useEffect(() => {
@@ -1680,11 +1719,6 @@ export default function SalesActivityClient() {
             {txModal && termCaps.supportsRefund && canRequestRemoteRefund(txModal.data) ? (
               <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-3 space-y-2">
                 <p className="text-xs font-medium text-emerald-900">Remote card refund</p>
-                <p className="text-[11px] text-emerald-800/90 leading-snug">
-                  Queues an SPIn <span className="font-mono">/Payment/Return</span> on the signed-in POS (settled
-                  card sales only). Amount is capped to the order&apos;s remaining refundable total on the device.
-                  Online / hosted card payments cannot use this queue.
-                </p>
                 {!user ? (
                   <p className="text-xs text-emerald-900">Sign in to request a refund.</p>
                 ) : (
@@ -1760,57 +1794,42 @@ export default function SalesActivityClient() {
 
                     {txModal && canRequestDirectRefund(txModal.data) ? (
                       <div className="mt-2 pt-2 border-t border-emerald-200 space-y-2">
-                        <p className="text-[11px] text-emerald-800/90 leading-snug">
-                          Or refund <span className="font-semibold">without the card present</span> using the
-                          processor reference from the original sale. Processed server-side — no POS or terminal needed.
-                        </p>
                         <button
                           type="button"
-                          disabled={directRefundSubmitting || refundSubmitting}
-                          onClick={async () => {
-                            if (!user || !txModal) return;
-                            const dollars = parseFloat(refundAmountInput);
-                            if (!Number.isFinite(dollars) || dollars <= 0) {
-                              setDirectRefundErr("Enter a valid refund amount greater than zero.");
-                              return;
-                            }
-                            const amountInCents = Math.round(dollars * 100);
+                          disabled={
+                            directRefundSubmitting ||
+                            refundSubmitting ||
+                            !orderRefundCaps
+                          }
+                          onClick={() => {
+                            if (!user || !txModal || !orderRefundCaps) return;
                             const oid = String(txModal.data.orderId ?? "").trim();
                             if (!oid) {
                               setDirectRefundErr("This transaction has no linked order id.");
                               return;
                             }
-                            setDirectRefundSubmitting(true);
+                            const salePaidCents =
+                              Number(txModal.data.totalPaidInCents ?? 0) !== 0
+                                ? Math.abs(Number(txModal.data.totalPaidInCents ?? 0))
+                                : txAmountCents(
+                                    txModal.data,
+                                    String(txModal.data.type ?? "")
+                                  );
+                            const maxC = Math.min(
+                              orderRefundCaps.remainingInCents,
+                              orderRefundCaps.totalInCents,
+                              salePaidCents
+                            );
                             setDirectRefundErr(null);
-                            setDirectRefundResult(null);
-                            try {
-                              const region = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION;
-                              const app = getApp();
-                              const functions = region ? getFunctions(app, region) : getFunctions(app);
-                              const call = httpsCallable(functions, "processServerRefund");
-                              const res = await call({
-                                transactionId: txModal.id,
-                                orderId: oid,
-                                amountInCents,
-                              });
-                              const d = res.data as Record<string, unknown>;
-                              if (d.success) {
-                                setDirectRefundResult(String(d.message ?? "Refund processed."));
-                              } else {
-                                setDirectRefundErr(String(d.error ?? "Refund failed."));
-                              }
-                            } catch (err) {
-                              console.error("[SalesActivity] direct refund", err);
-                              setDirectRefundErr(
-                                err instanceof Error ? err.message : "Could not process refund"
-                              );
-                            } finally {
-                              setDirectRefundSubmitting(false);
-                            }
+                            setDirectRefundModalErr(null);
+                            setDirectRefundModalAmount(
+                              maxC > 0 ? (maxC / 100).toFixed(2) : ""
+                            );
+                            setDirectRefundModalOpen(true);
                           }}
                           className="w-full py-2.5 rounded-xl bg-indigo-700 text-white text-sm font-semibold hover:bg-indigo-800 disabled:opacity-60"
                         >
-                          {directRefundSubmitting ? "Processing…" : "Direct refund (no card)"}
+                          Direct refund (no card)
                         </button>
                         {directRefundErr ? (
                           <p className="text-xs text-red-700 break-words">{directRefundErr}</p>
@@ -1828,10 +1847,6 @@ export default function SalesActivityClient() {
             {txModal && canRequestRemoteVoid(txModal.data) ? (
               <div className="rounded-xl border border-amber-100 bg-amber-50/80 px-3 py-3 space-y-2">
                 <p className="text-xs font-medium text-amber-900">Remote card void</p>
-                <p className="text-[11px] text-amber-800/90 leading-snug">
-                  Queues a void for the signed-in POS (Dejavoo / SpinPOS). The store tablet must be online
-                  with MaxiPay open; mixed cash + card must still be voided on the POS.
-                </p>
                 {!user ? (
                   <p className="text-xs text-amber-900">Sign in to request a void.</p>
                 ) : (
@@ -1884,14 +1899,185 @@ export default function SalesActivityClient() {
                 )}
               </div>
             ) : null}
+          </div>
+        </div>
+      ) : null}
 
-            <p className="text-xs text-slate-500">
-              The green card refund section appears only after the sale is{" "}
-              <span className="font-medium">settled</span> (closed batch) for eligible card-only sales when your
-              terminal supports refunds. Until then, use the amber void section for an unsettled reversal where
-              applicable. Mixed cash + card, ecommerce / online pay, and cash refunds still require the POS (or iPOS
-              portal where applicable).
-            </p>
+      {txModal && directRefundModalOpen ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
+          role="presentation"
+          onClick={() => {
+            if (!directRefundSubmitting) {
+              setDirectRefundModalOpen(false);
+              setDirectRefundModalErr(null);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sales-direct-refund-title"
+            className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3
+              id="sales-direct-refund-title"
+              className="text-base font-semibold text-slate-900"
+            >
+              Direct refund amount
+            </h3>
+            {orderRefundCaps && txModal ? (
+              <p className="text-xs text-slate-600">
+                Maximum:{" "}
+                <span className="font-semibold text-slate-800">
+                  {fmtMoney(
+                    Math.min(
+                      orderRefundCaps.remainingInCents,
+                      orderRefundCaps.totalInCents,
+                      Number(txModal.data.totalPaidInCents ?? 0) !== 0
+                        ? Math.abs(Number(txModal.data.totalPaidInCents ?? 0))
+                        : txAmountCents(
+                            txModal.data,
+                            String(txModal.data.type ?? "")
+                          )
+                    )
+                  )}
+                </span>
+              </p>
+            ) : (
+              <p className="text-xs text-slate-500">Loading limits…</p>
+            )}
+            <label className="block text-sm font-medium text-slate-800">
+              Amount (USD)
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={directRefundModalAmount}
+                onChange={(e) => {
+                  setDirectRefundModalAmount(e.target.value);
+                  setDirectRefundModalErr(null);
+                }}
+                disabled={!orderRefundCaps}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 disabled:opacity-50"
+                autoFocus
+              />
+            </label>
+            {directRefundModalErr ? (
+              <p className="text-xs text-red-600 break-words">{directRefundModalErr}</p>
+            ) : null}
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={directRefundSubmitting}
+                onClick={() => {
+                  setDirectRefundModalOpen(false);
+                  setDirectRefundModalErr(null);
+                }}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={directRefundSubmitting || !orderRefundCaps || !txModal}
+                onClick={async () => {
+                  if (!user || !txModal || !orderRefundCaps) return;
+                  const oid = String(txModal.data.orderId ?? "").trim();
+                  if (!oid) {
+                    setDirectRefundModalErr("This transaction has no linked order id.");
+                    return;
+                  }
+                  setDirectRefundModalErr(null);
+                  const dollars = parseFloat(directRefundModalAmount);
+                  if (!Number.isFinite(dollars) || dollars <= 0) {
+                    setDirectRefundModalErr("Enter a valid amount greater than zero.");
+                    return;
+                  }
+                  const amountInCents = Math.round(dollars * 100);
+                  const salePaidCents =
+                    Number(txModal.data.totalPaidInCents ?? 0) !== 0
+                      ? Math.abs(Number(txModal.data.totalPaidInCents ?? 0))
+                      : txAmountCents(
+                          txModal.data,
+                          String(txModal.data.type ?? "")
+                        );
+                  const maxC = Math.min(
+                    orderRefundCaps.remainingInCents,
+                    orderRefundCaps.totalInCents,
+                    salePaidCents
+                  );
+                  if (amountInCents > orderRefundCaps.totalInCents) {
+                    setDirectRefundModalErr(
+                      `Amount cannot exceed the original order total (${fmtMoney(orderRefundCaps.totalInCents)}).`
+                    );
+                    return;
+                  }
+                  if (amountInCents > orderRefundCaps.remainingInCents) {
+                    setDirectRefundModalErr(
+                      `Amount cannot exceed the remaining balance (${fmtMoney(orderRefundCaps.remainingInCents)}).`
+                    );
+                    return;
+                  }
+                  if (amountInCents > salePaidCents) {
+                    setDirectRefundModalErr(
+                      `Amount cannot exceed this sale total (${fmtMoney(salePaidCents)}).`
+                    );
+                    return;
+                  }
+                  setDirectRefundSubmitting(true);
+                  setDirectRefundErr(null);
+                  setDirectRefundResult(null);
+                  try {
+                    const region = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION;
+                    const app = getApp();
+                    const functions = region ? getFunctions(app, region) : getFunctions(app);
+                    const call = httpsCallable(functions, "processServerRefund");
+                    const res = await call({
+                      transactionId: txModal.id,
+                      orderId: oid,
+                      amountInCents,
+                    });
+                    const d = res.data as Record<string, unknown>;
+                    if (d.success) {
+                      setDirectRefundResult(String(d.message ?? "Refund processed."));
+                      setDirectRefundModalOpen(false);
+                      setDirectRefundModalAmount("");
+                      try {
+                        const ordSnap = await getDoc(doc(db, "Orders", oid));
+                        if (ordSnap.exists()) {
+                          const od = ordSnap.data() as Record<string, unknown>;
+                          const totalInCents = Number(od.totalInCents ?? 0);
+                          const totalRefundedInCents = Number(od.totalRefundedInCents ?? 0);
+                          setOrderRefundCaps({
+                            totalInCents,
+                            remainingInCents: Math.max(
+                              0,
+                              totalInCents - totalRefundedInCents
+                            ),
+                          });
+                        }
+                      } catch {
+                        /* ignore */
+                      }
+                    } else {
+                      setDirectRefundModalErr(String(d.error ?? "Refund failed."));
+                    }
+                  } catch (err) {
+                    console.error("[SalesActivity] direct refund", err);
+                    setDirectRefundModalErr(
+                      err instanceof Error ? err.message : "Could not process refund"
+                    );
+                  } finally {
+                    setDirectRefundSubmitting(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-indigo-700 text-white text-sm font-semibold hover:bg-indigo-800 disabled:opacity-60"
+              >
+                {directRefundSubmitting ? "Processing…" : "Refund"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
