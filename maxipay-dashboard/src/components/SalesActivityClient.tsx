@@ -606,7 +606,7 @@ export default function SalesActivityClient() {
     if (!txModal || !db) return;
     const oid = String(txModal.data.orderId ?? "").trim();
     if (!oid) return;
-    if (!canRequestDirectRefund(txModal.data)) return;
+    if (!canShowRemoteRefundSection(txModal.data)) return;
     let cancelled = false;
     (async () => {
       try {
@@ -670,10 +670,26 @@ export default function SalesActivityClient() {
           return;
         }
         const d = snap.data();
-        setRefundCmdStatus(String(d?.status ?? ""));
+        const st = String(d?.status ?? "");
+        setRefundCmdStatus(st);
         const err = typeof d?.errorMessage === "string" ? d.errorMessage : "";
         const ok = typeof d?.resultMessage === "string" ? d.resultMessage : "";
         setRefundCmdDetail(err || ok || null);
+        if (st === "completed" && db) {
+          const oid = String(d?.orderId ?? "").trim();
+          if (oid) {
+            void getDoc(doc(db, "Orders", oid)).then((ord) => {
+              if (!ord.exists()) return;
+              const od = ord.data() as Record<string, unknown>;
+              const totalInCents = Number(od.totalInCents ?? 0);
+              const totalRefundedInCents = Number(od.totalRefundedInCents ?? 0);
+              setOrderRefundCaps({
+                totalInCents,
+                remainingInCents: Math.max(0, totalInCents - totalRefundedInCents),
+              });
+            });
+          }
+        }
       },
       (e) => console.error("[SalesActivity] refund command", e)
     );
@@ -1204,6 +1220,12 @@ export default function SalesActivityClient() {
     }
   }, [txModal]);
 
+  const txRefundOrderId = txModal ? String(txModal.data.orderId ?? "").trim() : "";
+  const orderRefundActionsDisabled =
+    !txRefundOrderId ||
+    !orderRefundCaps ||
+    orderRefundCaps.remainingInCents <= 0;
+
   return (
     <>
       <div className="p-6 space-y-6 max-w-[1600px]">
@@ -1719,6 +1741,24 @@ export default function SalesActivityClient() {
             {txModal && termCaps.supportsRefund && canRequestRemoteRefund(txModal.data) ? (
               <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-3 space-y-2">
                 <p className="text-xs font-medium text-emerald-900">Remote card refund</p>
+                {txRefundOrderId ? (
+                  <p
+                    className={`text-xs ${
+                      orderRefundCaps && orderRefundCaps.remainingInCents <= 0
+                        ? "text-amber-900 font-medium"
+                        : "text-emerald-900/90"
+                    }`}
+                  >
+                    Remaining balance:{" "}
+                    {orderRefundCaps
+                      ? fmtMoney(orderRefundCaps.remainingInCents)
+                      : "Loading…"}
+                  </p>
+                ) : (
+                  <p className="text-xs text-amber-900">
+                    No linked order — refunds are not available from here.
+                  </p>
+                )}
                 {!user ? (
                   <p className="text-xs text-emerald-900">Sign in to request a refund.</p>
                 ) : (
@@ -1731,12 +1771,13 @@ export default function SalesActivityClient() {
                         step="0.01"
                         value={refundAmountInput}
                         onChange={(e) => setRefundAmountInput(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-sm text-slate-800"
+                        disabled={orderRefundActionsDisabled}
+                        className="mt-1 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-sm text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                     </label>
                     <button
                       type="button"
-                      disabled={refundSubmitting}
+                      disabled={refundSubmitting || orderRefundActionsDisabled}
                       onClick={async () => {
                         if (!user || !txModal) return;
                         const dollars = parseFloat(refundAmountInput);
@@ -1748,6 +1789,15 @@ export default function SalesActivityClient() {
                         const oid = String(txModal.data.orderId ?? "").trim();
                         if (!oid) {
                           setRefundSubmitErr("This transaction has no linked order id.");
+                          return;
+                        }
+                        if (
+                          orderRefundCaps &&
+                          amountInCents > orderRefundCaps.remainingInCents
+                        ) {
+                          setRefundSubmitErr(
+                            `Amount cannot exceed remaining balance (${fmtMoney(orderRefundCaps.remainingInCents)}).`
+                          );
                           return;
                         }
                         setRefundSubmitting(true);
@@ -1774,7 +1824,7 @@ export default function SalesActivityClient() {
                           setRefundSubmitting(false);
                         }
                       }}
-                      className="w-full py-2.5 rounded-xl bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:opacity-60"
+                      className="w-full py-2.5 rounded-xl bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {refundSubmitting ? "Queueing…" : "Request refund on POS"}
                     </button>
@@ -1799,7 +1849,7 @@ export default function SalesActivityClient() {
                           disabled={
                             directRefundSubmitting ||
                             refundSubmitting ||
-                            !orderRefundCaps
+                            orderRefundActionsDisabled
                           }
                           onClick={() => {
                             if (!user || !txModal || !orderRefundCaps) return;
@@ -1827,7 +1877,7 @@ export default function SalesActivityClient() {
                             );
                             setDirectRefundModalOpen(true);
                           }}
-                          className="w-full py-2.5 rounded-xl bg-indigo-700 text-white text-sm font-semibold hover:bg-indigo-800 disabled:opacity-60"
+                          className="w-full py-2.5 rounded-xl bg-indigo-700 text-white text-sm font-semibold hover:bg-indigo-800 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           Direct refund (no card)
                         </button>
