@@ -15,6 +15,9 @@ import {
   getDocs,
   query,
   where,
+  addDoc,
+  onSnapshot,
+  serverTimestamp,
   type Timestamp,
 } from "firebase/firestore";
 import { ArrowLeft, Loader2 } from "lucide-react";
@@ -131,6 +134,7 @@ function buildRefundStrikeIndex(
 }
 
 const SALES_ACTIVITY_FROM = "sales-activity";
+const REMOTE_PAYMENT_COMMANDS = "RemotePaymentCommands";
 
 function txRecordHasCashTender(tx: Record<string, unknown>): boolean {
   const pays = tx.payments;
@@ -310,6 +314,12 @@ export default function OrderDetailPage() {
   );
   const [orderRefreshNonce, setOrderRefreshNonce] = useState(0);
 
+  const [voidSubmitting, setVoidSubmitting] = useState(false);
+  const [voidErr, setVoidErr] = useState<string | null>(null);
+  const [voidCmdId, setVoidCmdId] = useState<string | null>(null);
+  const [voidCmdStatus, setVoidCmdStatus] = useState<string | null>(null);
+  const [voidCmdDetail, setVoidCmdDetail] = useState<string | null>(null);
+
   useEffect(() => {
     setDirectRefundModalOpen(false);
     setDirectRefundModalAmount("");
@@ -320,7 +330,41 @@ export default function OrderDetailPage() {
     setOpenSwipeLineId(null);
     setDirectRefundTargetLine(null);
     setOrderRefreshNonce(0);
+    setVoidSubmitting(false);
+    setVoidErr(null);
+    setVoidCmdId(null);
+    setVoidCmdStatus(null);
+    setVoidCmdDetail(null);
   }, [orderId]);
+
+  useEffect(() => {
+    if (!voidCmdId || !db) {
+      setVoidCmdStatus(null);
+      setVoidCmdDetail(null);
+      return;
+    }
+    const ref = doc(db, REMOTE_PAYMENT_COMMANDS, voidCmdId);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setVoidCmdStatus(null);
+          setVoidCmdDetail(null);
+          return;
+        }
+        const d = snap.data();
+        setVoidCmdStatus(String(d?.status ?? ""));
+        const err = typeof d?.errorMessage === "string" ? d.errorMessage : "";
+        const ok = typeof d?.resultMessage === "string" ? d.resultMessage : "";
+        setVoidCmdDetail(err || ok || null);
+        if (String(d?.status ?? "") === "completed") {
+          setOrderRefreshNonce((n) => n + 1);
+        }
+      },
+      (e) => console.error("[Order detail] void command listener", e)
+    );
+    return () => unsub();
+  }, [voidCmdId]);
 
   useEffect(() => {
     if (!user || !orderId) {
@@ -532,8 +576,12 @@ export default function OrderDetailPage() {
     !txRecordHasCashTender(saleTransactionData) &&
     !txRecordIsEcommerce(saleTransactionData);
 
+  const isSaleSettled =
+    saleTransactionData != null && saleTransactionData.settled === true;
+
   const canDirectRefund =
     canShowRemoteCardRefundPanel &&
+    isSaleSettled &&
     saleTransactionData != null &&
     Array.isArray(saleTransactionData.payments) &&
     (saleTransactionData.payments as Record<string, unknown>[]).some(
@@ -541,6 +589,17 @@ export default function OrderDetailPage() {
         String(p.pnReferenceId || p.PNReferenceId || "").trim().length > 0 &&
         !String(p.paymentType ?? "").toLowerCase().includes("cash")
     );
+
+  const canVoidUnsettled =
+    user != null &&
+    orderData != null &&
+    saleTransactionData != null &&
+    status === "CLOSED" &&
+    saleIdForRefund.length > 0 &&
+    saleTransactionData.voided !== true &&
+    !isSaleSettled &&
+    !txRecordHasCashTender(saleTransactionData) &&
+    !txRecordIsEcommerce(saleTransactionData);
 
   const maxDirectRefundCents = Math.min(
     Math.max(0, totalInCents),
@@ -968,6 +1027,63 @@ export default function OrderDetailPage() {
                 ) : null}
                 {directRefundResult ? (
                   <p className="text-xs text-emerald-800 font-medium break-words">{directRefundResult}</p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {canVoidUnsettled ? (
+              <div className="bg-amber-50/90 rounded-2xl border border-amber-100 shadow-sm p-4 space-y-3">
+                <button
+                  type="button"
+                  disabled={voidSubmitting}
+                  onClick={async () => {
+                    if (!user) return;
+                    setVoidSubmitting(true);
+                    setVoidErr(null);
+                    try {
+                      const ref = await addDoc(
+                        collection(db, REMOTE_PAYMENT_COMMANDS),
+                        {
+                          type: "voidTransaction",
+                          transactionId: saleIdForRefund,
+                          status: "pending",
+                          requestedByUid: user.uid,
+                          requestedByEmail: user.email ?? "",
+                          voidedByLabel: `Dashboard: ${user.email ?? user.uid}`,
+                          requestedAt: serverTimestamp(),
+                        }
+                      );
+                      setVoidCmdId(ref.id);
+                    } catch (err) {
+                      console.error("[Order detail] void queue", err);
+                      setVoidErr(
+                        err instanceof Error
+                          ? err.message
+                          : "Could not queue void request"
+                      );
+                    } finally {
+                      setVoidSubmitting(false);
+                    }
+                  }}
+                  className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-amber-700 text-white text-sm font-semibold hover:bg-amber-800 disabled:opacity-60"
+                >
+                  {voidSubmitting ? "Queueing…" : "Void"}
+                </button>
+                {voidErr ? (
+                  <p className="text-xs text-red-700 break-words">{voidErr}</p>
+                ) : null}
+                {voidCmdStatus ? (
+                  <div className="text-xs text-amber-950 space-y-0.5">
+                    <p>
+                      <span className="font-semibold">Status:</span>{" "}
+                      {voidCmdStatus}
+                    </p>
+                    {voidCmdDetail ? (
+                      <p className="text-amber-900/90 break-words">
+                        {voidCmdDetail}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             ) : null}
