@@ -157,9 +157,9 @@ function canRequestRemoteRefund(data: DocumentData): boolean {
   return canShowRemoteRefundSection(data) && data.settled === true;
 }
 
-/** Settled card sale with PNReferenceId — eligible for server-side refund (no card present). */
+/** Card sale with PNReferenceId — server-side refund (no card); allowed settled or unsettled (processor may decline if unsettled). */
 function canRequestDirectRefund(data: DocumentData): boolean {
-  if (!canRequestRemoteRefund(data)) return false;
+  if (!canShowRemoteRefundSection(data)) return false;
   const payments = Array.isArray(data.payments) ? data.payments : [];
   return payments.some(
     (p: Record<string, unknown>) =>
@@ -1688,9 +1688,11 @@ export default function SalesActivityClient() {
                   </p>
                 ) : (
                   <p className="text-[11px] text-amber-900/95 leading-snug rounded-lg border border-amber-200 bg-amber-50/90 px-2.5 py-2">
-                    This card sale is <span className="font-semibold">not settled</span> yet (open batch). Refund
-                    cannot be queued until the batch settles at the processor. For the full card amount while still
-                    unsettled, use <span className="font-semibold">Request void on POS</span> below.
+                    This card sale is <span className="font-semibold">not settled</span> yet (open batch).{" "}
+                    <span className="font-semibold">Request refund on POS</span> stays disabled until the batch settles.
+                    You can still try <span className="font-semibold">Direct refund (no card)</span> below if a
+                    processor reference exists — iPOS may approve or decline while the batch is open. For a full
+                    reversal without a refund, use <span className="font-semibold">Request void on POS</span> below.
                   </p>
                 )}
                 {!user ? (
@@ -1705,7 +1707,9 @@ export default function SalesActivityClient() {
                         step="0.01"
                         value={refundAmountInput}
                         onChange={(e) => setRefundAmountInput(e.target.value)}
-                        disabled={!canRequestRemoteRefund(txModal.data)}
+                        disabled={
+                          !canRequestRemoteRefund(txModal.data) && !canRequestDirectRefund(txModal.data)
+                        }
                         className="mt-1 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-sm text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                     </label>
@@ -1895,10 +1899,13 @@ export default function SalesActivityClient() {
             ) : null}
 
             <p className="text-xs text-slate-500">
-              The green card refund section is always shown for eligible card-only sales; the queue button works
-              only after the sale is <span className="font-medium">settled</span> (SPIn Return). Unsettled card-only
-              reversals use the amber void section. Mixed cash + card, ecommerce / online pay, and cash refunds still
-              require the POS (or iPOS portal where applicable).
+              The green card refund section appears for eligible card-only sales (when your terminal supports refunds).
+              <span className="font-medium"> Request refund on POS</span> works only after the sale is{" "}
+              <span className="font-medium">settled</span> (SPIn Return).{" "}
+              <span className="font-medium">Direct refund (no card)</span> may be available with a processor reference
+              even before settlement — success depends on iPOS. Unsettled full reversals without a refund can use the
+              amber void section. Mixed cash + card, ecommerce / online pay, and cash refunds still require the POS
+              (or iPOS portal where applicable).
             </p>
           </div>
         </div>
