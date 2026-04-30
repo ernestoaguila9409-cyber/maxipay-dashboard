@@ -121,13 +121,11 @@ export default function BusinessHoursSection({
         <h3 className="text-sm font-semibold text-slate-800">Business hours</h3>
       </div>
       <p className="text-xs text-slate-500 mb-4">
-        Weekly hours use the time zone below. They apply when{" "}
-        <span className="font-medium text-slate-700">Apply schedule to storefront</span> is checked and{" "}
-        <span className="font-medium text-slate-700">Auto (follow toggle)</span> is selected in Open / closed
-        above—then the public site shows <span className="font-medium text-slate-700">Closed</span> outside
-        these windows. Editing days or times below turns the schedule on automatically. Use{" "}
-        <span className="font-medium text-slate-700">Force open</span> to bypass the schedule, or{" "}
-        <span className="font-medium text-slate-700">Force closed</span> for a one-off closure.
+        Weekly hours use the time zone below. When{" "}
+        <span className="font-medium text-slate-700">Apply schedule to storefront</span> is checked, the
+        public site shows <span className="font-medium text-slate-700">Closed</span> outside these windows
+        (together with your online ordering and storefront rules in Firestore). Editing days or times below
+        turns the schedule on automatically.
       </p>
 
       {!settings.businessHoursEnforced && (
@@ -150,8 +148,8 @@ export default function BusinessHoursSection({
         <span className="text-sm text-slate-700">
           <span className="font-semibold">Apply schedule to storefront</span>
           <span className="block text-xs text-slate-500 mt-0.5 font-normal">
-            When off, online ordering stays Open whenever it is enabled and Auto is selected—your day-by-day
-            table is ignored. When on, closed days and outside hours show Closed and block checkout.
+            When off, your day-by-day table is kept for reference but does not close checkout by itself. When
+            on, closed days and outside hours show Closed and block checkout.
           </span>
         </span>
       </label>
