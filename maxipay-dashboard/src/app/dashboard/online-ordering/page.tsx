@@ -8,6 +8,7 @@ import {
   Image as ImageIcon,
   Settings as SettingsIcon,
   ShoppingBag,
+  UtensilsCrossed,
 } from "lucide-react";
 import Link from "next/link";
 import Header from "@/components/Header";
@@ -24,8 +25,9 @@ import {
 } from "@/lib/onlineOrderingShared";
 import StorefrontPictureManager from "@/components/online-ordering-admin/StorefrontPictureManager";
 import StorefrontSettingsManager from "@/components/online-ordering-admin/StorefrontSettingsManager";
+import OnlineKitchenRoutingManager from "@/components/online-ordering-admin/OnlineKitchenRoutingManager";
 
-type TabId = "picture" | "settings";
+type TabId = "picture" | "settings" | "kitchen";
 
 interface TabSpec {
   id: TabId;
@@ -36,6 +38,7 @@ interface TabSpec {
 const TABS: TabSpec[] = [
   { id: "picture", label: "Store Front picture", icon: ImageIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
+  { id: "kitchen", label: "Kitchen routing", icon: UtensilsCrossed },
 ];
 
 export default function OnlineOrderingDashboardPage() {
@@ -134,6 +137,7 @@ export default function OnlineOrderingDashboardPage() {
                 <StorefrontPictureManager businessName={businessName} />
               )}
               {activeTab === "settings" && <StorefrontSettingsManager settings={settings} />}
+              {activeTab === "kitchen" && <OnlineKitchenRoutingManager settings={settings} />}
             </div>
           </div>
         </div>

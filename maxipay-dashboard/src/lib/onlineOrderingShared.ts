@@ -86,6 +86,10 @@ export interface OnlineOrderingSettings {
    * Empty = auto-pick (server falls back to first 6 visible items).
    */
   featuredItemIds: string[];
+  /** Printer document IDs that should also receive kitchen chits for every online order (additive to labels). */
+  onlineRoutingPrinterIds: string[];
+  /** KDS device document IDs that should also show every online order (additive to menu assignment). */
+  onlineRoutingKdsDeviceIds: string[];
 }
 
 export function defaultWeeklyBusinessHours(): OnlineOrderingDayHours[] {
@@ -112,6 +116,8 @@ export const DEFAULT_ONLINE_ORDERING_SETTINGS: OnlineOrderingSettings = {
   businessHoursTimezone: "America/New_York",
   businessHoursWeekly: defaultWeeklyBusinessHours(),
   featuredItemIds: [],
+  onlineRoutingPrinterIds: [],
+  onlineRoutingKdsDeviceIds: [],
 };
 
 const WEEKDAY_LONG_TO_INDEX: Record<string, number> = {
@@ -244,6 +250,8 @@ function cloneDefaultOnlineOrderingSettings(): OnlineOrderingSettings {
     onlineMenuCategoryIds: [...d.onlineMenuCategoryIds],
     onlineMenuItemIds: [...d.onlineMenuItemIds],
     businessHoursWeekly: d.businessHoursWeekly.map((r) => ({ ...r })),
+    onlineRoutingPrinterIds: [...d.onlineRoutingPrinterIds],
+    onlineRoutingKdsDeviceIds: [...d.onlineRoutingKdsDeviceIds],
   };
 }
 
@@ -279,6 +287,8 @@ export function parseOnlineOrderingSettings(
         : DEFAULT_ONLINE_ORDERING_SETTINGS.businessHoursTimezone,
     businessHoursWeekly: parseWeeklyHoursFromFirestore(data.businessHoursWeekly),
     featuredItemIds: parseStringIdArray(data.featuredItemIds),
+    onlineRoutingPrinterIds: parseStringIdArray(data.onlineRoutingPrinterIds),
+    onlineRoutingKdsDeviceIds: parseStringIdArray(data.onlineRoutingKdsDeviceIds),
   };
 }
 
