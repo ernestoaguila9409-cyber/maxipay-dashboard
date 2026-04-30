@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+  useRef,
+  type PointerEvent,
+  type ReactNode,
+} from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   doc,
@@ -150,6 +156,120 @@ function txRecordIsEcommerce(tx: Record<string, unknown>): boolean {
   );
 }
 
+const LINE_SWIPE_ACTION_PX = 112;
+
+/**
+ * Drag the row to the right to reveal a direct-refund action (underlay on the left).
+ */
+function SwipeableOrderLine({
+  lineId,
+  swipeEnabled,
+  isOpen,
+  rowClassName,
+  onOpenChange,
+  onDirectRefund,
+  children,
+}: {
+  lineId: string;
+  swipeEnabled: boolean;
+  isOpen: boolean;
+  rowClassName: string;
+  onOpenChange: (openLineId: string | null) => void;
+  onDirectRefund: () => void;
+  children: ReactNode;
+}) {
+  const [tx, setTx] = useState(0);
+  const txRef = useRef(0);
+  const setTxClamped = (v: number) => {
+    const c = Math.min(LINE_SWIPE_ACTION_PX, Math.max(0, v));
+    txRef.current = c;
+    setTx(c);
+  };
+
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef({ startClientX: 0, baseTx: 0 });
+  const activePointerId = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!swipeEnabled) return;
+    const target = isOpen ? LINE_SWIPE_ACTION_PX : 0;
+    txRef.current = target;
+    setTx(target);
+  }, [isOpen, swipeEnabled]);
+
+  if (!swipeEnabled) {
+    return <li className={rowClassName}>{children}</li>;
+  }
+
+  function handlePointerEnd(e: PointerEvent<HTMLDivElement>) {
+    if (activePointerId.current !== e.pointerId) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+    activePointerId.current = null;
+    setIsDragging(false);
+    const final = txRef.current;
+    const mid = LINE_SWIPE_ACTION_PX / 2;
+    if (final >= mid) {
+      setTxClamped(LINE_SWIPE_ACTION_PX);
+      onOpenChange(lineId);
+    } else {
+      setTxClamped(0);
+      onOpenChange(null);
+    }
+  }
+
+  return (
+    <li className={`relative overflow-hidden ${rowClassName}`}>
+      <div
+        className="absolute left-0 top-0 bottom-0 z-0 flex"
+        style={{ width: LINE_SWIPE_ACTION_PX }}
+      >
+        <button
+          type="button"
+          className="flex-1 bg-indigo-700 px-2 text-center text-[11px] font-semibold leading-tight text-white hover:bg-indigo-800"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenChange(null);
+            onDirectRefund();
+          }}
+        >
+          Direct refund
+        </button>
+      </div>
+      <div
+        className="relative z-10 bg-white shadow-[1px_0_0_rgba(0,0,0,0.04)]"
+        style={{
+          transform: `translateX(${tx}px)`,
+          transition: isDragging ? "none" : "transform 0.2s ease-out",
+          touchAction: "none",
+        }}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          activePointerId.current = e.pointerId;
+          setIsDragging(true);
+          dragRef.current = {
+            startClientX: e.clientX,
+            baseTx: txRef.current,
+          };
+        }}
+        onPointerMove={(e) => {
+          if (activePointerId.current !== e.pointerId) return;
+          const delta = e.clientX - dragRef.current.startClientX;
+          setTxClamped(dragRef.current.baseTx + delta);
+        }}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+      >
+        {children}
+      </div>
+    </li>
+  );
+}
+
 export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -184,6 +304,11 @@ export default function OrderDetailPage() {
   const [directRefundResult, setDirectRefundResult] = useState<string | null>(null);
   const [directRefundErr, setDirectRefundErr] = useState<string | null>(null);
   const [directRefundModalErr, setDirectRefundModalErr] = useState<string | null>(null);
+  const [openSwipeLineId, setOpenSwipeLineId] = useState<string | null>(null);
+  const [directRefundTargetLine, setDirectRefundTargetLine] = useState<LineItem | null>(
+    null
+  );
+  const [orderRefreshNonce, setOrderRefreshNonce] = useState(0);
 
   useEffect(() => {
     setDirectRefundModalOpen(false);
@@ -192,6 +317,9 @@ export default function OrderDetailPage() {
     setDirectRefundSubmitting(false);
     setDirectRefundResult(null);
     setDirectRefundErr(null);
+    setOpenSwipeLineId(null);
+    setDirectRefundTargetLine(null);
+    setOrderRefreshNonce(0);
   }, [orderId]);
 
   useEffect(() => {
@@ -337,7 +465,7 @@ export default function OrderDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, orderId]);
+  }, [user, orderId, orderRefreshNonce]);
 
   if (!user) {
     return (
@@ -418,6 +546,17 @@ export default function OrderDetailPage() {
     Math.max(0, totalInCents),
     Math.max(0, remainingInCents)
   );
+
+  const lineSwipeRefundEnabled =
+    Boolean(user) && termCaps.supportsRefund && canDirectRefund;
+
+  const directRefundModalMaxCents = directRefundTargetLine
+    ? Math.min(
+        Math.max(0, directRefundTargetLine.lineTotalInCents),
+        Math.max(0, remainingInCents),
+        Math.max(0, totalInCents)
+      )
+    : maxDirectRefundCents;
 
   /** Same rule as Android `OrderDetailActivity`: full strike metadata only when order is fully refunded. */
   const fullyRefundedForStrike =
@@ -600,86 +739,111 @@ export default function OrderDetailPage() {
                   {lines.map((line) => {
                     const strike = lineRefundStrike(line);
                     const isRefunded = strike != null;
+                    const swipeRow =
+                      lineSwipeRefundEnabled && !isRefunded;
+                    const rowShell = isRefunded ? "bg-[#FFF5F5]" : "";
                     return (
-                      <li
+                      <SwipeableOrderLine
                         key={line.id}
-                        className={`px-6 py-4 ${isRefunded ? "bg-[#FFF5F5]" : ""}`}
+                        lineId={line.id}
+                        swipeEnabled={swipeRow}
+                        isOpen={openSwipeLineId === line.id}
+                        rowClassName={rowShell}
+                        onOpenChange={setOpenSwipeLineId}
+                        onDirectRefund={() => {
+                          setDirectRefundTargetLine(line);
+                          setDirectRefundModalErr(null);
+                          const maxC = Math.min(
+                            line.lineTotalInCents,
+                            remainingInCents
+                          );
+                          setDirectRefundModalAmount(
+                            maxC > 0 ? (maxC / 100).toFixed(2) : ""
+                          );
+                          setDirectRefundModalOpen(true);
+                        }}
                       >
-                        <div className="flex justify-between gap-4">
-                          <div className="min-w-0">
-                            <p
-                              className={`font-medium ${
-                                isRefunded
-                                  ? "text-[#999999] line-through decoration-[#999999]"
-                                  : "text-slate-800"
-                              }`}
-                            >
-                              {line.name}{" "}
-                              <span
-                                className={
+                        <div className="px-6 py-4">
+                          <p className="sr-only">
+                            Swipe right on this row to show direct refund for this
+                            line only.
+                          </p>
+                          <div className="flex justify-between gap-4">
+                            <div className="min-w-0">
+                              <p
+                                className={`font-medium ${
                                   isRefunded
-                                    ? "text-[#999999] font-normal"
-                                    : "text-slate-500 font-normal"
-                                }
+                                    ? "text-[#999999] line-through decoration-[#999999]"
+                                    : "text-slate-800"
+                                }`}
                               >
-                                ×{line.quantity}
-                              </span>
-                            </p>
-                            {line.modifiers.length > 0 && (
-                              <ul className="mt-1 text-xs text-slate-600 space-y-0.5">
-                                {line.modifiers.map((m, i) => (
-                                  <li key={i}>
-                                    {m.action === "ADD"
-                                      ? "+"
-                                      : m.action === "NO"
-                                        ? "−"
-                                        : ""}{" "}
-                                    {m.name}
-                                    {m.price != null && m.price !== 0
-                                      ? ` ($${Number(m.price).toFixed(2)})`
-                                      : ""}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                            {isRefunded ? (
-                              <div className="mt-2 space-y-0.5">
-                                <p className="text-xs font-bold uppercase tracking-wide text-red-600">
-                                  Refunded
-                                </p>
-                                {strike.by && strike.by !== "—" ? (
-                                  <p className="text-xs text-red-600/90">
-                                    Refunded by {strike.by}
+                                {line.name}{" "}
+                                <span
+                                  className={
+                                    isRefunded
+                                      ? "text-[#999999] font-normal"
+                                      : "text-slate-500 font-normal"
+                                  }
+                                >
+                                  ×{line.quantity}
+                                </span>
+                              </p>
+                              {line.modifiers.length > 0 && (
+                                <ul className="mt-1 text-xs text-slate-600 space-y-0.5">
+                                  {line.modifiers.map((m, i) => (
+                                    <li key={i}>
+                                      {m.action === "ADD"
+                                        ? "+"
+                                        : m.action === "NO"
+                                          ? "−"
+                                          : ""}{" "}
+                                      {m.name}
+                                      {m.price != null && m.price !== 0
+                                        ? ` ($${Number(m.price).toFixed(2)})`
+                                        : ""}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                              {isRefunded ? (
+                                <div className="mt-2 space-y-0.5">
+                                  <p className="text-xs font-bold uppercase tracking-wide text-red-600">
+                                    Refunded
                                   </p>
-                                ) : null}
-                                {strike.at ? (
-                                  <p className="text-xs text-red-600/90">{strike.at}</p>
-                                ) : null}
-                              </div>
-                            ) : null}
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p
-                              className={`text-sm font-semibold ${
-                                isRefunded
-                                  ? "text-[#999999] line-through decoration-[#999999]"
-                                  : "text-slate-800"
-                              }`}
-                            >
-                              ${centsToMoney(line.lineTotalInCents)}
-                            </p>
-                            <p
-                              className={`text-xs ${
-                                isRefunded
-                                  ? "text-[#999999] line-through"
-                                  : "text-slate-400"
-                              }`}
-                            >
-                              @ ${centsToMoney(line.unitPriceInCents)} each
-                            </p>
+                                  {strike.by && strike.by !== "—" ? (
+                                    <p className="text-xs text-red-600/90">
+                                      Refunded by {strike.by}
+                                    </p>
+                                  ) : null}
+                                  {strike.at ? (
+                                    <p className="text-xs text-red-600/90">{strike.at}</p>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p
+                                className={`text-sm font-semibold ${
+                                  isRefunded
+                                    ? "text-[#999999] line-through decoration-[#999999]"
+                                    : "text-slate-800"
+                                }`}
+                              >
+                                ${centsToMoney(line.lineTotalInCents)}
+                              </p>
+                              <p
+                                className={`text-xs ${
+                                  isRefunded
+                                    ? "text-[#999999] line-through"
+                                    : "text-slate-400"
+                                }`}
+                              >
+                                @ ${centsToMoney(line.unitPriceInCents)} each
+                              </p>
+                            </div>
                           </div>
                         </div>
-                      </li>
+                      </SwipeableOrderLine>
                     );
                   })}
                 </ul>
@@ -786,6 +950,7 @@ export default function OrderDetailPage() {
                   disabled={directRefundSubmitting}
                   onClick={() => {
                     if (!user) return;
+                    setDirectRefundTargetLine(null);
                     setDirectRefundModalErr(null);
                     setDirectRefundModalAmount(
                       maxDirectRefundCents > 0
@@ -812,7 +977,10 @@ export default function OrderDetailPage() {
                 className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
                 role="presentation"
                 onClick={() => {
-                  if (!directRefundSubmitting) setDirectRefundModalOpen(false);
+                  if (!directRefundSubmitting) {
+                    setDirectRefundModalOpen(false);
+                    setDirectRefundTargetLine(null);
+                  }
                 }}
               >
                 <div
@@ -826,18 +994,41 @@ export default function OrderDetailPage() {
                     id="direct-refund-modal-title"
                     className="text-base font-semibold text-slate-900"
                   >
-                    Refund amount
+                    {directRefundTargetLine
+                      ? `Refund: ${directRefundTargetLine.name}`
+                      : "Refund amount"}
                   </h3>
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    Original total{" "}
-                    <span className="font-medium text-slate-800">
-                      ${centsToMoney(totalInCents)}
-                    </span>
-                    . You may refund up to{" "}
-                    <span className="font-medium text-slate-800">
-                      ${centsToMoney(maxDirectRefundCents)}
-                    </span>{" "}
-                    (not above the original total and not more than the remaining balance).
+                    {directRefundTargetLine ? (
+                      <>
+                        Line total{" "}
+                        <span className="font-medium text-slate-800">
+                          ${centsToMoney(directRefundTargetLine.lineTotalInCents)}
+                        </span>
+                        . Original order total{" "}
+                        <span className="font-medium text-slate-800">
+                          ${centsToMoney(totalInCents)}
+                        </span>
+                        . You may refund up to{" "}
+                        <span className="font-medium text-slate-800">
+                          ${centsToMoney(directRefundModalMaxCents)}
+                        </span>{" "}
+                        for this line (not above the line total, original total, or remaining
+                        balance).
+                      </>
+                    ) : (
+                      <>
+                        Original total{" "}
+                        <span className="font-medium text-slate-800">
+                          ${centsToMoney(totalInCents)}
+                        </span>
+                        . You may refund up to{" "}
+                        <span className="font-medium text-slate-800">
+                          ${centsToMoney(maxDirectRefundCents)}
+                        </span>{" "}
+                        (not above the original total and not more than the remaining balance).
+                      </>
+                    )}
                   </p>
                   <label className="block text-sm font-medium text-slate-800">
                     Amount (USD)
@@ -845,7 +1036,11 @@ export default function OrderDetailPage() {
                       type="number"
                       min="0.01"
                       step="0.01"
-                      max={maxDirectRefundCents > 0 ? maxDirectRefundCents / 100 : undefined}
+                      max={
+                        directRefundModalMaxCents > 0
+                          ? directRefundModalMaxCents / 100
+                          : undefined
+                      }
                       value={directRefundModalAmount}
                       onChange={(e) => {
                         setDirectRefundModalAmount(e.target.value);
@@ -862,7 +1057,10 @@ export default function OrderDetailPage() {
                     <button
                       type="button"
                       disabled={directRefundSubmitting}
-                      onClick={() => setDirectRefundModalOpen(false)}
+                      onClick={() => {
+                        setDirectRefundModalOpen(false);
+                        setDirectRefundTargetLine(null);
+                      }}
                       className="px-4 py-2 rounded-xl border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                     >
                       Cancel
@@ -893,6 +1091,15 @@ export default function OrderDetailPage() {
                           );
                           return;
                         }
+                        if (
+                          directRefundTargetLine &&
+                          amountInCents > directRefundTargetLine.lineTotalInCents
+                        ) {
+                          setDirectRefundModalErr(
+                            `Amount cannot exceed this line total ($${centsToMoney(directRefundTargetLine.lineTotalInCents)}).`
+                          );
+                          return;
+                        }
                         setDirectRefundSubmitting(true);
                         setDirectRefundErr(null);
                         setDirectRefundResult(null);
@@ -904,11 +1111,17 @@ export default function OrderDetailPage() {
                             ? getFunctions(app, region)
                             : getFunctions(app);
                           const call = httpsCallable(functions, "processServerRefund");
-                          const res = await call({
+                          const payload: Record<string, unknown> = {
                             transactionId: saleIdForRefund,
                             orderId,
                             amountInCents,
-                          });
+                          };
+                          if (directRefundTargetLine) {
+                            payload.refundedLineKey = directRefundTargetLine.id;
+                            payload.refundedItemName =
+                              directRefundTargetLine.name.trim();
+                          }
+                          const res = await call(payload);
                           const d = res.data as Record<string, unknown>;
                           if (d.success) {
                             setDirectRefundResult(
@@ -916,6 +1129,9 @@ export default function OrderDetailPage() {
                             );
                             setDirectRefundModalOpen(false);
                             setDirectRefundModalAmount("");
+                            setDirectRefundTargetLine(null);
+                            setOpenSwipeLineId(null);
+                            setOrderRefreshNonce((n) => n + 1);
                           } else {
                             setDirectRefundModalErr(String(d.error ?? "Refund failed."));
                           }
