@@ -71,9 +71,7 @@ export default function SalesActivityBatchesSection() {
     setCloseError(null);
     setCloseOk(null);
     const ok = window.confirm(
-      "Close the open batch in MaxiPay?\n\n" +
-        "This marks open transactions as settled and starts a new batch, matching what the POS does in Firebase after a successful settle.\n\n" +
-        "It does not run your card terminal’s host/processor batch. If your processor still requires that, run it from the device when needed."
+      "Close the open batch?\n\nThis will send a Z8 settlement request to your processor (SPIn / Dejavoo), then mark all open transactions as settled and start a new batch \u2014 the same steps the POS runs when you tap Settle batch."
     );
     if (!ok) return;
     setCloseBusy(true);
@@ -90,13 +88,17 @@ export default function SalesActivityBatchesSection() {
         error?: string;
         closedBatchId?: string;
         newBatchId?: string;
+        processorMessage?: string;
       };
       if (!data?.success) {
         setCloseError(data?.error || "Close batch failed.");
         return;
       }
+      const proc = data.processorMessage
+        ? ` ${data.processorMessage}.`
+        : "";
       setCloseOk(
-        `Batch closed (${data.closedBatchId ?? "—"}). New open batch: ${data.newBatchId ?? "—"}.`
+        `Batch closed (${data.closedBatchId ?? "\u2014"}).${proc} New open batch: ${data.newBatchId ?? "\u2014"}.`
       );
     } catch (e: unknown) {
       let msg =
@@ -105,7 +107,7 @@ export default function SalesActivityBatchesSection() {
           : String(e);
       if (msg === "INTERNAL" || msg.includes("INTERNAL")) {
         msg +=
-          " — The Cloud Function 'closeOpenBatchFromDashboard' may not be deployed yet. " +
+          " \u2014 The Cloud Function 'closeOpenBatchFromDashboard' may not be deployed yet. " +
           "Run: firebase deploy --only functions:closeOpenBatchFromDashboard";
       }
       setCloseError(msg);
@@ -115,7 +117,6 @@ export default function SalesActivityBatchesSection() {
   }, [user, preAuthCount, settleable, openBatchId]);
 
   useEffect(() => {
-    // Modular Firestore has no legacy `db.collection()` — the old guard always skipped this effect.
     if (!user) return;
 
     const qUnsettled = query(
@@ -202,7 +203,7 @@ export default function SalesActivityBatchesSection() {
                 hour: "2-digit",
                 minute: "2-digit",
               })
-            : "—";
+            : "\u2014";
           const totalSales =
             typeof data.totalSales === "number"
               ? data.totalSales
@@ -246,7 +247,7 @@ export default function SalesActivityBatchesSection() {
       `Open transactions: ${settleable}`,
       `Total: $${openTotal.toFixed(2)}`,
     ];
-    return parts.join(" · ");
+    return parts.join(" \u00B7 ");
   }, [settleable, openTotal]);
 
   return (
@@ -255,9 +256,8 @@ export default function SalesActivityBatchesSection() {
         <Layers className="w-5 h-5 text-slate-600 shrink-0" aria-hidden />
         <h2 className="text-lg font-semibold text-slate-800">Batches</h2>
         <span className="text-xs text-slate-500 ml-auto max-w-md text-right">
-          Matches Settle batch on the POS. You can close the Firestore batch here;
-          run your card processor/terminal batch on the device when your processor
-          requires it.
+          Matches Settle batch on the POS. Sends a Z8 settlement to your
+          processor (SPIn / Dejavoo), then updates Firestore.
         </span>
       </div>
 
@@ -269,7 +269,7 @@ export default function SalesActivityBatchesSection() {
           {loadingOpen ? (
             <div className="flex items-center gap-2 text-slate-500 text-sm">
               <Loader2 className="w-4 h-4 animate-spin" />
-              Loading…
+              Loading&hellip;
             </div>
           ) : (
             <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 text-sm text-slate-800 space-y-1">
@@ -311,7 +311,7 @@ export default function SalesActivityBatchesSection() {
                   {closeBusy ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin mr-2" aria-hidden />
-                      Closing…
+                      Closing&hellip;
                     </>
                   ) : (
                     "Close batch"
@@ -340,7 +340,7 @@ export default function SalesActivityBatchesSection() {
           {loadingClosed ? (
             <div className="flex items-center gap-2 text-slate-500 text-sm">
               <Loader2 className="w-4 h-4 animate-spin" />
-              Loading…
+              Loading&hellip;
             </div>
           ) : closedRows.length === 0 ? (
             <p className="text-sm text-slate-500">No closed batches yet.</p>
@@ -370,7 +370,7 @@ export default function SalesActivityBatchesSection() {
                         {r.closedLabel}
                       </td>
                       <td className="px-3 py-2 text-slate-800">
-                        Transactions: {r.transactionCount} · Total: $
+                        Transactions: {r.transactionCount} &middot; Total: $
                         {r.totalSales.toFixed(2)}
                       </td>
                     </tr>
