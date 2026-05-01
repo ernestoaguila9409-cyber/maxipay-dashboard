@@ -61,6 +61,7 @@ export default function SalesActivityBatchesSection() {
   const [closeBusy, setCloseBusy] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
   const [closeOk, setCloseOk] = useState<string | null>(null);
+  const [queryError, setQueryError] = useState<string | null>(null);
 
   const canCloseFromWeb =
     !loadingOpen && preAuthCount === 0 && settleable > 0 && !closeBusy;
@@ -98,10 +99,15 @@ export default function SalesActivityBatchesSection() {
         `Batch closed (${data.closedBatchId ?? "—"}). New open batch: ${data.newBatchId ?? "—"}.`
       );
     } catch (e: unknown) {
-      const msg =
+      let msg =
         e && typeof e === "object" && "message" in e
           ? String((e as { message: string }).message)
           : String(e);
+      if (msg === "INTERNAL" || msg.includes("INTERNAL")) {
+        msg +=
+          " — The Cloud Function 'closeOpenBatchFromDashboard' may not be deployed yet. " +
+          "Run: firebase deploy --only functions:closeOpenBatchFromDashboard";
+      }
       setCloseError(msg);
     } finally {
       setCloseBusy(false);
@@ -136,9 +142,20 @@ export default function SalesActivityBatchesSection() {
         setSettleable(s);
         setOpenTotal(total < 0.005 ? 0 : total);
         setPreAuthCount(pre);
+        setQueryError(null);
         setLoadingOpen(false);
       },
-      () => {
+      (err) => {
+        console.error("[Batches] Transactions query error:", err);
+        const msg = String(err?.message ?? err);
+        if (msg.includes("index")) {
+          setQueryError(
+            "Firestore composite index required for Transactions (settled + voided). " +
+              "Open the Firebase console link in the browser console to create it."
+          );
+        } else {
+          setQueryError(`Transactions query failed: ${msg}`);
+        }
         setLoadingOpen(false);
       }
     );
@@ -256,6 +273,11 @@ export default function SalesActivityBatchesSection() {
             </div>
           ) : (
             <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 text-sm text-slate-800 space-y-1">
+              {queryError && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-sm px-3 py-2 mb-2">
+                  {queryError}
+                </div>
+              )}
               <p className="font-medium">{openSummaryLine}</p>
               {preAuthCount > 0 && (
                 <p className="text-amber-800 text-sm">

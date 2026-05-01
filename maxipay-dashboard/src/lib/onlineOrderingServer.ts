@@ -367,6 +367,8 @@ export async function createOnlineOrderTransaction(
       orderType: "ONLINE_PICKUP",
       itemsCount: resolvedLines.length,
       orderSource: "online_ordering",
+      /** POS must confirm before the order appears in Online orders / KDS (see `requireStaffConfirmOrder`). */
+      awaitingStaffConfirmOrder: oo.requireStaffConfirmOrder === true,
       onlinePaymentChoice: params.paymentChoice,
       customerName: customerName || "Guest",
       customerPhone: customerPhone,
