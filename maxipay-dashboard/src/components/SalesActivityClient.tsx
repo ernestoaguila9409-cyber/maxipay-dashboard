@@ -8,6 +8,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   limit,
   onSnapshot,
   orderBy,
@@ -53,6 +54,8 @@ function docDate(data: DocumentData): Date | null {
 type TabId = "orders" | "transactions" | "cash";
 type DatePreset = "today" | "yesterday" | "7days" | "custom";
 type PaymentFilter = "all" | "cash" | "credit" | "debit";
+
+type CardBrandBucket = "all" | "VISA" | "MASTERCARD" | "AMEX" | "DISCOVER" | "OTHER";
 
 interface BatchOption {
   id: string | null;
@@ -258,6 +261,78 @@ function receiptKindForTransaction(data: DocumentData): {
 
 type TxDocRow = { id: string; data: DocumentData };
 
+function cardBrandBucketFromRaw(raw: string): CardBrandBucket {
+  const u = raw.toUpperCase();
+  if (u.includes("VISA")) return "VISA";
+  if (u.includes("MASTER")) return "MASTERCARD";
+  if (u.includes("AMEX") || u.includes("AMERICAN")) return "AMEX";
+  if (u.includes("DISCOVER")) return "DISCOVER";
+  if (!raw.trim()) return "OTHER";
+  return "OTHER";
+}
+
+function transactionCardBrandBuckets(data: DocumentData): Set<CardBrandBucket> {
+  const out = new Set<CardBrandBucket>();
+  const pays = data.payments as Record<string, unknown>[] | undefined;
+  if (Array.isArray(pays) && pays.length > 0) {
+    for (const p of pays) {
+      if (String(p.paymentType ?? "").toLowerCase() === "cash") continue;
+      out.add(cardBrandBucketFromRaw(String(p.cardBrand ?? "")));
+    }
+  } else {
+    const pt = String(data.paymentType ?? "").toLowerCase();
+    if (pt !== "cash") {
+      out.add(cardBrandBucketFromRaw(String(data.cardBrand ?? "")));
+    }
+  }
+  if (out.size === 0) out.add("OTHER");
+  return out;
+}
+
+function transactionMatchesCardBrand(data: DocumentData, filter: CardBrandBucket): boolean {
+  if (filter === "all") return true;
+  const buckets = transactionCardBrandBuckets(data);
+  return buckets.has(filter);
+}
+
+function orderMatchesCardBrand(
+  orderId: string,
+  txRows: TxDocRow[],
+  filter: CardBrandBucket
+): boolean {
+  if (filter === "all") return true;
+  return txRows.some(
+    ({ data }) =>
+      String(data.orderId ?? "").trim() === orderId &&
+      inFinancialTx(data) &&
+      transactionMatchesCardBrand(data, filter)
+  );
+}
+
+function transactionMatchesEmployee(
+  data: DocumentData,
+  employeeName: string,
+  orderEmployeeById: Map<string, string>
+): boolean {
+  const want = employeeName.trim();
+  if (!want) return true;
+  const oid = String(data.orderId ?? "").trim();
+  const fromOrder = oid ? (orderEmployeeById.get(oid) ?? "").trim() : "";
+  const t = String(data.type ?? "");
+  if (t === "REFUND") {
+    const by = String(data.refundedBy ?? "").trim();
+    return by === want || fromOrder === want;
+  }
+  const direct = String(data.employeeName ?? "").trim();
+  return direct === want || fromOrder === want;
+}
+
+function orderMatchesEmployee(data: DocumentData, employeeName: string): boolean {
+  const want = employeeName.trim();
+  if (!want) return true;
+  return String(data.employeeName ?? "").trim() === want;
+}
+
 function transactionRowMatchesSearch(
   { id, data }: TxDocRow,
   qLower: string,
@@ -287,7 +362,10 @@ function buildTransactionGroups(
   batchId: string | null,
   qLower: string,
   paymentFilter: PaymentFilter,
-  orderIdsMatchingSearch: Set<string> | null
+  orderIdsMatchingSearch: Set<string> | null,
+  cardBrandFilter: CardBrandBucket,
+  employeeFilter: string,
+  orderEmployeeById: Map<string, string>
 ): { key: string; parent: TxDocRow | null; refunds: TxDocRow[]; sortTime: number }[] {
   const base = txDocs.filter(({ data }) => {
     if (!inFinancialTx(data)) return false;
@@ -316,7 +394,10 @@ function buildTransactionGroups(
       transactionRowMatchesSearch(p, qLower, orderIdsMatchingSearch) ||
       refundParentIdsFromSearch.has(p.id);
     if (!searchOk) return false;
-    return transactionMatchesPaymentFilter(p.data, paymentFilter);
+    if (!transactionMatchesPaymentFilter(p.data, paymentFilter)) return false;
+    if (!transactionMatchesCardBrand(p.data, cardBrandFilter)) return false;
+    if (!transactionMatchesEmployee(p.data, employeeFilter, orderEmployeeById)) return false;
+    return true;
   };
 
   const visibleParents = parents.filter(parentIsVisible);
@@ -344,6 +425,8 @@ function buildTransactionGroups(
     if (attachedRefundIds.has(r.id)) continue;
     if (!transactionRowMatchesSearch(r, qLower, orderIdsMatchingSearch)) continue;
     if (!transactionMatchesPaymentFilter(r.data, paymentFilter)) continue;
+    if (!transactionMatchesCardBrand(r.data, cardBrandFilter)) continue;
+    if (!transactionMatchesEmployee(r.data, employeeFilter, orderEmployeeById)) continue;
     groups.push({
       key: `orph-${r.id}`,
       parent: null,
@@ -485,8 +568,15 @@ export default function SalesActivityClient() {
   const [customEnd, setCustomEnd] = useState(() => new Date().toISOString().slice(0, 10));
   const [batchId, setBatchId] = useState<string | null>(null);
   const [batches, setBatches] = useState<BatchOption[]>([{ id: null, label: "All batches" }]);
+  /** `date` = Firestore queries use date range only; `batch` = queries use selected batch only. */
+  const [timeScope, setTimeScope] = useState<"date" | "batch">("date");
+  const [cardBrandFilter, setCardBrandFilter] = useState<CardBrandBucket>("all");
+  const [employeeFilter, setEmployeeFilter] = useState("");
+  const [employeeNames, setEmployeeNames] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>("all");
+
+  const queryBatchId = timeScope === "batch" ? batchId : null;
 
   const [orderDocs, setOrderDocs] = useState<{ id: string; data: DocumentData }[]>([]);
   const [txDocs, setTxDocs] = useState<{ id: string; data: DocumentData }[]>([]);
@@ -719,6 +809,28 @@ export default function SalesActivityClient() {
   const qLower = search.trim().toLowerCase();
 
   useEffect(() => {
+    if (!db) return;
+    getDocs(query(collection(db, "Employees"), limit(400)))
+      .then((snap) => {
+        const names: string[] = [];
+        snap.forEach((d) => {
+          const n = String(d.data().name ?? "").trim();
+          if (n) names.push(n);
+        });
+        names.sort((a, b) => a.localeCompare(b));
+        setEmployeeNames(names);
+      })
+      .catch(() => setEmployeeNames([]));
+  }, [db]);
+
+  useEffect(() => {
+    if (timeScope !== "batch") return;
+    if (batchId != null) return;
+    const first = batches.find((b) => b.id != null)?.id ?? null;
+    if (first) setBatchId(first);
+  }, [timeScope, batches, batchId]);
+
+  useEffect(() => {
     if (typeof window === "undefined" || !db) return;
     const unsubs: Array<() => void> = [];
 
@@ -748,10 +860,10 @@ export default function SalesActivityClient() {
     // with "All batches", constrain by createdAt only.
     // NOTE: When filtering by batchId we intentionally omit server-side orderBy so the query
     // doesn't require a (batchId, createdAt) composite index. Results are sorted client-side.
-    const ordersQ = batchId
+    const ordersQ = queryBatchId
       ? query(
           collection(db, "Orders"),
-          where("batchId", "==", batchId),
+          where("batchId", "==", queryBatchId),
           limit(400)
         )
       : query(
@@ -762,10 +874,10 @@ export default function SalesActivityClient() {
           limit(400)
         );
 
-    const txQ = batchId
+    const txQ = queryBatchId
       ? query(
           collection(db, "Transactions"),
-          where("batchId", "==", batchId),
+          where("batchId", "==", queryBatchId),
           limit(900)
         )
       : query(
@@ -806,7 +918,7 @@ export default function SalesActivityClient() {
 
       // Include orders voided *within* the selected date range even if the order was created earlier.
       // This keeps dashboard Sales Activity aligned with POS behavior (voids show on the day they occur).
-      if (!batchId) {
+      if (!queryBatchId) {
         const voidedOrdersQ = query(
           collection(db, "Orders"),
           where("status", "==", "VOIDED"),
@@ -859,7 +971,7 @@ export default function SalesActivityClient() {
       );
 
       // Include transactions voided *within* the selected date range even if the sale/capture was created earlier.
-      if (!batchId) {
+      if (!queryBatchId) {
         const voidedTxQ = query(
           collection(db, "Transactions"),
           where("voided", "==", true),
@@ -893,10 +1005,10 @@ export default function SalesActivityClient() {
         );
       }
 
-      const cashQ = batchId
+      const cashQ = queryBatchId
         ? query(
             collection(db, "cashLogs"),
-            where("batchId", "==", batchId),
+            where("batchId", "==", queryBatchId),
             limit(400)
           )
         : query(
@@ -923,7 +1035,7 @@ export default function SalesActivityClient() {
     }
 
     return () => unsubs.forEach((u) => u());
-  }, [tsStart, tsEnd, batchId]);
+  }, [tsStart, tsEnd, queryBatchId]);
 
   const orderIdsMatchingSearch = useMemo(() => {
     if (!qLower) return null as Set<string> | null;
@@ -942,9 +1054,19 @@ export default function SalesActivityClient() {
     return s;
   }, [orderDocs, qLower]);
 
+  const orderEmployeeById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const { id, data } of orderDocs) {
+      m.set(id, String(data.employeeName ?? "").trim());
+    }
+    return m;
+  }, [orderDocs]);
+
   const filteredOrders = useMemo(() => {
     return orderDocs.filter(({ id, data }) => {
-      if (batchId && String(data.batchId ?? "") !== batchId) return false;
+      if (queryBatchId && String(data.batchId ?? "") !== queryBatchId) return false;
+      if (!orderMatchesEmployee(data, employeeFilter)) return false;
+      if (!orderMatchesCardBrand(id, txDocs, cardBrandFilter)) return false;
       if (!qLower) return true;
       if (orderIdsMatchingSearch?.has(id)) return true;
       const num = String(data.orderNumber ?? "");
@@ -957,24 +1079,46 @@ export default function SalesActivityClient() {
         table.includes(qLower)
       );
     });
-  }, [orderDocs, batchId, qLower, orderIdsMatchingSearch]);
+  }, [
+    orderDocs,
+    queryBatchId,
+    qLower,
+    orderIdsMatchingSearch,
+    employeeFilter,
+    cardBrandFilter,
+    txDocs,
+  ]);
 
   const transactionGroups = useMemo(
     () =>
       buildTransactionGroups(
         txDocs,
-        batchId,
+        queryBatchId,
         qLower,
         paymentFilter,
-        orderIdsMatchingSearch
+        orderIdsMatchingSearch,
+        cardBrandFilter,
+        employeeFilter,
+        orderEmployeeById
       ),
-    [txDocs, batchId, qLower, paymentFilter, orderIdsMatchingSearch]
+    [
+      txDocs,
+      queryBatchId,
+      qLower,
+      paymentFilter,
+      orderIdsMatchingSearch,
+      cardBrandFilter,
+      employeeFilter,
+      orderEmployeeById,
+    ]
   );
 
   const summaryTx = useMemo(() => {
     return txDocs.filter(({ data }) => {
       if (!inFinancialTx(data)) return false;
-      if (batchId && String(data.batchId ?? "") !== batchId) return false;
+      if (queryBatchId && String(data.batchId ?? "") !== queryBatchId) return false;
+      if (!transactionMatchesCardBrand(data, cardBrandFilter)) return false;
+      if (!transactionMatchesEmployee(data, employeeFilter, orderEmployeeById)) return false;
       if (!qLower) {
         if (tab === "transactions" && paymentFilter !== "all") {
           const type = String(data.type ?? "");
@@ -1003,7 +1147,17 @@ export default function SalesActivityClient() {
       }
       return true;
     });
-  }, [txDocs, batchId, qLower, tab, paymentFilter, orderIdsMatchingSearch]);
+  }, [
+    txDocs,
+    queryBatchId,
+    qLower,
+    tab,
+    paymentFilter,
+    orderIdsMatchingSearch,
+    cardBrandFilter,
+    employeeFilter,
+    orderEmployeeById,
+  ]);
 
   const totals = useMemo(() => {
     let totalSales = 0;
@@ -1071,10 +1225,13 @@ export default function SalesActivityClient() {
       return b?.label ?? `Batch ${bid.slice(0, 6)}…`;
     };
 
-    cashLogDocs.forEach(({ id, data }) => {
-      if (batchId && String(data.batchId ?? "") !== batchId) return;
+    const empWant = employeeFilter.trim();
+    if (cardBrandFilter === "all") {
+      cashLogDocs.forEach(({ id, data }) => {
+        if (queryBatchId && String(data.batchId ?? "") !== queryBatchId) return;
       const t = String(data.type ?? "").toUpperCase();
       const ts = data.createdAt?.toDate?.() ?? new Date();
+      if (empWant && String(data.employeeName ?? "").trim() !== empWant) return;
       if (qLower) {
         const blob = `${t} ${data.reason ?? ""} ${data.note ?? ""} ${data.employeeName ?? ""}`.toLowerCase();
         if (!blob.includes(qLower)) return;
@@ -1090,15 +1247,18 @@ export default function SalesActivityClient() {
         time: ts.toLocaleString(),
         batchLine: `Batch: ${batchLabel(String(data.batchId ?? ""))}`,
       });
-    });
+      });
+    }
 
     txDocs.forEach(({ id, data }) => {
       if (data.voided === true) return;
       const t = String(data.type ?? "");
-      if (batchId && String(data.batchId ?? "") !== batchId) return;
+      if (queryBatchId && String(data.batchId ?? "") !== queryBatchId) return;
       const ts = docDate(data);
       if (!ts) return;
-      if (!batchId && (ts < start || ts >= endExclusive)) return;
+      if (!queryBatchId && (ts < start || ts >= endExclusive)) return;
+      if (!transactionMatchesEmployee(data, employeeFilter, orderEmployeeById)) return;
+      if (cardBrandFilter !== "all" && !transactionMatchesCardBrand(data, cardBrandFilter)) return;
 
       if (t === "CASH_ADD" || t === "PAID_OUT") {
         if (qLower) {
@@ -1163,7 +1323,18 @@ export default function SalesActivityClient() {
 
     rows.sort((a, b) => b.sort - a.sort);
     return rows;
-  }, [cashLogDocs, txDocs, batches, batchId, start, endExclusive, qLower]);
+  }, [
+    cashLogDocs,
+    txDocs,
+    batches,
+    queryBatchId,
+    start,
+    endExclusive,
+    qLower,
+    employeeFilter,
+    orderEmployeeById,
+    cardBrandFilter,
+  ]);
 
   const saveCashLog = useCallback(async () => {
     const v = parseFloat(cashAmount);
@@ -1177,7 +1348,7 @@ export default function SalesActivityClient() {
         employeeName: "Web dashboard",
         createdAt: Timestamp.now(),
         source: "maxipay_web_sales_activity",
-        ...(batchId ? { batchId } : {}),
+        ...(queryBatchId ? { batchId: queryBatchId } : {}),
       });
       setCashModal(null);
       setCashAmount("");
@@ -1188,7 +1359,7 @@ export default function SalesActivityClient() {
     } finally {
       setCashSaving(false);
     }
-  }, [cashModal, cashAmount, cashReason, batchId]);
+  }, [cashModal, cashAmount, cashReason, queryBatchId]);
 
   const openReceiptPreview = useCallback(async () => {
     if (!txModal) return;
@@ -1239,19 +1410,55 @@ export default function SalesActivityClient() {
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-4">
           <p className="text-xs text-slate-500">
-            Use <span className="font-medium text-slate-700">date range</span> or{" "}
-            <span className="font-medium text-slate-700">a specific batch</span> — not both. Choosing
-            a batch loads all orders, transactions, and the cash log (drawer moves, cash sales, and
-            cash refunds — same sources as POS Cash Flow).
+            Turn on <span className="font-medium text-slate-700">date range</span> or{" "}
+            <span className="font-medium text-slate-700">batch</span> — only one is active. Batch
+            mode loads all rows for that batch (orders, transactions, cash log). Card brand and
+            employee narrow what you see in each tab.
           </p>
+          <div className="flex flex-wrap gap-4 items-center pb-2 border-b border-slate-100">
+            <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide shrink-0">
+              Time
+            </span>
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input
+                type="radio"
+                name="salesTimeScope"
+                className="accent-violet-600"
+                checked={timeScope === "date"}
+                onChange={() => {
+                  setTimeScope("date");
+                  setBatchId(null);
+                }}
+              />
+              Date range
+            </label>
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input
+                type="radio"
+                name="salesTimeScope"
+                className="accent-violet-600"
+                checked={timeScope === "batch"}
+                onChange={() => {
+                  setTimeScope("batch");
+                  setBatchId((prev) => {
+                    if (prev != null) return prev;
+                    return batches.find((b) => b.id != null)?.id ?? null;
+                  });
+                }}
+              />
+              Batch
+            </label>
+          </div>
           <div className="flex flex-wrap gap-3 items-end">
             <div>
               <label className="text-xs text-slate-500 block mb-1">Date range</label>
               <select
                 value={datePreset}
                 onChange={(e) => setDatePreset(e.target.value as DatePreset)}
-                disabled={!!batchId}
-                title={batchId ? "Clear batch selection to filter by date" : undefined}
+                disabled={timeScope !== "date"}
+                title={
+                  timeScope !== "date" ? "Switch to Date range to change the period" : undefined
+                }
                 className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="today">Today</option>
@@ -1266,8 +1473,10 @@ export default function SalesActivityClient() {
                   type="date"
                   value={customStart}
                   onChange={(e) => setCustomStart(e.target.value)}
-                  disabled={!!batchId}
-                  title={batchId ? "Clear batch selection to filter by date" : undefined}
+                  disabled={timeScope !== "date"}
+                  title={
+                    timeScope !== "date" ? "Switch to Date range to change the period" : undefined
+                  }
                   className="rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 />
                 <span className="text-slate-400">to</span>
@@ -1275,8 +1484,10 @@ export default function SalesActivityClient() {
                   type="date"
                   value={customEnd}
                   onChange={(e) => setCustomEnd(e.target.value)}
-                  disabled={!!batchId}
-                  title={batchId ? "Clear batch selection to filter by date" : undefined}
+                  disabled={timeScope !== "date"}
+                  title={
+                    timeScope !== "date" ? "Switch to Date range to change the period" : undefined
+                  }
                   className="rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               </div>
@@ -1286,11 +1497,53 @@ export default function SalesActivityClient() {
               <select
                 value={batchId ?? ""}
                 onChange={(e) => setBatchId(e.target.value || null)}
-                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm min-w-[200px]"
+                disabled={timeScope !== "batch"}
+                title={
+                  timeScope !== "batch" ? "Switch to Batch to filter by settlement batch" : undefined
+                }
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm min-w-[200px] disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {batches.map((b) => (
-                  <option key={b.id ?? "all"} value={b.id ?? ""}>
-                    {b.label}
+                {timeScope === "date"
+                  ? batches.map((b) => (
+                      <option key={b.id ?? "all"} value={b.id ?? ""}>
+                        {b.label}
+                      </option>
+                    ))
+                  : batches
+                      .filter((b) => b.id != null)
+                      .map((b) => (
+                        <option key={b.id!} value={b.id!}>
+                          {b.label}
+                        </option>
+                      ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">Card brand</label>
+              <select
+                value={cardBrandFilter}
+                onChange={(e) => setCardBrandFilter(e.target.value as CardBrandBucket)}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm min-w-[130px]"
+              >
+                <option value="all">All brands</option>
+                <option value="VISA">Visa</option>
+                <option value="MASTERCARD">Mastercard</option>
+                <option value="AMEX">Amex</option>
+                <option value="DISCOVER">Discover</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">Employee</label>
+              <select
+                value={employeeFilter}
+                onChange={(e) => setEmployeeFilter(e.target.value)}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm min-w-[160px]"
+              >
+                <option value="">All employees</option>
+                {employeeNames.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
                   </option>
                 ))}
               </select>
