@@ -71,7 +71,10 @@ export default function OnlineOrderingSettingsPage() {
   }, [settings.iposHppTpn, settings.iposHppAuthToken]);
 
   type FlagPatch = Partial<
-    Pick<OnlineOrderingSettings, "enabled" | "allowPayInStore" | "allowPayOnlineHpp">
+    Pick<
+      OnlineOrderingSettings,
+      "enabled" | "allowPayInStore" | "allowPayOnlineHpp" | "requireStaffConfirmOrder"
+    >
   >;
 
   const persist = async (flags: FlagPatch, credentials?: { tpn: string; authToken: string }) => {
@@ -282,6 +285,22 @@ export default function OnlineOrderingSettingsPage() {
               className="w-5 h-5 accent-blue-600"
               checked={settings.enabled}
               onChange={(e) => void persist({ enabled: e.target.checked })}
+            />
+          </label>
+
+          <label className="flex items-center justify-between gap-4 cursor-pointer">
+            <div>
+              <p className="font-medium text-slate-800">Confirm order</p>
+              <p className="text-sm text-slate-500">
+                When on, new online orders need staff confirmation on the POS before they proceed for
+                the kitchen.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              className="w-5 h-5 accent-blue-600 shrink-0"
+              checked={settings.requireStaffConfirmOrder}
+              onChange={(e) => void persist({ requireStaffConfirmOrder: e.target.checked })}
             />
           </label>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   collection,
   limit,
@@ -10,6 +10,8 @@ import {
   where,
   type DocumentData,
 } from "firebase/firestore";
+import { getApp } from "firebase/app";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import { Layers, Loader2 } from "lucide-react";
@@ -56,6 +58,55 @@ export default function SalesActivityBatchesSection() {
   const [openBatchId, setOpenBatchId] = useState<string | null>(null);
   const [closedRows, setClosedRows] = useState<ClosedBatchRow[]>([]);
   const [loadingClosed, setLoadingClosed] = useState(true);
+  const [closeBusy, setCloseBusy] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const [closeOk, setCloseOk] = useState<string | null>(null);
+
+  const canCloseFromWeb =
+    !loadingOpen && preAuthCount === 0 && settleable > 0 && !closeBusy;
+
+  const handleCloseBatch = useCallback(async () => {
+    if (!user || preAuthCount > 0 || settleable <= 0) return;
+    setCloseError(null);
+    setCloseOk(null);
+    const ok = window.confirm(
+      "Close the open batch in MaxiPay?\n\n" +
+        "This marks open transactions as settled and starts a new batch, matching what the POS does in Firebase after a successful settle.\n\n" +
+        "It does not run your card terminal’s host/processor batch. If your processor still requires that, run it from the device when needed."
+    );
+    if (!ok) return;
+    setCloseBusy(true);
+    try {
+      const app = getApp();
+      const region = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION;
+      const functions = region ? getFunctions(app, region) : getFunctions(app);
+      const call = httpsCallable(functions, "closeOpenBatchFromDashboard");
+      const result = await call({
+        expectedBatchId: openBatchId ?? undefined,
+      });
+      const data = result.data as {
+        success?: boolean;
+        error?: string;
+        closedBatchId?: string;
+        newBatchId?: string;
+      };
+      if (!data?.success) {
+        setCloseError(data?.error || "Close batch failed.");
+        return;
+      }
+      setCloseOk(
+        `Batch closed (${data.closedBatchId ?? "—"}). New open batch: ${data.newBatchId ?? "—"}.`
+      );
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message: string }).message)
+          : String(e);
+      setCloseError(msg);
+    } finally {
+      setCloseBusy(false);
+    }
+  }, [user, preAuthCount, settleable, openBatchId]);
 
   useEffect(() => {
     // Modular Firestore has no legacy `db.collection()` — the old guard always skipped this effect.
@@ -186,9 +237,10 @@ export default function SalesActivityBatchesSection() {
       <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100 bg-slate-50/80">
         <Layers className="w-5 h-5 text-slate-600 shrink-0" aria-hidden />
         <h2 className="text-lg font-semibold text-slate-800">Batches</h2>
-        <span className="text-xs text-slate-500 ml-auto">
-          Same view as Settle batch on the POS — read-only here; close batch on
-          the device.
+        <span className="text-xs text-slate-500 ml-auto max-w-md text-right">
+          Matches Settle batch on the POS. You can close the Firestore batch here;
+          run your card processor/terminal batch on the device when your processor
+          requires it.
         </span>
       </div>
 
@@ -217,6 +269,44 @@ export default function SalesActivityBatchesSection() {
                   <span className="font-mono">{openBatchId}</span>
                 </p>
               )}
+              {closeError && (
+                <p className="text-sm text-red-600 pt-1" role="alert">
+                  {closeError}
+                </p>
+              )}
+              {closeOk && (
+                <p className="text-sm text-emerald-700 pt-1" role="status">
+                  {closeOk}
+                </p>
+              )}
+              <div className="pt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleCloseBatch()}
+                  disabled={!canCloseFromWeb}
+                  className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                >
+                  {closeBusy ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" aria-hidden />
+                      Closing…
+                    </>
+                  ) : (
+                    "Close batch"
+                  )}
+                </button>
+                {!loadingOpen && preAuthCount > 0 && (
+                  <span className="text-xs text-amber-800">
+                    Resolve open pre-auths on the POS before closing here.
+                  </span>
+                )}
+                {!loadingOpen && preAuthCount === 0 && settleable <= 0 && (
+                  <span className="text-xs text-slate-500">
+                    Nothing to settle (same as the POS: need at least one open
+                    transaction).
+                  </span>
+                )}
+              </div>
             </div>
           )}
         </div>

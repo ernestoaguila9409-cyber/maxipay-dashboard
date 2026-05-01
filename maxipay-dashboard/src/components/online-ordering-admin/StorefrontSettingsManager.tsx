@@ -73,6 +73,26 @@ export default function StorefrontSettingsManager({ settings }: StorefrontSettin
         onPersist={(patch) => void persistSettings(patch)}
       />
 
+      <section className="rounded-2xl border border-slate-200 bg-white p-5">
+        <label className="flex items-center justify-between gap-4 cursor-pointer">
+          <div className="min-w-0 pr-2">
+            <h3 className="text-sm font-semibold text-slate-800">Confirm order</h3>
+            <p className="text-xs text-slate-500 mt-1">
+              When on, new online orders need staff confirmation on the POS before they proceed for the
+              kitchen. Same setting as Settings → Online ordering on the web and Order Types → Online
+              Ordering on the POS.
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            disabled={savingSettings}
+            className="w-5 h-5 accent-blue-600 shrink-0"
+            checked={settings.requireStaffConfirmOrder}
+            onChange={(e) => void persistSettings({ requireStaffConfirmOrder: e.target.checked })}
+          />
+        </label>
+      </section>
+
       {/* Prep time */}
       <section className="rounded-2xl border border-slate-200 bg-white p-5">
         <div className="flex items-center gap-2 mb-3">

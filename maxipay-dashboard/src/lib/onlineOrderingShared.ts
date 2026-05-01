@@ -90,6 +90,11 @@ export interface OnlineOrderingSettings {
   onlineRoutingPrinterIds: string[];
   /** KDS device document IDs that should also show every online order (additive to menu assignment). */
   onlineRoutingKdsDeviceIds: string[];
+  /**
+   * When true, new online orders expect staff confirmation on the POS before they are treated as
+   * accepted for the kitchen (same flag as Android Order Types → Online Ordering).
+   */
+  requireStaffConfirmOrder: boolean;
 }
 
 export function defaultWeeklyBusinessHours(): OnlineOrderingDayHours[] {
@@ -118,6 +123,7 @@ export const DEFAULT_ONLINE_ORDERING_SETTINGS: OnlineOrderingSettings = {
   featuredItemIds: [],
   onlineRoutingPrinterIds: [],
   onlineRoutingKdsDeviceIds: [],
+  requireStaffConfirmOrder: false,
 };
 
 const WEEKDAY_LONG_TO_INDEX: Record<string, number> = {
@@ -289,6 +295,7 @@ export function parseOnlineOrderingSettings(
     featuredItemIds: parseStringIdArray(data.featuredItemIds),
     onlineRoutingPrinterIds: parseStringIdArray(data.onlineRoutingPrinterIds),
     onlineRoutingKdsDeviceIds: parseStringIdArray(data.onlineRoutingKdsDeviceIds),
+    requireStaffConfirmOrder: data.requireStaffConfirmOrder === true,
   };
 }
 
