@@ -29,6 +29,7 @@ import {
   Contact,
   ShoppingBag,
   Globe,
+  Layers,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
@@ -44,6 +45,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Sales activity", href: "/dashboard/sales-activity", icon: Activity },
+  { label: "Batches", href: "/dashboard/batches", icon: Layers },
   {
     label: "Menu",
     href: "/dashboard/menu",
