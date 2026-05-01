@@ -58,8 +58,8 @@ export default function SalesActivityBatchesSection() {
   const [loadingClosed, setLoadingClosed] = useState(true);
 
   useEffect(() => {
-    if (!user || !db || typeof (db as { collection?: unknown }).collection !== "function")
-      return;
+    // Modular Firestore has no legacy `db.collection()` — the old guard always skipped this effect.
+    if (!user) return;
 
     const qUnsettled = query(
       collection(db, "Transactions"),
