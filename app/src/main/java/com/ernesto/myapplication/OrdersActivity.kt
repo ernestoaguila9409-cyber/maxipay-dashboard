@@ -2,6 +2,7 @@ package com.ernesto.myapplication
 
 import android.app.DatePickerDialog
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
@@ -45,6 +46,7 @@ class OrdersActivity : AppCompatActivity() {
 
     private lateinit var chipGroupStatus: ChipGroup
     private lateinit var chipGroupOrderType: ChipGroup
+    private lateinit var chipGroupOnlineChannel: ChipGroup
     private lateinit var txtRefundCountSummary: TextView
     private lateinit var txtEmptyState: TextView
 
@@ -79,6 +81,18 @@ class OrdersActivity : AppCompatActivity() {
     private var filterBatchId: String? = null
     private var currentOrderView: Boolean = false
 
+    /** Opened from dashboard Online tile — list all online-channel orders (any status). */
+    private var launchedFromOnlineTile: Boolean = false
+
+    /** Main Orders tile: hide online-channel rows by default; when true, show them with dine-in / to-go / bar. */
+    private var isGeneralOrdersList: Boolean = false
+    private var ordersTabIncludeOnlineWithAll: Boolean = false
+
+    /** Online tile: ALL = every online-channel order; ONLINE_WEB = not Uber Eats; UBER = Uber Eats only. */
+    private var onlineTileChannelFilter: String = "ALL"
+
+    private lateinit var btnOrdersOnlineToggle: MaterialButton
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_orders)
@@ -86,6 +100,8 @@ class OrdersActivity : AppCompatActivity() {
         currentEmployeeName = intent.getStringExtra("employeeName") ?: ""
         currentOrderView = intent.getBooleanExtra("CURRENT_ORDER", false)
         filterBatchId = intent.getStringExtra("BATCH_ID")?.takeIf { it.isNotBlank() }
+        launchedFromOnlineTile = intent.getBooleanExtra("FILTER_ONLINE", false)
+        isGeneralOrdersList = !launchedFromOnlineTile && !currentOrderView && filterBatchId == null
         if (currentOrderView) title = "Closed Order"
 
         recyclerOrders = findViewById(R.id.recyclerOrders)
@@ -94,8 +110,23 @@ class OrdersActivity : AppCompatActivity() {
 
         chipGroupStatus = findViewById(R.id.chipGroupFilter)
         chipGroupOrderType = findViewById(R.id.chipGroupOrderType)
+        chipGroupOnlineChannel = findViewById(R.id.chipGroupOnlineChannel)
         txtRefundCountSummary = findViewById(R.id.txtRefundCountSummary)
         txtEmptyState = findViewById(R.id.txtEmptyState)
+        btnOrdersOnlineToggle = findViewById(R.id.btnOrdersOnlineToggle)
+
+        if (isGeneralOrdersList) {
+            btnOrdersOnlineToggle.visibility = View.VISIBLE
+            findViewById<View>(R.id.chipOnline).visibility = View.GONE
+            btnOrdersOnlineToggle.setOnClickListener {
+                ordersTabIncludeOnlineWithAll = !ordersTabIncludeOnlineWithAll
+                updateOnlineToggleButton()
+                applyAndRefresh()
+            }
+            updateOnlineToggleButton()
+        } else {
+            btnOrdersOnlineToggle.visibility = View.GONE
+        }
 
         adapter = OrdersAdapter(
             onOrderClick = { order ->
@@ -183,14 +214,44 @@ class OrdersActivity : AppCompatActivity() {
             applyAndRefresh()
         }
 
+        chipGroupOnlineChannel.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (!launchedFromOnlineTile) return@setOnCheckedStateChangeListener
+            when (checkedIds.firstOrNull()) {
+                R.id.chipOnlineTileOnline -> onlineTileChannelFilter = "ONLINE_WEB"
+                R.id.chipOnlineTileUber -> onlineTileChannelFilter = "UBER"
+                else -> onlineTileChannelFilter = "ALL"
+            }
+            applyAndRefresh()
+        }
+
         btnFilter.setOnClickListener { showFilterDialog() }
 
-        if (intent.getBooleanExtra("FILTER_ONLINE", false)) {
-            chipGroupOrderType.check(R.id.chipOnline)
-            chipGroupStatus.check(R.id.chipOpen)
-            orderTypeFilter = "ONLINE"
-            statusFilter = "OPEN"
-            filter = "OPEN"
+        if (launchedFromOnlineTile) {
+            chipGroupOrderType.visibility = View.GONE
+            chipGroupOnlineChannel.visibility = View.VISIBLE
+            chipGroupOnlineChannel.check(R.id.chipOnlineTileAll)
+            onlineTileChannelFilter = "ALL"
+            chipGroupStatus.check(R.id.chipAll)
+            statusFilter = "ALL"
+            filter = "ALL"
+            orderTypeFilter = "ALL"
+        }
+    }
+
+    private fun updateOnlineToggleButton() {
+        if (!isGeneralOrdersList) return
+        val on = ordersTabIncludeOnlineWithAll
+        val accent = 0xFF06C167.toInt()
+        val strokePx = (2 * resources.displayMetrics.density).toInt().coerceAtLeast(1)
+        if (on) {
+            btnOrdersOnlineToggle.strokeWidth = 0
+            btnOrdersOnlineToggle.backgroundTintList = ColorStateList.valueOf(accent)
+            btnOrdersOnlineToggle.setTextColor(ColorStateList.valueOf(0xFFFFFFFF.toInt()))
+        } else {
+            btnOrdersOnlineToggle.strokeWidth = strokePx
+            btnOrdersOnlineToggle.strokeColor = ColorStateList.valueOf(accent)
+            btnOrdersOnlineToggle.backgroundTintList = ColorStateList.valueOf(0xFFFFFFFF.toInt())
+            btnOrdersOnlineToggle.setTextColor(ColorStateList.valueOf(accent))
         }
     }
 
@@ -305,6 +366,7 @@ class OrdersActivity : AppCompatActivity() {
                 val parsed = withContext(Dispatchers.Default) {
                     val result = mutableListOf<OrderRow>()
                     for (doc in snap.documents) {
+                        if (OnlineOrderStaffConfirm.isAwaitingStaffWebOnline(doc)) continue
                         val id = doc.id
                         val status = effectiveOrderListStatus(doc)
                         val totalCents = doc.getLong("totalInCents") ?: 0L
@@ -385,8 +447,7 @@ class OrdersActivity : AppCompatActivity() {
 
     private fun updateEmptyState() {
         if (orders.isEmpty()) {
-            val msg = if (orderTypeFilter == "ONLINE") "No online orders yet"
-                      else "No orders found"
+            val msg = if (launchedFromOnlineTile) "No online orders yet" else "No orders found"
             txtEmptyState.text = msg
             txtEmptyState.visibility = View.VISIBLE
             recyclerOrders.visibility = View.GONE
@@ -408,10 +469,20 @@ class OrdersActivity : AppCompatActivity() {
 
     private fun applyFilters(list: List<OrderRow>): List<OrderRow> {
         var result = applyStatusFilter(list)
-        if (orderTypeFilter != "ALL") {
+        if (launchedFromOnlineTile) {
+            result = result.filter { it.isOnlineChannelOrder }
+            result = when (onlineTileChannelFilter) {
+                "ONLINE_WEB" -> result.filter { it.orderType != "UBER_EATS" }
+                "UBER" -> result.filter { it.orderType == "UBER_EATS" }
+                else -> result
+            }
+        } else if (isGeneralOrdersList && !ordersTabIncludeOnlineWithAll) {
+            result = result.filter { !it.isOnlineChannelOrder }
+        }
+        if (orderTypeFilter != "ALL" && !launchedFromOnlineTile) {
             result = when (orderTypeFilter) {
                 "BAR" -> result.filter { it.orderType == "BAR" || it.orderType == "BAR_TAB" }
-                "ONLINE" -> result.filter { it.orderSource.isNotBlank() }
+                "ONLINE" -> result.filter { it.isOnlineChannelOrder }
                 else -> result.filter { it.orderType == orderTypeFilter }
             }
         }
@@ -500,6 +571,14 @@ class OrdersActivity : AppCompatActivity() {
             dateFromMillis = null
             dateToMillis = null
             filter = "ALL"
+            if (isGeneralOrdersList) {
+                ordersTabIncludeOnlineWithAll = false
+                updateOnlineToggleButton()
+            }
+            if (launchedFromOnlineTile) {
+                onlineTileChannelFilter = "ALL"
+                chipGroupOnlineChannel.check(R.id.chipOnlineTileAll)
+            }
             chipGroupStatus.check(R.id.chipAll)
             chipGroupOrderType.clearCheck()
             dialog.dismiss()

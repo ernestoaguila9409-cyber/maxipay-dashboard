@@ -213,21 +213,26 @@ object KitchenPrintHelper {
             onNotesPrintedMapReady(null)
             return
         }
-        val batches = buildBatches(context, lineItems)
-        if (batches.isEmpty()) {
-            onNotesPrintedMapReady(null)
-            return
-        }
 
         FirebaseFirestore.getInstance()
             .collection("Orders")
             .document(orderId)
             .get()
             .addOnSuccessListener { doc ->
+                val orderSource = doc.getString("orderSource")?.trim().orEmpty()
+                val orderTypeRaw = doc.getString("orderType")
+                val isOnlineOrder = orderSource.isNotBlank() ||
+                    orderTypeRaw == "UBER_EATS" || orderTypeRaw == "ONLINE_PICKUP"
+
+                val batches = buildBatches(context, lineItems, isOnlineOrder)
+                if (batches.isEmpty()) {
+                    onNotesPrintedMapReady(null)
+                    return@addOnSuccessListener
+                }
+
                 val orderNum = doc.getLong("orderNumber")
                 val tableRaw = doc.getString("tableName")?.trim()?.takeIf { it.isNotEmpty() }
                 val tableDisplay = tableRaw ?: "-"
-                val orderTypeRaw = doc.getString("orderType")
                 val customerDisplayName = doc.getString("customerName")?.trim()?.takeIf { it.isNotEmpty() }
                 val isKitchenDeltaChit = doc.getTimestamp("lastKitchenSentAt") != null
                 val genericNotes = KitchenTicketBuilder.readOrderNotes(doc)
@@ -284,12 +289,13 @@ object KitchenPrintHelper {
     private fun buildBatches(
         context: Context,
         lineItems: List<KitchenTicketLineInput>,
+        isOnlineOrder: Boolean = false,
     ): List<KitchenPrintBatch> {
         val mode = PrintingSettingsCache.printItemFilterMode
         val allTargets = kitchenRoutingPrinters(context)
         if (allTargets.isEmpty()) return emptyList()
 
-        return when (mode) {
+        val baseBatches = when (mode) {
             PrintingSettingsFirestore.ALL_ITEMS -> {
                 allTargets.map { p ->
                     KitchenPrintBatch(printer = p, ticketItems = lineItems.toList())
@@ -312,6 +318,20 @@ object KitchenPrintHelper {
                 }
             }
         }
+        if (!isOnlineOrder) return baseBatches
+
+        val onlinePrinterDocIds = OnlineOrderKitchenRoutingCache.onlineRoutingPrinterIds
+        if (onlinePrinterDocIds.isEmpty()) return baseBatches
+
+        val coveredIps = baseBatches.map { it.printer.ipAddress.trim() }.toSet()
+        val extraBatches = mutableListOf<KitchenPrintBatch>()
+        for (p in allTargets) {
+            val docId = PrinterFirestoreSync.documentIdForLanIp(p.ipAddress)
+            if (docId in onlinePrinterDocIds && p.ipAddress.trim() !in coveredIps) {
+                extraBatches.add(KitchenPrintBatch(printer = p, ticketItems = lineItems.toList()))
+            }
+        }
+        return baseBatches + extraBatches
     }
 
     /**

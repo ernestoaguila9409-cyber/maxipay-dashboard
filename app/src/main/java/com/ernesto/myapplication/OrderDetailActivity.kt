@@ -410,7 +410,11 @@ class OrderDetailActivity : AppCompatActivity() {
                         btnReceipt.visibility = View.VISIBLE
                         btnReceipt.setOnClickListener { showOrderReceiptFlow() }
                         resolveBatchAndShowVoid(saleTransactionId)
-                        resolveBatchAndShowTipAdjust(saleTransactionId)
+                        if (TipConfig.isTipsEnabled(this) && !TipConfig.isTipOnCustomerScreen(this)) {
+                            resolveBatchAndShowTipAdjust(saleTransactionId)
+                        } else {
+                            btnTipAdjust.visibility = View.GONE
+                        }
                     }
                 }
             }

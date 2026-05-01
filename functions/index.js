@@ -161,7 +161,20 @@ async function resolveCustomerDisplayNameForReceipt(db, order) {
   }
 }
 
-function orderMetaSection(order) {
+function resolveTransactionTypeLabel(payments) {
+  if (!Array.isArray(payments) || payments.length === 0) return "CASH";
+  const hasDebit = payments.some(
+    (p) => String(p.paymentType ?? "").toLowerCase() === "debit"
+  );
+  const hasCredit = payments.some(
+    (p) => String(p.paymentType ?? "").toLowerCase() === "credit"
+  );
+  if (hasDebit) return "DEBIT SALE";
+  if (hasCredit) return "CREDIT SALE";
+  return "CASH";
+}
+
+function orderMetaSection(order, payments) {
   const orderNumber = order.orderNumber ?? "";
   const orderType = order.orderType ?? "";
   const employeeName = order.employeeName ?? "";
@@ -187,6 +200,13 @@ function orderMetaSection(order) {
   if (timeStr) rows.push(row("Time:", escapeHtml(timeStr)));
   if (employeeName) rows.push(row("Cashier:", escapeHtml(employeeName)));
   if (customerName) rows.push(row("Customer:", escapeHtml(customerName)));
+
+  if (Array.isArray(payments) && payments.length > 0) {
+    const txLabel = resolveTransactionTypeLabel(payments);
+    const txColor = txLabel === "CASH" ? "#4CAF50" : txLabel === "DEBIT SALE" ? "#1976D2" : "#7B1FA2";
+    const txBadge = `<span style="background:${txColor};color:#fff;padding:3px 10px;border-radius:4px;font-size:12px;font-weight:bold;display:inline-block;">${escapeHtml(txLabel)}</span>`;
+    rows.push(row("Transaction:", txBadge));
+  }
 
   if (rows.length === 0) return "";
 
@@ -845,7 +865,7 @@ async function composeStandardReceiptWrappedHtml(db, orderId) {
   const body =
     brandedHeader(biz) +
     receiptTitleHtml("RECEIPT") +
-    orderMetaSection(orderWithCustomer) +
+    orderMetaSection(orderWithCustomer, payments) +
     itemsTableHtml(items, false, appliedDiscounts) +
     totalsHtml({
       subtotal,
@@ -919,7 +939,7 @@ async function composeVoidReceiptWrappedHtml(db, orderId) {
     statusBadge("VOIDED", "#D32F2F") +
     receiptTitleHtml("VOID RECEIPT") +
     voidMeta +
-    orderMetaSection(orderWithCustomer) +
+    orderMetaSection(orderWithCustomer, fallbackPayments) +
     itemsTableHtml(items, true, appliedDiscounts) +
     totalsHtml({
       subtotal,
@@ -1707,6 +1727,11 @@ exports.uberResolveFulfillmentIssue = uberCallables.uberResolveFulfillmentIssue;
 exports.uberRunCertificationTests = uberCallables.uberRunCertificationTests;
 exports.uberGetReports = uberCallables.uberGetReports;
 
+const uberOAuth = require("./uber-oauth");
+exports.uberOAuthStart = uberOAuth.uberOAuthStart;
+exports.uberOAuthCallback = uberOAuth.uberOAuthCallback;
+exports.uberOAuthStatus = uberOAuth.uberOAuthStatus;
+
 // ---------------------------------------------------------------------------
 // Server-side card refund (no card present) — iPOS Transact API
 // ---------------------------------------------------------------------------
@@ -1819,12 +1844,8 @@ exports.processServerRefund = onCall(async (request) => {
       error: "Online / hosted card payments cannot be refunded through this endpoint.",
     };
   }
-  if (tx.settled !== true) {
-    return {
-      success: false,
-      error: "Sale must be settled before a server-side refund. Use void on the POS for unsettled sales.",
-    };
-  }
+  // Note: server-side (iPOS Transact) refund is allowed while the sale is still unsettled
+  // (open batch) for merchant testing; processor may still decline depending on host state.
 
   // Find the first card payment leg with a PNReferenceId (= RRN for iPOS Transact)
   const payments = Array.isArray(tx.payments) ? tx.payments : [];
@@ -2081,6 +2102,330 @@ exports.processServerRefund = onCall(async (request) => {
     iposResponse,
   };
 });
+
+/**
+ * Resolve SPIn P-series terminal credentials from Firestore.
+ * Only SPIN_P terminals support dashboard-initiated settlement;
+ * credentials come from `payment_terminals` (Payments page).
+ */
+async function resolveSpinSettleCredentials(db) {
+  const SPIN_DEFAULT_BASE = "https://spinpos.net/v2";
+
+  const ptSnap = await db
+    .collection("payment_terminals")
+    .where("active", "==", true)
+    .get();
+
+  for (const doc of ptSnap.docs) {
+    const d = doc.data();
+    const provider = String(d.provider || "").toUpperCase();
+    if (provider !== "SPIN_P") continue;
+
+    const cfg = d.config || {};
+    const baseUrl = String(d.baseUrl || SPIN_DEFAULT_BASE).replace(/\/+$/, "");
+    const endpoints = d.endpoints || {};
+    const settlePath = String(endpoints.settle || "/Payment/Settle");
+    const settleUrl = settlePath.startsWith("http")
+      ? settlePath
+      : `${baseUrl}${settlePath.startsWith("/") ? "" : "/"}${settlePath}`;
+    return {
+      found: true,
+      provider,
+      deviceModel: String(d.deviceModel || d.name || "").trim(),
+      terminalName: String(d.name || doc.id).trim(),
+      tpn: String(cfg.tpn || "").trim(),
+      registerId: String(cfg.registerId || "").trim(),
+      authKey: String(cfg.authKey || "").trim(),
+      settleUrl,
+    };
+  }
+
+  return { found: false, provider: "", deviceModel: "", terminalName: "", tpn: "", registerId: "", authKey: "", settleUrl: "" };
+}
+
+/**
+ * Dashboard: close the open batch — calls SPIn settle (Z8) first,
+ * then updates Firestore exactly like the Android POS.
+ */
+function computeNetAmountForBatchClose(data) {
+  const type = String(data?.type ?? "SALE");
+  if (type === "SALE" || type === "CAPTURE") {
+    const cents = data.totalPaidInCents;
+    if (typeof cents === "number") return cents / 100;
+    const tp = data.totalPaid;
+    if (typeof tp === "number") return tp;
+    const amt = data.amount;
+    if (typeof amt === "number") return amt;
+    return 0;
+  }
+  if (type === "REFUND") {
+    const a = data.amount;
+    return typeof a === "number" ? -a : 0;
+  }
+  return 0;
+}
+
+exports.closeOpenBatchFromDashboard = onCall(
+  { timeoutSeconds: 300, memory: "512MiB" },
+  async (request) => {
+    if (!request.auth?.uid) {
+      return { success: false, error: "You must be signed in to close a batch." };
+    }
+    const { expectedBatchId } = request.data || {};
+    const expected =
+      expectedBatchId != null && String(expectedBatchId).trim()
+        ? String(expectedBatchId).trim()
+        : null;
+
+    const db = admin.firestore();
+    const closedBy = String(request.auth.token?.email || request.auth.uid);
+
+    let batchSnap = await db
+      .collection("Batches")
+      .where("closed", "==", false)
+      .limit(1)
+      .get();
+
+    let batchId;
+    if (batchSnap.empty) {
+      batchId = `BATCH_${Date.now()}`;
+      await db
+        .collection("Batches")
+        .doc(batchId)
+        .set({
+          batchId,
+          total: 0,
+          count: 0,
+          closed: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          type: "OPEN",
+          transactionCounter: 0,
+        });
+      logger.info("[closeOpenBatchFromDashboard] Created missing open batch", {
+        batchId,
+        uid: request.auth.uid,
+      });
+    } else {
+      batchId = batchSnap.docs[0].id;
+    }
+
+    if (expected && expected !== batchId) {
+      return {
+        success: false,
+        error: "Open batch changed. Refresh the page and try again.",
+      };
+    }
+
+    const txSnap = await db
+      .collection("Transactions")
+      .where("settled", "==", false)
+      .where("voided", "==", false)
+      .get();
+
+    const txDocs = txSnap.docs;
+    let preAuthCount = 0;
+    let settleableCount = 0;
+    for (const doc of txDocs) {
+      const t = String(doc.data()?.type ?? "SALE");
+      if (t === "PRE_AUTH") preAuthCount += 1;
+      else settleableCount += 1;
+    }
+    if (preAuthCount > 0) {
+      return {
+        success: false,
+        error:
+          "There are open pre-authorizations. Capture or void all bar-tab pre-auths on the POS before closing the batch.",
+      };
+    }
+    if (settleableCount <= 0) {
+      return {
+        success: false,
+        error: "No open transactions to settle (same rule as the POS).",
+      };
+    }
+
+    const batchRef = db.collection("Batches").doc(batchId);
+    const batchFresh = await batchRef.get();
+    if (!batchFresh.exists || batchFresh.data()?.closed === true) {
+      return {
+        success: false,
+        error: "That batch is already closed. Refresh the page.",
+      };
+    }
+
+    // --- Call SPIn Z8 settle (only SPIN_P terminals) ---
+    const spinCreds = await resolveSpinSettleCredentials(db);
+    if (!spinCreds.found) {
+      return {
+        success: false,
+        error:
+          "No active SPIn (SPInPos Gateway) P terminal found. " +
+          "Go to Settings \u2192 Payments, add or activate a SPIN_P terminal with TPN + Auth Key.",
+      };
+    }
+    if (!spinCreds.tpn || !spinCreds.authKey) {
+      return {
+        success: false,
+        error:
+          `Terminal \"${spinCreds.terminalName}\" is missing TPN or Auth Key. ` +
+          "Edit it in Settings \u2192 Payments and fill in the credentials.",
+      };
+    }
+
+    const settlePayload = {
+      PrintReceipt: false,
+      GetReceipt: false,
+      SettlementType: "Force",
+      Tpn: spinCreds.tpn,
+      RegisterId: spinCreds.registerId,
+      Authkey: spinCreds.authKey,
+    };
+
+    logger.info("[closeOpenBatchFromDashboard] Calling SPIn settle (Z8)", {
+      url: spinCreds.settleUrl,
+      tpn: spinCreds.tpn,
+      deviceModel: spinCreds.deviceModel,
+      terminalName: spinCreds.terminalName,
+      uid: request.auth.uid,
+    });
+
+    let spinResponse;
+    try {
+      const resp = await fetch(spinCreds.settleUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settlePayload),
+      });
+      spinResponse = await resp.json();
+    } catch (err) {
+      logger.error("[closeOpenBatchFromDashboard] SPIn settle network error", {
+        error: err.message,
+        deviceModel: spinCreds.deviceModel,
+      });
+      return {
+        success: false,
+        error: `Network error calling SPIn settle on ${spinCreds.deviceModel || "terminal"}: ${err.message}`,
+      };
+    }
+
+    logger.info("[closeOpenBatchFromDashboard] SPIn settle response", {
+      response: JSON.stringify(spinResponse).slice(0, 2000),
+      deviceModel: spinCreds.deviceModel,
+    });
+
+    const generalResponse = spinResponse.GeneralResponse || {};
+    const resultCode = String(generalResponse.ResultCode ?? "-1");
+    const detailedMessage = String(generalResponse.DetailedMessage ?? "");
+    const settleDetails = Array.isArray(spinResponse.SettleDetails)
+      ? spinResponse.SettleDetails
+      : [];
+    const hostApproved = settleDetails.some(
+      (d) => String(d.HostStatus) === "0"
+    );
+
+    if (resultCode !== "0" && !hostApproved) {
+      const msg = detailedMessage || `ResultCode: ${resultCode}`;
+      logger.warn("[closeOpenBatchFromDashboard] SPIn settle declined", {
+        msg,
+        resultCode,
+        deviceModel: spinCreds.deviceModel,
+      });
+      return {
+        success: false,
+        error: `Processor settlement failed on ${spinCreds.deviceModel || "terminal"}: ${msg}`,
+        spinResponse,
+      };
+    }
+
+    // --- Z8 approved — now update Firestore (same as Android settleOpenBatch) ---
+
+    let totalSales = 0;
+    let totalTipsCents = 0;
+    let count = 0;
+    for (const doc of txDocs) {
+      const d = doc.data();
+      const net = computeNetAmountForBatchClose(d);
+      if (Math.abs(net) > 1e-9) {
+        totalSales += net;
+        count += 1;
+      }
+      const type = String(d?.type ?? "SALE");
+      if (type === "SALE" || type === "CAPTURE") {
+        totalTipsCents += Number(d.tipAmountInCents ?? 0);
+      }
+    }
+
+    const CHUNK = 450;
+    for (let i = 0; i < txDocs.length; i += CHUNK) {
+      const wb = db.batch();
+      const slice = txDocs.slice(i, i + CHUNK);
+      for (const doc of slice) {
+        wb.update(doc.ref, {
+          settled: true,
+          batchId,
+        });
+      }
+      await wb.commit();
+    }
+
+    const again = await batchRef.get();
+    if (!again.exists || again.data()?.closed === true) {
+      return {
+        success: false,
+        error:
+          "This batch was closed while processing (another session or device). Refresh and verify your data.",
+      };
+    }
+
+    const newBatchId = `BATCH_${Date.now()}`;
+    const finalWb = db.batch();
+    finalWb.update(batchRef, {
+      closed: true,
+      closedAt: admin.firestore.FieldValue.serverTimestamp(),
+      totalSales,
+      totalTipsInCents: totalTipsCents,
+      transactionCount: count,
+      type: "SETTLEMENT",
+      closedFromDashboardBy: closedBy,
+      closedFromDashboardUid: request.auth.uid,
+    });
+    finalWb.set(db.collection("Batches").doc(newBatchId), {
+      batchId: newBatchId,
+      total: 0,
+      count: 0,
+      closed: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      type: "OPEN",
+      transactionCounter: 0,
+    });
+    await finalWb.commit();
+
+    logger.info("[closeOpenBatchFromDashboard] Closed batch", {
+      closedBatchId: batchId,
+      newBatchId,
+      transactionDocs: txDocs.length,
+      summaryCount: count,
+      uid: request.auth.uid,
+    });
+
+    const deviceLabel = spinCreds.deviceModel || "terminal";
+    const spinMsg = hostApproved && resultCode !== "0"
+      ? `Z8 Batch Closed Successfully on ${deviceLabel} (host approved, ResultCode=${resultCode})`
+      : `Z8 Batch Closed Successfully on ${deviceLabel}`;
+
+    return {
+      success: true,
+      closedBatchId: batchId,
+      newBatchId,
+      settledTransactionDocs: txDocs.length,
+      transactionCount: count,
+      totalSales,
+      processorMessage: spinMsg,
+      deviceModel: spinCreds.deviceModel,
+      terminalName: spinCreds.terminalName,
+    };
+  }
+);
 
 // ---------------------------------------------------------------------------
 // iPOSpays Hosted Payment Page — online ordering payments

@@ -65,7 +65,13 @@ class KdsOrdersRepository(
                 if (!kdsEligiblePosStatus(doc)) return@filter false
                 val kitchen = doc.getString("kitchenStatus")?.trim()?.uppercase().orEmpty()
                 if (kitchen == "READY") return@filter false
-                if (!orderReleasedToKitchen(doc, config.printTriggerMode)) return@filter false
+                if (doc.getBoolean("awaitingStaffConfirmOrder") == true &&
+                    doc.getString("orderSource")?.trim() == "online_ordering"
+                ) {
+                    return@filter false
+                }
+                val isOnline = isOnlineOrder(doc)
+                if (!isOnline && !orderReleasedToKitchen(doc, config.printTriggerMode)) return@filter false
                 true
             }
             if (docs.isEmpty()) {
@@ -175,6 +181,24 @@ class KdsOrdersRepository(
             }
         awaitClose { listener.remove() }
     }
+
+    /** KDS device IDs that should show all online orders regardless of menu assignment. */
+    fun observeOnlineRoutingKdsDeviceIds(): Flow<Set<String>> = callbackFlow {
+        val listener = db.collection("Settings").document("onlineOrdering")
+            .addSnapshotListener { snap: DocumentSnapshot?, _: FirebaseFirestoreException? ->
+                if (snap == null || !snap.exists()) {
+                    trySend(emptySet())
+                    return@addSnapshotListener
+                }
+                val raw = snap.get("onlineRoutingKdsDeviceIds")
+                val ids = when (raw) {
+                    is List<*> -> raw.mapNotNull { (it as? String)?.trim() }.filter { it.isNotEmpty() }.toSet()
+                    else -> emptySet()
+                }
+                trySend(ids)
+            }
+        awaitClose { listener.remove() }
+    }.distinctUntilChanged()
 
     /**
      * `assignedCategoryIds` and `assignedItemIds` on the paired KDS device document.
@@ -488,6 +512,14 @@ class KdsOrdersRepository(
             return out
         }
 
+        internal fun isOnlineOrder(doc: DocumentSnapshot): Boolean {
+            val orderSource = doc.getString("orderSource")?.trim().orEmpty()
+            if (orderSource.isNotBlank()) return true
+            val rawType = doc.getString("orderType")?.trim().orEmpty()
+            return rawType.equals("UBER_EATS", ignoreCase = true) ||
+                rawType.equals("ONLINE_PICKUP", ignoreCase = true)
+        }
+
         internal fun orderReleasedToKitchen(doc: DocumentSnapshot, triggerMode: String): Boolean {
             val lastSend = doc.getTimestamp(FIELD_LAST_KITCHEN_SENT_AT) != null
             val chits = doc.getTimestamp(FIELD_KITCHEN_CHITS_PRINTED_AT) != null
@@ -538,6 +570,11 @@ class KdsOrdersRepository(
                     if (orderNum > 0L) "#$orderNum" else "Order"
                 }
             val customerName = doc.getString("customerName")?.trim().orEmpty()
+            val orderSource = doc.getString("orderSource")?.trim().orEmpty()
+            val rawOrderType = doc.getString("orderType")?.trim().orEmpty()
+            val isOnlineOrder = orderSource.isNotBlank() ||
+                rawOrderType.equals("UBER_EATS", ignoreCase = true) ||
+                rawOrderType.equals("ONLINE_PICKUP", ignoreCase = true)
             val posStatus = doc.getString(FIELD_POS_STATUS)?.trim()?.uppercase().orEmpty()
             val kitchen = doc.getString(FIELD_KITCHEN_STATUS)?.trim()?.uppercase().orEmpty()
             val displayStatus = when {
@@ -574,6 +611,7 @@ class KdsOrdersRepository(
                 orderNumber = orderNum,
                 cardClaims = cardClaims,
                 kdsDeviceDocId = kdsDeviceDocIdForClaimFilter.trim(),
+                isOnlineOrder = isOnlineOrder,
             )
         }
 
@@ -594,6 +632,7 @@ class KdsOrdersRepository(
             orderNumber: Long,
             cardClaims: Map<String, String> = emptyMap(),
             kdsDeviceDocId: String = "",
+            isOnlineOrder: Boolean = false,
         ): List<Order> {
             fun normSt(s: String) = s.trim().uppercase(Locale.US)
             val preparing = itemsForDisplay.filter { normSt(it.kdsStatus) == "PREPARING" }
@@ -628,6 +667,7 @@ class KdsOrdersRepository(
                     items = items,
                     orderType = orderType,
                     orderNumber = orderNumber,
+                    isOnlineOrder = isOnlineOrder,
                 )
             }
             return when {
@@ -647,6 +687,8 @@ class KdsOrdersRepository(
                 "DINE_IN", "DINEIN" -> "DINE_IN"
                 "TO_GO", "TAKEOUT", "TAKE_OUT" -> "TO_GO"
                 "BAR", "BAR_TAB" -> "BAR"
+                "UBER_EATS" -> "UBER_EATS"
+                "ONLINE_PICKUP" -> "ONLINE_PICKUP"
                 else -> "DINE_IN"
             }
         }

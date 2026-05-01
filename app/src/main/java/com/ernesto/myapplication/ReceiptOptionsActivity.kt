@@ -307,6 +307,7 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         if (rs.showServerName && employeeName.isNotBlank()) orderInfo("Server: $employeeName")
         if (customerName.isNotBlank()) orderInfo("Customer: $customerName")
         if (rs.showDateTime) orderInfo("Date: $dateStr")
+        orderInfo(ReceiptPaymentFormatting.resolveTransactionTypeLabel(payments))
         segs += EscPosPrinter.Segment("")
 
         // ── Items ──

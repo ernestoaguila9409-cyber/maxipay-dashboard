@@ -102,6 +102,8 @@ private fun formatOrderTypeLabel(type: String): String {
         "DINE_IN" -> "Dine in"
         "TO_GO", "TAKEOUT", "TAKE_OUT" -> "TO-GO"
         "BAR", "BAR_TAB" -> "Bar"
+        "UBER_EATS" -> "Uber Eats"
+        "ONLINE_PICKUP" -> "Online"
         else -> type.replace('_', ' ').lowercase()
             .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
     }
@@ -692,7 +694,9 @@ private fun OrderKdsCard(
             ) {
                 val tableLine = dineInTableDisplay(order)
                 val customerLine = order.customerName.trim().takeIf { it.isNotEmpty() }
-                if (tableLine != null || (isDineIn(order) && customerLine != null)) {
+                val showCustomerLine =
+                    customerLine != null && (isDineIn(order) || order.isOnlineOrder)
+                if (tableLine != null || showCustomerLine) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -706,7 +710,7 @@ private fun OrderKdsCard(
                                 color = Color(0xFF37474F),
                             )
                         }
-                        if (isDineIn(order) && customerLine != null) {
+                        if (showCustomerLine) {
                             Text(
                                 text = "Customer · $customerLine",
                                 fontSize = textSettings.customerNameSp.sp,

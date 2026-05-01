@@ -78,7 +78,7 @@ class OrdersAdapter(
         }
 
         fun bind(order: OrderRow, isSelected: Boolean) {
-            val isOnline = order.orderSource.isNotBlank()
+            val isOnline = order.isOnlineChannelOrder
             val label = buildString {
                 if (order.orderNumber > 0L) append("#${order.orderNumber}")
                 // Customer / guest name: show only on order detail, not on list cards.

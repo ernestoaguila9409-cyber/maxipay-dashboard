@@ -23,6 +23,10 @@ class OrderTypesConfigureActivity : AppCompatActivity() {
         findViewById<android.view.View>(R.id.optionDineIn).setOnClickListener {
             startActivity(Intent(this, DineInConfigureActivity::class.java))
         }
+
+        findViewById<android.view.View>(R.id.optionOnlineOrdering).setOnClickListener {
+            startActivity(Intent(this, OnlineOrderingConfigureActivity::class.java))
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {

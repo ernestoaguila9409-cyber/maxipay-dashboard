@@ -78,11 +78,14 @@ class KdsViewModel(
                             combine(
                                 repository.observeKdsDeviceMenuAssignment(docId),
                                 repository.observeMenuItemCategoryPlacements(),
-                            ) { assignment, itemPlacements ->
+                                repository.observeOnlineRoutingKdsDeviceIds(),
+                            ) { assignment, itemPlacements, onlineKdsIds ->
                                 filterOrdersByMenuAssignment(
                                     rawOrders,
                                     assignment,
                                     itemPlacements,
+                                    thisDeviceDocId = docId,
+                                    onlineRoutingKdsDeviceIds = onlineKdsIds,
                                 )
                             }
                         }
@@ -264,7 +267,11 @@ class KdsViewModel(
             orders: List<Order>,
             assignment: KdsMenuAssignment,
             itemIdToCategoryPlacements: Map<String, Set<String>>,
+            thisDeviceDocId: String = "",
+            onlineRoutingKdsDeviceIds: Set<String> = emptySet(),
         ): List<Order> {
+            val thisDeviceIsOnlineTarget =
+                thisDeviceDocId.isNotEmpty() && thisDeviceDocId in onlineRoutingKdsDeviceIds
             if (assignment.categoryIds.isEmpty() && assignment.itemIds.isEmpty()) {
                 return orders
             }
@@ -276,6 +283,14 @@ class KdsViewModel(
                 return placements.any { it in assignment.categoryIds }
             }
             return orders.mapNotNull { order ->
+                if (thisDeviceIsOnlineTarget && order.isOnlineOrder) {
+                    val active = KdsLineWorkflow.linesOmittingKitchenReady(order.items)
+                    if (active.isEmpty()) return@mapNotNull null
+                    val status = KdsLineWorkflow.deriveCardStatusFromVisibleLines(active)
+                    if (status.equals("READY", ignoreCase = true)) return@mapNotNull null
+                    val prepAnchor = KdsLineWorkflow.derivePrepStartedAtFromVisibleLines(active, status)
+                    return@mapNotNull order.copy(items = active, status = status, kitchenStartedAt = prepAnchor)
+                }
                 val lines = order.items.filter { lineMatches(it) }
                 val active = KdsLineWorkflow.linesOmittingKitchenReady(lines)
                 if (active.isEmpty()) return@mapNotNull null

@@ -131,6 +131,17 @@
             android:name=".BarTabConfigureActivity"
             android:exported="false"
             android:parentActivityName=".OrderTypesConfigureActivity" />
+
+        <activity
+            android:name=".OnlineOrderingConfigureActivity"
+            android:exported="false"
+            android:parentActivityName=".OrderTypesConfigureActivity" />
+
+        <activity
+            android:name=".OnlineOrderingBusinessHoursActivity"
+            android:exported="false"
+            android:parentActivityName=".OnlineOrderingConfigureActivity" />
+
         <activity
             android:name=".BarSeatConfigActivity"
             android:exported="false"

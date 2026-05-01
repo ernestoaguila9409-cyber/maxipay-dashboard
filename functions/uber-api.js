@@ -1,5 +1,6 @@
 const logger = require("firebase-functions/logger");
 const { getAccessToken, clearTokenCache } = require("./uber-auth");
+const { getProvisioningToken, clearProvisioningCache } = require("./uber-auth-code");
 
 const SANDBOX_BASE = "https://test-api.uber.com";
 const PROD_BASE = "https://api.uber.com";
@@ -12,7 +13,7 @@ function getBase() {
 // Generic fetch wrapper with automatic Bearer token + retry on 401
 // ---------------------------------------------------------------------------
 
-async function uberFetch(method, path, { body, query, expectStatus } = {}) {
+async function uberFetch(method, path, { body, query, expectStatus, useProvisioningToken } = {}) {
   const url = new URL(path, getBase());
   if (query) {
     for (const [k, v] of Object.entries(query)) {
@@ -21,7 +22,9 @@ async function uberFetch(method, path, { body, query, expectStatus } = {}) {
   }
 
   const attempt = async (retry) => {
-    const token = await getAccessToken();
+    const token = useProvisioningToken
+      ? await getProvisioningToken()
+      : await getAccessToken();
     const opts = {
       method,
       headers: {
@@ -35,13 +38,17 @@ async function uberFetch(method, path, { body, query, expectStatus } = {}) {
       opts.body = JSON.stringify(body);
     }
 
-    logger.info("[uber-api] request", { method, path, retry });
+    logger.info("[uber-api] request", { method, path, retry, provisioning: !!useProvisioningToken });
 
     const res = await fetch(url.toString(), opts);
 
     if (res.status === 401 && !retry) {
       logger.warn("[uber-api] 401 — clearing token cache and retrying");
-      clearTokenCache();
+      if (useProvisioningToken) {
+        clearProvisioningCache();
+      } else {
+        clearTokenCache();
+      }
       return attempt(true);
     }
 
@@ -87,7 +94,9 @@ async function getStores(limit = 50) {
 
 /** GET /v1/eats/stores/{storeId}/pos_data — integration details for a store. */
 async function getIntegrationDetails(storeId) {
-  return uberFetch("GET", `/v1/eats/stores/${storeId}/pos_data`);
+  return uberFetch("GET", `/v1/eats/stores/${storeId}/pos_data`, {
+    useProvisioningToken: true,
+  });
 }
 
 /**
@@ -112,6 +121,7 @@ async function activateIntegration(storeId, opts = {}) {
   return uberFetch("POST", `/v1/eats/stores/${storeId}/pos_data`, {
     body: payload,
     expectStatus: [200, 204],
+    useProvisioningToken: true,
   });
 }
 
@@ -123,6 +133,7 @@ async function updateIntegrationDetails(storeId, patch = {}) {
   return uberFetch("PATCH", `/v1/eats/stores/${storeId}/pos_data`, {
     body: patch,
     expectStatus: [200, 204],
+    useProvisioningToken: true,
   });
 }
 

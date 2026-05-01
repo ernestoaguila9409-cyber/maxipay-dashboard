@@ -17,6 +17,7 @@ internal object KdsColorPalette {
         "indigo" to 0xFF3949AB,
         "pink" to 0xFFAD1457,
         "cyan" to 0xFF0097A7,
+        "uber_green" to 0xFF06C167,
     )
 
     fun argbForColorKey(colorKey: String): Int {
@@ -30,6 +31,7 @@ internal fun defaultDashboardColorKey(dashboardKey: String): String = when (dash
     "dine_in" -> "green"
     "to_go" -> "orange"
     "bar" -> "teal"
+    "online_orders" -> "uber_green"
     else -> "purple"
 }
 
@@ -38,6 +40,7 @@ internal fun posOrderTypeToDashboardKey(orderType: String): String {
         "DINE_IN" -> "dine_in"
         "TO_GO", "TAKEOUT", "TAKE_OUT" -> "to_go"
         "BAR", "BAR_TAB" -> "bar"
+        "UBER_EATS", "ONLINE_PICKUP" -> "online_orders"
         else -> "to_go"
     }
 }

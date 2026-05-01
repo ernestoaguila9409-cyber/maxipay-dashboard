@@ -7,6 +7,18 @@
     android:orientation="vertical"
     android:background="#F5F5F5">
 
+    <!-- General Orders tab: when on, include online/Uber rows with all other orders -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnOrdersOnlineToggle"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="12dp"
+        android:layout_marginTop="8dp"
+        android:text="ONLINE"
+        android:visibility="gone"
+        app:cornerRadius="8dp"/>
+
     <!-- Top bar: Filters + Delete Button -->
     <LinearLayout
         android:layout_width="match_parent"
@@ -112,6 +124,45 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Online"
+            app:checkedIconVisible="false"/>
+
+    </com.google.android.material.chip.ChipGroup>
+
+    <!-- Online dashboard tile only: channel filter (replaces order-type row) -->
+    <com.google.android.material.chip.ChipGroup
+        android:id="@+id/chipGroupOnlineChannel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="8dp"
+        android:visibility="gone"
+        app:singleSelection="true"
+        app:selectionRequired="true">
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chipOnlineTileAll"
+            style="@style/Widget.MaterialComponents.Chip.Choice"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="All"
+            android:checked="true"
+            app:checkedIconVisible="false"/>
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chipOnlineTileOnline"
+            style="@style/Widget.MaterialComponents.Chip.Choice"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Online"
+            app:checkedIconVisible="false"/>
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chipOnlineTileUber"
+            style="@style/Widget.MaterialComponents.Chip.Choice"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Uber"
             app:checkedIconVisible="false"/>
 
     </com.google.android.material.chip.ChipGroup>

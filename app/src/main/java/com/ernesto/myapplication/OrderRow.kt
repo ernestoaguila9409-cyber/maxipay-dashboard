@@ -19,6 +19,12 @@ data class OrderRow(
     val orderSource: String = "",
     val itemsCount: Int = 0,
 ) {
+    /** Web / third-party / Uber Eats / online pickup — same scope as the dashboard Online tile. */
+    val isOnlineChannelOrder: Boolean
+        get() = orderSource.isNotBlank() ||
+            orderType == "UBER_EATS" ||
+            orderType == "ONLINE_PICKUP"
+
     val netCents: Long get() = (totalCents - totalRefundedInCents).coerceAtLeast(0L)
 
     /** Original order total in dollars; mirrors Firestore `totalInCents` (not reduced by refunds). */

@@ -24,6 +24,8 @@ data class Order(
     val orderType: String,
     /** POS order number for header (e.g. 283 shown as #283). */
     val orderNumber: Long = 0L,
+    /** True when the order comes from an online channel (web, Uber Eats, etc.). */
+    val isOnlineOrder: Boolean = false,
 ) {
     fun isOpen(): Boolean = status.equals("OPEN", ignoreCase = true)
     fun isPreparing(): Boolean = status.equals("PREPARING", ignoreCase = true)

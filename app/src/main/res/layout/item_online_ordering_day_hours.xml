@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingVertical="8dp"
+    android:paddingHorizontal="4dp">
+
+    <TextView
+        android:id="@+id/txtDayName"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1.1"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        tools:text="Monday" />
+
+    <androidx.appcompat.widget.SwitchCompat
+        android:id="@+id/switchOpenForDay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
+        android:text="Open"
+        android:textSize="12sp" />
+
+    <EditText
+        android:id="@+id/editOpenTime"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="0.85"
+        android:hint="09:00"
+        android:inputType="text"
+        android:importantForAutofill="no"
+        android:textSize="14sp"
+        android:maxLines="1" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="–"
+        android:paddingHorizontal="4dp" />
+
+    <EditText
+        android:id="@+id/editCloseTime"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="0.85"
+        android:hint="21:00"
+        android:inputType="text"
+        android:importantForAutofill="no"
+        android:textSize="14sp"
+        android:maxLines="1" />
+</LinearLayout>
