@@ -27,6 +27,7 @@ import {
   buildAndroidOrdersListTitle,
   effectivePosOrderStatus,
   formatOrdersListTime,
+  mergeSalesActivityOrderWithVoidedSaleTx,
   orderListNetCents,
   orderListStatusBadgeStyle,
   orderListStatusBarColor,
@@ -1405,13 +1406,21 @@ export default function SalesActivityClient() {
               ) : (
                 filteredOrders.map(({ id, data }) => {
                   const rec = data as Record<string, unknown>;
-                  const status = effectivePosOrderStatus(rec);
-                  const title = buildAndroidOrdersListTitle(rec);
+                  const displayRec = mergeSalesActivityOrderWithVoidedSaleTx(
+                    id,
+                    rec,
+                    txDocs.map(({ id: txId, data: txData }) => ({
+                      id: txId,
+                      data: txData as Record<string, unknown>,
+                    }))
+                  );
+                  const status = effectivePosOrderStatus(displayRec);
+                  const title = buildAndroidOrdersListTitle(displayRec);
                   const num = data.orderNumber as number | undefined;
                   const headline =
                     title.trim() ||
                     (num ? `#${num}` : `Order ${id.slice(0, 8)}`);
-                  const netC = orderListNetCents(rec);
+                  const netC = orderListNetCents(displayRec);
                   const barColor = orderListStatusBarColor(status);
                   const stBadge = orderListStatusBadgeStyle(status);
                   const otRaw = String(data.orderType ?? "").trim();

@@ -338,6 +338,36 @@ export function effectivePosOrderStatus(data: Record<string, unknown>): string {
   return raw;
 }
 
+/**
+ * Sales activity (web): voiding a card sale updates `Transactions` (`voided`, `voidedBy`)
+ * but the linked `Orders` row often stays `CLOSED` without `status: VOIDED`.
+ * Merge void state from the sale/capture/pre-auth transaction so Orders tab badges
+ * match the Transactions tab.
+ */
+export function mergeSalesActivityOrderWithVoidedSaleTx(
+  orderId: string,
+  orderData: Record<string, unknown>,
+  txDocs: Array<{ id: string; data: Record<string, unknown> }>
+): Record<string, unknown> {
+  const saleTxId = String(orderData.saleTransactionId ?? "").trim();
+  const candidates = txDocs.filter(({ id, data }) => {
+    if (data.voided !== true) return false;
+    const t = String(data.type ?? "");
+    if (t !== "SALE" && t !== "CAPTURE" && t !== "PRE_AUTH") return false;
+    if (String(data.orderId ?? "").trim() !== orderId) return false;
+    if (saleTxId && id !== saleTxId) return false;
+    return true;
+  });
+  if (candidates.length === 0) return orderData;
+  const voidedByTx = String(candidates[0].data.voidedBy ?? "").trim();
+  const voidedByOrder = String(orderData.voidedBy ?? "").trim();
+  return {
+    ...orderData,
+    status: "VOIDED",
+    voidedBy: voidedByTx || voidedByOrder || orderData.voidedBy,
+  };
+}
+
 /** Maps Firestore `Orders` document to dashboard table row (POS app schema). */
 export function mapFirestoreOrderDoc(
   docId: string,
