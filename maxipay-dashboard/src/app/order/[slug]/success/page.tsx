@@ -112,6 +112,7 @@ function SuccessInner() {
   const sessionId = sp.get("session_id");
   const iposRedirectParams = extractIposRedirectParams(sp);
   const [businessName, setBusinessName] = useState<string>("");
+  const [logoUrl, setLogoUrl] = useState<string>("");
   const [paymentStatus, setPaymentStatus] = useState<"confirming" | "confirmed" | "pending" | "error">(() =>
     orderId && !isPayAtStore ? "confirming" : "confirmed",
   );
@@ -128,6 +129,10 @@ function SuccessInner() {
         const res = await fetch("/api/online-ordering/config", { cache: "no-store" });
         const data = await res.json();
         if (data.businessName) setBusinessName(data.businessName as string);
+        const rawLogo = typeof data.logoUrl === "string" ? data.logoUrl.trim() : "";
+        if (rawLogo.startsWith("http://") || rawLogo.startsWith("https://")) {
+          setLogoUrl(rawLogo);
+        }
       } catch {
         /* ignore */
       }
@@ -342,6 +347,18 @@ function SuccessInner() {
     <div className="min-h-screen bg-[#fafafa] flex flex-col items-center justify-center p-6 text-center">
       <div className="bg-white rounded-3xl shadow-sm border border-neutral-100 max-w-md w-full px-8 py-12 space-y-5">
         <div className="flex justify-center">{heroIcon}</div>
+
+        {logoUrl && (
+          <div className="flex justify-center pt-1">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={logoUrl}
+              alt={businessName ? `${businessName} logo` : "Business logo"}
+              className="max-h-16 max-w-[200px] w-auto object-contain"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+        )}
 
         {businessName && (
           <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
