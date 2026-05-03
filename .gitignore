@@ -18,3 +18,8 @@ local.properties
 functions/.env
 functions/.env.*
 !functions/.env.example
+
+# Firebase CLI debug logs (often contain env / API keys — never commit)
+firebase-debug.log
+functions/firebase-debug.log
+**/firebase-debug.log
