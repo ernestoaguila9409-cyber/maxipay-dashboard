@@ -305,6 +305,38 @@ export async function loadOnlineMenu(
   return { categories: filteredCategories, items, modifierGroups };
 }
 
+/**
+ * Returns the top N best-selling item IDs by quantity across recent orders.
+ * Uses a collectionGroup query on the "items" subcollection under Orders.
+ * Falls back to an empty array on error (e.g. no index, no orders yet).
+ */
+export async function loadBestSellerItemIds(
+  db: Firestore,
+  limit = 5,
+): Promise<string[]> {
+  try {
+    const snap = await db
+      .collectionGroup("items")
+      .orderBy("createdAt", "desc")
+      .limit(500)
+      .get();
+    const counts = new Map<string, number>();
+    for (const doc of snap.docs) {
+      const itemId = doc.get("itemId") as string | undefined;
+      if (itemId) {
+        const qty = (doc.get("quantity") as number | undefined) ?? 1;
+        counts.set(itemId, (counts.get(itemId) ?? 0) + qty);
+      }
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([id]) => id);
+  } catch {
+    return [];
+  }
+}
+
 /** One chosen option in a modifier group (server resolves price / labels from Firestore). */
 export interface CartModifierSelectionInput {
   groupId: string;

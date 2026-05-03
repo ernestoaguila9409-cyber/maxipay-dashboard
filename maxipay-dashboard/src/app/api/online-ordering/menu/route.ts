@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getFirebaseAdminApp } from "@/lib/firebaseAdmin";
 import {
   loadOnlineMenu,
+  loadBestSellerItemIds,
   loadPublicOnlineOrderingConfig,
 } from "@/lib/onlineOrderingServer";
 
@@ -17,8 +18,11 @@ export async function GET() {
     if (!cfg.enabled) {
       return NextResponse.json({ error: "Online ordering is disabled." }, { status: 403 });
     }
-    const menu = await loadOnlineMenu(db);
-    return NextResponse.json(menu, {
+    const [menu, bestSellerItemIds] = await Promise.all([
+      loadOnlineMenu(db),
+      loadBestSellerItemIds(db, 5),
+    ]);
+    return NextResponse.json({ ...menu, bestSellerItemIds }, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (e) {
