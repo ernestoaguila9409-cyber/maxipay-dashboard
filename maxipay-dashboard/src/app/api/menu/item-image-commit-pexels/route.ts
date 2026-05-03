@@ -114,7 +114,8 @@ export async function POST(req: Request) {
 
     let uploadBuf = buf;
     let uploadContentType = contentType;
-    if (businessLogo) {
+    const isSvg = contentType.includes("svg");
+    if (businessLogo && !isSvg) {
       try {
         const sharp = (await import("sharp")).default;
         uploadBuf = Buffer.from(
@@ -125,11 +126,7 @@ export async function POST(req: Request) {
         );
         uploadContentType = "image/png";
       } catch (e) {
-        console.error("[api/menu/item-image-commit-pexels] business logo normalize failed", e);
-        return NextResponse.json(
-          { error: "Could not process that logo. Try another image or upload a PNG/JPG." },
-          { status: 400 },
-        );
+        console.warn("[api/menu/item-image-commit-pexels] sharp resize skipped, storing original", e);
       }
     }
 
