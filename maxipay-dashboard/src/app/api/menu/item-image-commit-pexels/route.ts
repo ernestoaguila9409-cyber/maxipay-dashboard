@@ -25,21 +25,23 @@ function isValidHeroSlideId(id: string): boolean {
  * Downloads a Pexels image (validated host), uploads to Firebase Storage, returns a Firebase
  * download URL (never the Pexels URL) for storing on MenuItems or online-ordering hero slides.
  *
- * POST body: { itemId: string, sourceUrl: string } | { heroSlideId: string, sourceUrl: string }
+ * POST body: { itemId, sourceUrl } | { heroSlideId, sourceUrl } | { businessLogo: true, sourceUrl }
  */
 export async function POST(req: Request) {
   try {
-    await verifyIdToken(req.headers.get("authorization"));
+    const decoded = await verifyIdToken(req.headers.get("authorization"));
     getFirebaseAdminApp();
 
     const body = (await req.json()) as {
       itemId?: string;
       heroSlideId?: string;
+      businessLogo?: boolean;
       sourceUrl?: string;
     };
     const itemId = typeof body.itemId === "string" ? body.itemId.trim() : "";
     const heroSlideId =
       typeof body.heroSlideId === "string" ? body.heroSlideId.trim() : "";
+    const businessLogo = body.businessLogo === true;
     const sourceUrl = typeof body.sourceUrl === "string" ? body.sourceUrl.trim() : "";
 
     const heroMode = Boolean(heroSlideId);
@@ -49,13 +51,18 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    if (heroMode) {
+    if (businessLogo) {
+      // Storage path uses [decoded.uid] from Bearer token.
+    } else if (heroMode) {
       if (!isValidHeroSlideId(heroSlideId)) {
         return NextResponse.json({ error: "Invalid heroSlideId." }, { status: 400 });
       }
     } else if (!itemId) {
       return NextResponse.json(
-        { error: "Provide itemId for menu images, or heroSlideId for storefront banner." },
+        {
+          error:
+            "Provide itemId for menu images, heroSlideId for storefront banner, or businessLogo: true for business logo.",
+        },
         { status: 400 }
       );
     }
@@ -86,9 +93,11 @@ export async function POST(req: Request) {
     }
 
     const ext = contentType.includes("png") ? "png" : "jpg";
-    const storagePath = heroMode
-      ? `${HERO_STORAGE_PREFIX}/${heroSlideId}.${ext}`
-      : `menuItems/${itemId}_${Date.now()}.${ext}`;
+    const storagePath = businessLogo
+      ? `businesses/${decoded.uid}/logo.${ext}`
+      : heroMode
+        ? `${HERO_STORAGE_PREFIX}/${heroSlideId}.${ext}`
+        : `menuItems/${itemId}_${Date.now()}.${ext}`;
     const bucket = getStorage().bucket(bucketName);
     const file = bucket.file(storagePath);
     const token = randomUUID();

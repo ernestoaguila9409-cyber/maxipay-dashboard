@@ -22,7 +22,9 @@ import {
   AlertCircle,
   Receipt,
   Settings2,
+  Search,
 } from "lucide-react";
+import { ImageSearchModal } from "@/components/menu-item-image/ImageSearchModal";
 import {
   thermalCharsPerLine,
   wrapThermalText,
@@ -241,6 +243,7 @@ export default function BusinessInformationPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [imageSearchOpen, setImageSearchOpen] = useState(false);
   const [imgPreview, setImgPreview] = useState<string | null>(null);
   const [resizedBlob, setResizedBlob] = useState<Blob | null>(null);
 
@@ -418,6 +421,11 @@ export default function BusinessInformationPage() {
     setResizedBlob(null);
     setUploadError(null);
   }, []);
+
+  const getIdToken = useCallback(async () => {
+    if (!user) throw new Error("Not signed in");
+    return user.getIdToken();
+  }, [user]);
 
   const savePsToFirestore = useCallback((updated: PrintSettings) => {
     if (psTimerRef.current) clearTimeout(psTimerRef.current);
@@ -1148,6 +1156,20 @@ export default function BusinessInformationPage() {
       />
 
       {/* Logo Modal */}
+      {user && (
+        <ImageSearchModal
+          mode="businessLogo"
+          open={imageSearchOpen}
+          onClose={() => setImageSearchOpen(false)}
+          businessName={data.businessName.trim() || "restaurant"}
+          getIdToken={getIdToken}
+          onCommitted={async (url) => {
+            setData((prev) => ({ ...prev, logoUrl: url }));
+            setDirty(true);
+          }}
+        />
+      )}
+
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
@@ -1206,6 +1228,28 @@ export default function BusinessInformationPage() {
                       </p>
                       <p className="text-xs text-slate-400">
                         Use your device camera
+                      </p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!user}
+                    onClick={() => {
+                      setModalOpen(false);
+                      setImageSearchOpen(true);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-slate-200 text-left hover:border-blue-400 hover:bg-blue-50/50 transition-colors group disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    <div className="p-2 rounded-lg bg-emerald-50 group-hover:bg-emerald-100 transition-colors">
+                      <Search size={20} className="text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">
+                        Search for image
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        Describe what you want &mdash; AI suggests a query, then pick from Pexels (saved to your
+                        storage).
                       </p>
                     </div>
                   </button>

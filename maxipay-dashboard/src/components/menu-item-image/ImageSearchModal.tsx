@@ -28,12 +28,24 @@ export type ImageSearchModalProps =
         firebaseDownloadUrl: string,
         storagePath?: string
       ) => void | boolean | Promise<void | boolean>;
+    }
+  | {
+      mode: "businessLogo";
+      open: boolean;
+      onClose: () => void;
+      businessName: string;
+      getIdToken: () => Promise<string>;
+      onCommitted: (
+        firebaseDownloadUrl: string,
+        storagePath?: string
+      ) => void | boolean | Promise<void | boolean>;
     };
 
 export function ImageSearchModal(props: ImageSearchModalProps) {
   const isStorefront = props.mode === "storefront";
-  const seedForSearch = isStorefront ? props.businessName : props.itemName;
-  const searchKind = isStorefront ? "storefront" : "menu";
+  const isBusinessLogo = props.mode === "businessLogo";
+  const seedForSearch = isBusinessLogo || isStorefront ? props.businessName : props.itemName;
+  const searchKind = isBusinessLogo ? "businessLogo" : isStorefront ? "storefront" : "menu";
   const { images, query, setQuery, loading, error, reset, searchFromItemName, searchWithQuery } =
     useImageSearch();
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -47,9 +59,18 @@ export function ImageSearchModal(props: ImageSearchModalProps) {
       setCommitError(null);
       return;
     }
-    const seed = seedForSearch.trim() || (isStorefront ? "restaurant" : "");
+    const seed = seedForSearch.trim() || (isStorefront || isBusinessLogo ? "restaurant" : "");
     void searchFromItemName(seed, props.getIdToken, searchKind);
-  }, [props.open, seedForSearch, isStorefront, searchKind, props.getIdToken, reset, searchFromItemName]);
+  }, [
+    props.open,
+    seedForSearch,
+    isStorefront,
+    isBusinessLogo,
+    searchKind,
+    props.getIdToken,
+    reset,
+    searchFromItemName,
+  ]);
 
   if (!props.open) return null;
 
@@ -67,9 +88,11 @@ export function ImageSearchModal(props: ImageSearchModalProps) {
     setCommitting(true);
     try {
       const token = await props.getIdToken();
-      const body = isStorefront
-        ? { heroSlideId: props.heroSlideId, sourceUrl }
-        : { itemId: props.itemId, sourceUrl };
+      const body = isBusinessLogo
+        ? { businessLogo: true, sourceUrl }
+        : isStorefront
+          ? { heroSlideId: props.heroSlideId, sourceUrl }
+          : { itemId: props.itemId, sourceUrl };
       const res = await fetch("/api/menu/item-image-commit-pexels", {
         method: "POST",
         headers: {
@@ -97,10 +120,16 @@ export function ImageSearchModal(props: ImageSearchModalProps) {
     }
   };
 
-  const title = isStorefront ? "Find storefront picture" : "Select image";
-  const searchPlaceholder = isStorefront
-    ? "Describe the banner image…"
-    : "Describe the food photo…";
+  const title = isBusinessLogo
+    ? "Find logo image"
+    : isStorefront
+      ? "Find storefront picture"
+      : "Select image";
+  const searchPlaceholder = isBusinessLogo
+    ? "Describe the logo or brand look…"
+    : isStorefront
+      ? "Describe the banner image…"
+      : "Describe the food photo…";
   const cellAspect = isStorefront ? "aspect-[16/9]" : "aspect-square";
   const gridClass = isStorefront
     ? "grid grid-cols-1 sm:grid-cols-2 gap-2"
