@@ -106,6 +106,27 @@ function modifierSummaryLines(selections: ModifierSelection[], groupMap: Map<str
   return out;
 }
 
+/** Mirrors Android [ModifierRemoveDisplay.cartLine]. */
+function formatRemoveModifierLabel(name: string): string {
+  const t = name.trim();
+  if (!t) return t;
+  const u = t.toUpperCase();
+  if (u.startsWith("NO ") || u === "NO") return t;
+  return `No ${t}`;
+}
+
+/** Per-modifier rows for cart UI (matches POS cart line bullets; REMOVE styled separately). */
+function modifierCartRows(selections: ModifierSelection[], groupMap: Map<string, ModifierGroup>): { label: string; remove: boolean }[] {
+  const out: { label: string; remove: boolean }[] = [];
+  for (const s of selections) {
+    const g = groupMap.get(s.groupId);
+    const opt = g?.options.find((o) => o.id === s.optionId);
+    if (!opt?.name) continue;
+    out.push({ label: opt.name, remove: g?.groupType === "REMOVE" });
+  }
+  return out;
+}
+
 /* ═══════════════════════════════════════════
    SVG Icons
    ═══════════════════════════════════════════ */
@@ -133,6 +154,12 @@ function IconClock({ size = 14 }: { size?: number }) {
 }
 function IconArrowRight({ size = 18 }: { size?: number }) {
   return (<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7" /></svg>);
+}
+function IconChevronLeft({ size = 22 }: { size?: number }) {
+  return (<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>);
+}
+function IconChevronRight({ size = 22 }: { size?: number }) {
+  return (<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>);
 }
 function IconTruck({ size = 22 }: { size?: number }) {
   return (<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="3" width="15" height="13" /><polygon points="16 8 20 8 23 11 23 16 16 16 16 8" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></svg>);
@@ -178,6 +205,43 @@ function CategoryTabs({ categories, active, onSelect }: { categories: MenuCatego
 /* ═══════════════════════════════════════════
    PopularCard (large vertical card for Popular section)
    ═══════════════════════════════════════════ */
+
+/**
+ * Horizontal Popular strip with visible scrollbar (Android-style scroll) and optional arrows.
+ */
+function PopularRow({ items, onItemAction }: { items: MenuItem[]; onItemAction: (it: MenuItem) => void }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollBy = (delta: number) => scrollRef.current?.scrollBy({ left: delta, behavior: "smooth" });
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-label="Scroll popular items left"
+        onClick={() => scrollBy(-220)}
+        className="hidden sm:flex absolute left-0 top-1/2 z-10 -translate-y-1/2 w-9 h-24 items-center justify-center rounded-r-xl bg-white/95 border border-neutral-200 shadow-md text-neutral-700 hover:bg-orange-50 hover:text-[#EA580C] transition-colors"
+      >
+        <IconChevronLeft size={22} />
+      </button>
+      <button
+        type="button"
+        aria-label="Scroll popular items right"
+        onClick={() => scrollBy(220)}
+        className="hidden sm:flex absolute right-0 top-1/2 z-10 -translate-y-1/2 w-9 h-24 items-center justify-center rounded-l-xl bg-white/95 border border-neutral-200 shadow-md text-neutral-700 hover:bg-orange-50 hover:text-[#EA580C] transition-colors"
+      >
+        <IconChevronRight size={22} />
+      </button>
+      <div
+        ref={scrollRef}
+        className="popular-strip-scroll flex gap-3 overflow-x-auto pb-2 pt-0.5 px-1 sm:px-10 -mx-1"
+      >
+        {items.map((it) => (
+          <PopularCard key={it.id} item={it} onAction={() => onItemAction(it)} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function PopularCard({ item, onAction }: { item: MenuItem; onAction: () => void }) {
   return (
@@ -310,7 +374,8 @@ function CartSidebar({
             <div className="flex-1 overflow-y-auto px-5 py-3 space-y-4">
               {lines.map((l) => {
                 const unit = unitPriceCentsForLine(l.item, l.selections, groupMap);
-                const mods = modifierSummaryLines(l.selections, groupMap);
+                const lineTotal = unit * l.quantity;
+                const modRows = modifierCartRows(l.selections, groupMap);
                 return (
                   <div key={l.lineId} className="flex items-start gap-3">
                     {l.item.imageUrl ? (
@@ -321,9 +386,18 @@ function CartSidebar({
                     )}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-neutral-900 truncate">{l.item.name}</p>
-                      <p className={`text-sm font-bold ${O.primaryText} mt-0.5`}>{fmt(unit)}</p>
-                      {mods.length > 0 && <p className="text-[11px] text-neutral-500 mt-0.5 line-clamp-1">{mods.join(" · ")}</p>}
-                      <div className={`flex items-center gap-0 mt-1.5 ${O.primaryText}`}>
+                      <p className="text-xs text-neutral-500 mt-0.5 tabular-nums">
+                        Qty {l.quantity} · {fmt(unit)} ea
+                      </p>
+                      {modRows.map((m, i) => (
+                        <p key={i} className={`text-[11px] mt-0.5 pl-0.5 ${m.remove ? "text-red-700" : "text-neutral-600"}`}>
+                          • {m.remove ? formatRemoveModifierLabel(m.label) : m.label}
+                        </p>
+                      ))}
+                      <p className="text-sm font-bold text-emerald-900 mt-1.5 tabular-nums">
+                        Line total: {fmt(lineTotal)}
+                      </p>
+                      <div className={`flex items-center gap-0 mt-2 ${O.primaryText}`}>
                         <button type="button" onClick={() => onDec(l.lineId)} className="w-6 h-6 rounded-full border border-[#EA580C] flex items-center justify-center hover:bg-orange-50 transition-colors">
                           {l.quantity === 1 ? <IconTrash size={10} /> : <IconMinus size={12} />}
                         </button>
@@ -408,27 +482,37 @@ function MobileCartSheet({
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {lines.map((l) => {
             const unit = unitPriceCentsForLine(l.item, l.selections, groupMap);
-            const mods = modifierSummaryLines(l.selections, groupMap);
+            const lineTotal = unit * l.quantity;
+            const modRows = modifierCartRows(l.selections, groupMap);
             return (
-              <div key={l.lineId} className="flex items-center gap-3">
+              <div key={l.lineId} className="flex items-start gap-3">
                 {l.item.imageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={l.item.imageUrl} alt={l.item.name} className="w-12 h-12 rounded-lg object-cover shrink-0" />
-                ) : null}
+                ) : (
+                  <div className="w-12 h-12 rounded-lg bg-neutral-100 shrink-0 flex items-center justify-center text-neutral-300"><IconStore size={18} /></div>
+                )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-neutral-800 truncate">{l.item.name}</p>
-                  {mods.length > 0 && <p className="text-xs text-neutral-500 mt-0.5 line-clamp-1">{mods.join(" · ")}</p>}
+                  <p className="text-sm font-semibold text-neutral-900 truncate">{l.item.name}</p>
+                  <p className="text-xs text-neutral-500 mt-0.5 tabular-nums">
+                    Qty {l.quantity} · {fmt(unit)} ea
+                  </p>
+                  {modRows.map((m, i) => (
+                    <p key={i} className={`text-[11px] mt-0.5 ${m.remove ? "text-red-700" : "text-neutral-600"}`}>
+                      • {m.remove ? formatRemoveModifierLabel(m.label) : m.label}
+                    </p>
+                  ))}
+                  <p className="text-sm font-bold text-emerald-900 mt-1 tabular-nums">Line total: {fmt(lineTotal)}</p>
+                  <div className={`flex items-center gap-0 mt-2 ${O.primaryText}`}>
+                    <button type="button" onClick={() => onDec(l.lineId)} className="w-7 h-7 rounded-full border border-[#EA580C] flex items-center justify-center hover:bg-orange-50 transition-colors">
+                      {l.quantity === 1 ? <IconTrash size={11} /> : <IconMinus size={13} />}
+                    </button>
+                    <span className="text-sm font-bold w-6 text-center tabular-nums text-neutral-900">{l.quantity}</span>
+                    <button type="button" onClick={() => onAdd(l.lineId)} className="w-7 h-7 rounded-full border border-[#EA580C] flex items-center justify-center hover:bg-orange-50 transition-colors">
+                      <IconPlus size={13} />
+                    </button>
+                  </div>
                 </div>
-                <div className={`flex items-center gap-0 shrink-0 ${O.primaryText}`}>
-                  <button type="button" onClick={() => onDec(l.lineId)} className="w-7 h-7 rounded-full border border-[#EA580C] flex items-center justify-center hover:bg-orange-50 transition-colors">
-                    {l.quantity === 1 ? <IconTrash size={11} /> : <IconMinus size={13} />}
-                  </button>
-                  <span className="text-sm font-bold w-6 text-center tabular-nums text-neutral-900">{l.quantity}</span>
-                  <button type="button" onClick={() => onAdd(l.lineId)} className="w-7 h-7 rounded-full border border-[#EA580C] flex items-center justify-center hover:bg-orange-50 transition-colors">
-                    <IconPlus size={13} />
-                  </button>
-                </div>
-                <p className="text-sm font-bold text-neutral-800 tabular-nums shrink-0">{fmt(unit * l.quantity)}</p>
               </div>
             );
           })}
@@ -483,14 +567,22 @@ function CheckoutModal({
             <div className="space-y-2">
               {lines.map((l) => {
                 const unit = unitPriceCentsForLine(l.item, l.selections, groupMap);
-                const mods = modifierSummaryLines(l.selections, groupMap);
+                const lineTotal = unit * l.quantity;
+                const modRows = modifierCartRows(l.selections, groupMap);
                 return (
-                  <div key={l.lineId} className="flex justify-between gap-3 text-sm">
-                    <span className="text-neutral-700 min-w-0">
-                      {l.quantity}&times; {l.item.name}
-                      {mods.length > 0 && <span className="block text-xs text-neutral-500 mt-0.5">{mods.join(" · ")}</span>}
-                    </span>
-                    <span className="font-medium text-neutral-800 tabular-nums shrink-0">{fmt(unit * l.quantity)}</span>
+                  <div key={l.lineId} className="text-sm border-b border-neutral-100 pb-2 last:border-0">
+                    <div className="text-neutral-700 min-w-0">
+                      <span className="font-semibold">{l.item.name}</span>
+                      <span className="block text-xs text-neutral-500 mt-0.5 tabular-nums">
+                        Qty {l.quantity} · {fmt(unit)} ea
+                      </span>
+                      {modRows.map((m, i) => (
+                        <span key={i} className={`block text-xs mt-0.5 ${m.remove ? "text-red-700" : "text-neutral-500"}`}>
+                          • {m.remove ? formatRemoveModifierLabel(m.label) : m.label}
+                        </span>
+                      ))}
+                      <span className="block text-xs font-bold text-emerald-900 mt-1 tabular-nums">Line total: {fmt(lineTotal)}</span>
+                    </div>
                   </div>
                 );
               })}
@@ -958,18 +1050,13 @@ function PublicOrderPageInner() {
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-lg font-bold text-neutral-900">Popular</h2>
                 </div>
-                <div className="-mx-1 flex gap-3 overflow-x-auto scrollbar-hide pb-1 px-1">
-                  {popularItems.map((it) => (
-                    <PopularCard
-                      key={it.id}
-                      item={it}
-                      onAction={() => {
-                        if (it.modifierGroupIds.length > 0) setCustomizeItemId(it.id);
-                        else addSimpleToCart(it.id);
-                      }}
-                    />
-                  ))}
-                </div>
+                <PopularRow
+                  items={popularItems}
+                  onItemAction={(it) => {
+                    if (it.modifierGroupIds.length > 0) setCustomizeItemId(it.id);
+                    else addSimpleToCart(it.id);
+                  }}
+                />
               </div>
             )}
 
@@ -1048,6 +1135,14 @@ function PublicOrderPageInner() {
       <style jsx global>{`
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .popular-strip-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: #EA580C #FDE8D4;
+        }
+        .popular-strip-scroll::-webkit-scrollbar { height: 10px; }
+        .popular-strip-scroll::-webkit-scrollbar-track { background: #FDE8D4; border-radius: 6px; }
+        .popular-strip-scroll::-webkit-scrollbar-thumb { background: #EA580C; border-radius: 6px; }
+        .popular-strip-scroll::-webkit-scrollbar-thumb:hover { background: #C2410C; }
         @keyframes slide-up { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         @keyframes fade-in { from { transform: scale(0.97); opacity: 0; } to { transform: scale(1); opacity: 1; } }
         .animate-slide-up { animation: slide-up 0.3s ease-out; }
