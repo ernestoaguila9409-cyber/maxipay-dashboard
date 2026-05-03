@@ -20,10 +20,16 @@ export async function POST(req: Request) {
   try {
     await verifyIdToken(req.headers.get("authorization"));
 
-    const clientId = process.env.BRANDFETCH_CLIENT_ID;
+    const clientId =
+      process.env.BRANDFETCH_CLIENT_ID?.trim() ||
+      process.env.NEXT_PUBLIC_BRANDFETCH_CLIENT_ID?.trim();
     if (!clientId) {
       return NextResponse.json(
-        { error: "BRANDFETCH_CLIENT_ID is not configured." },
+        {
+          error:
+            "Brandfetch is not configured. Set BRANDFETCH_CLIENT_ID (or NEXT_PUBLIC_BRANDFETCH_CLIENT_ID) " +
+            "in .env.local for local dev, and in your host (e.g. Vercel → Environment Variables) for production, then restart / redeploy.",
+        },
         { status: 500 },
       );
     }

@@ -88,18 +88,28 @@ export async function POST(req: Request) {
     if (!imgRes.ok) {
       return NextResponse.json(
         { error: `Could not download image (${imgRes.status}).` },
-        { status: 502 }
+        { status: 502 },
       );
     }
     const buf = Buffer.from(await imgRes.arrayBuffer());
-    if (buf.length < 500 || buf.length > 15 * 1024 * 1024) {
+    if (buf.length < 100 || buf.length > 15 * 1024 * 1024) {
       return NextResponse.json({ error: "Image size invalid." }, { status: 400 });
     }
 
-    const contentType =
-      imgRes.headers.get("content-type")?.split(";")[0]?.trim() || "image/jpeg";
+    let contentType =
+      imgRes.headers.get("content-type")?.split(";")[0]?.trim() || "";
+
     if (!contentType.startsWith("image/")) {
-      return NextResponse.json({ error: "URL did not return an image." }, { status: 400 });
+      const head = buf.subarray(0, 16);
+      if (head[0] === 0x89 && head[1] === 0x50) {
+        contentType = "image/png";
+      } else if (head[0] === 0xff && head[1] === 0xd8) {
+        contentType = "image/jpeg";
+      } else if (buf.subarray(0, 200).toString("utf8").includes("<svg")) {
+        contentType = "image/svg+xml";
+      } else {
+        contentType = "image/png";
+      }
     }
 
     const bucketName =
@@ -109,7 +119,7 @@ export async function POST(req: Request) {
       throw new Error("Storage bucket not configured");
     }
 
-    const ext = contentType.includes("png") ? "png" : "jpg";
+    const ext = contentType.includes("svg") ? "svg" : contentType.includes("png") ? "png" : "jpg";
     const storagePath = businessLogo
       ? `businesses/${decoded.uid}/logo.${ext}`
       : heroMode
@@ -122,7 +132,7 @@ export async function POST(req: Request) {
     await file.save(buf, {
       resumable: false,
       metadata: {
-        contentType: ext === "png" ? "image/png" : "image/jpeg",
+        contentType: ext === "svg" ? "image/svg+xml" : ext === "png" ? "image/png" : "image/jpeg",
         cacheControl: "public, max-age=31536000",
         metadata: {
           firebaseStorageDownloadTokens: token,
