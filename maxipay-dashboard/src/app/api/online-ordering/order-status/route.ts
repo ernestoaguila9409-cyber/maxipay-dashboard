@@ -1,8 +1,54 @@
 import admin from "firebase-admin";
+import type { DocumentData, QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp } from "@/lib/firebaseAdmin";
 
 export const runtime = "nodejs";
+
+type KdsPhase = "none" | "preparing" | "ready";
+
+function normKds(s: unknown): string {
+  return String(s ?? "")
+    .trim()
+    .toUpperCase();
+}
+
+/**
+ * Matches POS/KDS: prefer latest [kdsSendBatches].kdsStatus, else top-level [kdsStatus].
+ */
+function effectiveLineKdsStatus(data: Record<string, unknown>): string {
+  const batches = data.kdsSendBatches;
+  if (Array.isArray(batches) && batches.length > 0) {
+    const last = batches[batches.length - 1] as Record<string, unknown> | undefined;
+    const st = normKds(last?.kdsStatus);
+    if (st) return st;
+  }
+  return normKds(data.kdsStatus);
+}
+
+/**
+ * Customer-facing kitchen phase from `Orders/{id}/items/*` (PREPARING / READY).
+ */
+function aggregateKdsPhase(itemDocs: QueryDocumentSnapshot<DocumentData>[]): KdsPhase {
+  let anyLine = false;
+  let anyPreparing = false;
+  let allReady = true;
+
+  for (const doc of itemDocs) {
+    const data = doc.data() as Record<string, unknown>;
+    const qty = Number(data.quantity ?? 0);
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+    anyLine = true;
+    const st = effectiveLineKdsStatus(data);
+    if (st === "PREPARING") anyPreparing = true;
+    if (st !== "READY") allReady = false;
+  }
+
+  if (!anyLine) return "none";
+  if (anyPreparing) return "preparing";
+  if (allReady) return "ready";
+  return "none";
+}
 
 /**
  * Public read of minimal order fields for the customer success page (polling).
@@ -44,12 +90,16 @@ export async function GET(request: Request) {
           ? "PAY_AT_STORE"
           : "";
 
+    const itemsSnap = await db.collection("Orders").doc(orderId).collection("items").get();
+    const kdsPhase = aggregateKdsPhase(itemsSnap.docs);
+
     return NextResponse.json({
       ok: true,
       status,
       voided,
       awaitingStaffConfirmOrder: awaitingStaff,
       onlinePaymentChoice,
+      kdsPhase,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

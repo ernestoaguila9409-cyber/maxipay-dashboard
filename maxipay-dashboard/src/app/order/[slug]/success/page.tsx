@@ -90,6 +90,8 @@ function extractIposRedirectParams(sp: URLSearchParams): Record<string, string> 
 
 type StaffOutcome = "checking" | "accepted" | "declined";
 
+type KdsPhase = "none" | "preparing" | "ready";
+
 function staffOutcomeFromApi(data: {
   voided: boolean;
   status: string;
@@ -118,6 +120,7 @@ function SuccessInner() {
   const [staffOutcome, setStaffOutcome] = useState<StaffOutcome | null>(
     isPayAtStore && orderId && orderNumber ? "checking" : null,
   );
+  const [kdsPhase, setKdsPhase] = useState<KdsPhase>("none");
 
   useEffect(() => {
     void (async () => {
@@ -132,7 +135,7 @@ function SuccessInner() {
   }, []);
 
   useEffect(() => {
-    if (!orderId || !orderNumber || !isPayAtStore) return;
+    if (!orderId || !orderNumber) return;
 
     let cancelled = false;
     const poll = async () => {
@@ -141,12 +144,16 @@ function SuccessInner() {
         const res = await fetch(`/api/online-ordering/order-status?${qs.toString()}`, { cache: "no-store" });
         const data = await res.json();
         if (cancelled || !data.ok) return;
-        const next = staffOutcomeFromApi({
-          voided: !!data.voided,
-          status: String(data.status ?? ""),
-          awaitingStaffConfirmOrder: !!data.awaitingStaffConfirmOrder,
-        });
-        setStaffOutcome(next);
+        const phase = (data.kdsPhase as KdsPhase) || "none";
+        setKdsPhase(phase);
+        if (isPayAtStore) {
+          const next = staffOutcomeFromApi({
+            voided: !!data.voided,
+            status: String(data.status ?? ""),
+            awaitingStaffConfirmOrder: !!data.awaitingStaffConfirmOrder,
+          });
+          setStaffOutcome(next);
+        }
       } catch {
         /* keep last state */
       }
@@ -204,24 +211,36 @@ function SuccessInner() {
 
   const legacyNumberOnly = !orderId && !!orderNumber;
 
+  const kitchenTrackingEligible =
+    (isPayAtStore && staffOutcome === "accepted") ||
+    (!isPayAtStore && paymentStatus === "confirmed");
+
   const heroIcon = (() => {
     if (isPayAtStore && staffOutcome) {
       if (staffOutcome === "checking") return <ReviewSpinner />;
+      if (staffOutcome === "declined") return <XCircle />;
+      if (staffOutcome === "accepted" && kdsPhase === "preparing") return <ReviewSpinner />;
       if (staffOutcome === "accepted") return <CheckCircle />;
-      return <XCircle />;
     }
     if (paymentStatus === "confirming") return <Spinner />;
+    if (!isPayAtStore && paymentStatus === "confirmed" && kdsPhase === "preparing") {
+      return <ReviewSpinner />;
+    }
     return <CheckCircle />;
   })();
 
   const title = (() => {
     if (isPayAtStore && staffOutcome) {
       if (staffOutcome === "checking") return "Checking order";
+      if (staffOutcome === "declined") return "Order not accepted";
+      if (kitchenTrackingEligible && kdsPhase === "preparing") return "Order is being prepared";
+      if (kitchenTrackingEligible && kdsPhase === "ready") return "Your order is ready for pickup";
       if (staffOutcome === "accepted") return "Order accepted";
-      return "Order not accepted";
     }
     if (legacyNumberOnly) return "Order received";
     if (paymentStatus === "confirming") return "Confirming payment…";
+    if (kitchenTrackingEligible && kdsPhase === "preparing") return "Order is being prepared";
+    if (kitchenTrackingEligible && kdsPhase === "ready") return "Your order is ready for pickup";
     if (paymentStatus === "confirmed") return "Order approved";
     if (paymentStatus === "pending") return "Order received";
     if (paymentStatus === "error") return "We couldn't verify payment";
@@ -237,6 +256,27 @@ function SuccessInner() {
           </p>
         );
       }
+      if (staffOutcome === "declined") {
+        return (
+          <p className="text-sm text-red-600 max-w-xs mx-auto leading-relaxed">
+            The store declined this order. If you have questions, please contact them directly.
+          </p>
+        );
+      }
+      if (kitchenTrackingEligible && kdsPhase === "preparing") {
+        return (
+          <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
+            The kitchen started your order. This page updates automatically when it&apos;s ready for pickup.
+          </p>
+        );
+      }
+      if (kitchenTrackingEligible && kdsPhase === "ready") {
+        return (
+          <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
+            Your order is ready. Please show your order number when you pick it up.
+          </p>
+        );
+      }
       if (staffOutcome === "accepted") {
         return (
           <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
@@ -244,11 +284,6 @@ function SuccessInner() {
           </p>
         );
       }
-      return (
-        <p className="text-sm text-red-600 max-w-xs mx-auto leading-relaxed">
-          The store declined this order. If you have questions, please contact them directly.
-        </p>
-      );
     }
     if (legacyNumberOnly) {
       return (
@@ -265,6 +300,20 @@ function SuccessInner() {
       );
     }
     if (paymentStatus === "confirmed") {
+      if (kitchenTrackingEligible && kdsPhase === "preparing") {
+        return (
+          <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
+            The kitchen started your order. This page updates automatically when it&apos;s ready for pickup.
+          </p>
+        );
+      }
+      if (kitchenTrackingEligible && kdsPhase === "ready") {
+        return (
+          <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
+            Your order is ready. Please show your order number when you pick it up.
+          </p>
+        );
+      }
       return (
         <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
           Payment successful. Your order is approved &mdash; show your order number when you pick up. We&apos;ll have it
