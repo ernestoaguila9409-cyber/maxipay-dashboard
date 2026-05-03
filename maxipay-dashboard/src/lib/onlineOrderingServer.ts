@@ -44,6 +44,25 @@ export interface PublicOnlineOrderingConfig {
   allowPayOnlineHpp: boolean;
 }
 
+export interface OnlineModifierOption {
+  id: string;
+  name: string;
+  /** Additional charge in dollars (same as Firestore / POS). */
+  price: number;
+  triggersModifierGroupIds: string[];
+}
+
+export interface OnlineModifierGroup {
+  id: string;
+  name: string;
+  required: boolean;
+  minSelection: number;
+  maxSelection: number;
+  /** "ADD" (default) or "REMOVE" (e.g. "No onions"). */
+  groupType: string;
+  options: OnlineModifierOption[];
+}
+
 export interface OnlineMenuItem {
   id: string;
   name: string;
@@ -56,6 +75,8 @@ export interface OnlineMenuItem {
   imageUrl: string;
   /** True when the owner explicitly featured this item from the dashboard. */
   isFeatured: boolean;
+  /** Modifier group document ids, in display order (see `ModifierGroups`). */
+  modifierGroupIds: string[];
 }
 
 export interface OnlineMenuCategory {
@@ -80,6 +101,34 @@ function menuItemOnlinePriceCents(data: DocumentData): number {
 
 function asRecord(data: DocumentData): Record<string, unknown> {
   return data as unknown as Record<string, unknown>;
+}
+
+function parseModifierGroupDoc(id: string, data: DocumentData): OnlineModifierGroup {
+  const rawOptions = Array.isArray(data.options) ? data.options : [];
+  const options: OnlineModifierOption[] = rawOptions.map((o: Record<string, unknown>, i: number) => ({
+    id: (o.id as string) || `opt_${i}`,
+    name: (o.name as string) || "",
+    price: typeof o.price === "number" ? o.price : 0,
+    triggersModifierGroupIds: Array.isArray(o.triggersModifierGroupIds)
+      ? (o.triggersModifierGroupIds as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0)
+      : [],
+  }));
+  return {
+    id,
+    name: (data.name as string) || "",
+    required: Boolean(data.required),
+    minSelection:
+      typeof data.minSelection === "number" ? data.minSelection : data.required ? 1 : 0,
+    maxSelection: typeof data.maxSelection === "number" ? data.maxSelection : 1,
+    groupType: (data.groupType as string) || "ADD",
+    options,
+  };
+}
+
+function itemModifierGroupIds(data: DocumentData): string[] {
+  const raw = data.modifierGroupIds;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((x): x is string => typeof x === "string" && x.length > 0);
 }
 
 /** Server-only: iPOSpays HPP credentials (Firestore `Settings/onlineOrdering`, env fallback). */
@@ -186,7 +235,11 @@ export async function loadPublicStorefront(db: Firestore): Promise<PublicStorefr
 
 export async function loadOnlineMenu(
   db: Firestore
-): Promise<{ categories: OnlineMenuCategory[]; items: OnlineMenuItem[] }> {
+): Promise<{
+  categories: OnlineMenuCategory[];
+  items: OnlineMenuItem[];
+  modifierGroups: OnlineModifierGroup[];
+}> {
   const [catSnap, itemSnap, ooSnap] = await Promise.all([
     db.collection("Categories").get(),
     db.collection("MenuItems").get(),
@@ -208,6 +261,7 @@ export async function loadOnlineMenu(
 
   const featuredSet = new Set(oo.featuredItemIds);
   const items: OnlineMenuItem[] = [];
+  const modifierGroupIdSet = new Set<string>();
   for (const d of itemSnap.docs) {
     const data = d.data();
     const rec = asRecord(data);
@@ -216,6 +270,8 @@ export async function loadOnlineMenu(
     const rawCategoryIds = menuItemPlacementCategoryIds(rec);
     const categoryId =
       rawCategoryIds[0] || (typeof data.categoryId === "string" ? data.categoryId : "");
+    const modifierGroupIds = itemModifierGroupIds(data);
+    for (const mg of modifierGroupIds) modifierGroupIdSet.add(mg);
     items.push({
       id: d.id,
       name: (data.name as string) || "Item",
@@ -226,8 +282,17 @@ export async function loadOnlineMenu(
       stock: typeof data.stock === "number" ? data.stock : 0,
       imageUrl: typeof data.imageUrl === "string" ? data.imageUrl : "",
       isFeatured: featuredSet.has(d.id),
+      modifierGroupIds,
     });
   }
+
+  const groupRefs = [...modifierGroupIdSet].map((id) => db.collection("ModifierGroups").doc(id));
+  const groupSnaps = groupRefs.length > 0 ? await db.getAll(...groupRefs) : [];
+  const modifierGroups: OnlineModifierGroup[] = [];
+  for (const s of groupSnaps) {
+    if (s.exists) modifierGroups.push(parseModifierGroupDoc(s.id, s.data()!));
+  }
+  modifierGroups.sort((a, b) => a.name.localeCompare(b.name));
 
   const catIdsUsed = new Set<string>();
   for (const it of items) {
@@ -237,12 +302,20 @@ export async function loadOnlineMenu(
   }
   const filteredCategories = categories.filter((c) => catIdsUsed.has(c.id));
 
-  return { categories: filteredCategories, items };
+  return { categories: filteredCategories, items, modifierGroups };
+}
+
+/** One chosen option in a modifier group (server resolves price / labels from Firestore). */
+export interface CartModifierSelectionInput {
+  groupId: string;
+  optionId: string;
 }
 
 export interface CartLineInput {
   itemId: string;
   quantity: number;
+  /** Required when the menu item has modifier groups with minSelection > 0. */
+  modifierSelections?: CartModifierSelectionInput[];
 }
 
 export interface CreateOnlineOrderResult {
@@ -257,6 +330,81 @@ export class OnlineOrderValidationError extends Error {
     super(message);
     this.name = "OnlineOrderValidationError";
   }
+}
+
+/**
+ * Validates selections against the item's modifierGroupIds and group rules, then returns
+ * Firestore line maps compatible with Android [OrderEngine.serializeModifier].
+ */
+function buildValidatedModifiersForLine(
+  itemName: string,
+  itemModifierGroupIds: string[],
+  selectionsInput: CartModifierSelectionInput[],
+  groupById: Map<string, OnlineModifierGroup>
+): { modifierMaps: Record<string, unknown>[]; modifiersTotalInCents: number } {
+  const selections = Array.isArray(selectionsInput) ? selectionsInput : [];
+  if (itemModifierGroupIds.length === 0) {
+    if (selections.length > 0) {
+      throw new OnlineOrderValidationError(`"${itemName}" does not support modifiers.`);
+    }
+    return { modifierMaps: [], modifiersTotalInCents: 0 };
+  }
+
+  const seenPair = new Set<string>();
+  for (const s of selections) {
+    if (!s.groupId || !s.optionId) {
+      throw new OnlineOrderValidationError(`Invalid modifier selection for "${itemName}".`);
+    }
+    const key = `${s.groupId}\0${s.optionId}`;
+    if (seenPair.has(key)) {
+      throw new OnlineOrderValidationError(`Duplicate modifier selection for "${itemName}".`);
+    }
+    seenPair.add(key);
+    if (!itemModifierGroupIds.includes(s.groupId)) {
+      throw new OnlineOrderValidationError(`Invalid modifier group for "${itemName}".`);
+    }
+  }
+
+  for (const gid of itemModifierGroupIds) {
+    const g = groupById.get(gid);
+    if (!g) {
+      throw new OnlineOrderValidationError(`Modifier group is not available for "${itemName}".`);
+    }
+    const picks = selections.filter((x) => x.groupId === gid);
+    if (picks.length < g.minSelection || picks.length > g.maxSelection) {
+      throw new OnlineOrderValidationError(
+        `Choose between ${g.minSelection} and ${g.maxSelection} option(s) for "${g.name}" on "${itemName}".`
+      );
+    }
+  }
+
+  const modifierMaps: Record<string, unknown>[] = [];
+  let modifiersTotalInCents = 0;
+
+  for (const gid of itemModifierGroupIds) {
+    const g = groupById.get(gid)!;
+    const picks = selections.filter((x) => x.groupId === gid);
+    for (const p of picks) {
+      const opt = g.options.find((o) => o.id === p.optionId);
+      if (!opt) {
+        throw new OnlineOrderValidationError(`Unknown option for "${g.name}" on "${itemName}".`);
+      }
+      const action = g.groupType === "REMOVE" ? "REMOVE" : "ADD";
+      const map: Record<string, unknown> = {
+        name: opt.name,
+        action,
+        price: opt.price,
+        groupId: g.id,
+        groupName: g.name,
+      };
+      modifierMaps.push(map);
+      if (action === "ADD") {
+        modifiersTotalInCents += Math.round(opt.price * 100);
+      }
+    }
+  }
+
+  return { modifierMaps, modifiersTotalInCents };
 }
 
 /**
@@ -301,6 +449,22 @@ export async function createOnlineOrderTransaction(
     if (s.exists) byId.set(s.id, s.data()!);
   }
 
+  const modifierGroupIdSet = new Set<string>();
+  for (const line of lines) {
+    const data = byId.get(line.itemId);
+    if (!data) continue;
+    for (const gid of itemModifierGroupIds(data)) modifierGroupIdSet.add(gid);
+    for (const sel of line.modifierSelections ?? []) {
+      if (sel.groupId) modifierGroupIdSet.add(sel.groupId);
+    }
+  }
+  const groupRefs = [...modifierGroupIdSet].map((id) => db.collection("ModifierGroups").doc(id));
+  const groupSnaps = groupRefs.length > 0 ? await db.getAll(...groupRefs) : [];
+  const groupById = new Map<string, OnlineModifierGroup>();
+  for (const s of groupSnaps) {
+    if (s.exists) groupById.set(s.id, parseModifierGroupDoc(s.id, s.data()!));
+  }
+
   let totalInCents = 0;
   const resolvedLines: {
     lineKey: string;
@@ -308,8 +472,11 @@ export async function createOnlineOrderTransaction(
     name: string;
     quantity: number;
     basePriceInCents: number;
-    lineTotalInCents: number;
     taxIds: string[];
+    modifierMaps: Record<string, unknown>[];
+    modifiersTotalInCents: number;
+    unitPriceInCents: number;
+    lineTotalInCents: number;
   }[] = [];
 
   for (const line of lines) {
@@ -327,7 +494,15 @@ export async function createOnlineOrderTransaction(
     const taxIds = Array.isArray(data.taxIds)
       ? (data.taxIds as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0)
       : [];
-    const lineTotalInCents = basePriceCents * line.quantity;
+    const itemModIds = itemModifierGroupIds(data);
+    const { modifierMaps, modifiersTotalInCents } = buildValidatedModifiersForLine(
+      name,
+      itemModIds,
+      line.modifierSelections ?? [],
+      groupById
+    );
+    const unitPriceInCents = basePriceCents + modifiersTotalInCents;
+    const lineTotalInCents = unitPriceInCents * line.quantity;
     totalInCents += lineTotalInCents;
     resolvedLines.push({
       lineKey: randomUUID(),
@@ -335,8 +510,11 @@ export async function createOnlineOrderTransaction(
       name,
       quantity: line.quantity,
       basePriceInCents: basePriceCents,
-      lineTotalInCents,
       taxIds,
+      modifierMaps,
+      modifiersTotalInCents,
+      unitPriceInCents,
+      lineTotalInCents,
     });
   }
 
@@ -378,17 +556,15 @@ export async function createOnlineOrderTransaction(
     t.set(orderRef, orderFields);
 
     for (const rl of resolvedLines) {
-      const modifiersTotalInCents = 0;
-      const unitPriceInCents = rl.basePriceInCents + modifiersTotalInCents;
       const lineDoc: Record<string, unknown> = {
         itemId: rl.itemId,
         name: rl.name,
         quantity: rl.quantity,
         basePriceInCents: rl.basePriceInCents,
-        modifiersTotalInCents,
-        unitPriceInCents,
+        modifiersTotalInCents: rl.modifiersTotalInCents,
+        unitPriceInCents: rl.unitPriceInCents,
         lineTotalInCents: rl.lineTotalInCents,
-        modifiers: [],
+        modifiers: rl.modifierMaps,
         taxMode: "INHERIT",
         updatedAt: now,
         createdAt: now,

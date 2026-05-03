@@ -27,6 +27,23 @@ type PublicConfig = {
   allowPayOnlineHpp: boolean;
 };
 
+type ModifierOption = {
+  id: string;
+  name: string;
+  price: number;
+  triggersModifierGroupIds: string[];
+};
+
+type ModifierGroup = {
+  id: string;
+  name: string;
+  required: boolean;
+  minSelection: number;
+  maxSelection: number;
+  groupType: string;
+  options: ModifierOption[];
+};
+
 type MenuItem = {
   id: string;
   name: string;
@@ -37,16 +54,55 @@ type MenuItem = {
   stock: number;
   imageUrl: string;
   isFeatured: boolean;
+  modifierGroupIds: string[];
 };
 
 type MenuCategory = { id: string; name: string; sortOrder: number };
-type CartLine = { itemId: string; quantity: number; item: MenuItem };
+
+type ModifierSelection = { groupId: string; optionId: string };
+
+type CartLine = {
+  lineId: string;
+  itemId: string;
+  quantity: number;
+  item: MenuItem;
+  selections: ModifierSelection[];
+};
 
 function fmt(cents: number): string {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency: "USD",
   }).format(cents / 100);
+}
+
+function unitPriceCentsForLine(
+  item: MenuItem,
+  selections: ModifierSelection[],
+  groupMap: Map<string, ModifierGroup>,
+): number {
+  let extra = 0;
+  for (const s of selections) {
+    const g = groupMap.get(s.groupId);
+    const opt = g?.options.find((o) => o.id === s.optionId);
+    if (!g || !opt) continue;
+    if (g.groupType === "REMOVE") continue;
+    extra += Math.round(opt.price * 100);
+  }
+  return item.unitPriceCents + extra;
+}
+
+function modifierSummaryLines(
+  selections: ModifierSelection[],
+  groupMap: Map<string, ModifierGroup>,
+): string[] {
+  const out: string[] = [];
+  for (const s of selections) {
+    const g = groupMap.get(s.groupId);
+    const opt = g?.options.find((o) => o.id === s.optionId);
+    if (opt?.name) out.push(opt.name);
+  }
+  return out;
 }
 
 /* ═══════════════════════════════════════════
@@ -146,14 +202,18 @@ function CategoryTabs({
 
 function MenuItemCard({
   item,
-  qty,
-  onAdd,
-  onDec,
+  qtySimple,
+  hasModifiers,
+  onAddSimple,
+  onOpenCustomize,
+  onDecSimple,
 }: {
   item: MenuItem;
-  qty: number;
-  onAdd: () => void;
-  onDec: () => void;
+  qtySimple: number;
+  hasModifiers: boolean;
+  onAddSimple: () => void;
+  onOpenCustomize: () => void;
+  onDecSimple: () => void;
 }) {
   const hasImage = item.imageUrl.trim().length > 0;
 
@@ -187,14 +247,25 @@ function MenuItemCard({
           />
         )}
 
-        {/* Add / quantity stepper */}
+        {/* Add / quantity stepper, or customize for modifier items */}
         <div className={`${hasImage ? "absolute -bottom-3 right-1" : "mt-auto"}`}>
-          {qty === 0 ? (
+          {hasModifiers ? (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onAdd();
+                onOpenCustomize();
+              }}
+              className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-white text-black text-sm font-semibold shadow-md border border-neutral-200 hover:scale-105 active:scale-95 transition-transform"
+            >
+              Customize
+            </button>
+          ) : qtySimple === 0 ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddSimple();
               }}
               className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-white text-black text-sm font-semibold shadow-md border border-neutral-200 hover:scale-105 active:scale-95 transition-transform"
             >
@@ -207,20 +278,20 @@ function MenuItemCard({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onDec();
+                  onDecSimple();
                 }}
                 className="flex items-center justify-center w-9 h-9 text-white hover:bg-neutral-800 transition-colors"
               >
-                {qty === 1 ? <IconTrash size={14} /> : <IconMinus size={15} />}
+                {qtySimple === 1 ? <IconTrash size={14} /> : <IconMinus size={15} />}
               </button>
               <span className="text-white text-sm font-semibold w-6 text-center tabular-nums">
-                {qty}
+                {qtySimple}
               </span>
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onAdd();
+                  onAddSimple();
                 }}
                 className="flex items-center justify-center w-9 h-9 text-white hover:bg-neutral-800 transition-colors"
               >
@@ -242,6 +313,7 @@ function CartSidebar({
   lines,
   subtotal,
   prepTimeLabel,
+  groupMap,
   onAdd,
   onDec,
   onCheckout,
@@ -249,8 +321,9 @@ function CartSidebar({
   lines: CartLine[];
   subtotal: number;
   prepTimeLabel: string;
-  onAdd: (id: string) => void;
-  onDec: (id: string) => void;
+  groupMap: Map<string, ModifierGroup>;
+  onAdd: (lineId: string) => void;
+  onDec: (lineId: string) => void;
   onCheckout: () => void;
 }) {
   const itemCount = lines.reduce((s, l) => s + l.quantity, 0);
@@ -284,39 +357,46 @@ function CartSidebar({
       ) : (
         <>
           <div className="flex-1 overflow-y-auto px-5 py-3 space-y-3">
-            {lines.map((l) => (
-              <div key={l.itemId} className="flex items-start gap-3">
-                {/* Qty stepper */}
-                <div className="flex items-center gap-0 bg-neutral-100 rounded-full shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => onDec(l.itemId)}
-                    className="flex items-center justify-center w-7 h-7 text-neutral-700 hover:bg-neutral-200 rounded-full transition-colors"
-                  >
-                    {l.quantity === 1 ? <IconTrash size={12} /> : <IconMinus size={13} />}
-                  </button>
-                  <span className="text-xs font-semibold w-5 text-center tabular-nums text-neutral-800">
-                    {l.quantity}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => onAdd(l.itemId)}
-                    className="flex items-center justify-center w-7 h-7 text-neutral-700 hover:bg-neutral-200 rounded-full transition-colors"
-                  >
-                    <IconPlus size={13} />
-                  </button>
-                </div>
-                {/* Name + price */}
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-medium text-neutral-800 leading-tight truncate">
-                    {l.item.name}
+            {lines.map((l) => {
+              const unit = unitPriceCentsForLine(l.item, l.selections, groupMap);
+              const mods = modifierSummaryLines(l.selections, groupMap);
+              return (
+                <div key={l.lineId} className="flex items-start gap-3">
+                  <div className="flex items-center gap-0 bg-neutral-100 rounded-full shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => onDec(l.lineId)}
+                      className="flex items-center justify-center w-7 h-7 text-neutral-700 hover:bg-neutral-200 rounded-full transition-colors"
+                    >
+                      {l.quantity === 1 ? <IconTrash size={12} /> : <IconMinus size={13} />}
+                    </button>
+                    <span className="text-xs font-semibold w-5 text-center tabular-nums text-neutral-800">
+                      {l.quantity}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onAdd(l.lineId)}
+                      className="flex items-center justify-center w-7 h-7 text-neutral-700 hover:bg-neutral-200 rounded-full transition-colors"
+                    >
+                      <IconPlus size={13} />
+                    </button>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-medium text-neutral-800 leading-tight truncate">
+                      {l.item.name}
+                    </p>
+                    {mods.length > 0 && (
+                      <p className="text-[11px] text-neutral-500 mt-0.5 leading-snug line-clamp-2">
+                        {mods.join(" · ")}
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-[13px] font-medium text-neutral-700 tabular-nums shrink-0">
+                    {fmt(unit * l.quantity)}
                   </p>
                 </div>
-                <p className="text-[13px] font-medium text-neutral-700 tabular-nums shrink-0">
-                  {fmt(l.item.unitPriceCents * l.quantity)}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Totals + checkout */}
@@ -386,6 +466,7 @@ function MobileCartSheet({
   open,
   lines,
   subtotal,
+  groupMap,
   onClose,
   onAdd,
   onDec,
@@ -394,9 +475,10 @@ function MobileCartSheet({
   open: boolean;
   lines: CartLine[];
   subtotal: number;
+  groupMap: Map<string, ModifierGroup>;
   onClose: () => void;
-  onAdd: (id: string) => void;
-  onDec: (id: string) => void;
+  onAdd: (lineId: string) => void;
+  onDec: (lineId: string) => void;
   onCheckout: () => void;
 }) {
   if (!open) return null;
@@ -417,21 +499,30 @@ function MobileCartSheet({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {lines.map((l) => (
-            <div key={l.itemId} className="flex items-center gap-3">
-              <div className="flex items-center gap-0 bg-neutral-100 rounded-full shrink-0">
-                <button type="button" onClick={() => onDec(l.itemId)} className="flex items-center justify-center w-8 h-8 text-neutral-700 hover:bg-neutral-200 rounded-full transition-colors">
-                  {l.quantity === 1 ? <IconTrash size={13} /> : <IconMinus size={14} />}
-                </button>
-                <span className="text-sm font-semibold w-6 text-center tabular-nums">{l.quantity}</span>
-                <button type="button" onClick={() => onAdd(l.itemId)} className="flex items-center justify-center w-8 h-8 text-neutral-700 hover:bg-neutral-200 rounded-full transition-colors">
-                  <IconPlus size={14} />
-                </button>
+          {lines.map((l) => {
+            const unit = unitPriceCentsForLine(l.item, l.selections, groupMap);
+            const mods = modifierSummaryLines(l.selections, groupMap);
+            return (
+              <div key={l.lineId} className="flex items-center gap-3">
+                <div className="flex items-center gap-0 bg-neutral-100 rounded-full shrink-0">
+                  <button type="button" onClick={() => onDec(l.lineId)} className="flex items-center justify-center w-8 h-8 text-neutral-700 hover:bg-neutral-200 rounded-full transition-colors">
+                    {l.quantity === 1 ? <IconTrash size={13} /> : <IconMinus size={14} />}
+                  </button>
+                  <span className="text-sm font-semibold w-6 text-center tabular-nums">{l.quantity}</span>
+                  <button type="button" onClick={() => onAdd(l.lineId)} className="flex items-center justify-center w-8 h-8 text-neutral-700 hover:bg-neutral-200 rounded-full transition-colors">
+                    <IconPlus size={14} />
+                  </button>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-neutral-800 truncate">{l.item.name}</p>
+                  {mods.length > 0 && (
+                    <p className="text-xs text-neutral-500 mt-0.5 line-clamp-2">{mods.join(" · ")}</p>
+                  )}
+                </div>
+                <p className="text-sm font-medium text-neutral-700 tabular-nums shrink-0">{fmt(unit * l.quantity)}</p>
               </div>
-              <p className="flex-1 text-sm font-medium text-neutral-800 truncate">{l.item.name}</p>
-              <p className="text-sm font-medium text-neutral-700 tabular-nums shrink-0">{fmt(l.item.unitPriceCents * l.quantity)}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="border-t border-neutral-100 px-5 py-4 space-y-3 pb-6">
@@ -461,6 +552,7 @@ function CheckoutModal({
   cfg,
   lines,
   subtotal,
+  groupMap,
   onClose,
   onSubmit,
   submitting,
@@ -470,6 +562,7 @@ function CheckoutModal({
   cfg: PublicConfig;
   lines: CartLine[];
   subtotal: number;
+  groupMap: Map<string, ModifierGroup>;
   onClose: () => void;
   onSubmit: (data: {
     customerName: string;
@@ -508,14 +601,23 @@ function CheckoutModal({
           <div>
             <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Order summary</h3>
             <div className="space-y-2">
-              {lines.map((l) => (
-                <div key={l.itemId} className="flex justify-between text-sm">
-                  <span className="text-neutral-700">
-                    {l.quantity}&times; {l.item.name}
-                  </span>
-                  <span className="font-medium text-neutral-800 tabular-nums">{fmt(l.item.unitPriceCents * l.quantity)}</span>
-                </div>
-              ))}
+              {lines.map((l) => {
+                const unit = unitPriceCentsForLine(l.item, l.selections, groupMap);
+                const mods = modifierSummaryLines(l.selections, groupMap);
+                return (
+                  <div key={l.lineId} className="flex justify-between gap-3 text-sm">
+                    <span className="text-neutral-700 min-w-0">
+                      {l.quantity}&times; {l.item.name}
+                      {mods.length > 0 && (
+                        <span className="block text-xs text-neutral-500 mt-0.5 font-normal">
+                          {mods.join(" · ")}
+                        </span>
+                      )}
+                    </span>
+                    <span className="font-medium text-neutral-800 tabular-nums shrink-0">{fmt(unit * l.quantity)}</span>
+                  </div>
+                );
+              })}
               <div className="flex justify-between text-sm font-semibold pt-2 border-t border-neutral-100">
                 <span>Total</span>
                 <span className="tabular-nums">{fmt(subtotal)}</span>
@@ -622,6 +724,166 @@ function CheckoutModal({
 }
 
 /* ═══════════════════════════════════════════
+   CustomizeSheet (modifier choices before add-to-cart)
+   ═══════════════════════════════════════════ */
+
+function CustomizeSheet({
+  open,
+  item,
+  groups,
+  groupMap,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  item: MenuItem | null;
+  groups: ModifierGroup[];
+  groupMap: Map<string, ModifierGroup>;
+  onClose: () => void;
+  onConfirm: (selections: ModifierSelection[]) => void;
+}) {
+  const [draft, setDraft] = useState<Record<string, string[]>>({});
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !item) return;
+    const init: Record<string, string[]> = {};
+    for (const g of groups) init[g.id] = [];
+    setDraft(init);
+    setErr(null);
+  }, [open, item, groups]);
+
+  const draftSelections = useMemo((): ModifierSelection[] => {
+    const out: ModifierSelection[] = [];
+    for (const g of groups) {
+      for (const oid of draft[g.id] ?? []) out.push({ groupId: g.id, optionId: oid });
+    }
+    return out;
+  }, [draft, groups]);
+
+  const previewUnitCents =
+    item != null ? unitPriceCentsForLine(item, draftSelections, groupMap) : 0;
+
+  const toggle = (g: ModifierGroup, optionId: string) => {
+    setDraft((prev) => {
+      const cur = prev[g.id] ?? [];
+      if (g.maxSelection <= 1) {
+        return { ...prev, [g.id]: cur[0] === optionId ? [] : [optionId] };
+      }
+      const set = new Set(cur);
+      if (set.has(optionId)) set.delete(optionId);
+      else if (set.size < g.maxSelection) set.add(optionId);
+      return { ...prev, [g.id]: [...set] };
+    });
+    setErr(null);
+  };
+
+  if (!open || !item) return null;
+
+  if (groups.length === 0) {
+    return (
+      <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center">
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+        <div className="relative bg-white rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md p-6 shadow-2xl animate-slide-up sm:animate-fade-in">
+          <h2 className="font-bold text-lg text-neutral-900">{item.name}</h2>
+          <p className="text-sm text-neutral-600 mt-2">
+            Modifier options are not available for this item right now. Please try again later or choose another item.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="mt-5 w-full h-11 rounded-xl bg-black text-white font-semibold text-sm"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const handleConfirm = () => {
+    for (const g of groups) {
+      const n = (draft[g.id] ?? []).length;
+      if (n < g.minSelection || n > g.maxSelection) {
+        setErr(`Choose ${g.minSelection}–${g.maxSelection} option(s) for “${g.name}”.`);
+        return;
+      }
+    }
+    onConfirm(draftSelections);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-t-3xl sm:rounded-2xl w-full sm:max-w-lg max-h-[90vh] flex flex-col shadow-2xl animate-slide-up sm:animate-fade-in">
+        <div className="sticky top-0 bg-white z-10 flex items-center justify-between px-5 pt-4 pb-3 border-b border-neutral-100">
+          <div className="min-w-0 pr-2">
+            <h2 className="font-bold text-lg text-neutral-900 truncate">{item.name}</h2>
+            <p className="text-sm text-neutral-600 tabular-nums mt-0.5">{fmt(previewUnitCents)} each</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-neutral-100 shrink-0">
+            <IconX size={20} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+          {groups.map((g) => (
+            <div key={g.id}>
+              <p className="text-sm font-semibold text-neutral-900">
+                {g.name}
+                {g.minSelection > 0 && <span className="text-red-600 font-normal"> *</span>}
+              </p>
+              <p className="text-xs text-neutral-500 mt-0.5 mb-2">
+                {g.maxSelection <= 1 ? "Choose one" : `Choose ${g.minSelection}–${g.maxSelection}`}
+                {g.groupType === "REMOVE" && " · removal / preference"}
+              </p>
+              <div className="flex flex-col gap-2">
+                {g.options.map((opt) => {
+                  const picked = (draft[g.id] ?? []).includes(opt.id);
+                  const priceLabel =
+                    g.groupType === "REMOVE"
+                      ? ""
+                      : opt.price > 0
+                        ? ` +${fmt(Math.round(opt.price * 100))}`
+                        : "";
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => toggle(g, opt.id)}
+                      className={`flex items-center justify-between text-left rounded-xl border px-3 py-2.5 text-sm transition-colors ${
+                        picked ? "border-black bg-neutral-50" : "border-neutral-200 hover:border-neutral-300"
+                      }`}
+                    >
+                      <span className="font-medium text-neutral-900">{opt.name}</span>
+                      {priceLabel ? <span className="text-neutral-600 tabular-nums text-xs shrink-0">{priceLabel}</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          {err && (
+            <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{err}</div>
+          )}
+        </div>
+
+        <div className="sticky bottom-0 bg-white border-t border-neutral-100 px-5 py-4">
+          <button
+            type="button"
+            onClick={handleConfirm}
+            className="w-full h-12 rounded-2xl bg-black text-white font-semibold text-[15px] hover:bg-neutral-800 active:scale-[0.98] transition-all"
+          >
+            Add to cart · {fmt(previewUnitCents)}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
    Main Page
    ═══════════════════════════════════════════ */
 
@@ -632,11 +894,17 @@ function PublicOrderPageInner() {
 
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
   const [storefront, setStorefront] = useState<PublicStorefront | null>(null);
-  const [menu, setMenu] = useState<{ categories: MenuCategory[]; items: MenuItem[] } | null>(null);
+  const [menu, setMenu] = useState<{
+    categories: MenuCategory[];
+    items: MenuItem[];
+    modifierGroups: ModifierGroup[];
+  } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [menuLoading, setMenuLoading] = useState(false);
 
-  const [cart, setCart] = useState<Record<string, number>>({});
+  type CartRowState = { lineId: string; itemId: string; quantity: number; selections: ModifierSelection[] };
+  const [cartRows, setCartRows] = useState<CartRowState[]>([]);
+  const [customizeItemId, setCustomizeItemId] = useState<string | null>(null);
   const [activeCategoryId, setActiveCategoryId] = useState<string>("ALL");
 
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -677,11 +945,33 @@ function PublicOrderPageInner() {
     setMenuLoading(true);
     try {
       const res = await fetch("/api/online-ordering/menu", { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) { setMenu(null); setLoadError(data.error || "Menu unavailable."); return; }
-      setMenu(data as { categories: MenuCategory[]; items: MenuItem[] });
+      const data = (await res.json()) as {
+        categories?: MenuCategory[];
+        items?: MenuItem[];
+        modifierGroups?: ModifierGroup[];
+        error?: string;
+      };
+      if (!res.ok) {
+        setMenu(null);
+        setLoadError(data.error || "Menu unavailable.");
+        return;
+      }
+      const rawItems = Array.isArray(data.items) ? data.items : [];
+      const items: MenuItem[] = rawItems.map((it) => ({
+        ...it,
+        modifierGroupIds: Array.isArray(it.modifierGroupIds)
+          ? it.modifierGroupIds.filter((x): x is string => typeof x === "string" && x.length > 0)
+          : [],
+      }));
+      setMenu({
+        categories: Array.isArray(data.categories) ? data.categories : [],
+        items,
+        modifierGroups: Array.isArray(data.modifierGroups) ? data.modifierGroups : [],
+      });
       setLoadError(null);
-    } finally { setMenuLoading(false); }
+    } finally {
+      setMenuLoading(false);
+    }
   }, []);
 
   useEffect(() => { void loadConfig(); const id = setInterval(() => void loadConfig(), 45_000); return () => clearInterval(id); }, [loadConfig]);
@@ -708,19 +998,60 @@ function PublicOrderPageInner() {
     return menu.categories;
   }, [menu]);
 
+  const groupMap = useMemo(() => {
+    if (!menu) return new Map<string, ModifierGroup>();
+    return new Map(menu.modifierGroups.map((g) => [g.id, g]));
+  }, [menu]);
+
   const cartLines: CartLine[] = useMemo(() => {
     if (!menu) return [];
-    return Object.entries(cart)
-      .filter(([, q]) => q > 0)
-      .map(([itemId, quantity]) => {
-        const item = menu.items.find((i) => i.id === itemId);
-        return item ? { itemId, quantity, item } : null;
+    return cartRows
+      .map((row) => {
+        const item = menu.items.find((i) => i.id === row.itemId);
+        if (!item) return null;
+        return {
+          lineId: row.lineId,
+          itemId: row.itemId,
+          quantity: row.quantity,
+          item,
+          selections: row.selections,
+        };
       })
       .filter((x): x is CartLine => x != null);
-  }, [cart, menu]);
+  }, [cartRows, menu]);
 
-  const subtotalCents = useMemo(() => cartLines.reduce((s, l) => s + l.item.unitPriceCents * l.quantity, 0), [cartLines]);
+  const subtotalCents = useMemo(
+    () =>
+      cartLines.reduce(
+        (s, l) => s + unitPriceCentsForLine(l.item, l.selections, groupMap) * l.quantity,
+        0,
+      ),
+    [cartLines, groupMap],
+  );
   const cartCount = useMemo(() => cartLines.reduce((s, l) => s + l.quantity, 0), [cartLines]);
+
+  const simpleQtyByItemId = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const row of cartRows) {
+      if (row.selections.length === 0) {
+        m.set(row.itemId, (m.get(row.itemId) ?? 0) + row.quantity);
+      }
+    }
+    return m;
+  }, [cartRows]);
+
+  const customizeItem = useMemo(() => {
+    if (!menu || !customizeItemId) return null;
+    return menu.items.find((i) => i.id === customizeItemId) ?? null;
+  }, [menu, customizeItemId]);
+
+  const customizeGroups = useMemo(() => {
+    if (!menu || !customizeItem) return [];
+    const map = new Map(menu.modifierGroups.map((g) => [g.id, g]));
+    return customizeItem.modifierGroupIds
+      .map((id) => map.get(id))
+      .filter((g): g is ModifierGroup => Boolean(g));
+  }, [menu, customizeItem]);
 
   const featuredRowItems: FeaturedRowItem[] = useMemo(() => {
     if (!menu || !storefront) return [];
@@ -734,6 +1065,7 @@ function PublicOrderPageInner() {
           name: it.name,
           unitPriceCents: it.unitPriceCents,
           imageUrl: it.imageUrl,
+          hasModifiers: it.modifierGroupIds.length > 0,
         }));
     }
     return menu.items
@@ -744,6 +1076,7 @@ function PublicOrderPageInner() {
         name: it.name,
         unitPriceCents: it.unitPriceCents,
         imageUrl: it.imageUrl,
+        hasModifiers: it.modifierGroupIds.length > 0,
       }));
   }, [menu, storefront]);
 
@@ -769,14 +1102,42 @@ function PublicOrderPageInner() {
 
   /* ── Cart actions ── */
 
-  const addToCart = (id: string) => setCart((c) => ({ ...c, [id]: (c[id] ?? 0) + 1 }));
-  const decFromCart = (id: string) => setCart((c) => {
-    const n = (c[id] ?? 0) - 1;
-    const next = { ...c };
-    if (n <= 0) delete next[id];
-    else next[id] = n;
-    return next;
-  });
+  const newLineId = () =>
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `ln_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+  const addSimpleToCart = useCallback((itemId: string) => {
+    setCartRows((prev) => {
+      const idx = prev.findIndex((r) => r.itemId === itemId && r.selections.length === 0);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], quantity: next[idx].quantity + 1 };
+        return next;
+      }
+      return [...prev, { lineId: newLineId(), itemId, quantity: 1, selections: [] }];
+    });
+  }, []);
+
+  const addCustomizedLine = useCallback((itemId: string, selections: ModifierSelection[]) => {
+    setCartRows((prev) => [...prev, { lineId: newLineId(), itemId, quantity: 1, selections }]);
+  }, []);
+
+  const incLine = useCallback((lineId: string) => {
+    setCartRows((prev) =>
+      prev.map((r) => (r.lineId === lineId ? { ...r, quantity: r.quantity + 1 } : r)),
+    );
+  }, []);
+
+  const decLine = useCallback((lineId: string) => {
+    setCartRows((prev) =>
+      prev.flatMap((r) => {
+        if (r.lineId !== lineId) return [r];
+        if (r.quantity <= 1) return [];
+        return [{ ...r, quantity: r.quantity - 1 }];
+      }),
+    );
+  }, []);
 
   /* ── Order submit ── */
 
@@ -788,7 +1149,11 @@ function PublicOrderPageInner() {
   }) => {
     setSubmitError(null);
     if (!cfg?.enabled) return;
-    const lines = cartLines.map((l) => ({ itemId: l.itemId, quantity: l.quantity }));
+    const lines = cartLines.map((l) => ({
+      itemId: l.itemId,
+      quantity: l.quantity,
+      modifierSelections: l.selections.length > 0 ? l.selections : undefined,
+    }));
     if (lines.length === 0) { setSubmitError("Your cart is empty."); return; }
     if (!data.customerName.trim()) { setSubmitError("Please enter your name."); return; }
     setSubmitting(true);
@@ -811,7 +1176,7 @@ function PublicOrderPageInner() {
       }
 
       setCheckoutOpen(false);
-      setCart({});
+      setCartRows([]);
       const pay = encodeURIComponent(String(result.paymentChoice ?? ""));
       const oid = encodeURIComponent(String(result.orderId ?? ""));
       router.push(
@@ -936,7 +1301,8 @@ function PublicOrderPageInner() {
                 <FeaturedRow
                   items={featuredRowItems}
                   title="Popular"
-                  onAdd={(id) => addToCart(id)}
+                  onAdd={(id) => addSimpleToCart(id)}
+                  onCustomize={(id) => setCustomizeItemId(id)}
                 />
               </div>
             )}
@@ -959,9 +1325,16 @@ function PublicOrderPageInner() {
                             <MenuItemCard
                               key={it.id}
                               item={it}
-                              qty={cart[it.id] ?? 0}
-                              onAdd={() => addToCart(it.id)}
-                              onDec={() => decFromCart(it.id)}
+                              qtySimple={simpleQtyByItemId.get(it.id) ?? 0}
+                              hasModifiers={it.modifierGroupIds.length > 0}
+                              onAddSimple={() => addSimpleToCart(it.id)}
+                              onOpenCustomize={() => setCustomizeItemId(it.id)}
+                              onDecSimple={() => {
+                                const line = cartRows.find(
+                                  (r) => r.itemId === it.id && r.selections.length === 0,
+                                );
+                                if (line) decLine(line.lineId);
+                              }}
                             />
                           ))}
                         </div>
@@ -977,9 +1350,16 @@ function PublicOrderPageInner() {
                           <MenuItemCard
                             key={it.id}
                             item={it}
-                            qty={cart[it.id] ?? 0}
-                            onAdd={() => addToCart(it.id)}
-                            onDec={() => decFromCart(it.id)}
+                            qtySimple={simpleQtyByItemId.get(it.id) ?? 0}
+                            hasModifiers={it.modifierGroupIds.length > 0}
+                            onAddSimple={() => addSimpleToCart(it.id)}
+                            onOpenCustomize={() => setCustomizeItemId(it.id)}
+                            onDecSimple={() => {
+                              const line = cartRows.find(
+                                (r) => r.itemId === it.id && r.selections.length === 0,
+                              );
+                              if (line) decLine(line.lineId);
+                            }}
                           />
                         ))}
                       </div>
@@ -992,9 +1372,16 @@ function PublicOrderPageInner() {
                     <MenuItemCard
                       key={it.id}
                       item={it}
-                      qty={cart[it.id] ?? 0}
-                      onAdd={() => addToCart(it.id)}
-                      onDec={() => decFromCart(it.id)}
+                      qtySimple={simpleQtyByItemId.get(it.id) ?? 0}
+                      hasModifiers={it.modifierGroupIds.length > 0}
+                      onAddSimple={() => addSimpleToCart(it.id)}
+                      onOpenCustomize={() => setCustomizeItemId(it.id)}
+                      onDecSimple={() => {
+                        const line = cartRows.find(
+                          (r) => r.itemId === it.id && r.selections.length === 0,
+                        );
+                        if (line) decLine(line.lineId);
+                      }}
                     />
                   ))}
                 </div>
@@ -1015,8 +1402,9 @@ function PublicOrderPageInner() {
                 lines={cartLines}
                 subtotal={subtotalCents}
                 prepTimeLabel={cfg.prepTimeLabel}
-                onAdd={addToCart}
-                onDec={decFromCart}
+                groupMap={groupMap}
+                onAdd={incLine}
+                onDec={decLine}
                 onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}
               />
             </div>
@@ -1030,9 +1418,10 @@ function PublicOrderPageInner() {
         open={mobileCartOpen}
         lines={cartLines}
         subtotal={subtotalCents}
+        groupMap={groupMap}
         onClose={() => setMobileCartOpen(false)}
-        onAdd={addToCart}
-        onDec={decFromCart}
+        onAdd={incLine}
+        onDec={decLine}
         onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}
       />
 
@@ -1042,10 +1431,27 @@ function PublicOrderPageInner() {
         cfg={cfg}
         lines={cartLines}
         subtotal={subtotalCents}
+        groupMap={groupMap}
         onClose={() => setCheckoutOpen(false)}
         onSubmit={(d) => void submitOrder(d)}
         submitting={submitting}
         submitError={submitError}
+      />
+
+      <CustomizeSheet
+        open={
+          customizeItemId != null &&
+          customizeItem != null &&
+          customizeItem.modifierGroupIds.length > 0
+        }
+        item={customizeItem}
+        groups={customizeGroups}
+        groupMap={groupMap}
+        onClose={() => setCustomizeItemId(null)}
+        onConfirm={(selections) => {
+          if (customizeItemId) addCustomizedLine(customizeItemId, selections);
+          setCustomizeItemId(null);
+        }}
       />
 
       {/* Spacer for mobile bottom bar */}

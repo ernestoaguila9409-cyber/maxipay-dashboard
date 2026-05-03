@@ -7,12 +7,16 @@ export interface FeaturedRowItem {
   name: string;
   unitPriceCents: number;
   imageUrl: string;
+  /** When true, primary action should open customization instead of a direct add. */
+  hasModifiers?: boolean;
 }
 
 export interface FeaturedRowProps {
   items: FeaturedRowItem[];
   title?: string;
   onAdd?: (id: string) => void;
+  /** Used for items with [FeaturedRowItem.hasModifiers] (e.g. online ordering). */
+  onCustomize?: (id: string) => void;
   compact?: boolean;
 }
 
@@ -31,6 +35,7 @@ export function FeaturedRow({
   items,
   title = "Popular",
   onAdd,
+  onCustomize,
   compact = false,
 }: FeaturedRowProps) {
   if (items.length === 0) return null;
@@ -80,11 +85,14 @@ export function FeaturedRow({
                 >
                   {fmt(it.unitPriceCents)}
                 </span>
-                {onAdd && (
+                {(onAdd || onCustomize) && (
                   <button
                     type="button"
-                    onClick={() => onAdd(it.id)}
-                    aria-label={`Add ${it.name}`}
+                    onClick={() => {
+                      if (it.hasModifiers && onCustomize) onCustomize(it.id);
+                      else if (onAdd) onAdd(it.id);
+                    }}
+                    aria-label={it.hasModifiers && onCustomize ? `Customize ${it.name}` : `Add ${it.name}`}
                     className={`grid place-items-center rounded-full bg-black text-white shadow ${
                       compact ? "w-7 h-7" : "w-8 h-8"
                     } hover:bg-neutral-800 active:scale-95 transition-transform`}
