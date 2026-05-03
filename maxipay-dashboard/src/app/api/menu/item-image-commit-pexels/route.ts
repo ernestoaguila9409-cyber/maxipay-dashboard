@@ -17,6 +17,21 @@ function isAllowedPexelsUrl(urlStr: string): boolean {
   }
 }
 
+function isAllowedBrandfetchUrl(urlStr: string): boolean {
+  try {
+    const u = new URL(urlStr);
+    if (u.protocol !== "https:") return false;
+    const h = u.hostname.toLowerCase();
+    return (
+      h === "cdn.brandfetch.io" ||
+      h.endsWith(".brandfetch.io") ||
+      h === "asset.brandfetch.io"
+    );
+  } catch {
+    return false;
+  }
+}
+
 function isValidHeroSlideId(id: string): boolean {
   return /^[a-zA-Z0-9_-]{1,128}$/.test(id);
 }
@@ -45,10 +60,12 @@ export async function POST(req: Request) {
     const sourceUrl = typeof body.sourceUrl === "string" ? body.sourceUrl.trim() : "";
 
     const heroMode = Boolean(heroSlideId);
-    if (!sourceUrl || !isAllowedPexelsUrl(sourceUrl)) {
+    const pexelsOk = isAllowedPexelsUrl(sourceUrl);
+    const brandfetchOk = isAllowedBrandfetchUrl(sourceUrl);
+    if (!sourceUrl || (!pexelsOk && !brandfetchOk)) {
       return NextResponse.json(
-        { error: "Invalid sourceUrl (must be a https://images.pexels.com/… URL)." },
-        { status: 400 }
+        { error: "Invalid sourceUrl (must be a Pexels or Brandfetch URL)." },
+        { status: 400 },
       );
     }
     if (businessLogo) {
