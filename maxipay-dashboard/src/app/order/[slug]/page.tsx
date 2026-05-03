@@ -812,7 +812,11 @@ function PublicOrderPageInner() {
 
       setCheckoutOpen(false);
       setCart({});
-      router.push(`/order/${slug}/success?orderNumber=${result.orderNumber}`);
+      const pay = encodeURIComponent(String(result.paymentChoice ?? ""));
+      const oid = encodeURIComponent(String(result.orderId ?? ""));
+      router.push(
+        `/order/${slug}/success?orderNumber=${result.orderNumber}&orderId=${oid}&payment=${pay}`,
+      );
     } finally { setSubmitting(false); }
   };
 

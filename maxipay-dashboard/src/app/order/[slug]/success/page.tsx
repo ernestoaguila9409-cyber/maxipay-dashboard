@@ -12,11 +12,29 @@ function CheckCircle() {
   );
 }
 
+function XCircle() {
+  return (
+    <svg width={56} height={56} viewBox="0 0 56 56" fill="none">
+      <circle cx={28} cy={28} r={28} fill="#dc2626" />
+      <path d="M20 20l16 16M36 20l-16 16" stroke="white" strokeWidth={3} strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function Spinner() {
   return (
     <svg width={56} height={56} viewBox="0 0 56 56" fill="none" className="animate-spin">
       <circle cx={28} cy={28} r={24} stroke="#e5e5e5" strokeWidth={4} />
       <path d="M28 4a24 24 0 0 1 24 24" stroke="#000" strokeWidth={4} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ReviewSpinner() {
+  return (
+    <svg width={56} height={56} viewBox="0 0 56 56" fill="none" className="animate-spin">
+      <circle cx={28} cy={28} r={24} stroke="#fde68a" strokeWidth={4} />
+      <path d="M28 4a24 24 0 0 1 24 24" stroke="#d97706" strokeWidth={4} strokeLinecap="round" />
     </svg>
   );
 }
@@ -42,20 +60,6 @@ const IPOS_KEYS = [
 
 /**
  * Extract iPOSpays redirect params.
- *
- * iPOSpays appends `?responseCode=200&…` to the return URL which already
- * contains `?orderNumber=X&orderId=Y`.  The browser only sees ONE `?`, so
- * the iPOSpays block may appear in two places:
- *
- * Case A — iPOSpays used `&` to append (or the browser normalised it).
- *   → responseCode etc. are top-level search params.
- *
- * Case B — iPOSpays appended with a literal `?` that's NOT the first `?`.
- *   → The extra params end up inside the *value* of orderId
- *     (e.g. `orderId=abc123?responseCode=200&cardType=CREDIT&…`).
- *
- * We try Case A first; if responseCode isn't found at the top level, we
- * parse it out of the raw orderId value (Case B).
  */
 function extractIposRedirectParams(sp: URLSearchParams): Record<string, string> | null {
   if (sp.get("responseCode")) {
@@ -84,18 +88,36 @@ function extractIposRedirectParams(sp: URLSearchParams): Record<string, string> 
   return null;
 }
 
+type StaffOutcome = "checking" | "accepted" | "declined";
+
+function staffOutcomeFromApi(data: {
+  voided: boolean;
+  status: string;
+  awaitingStaffConfirmOrder: boolean;
+}): StaffOutcome {
+  if (data.voided || data.status === "VOIDED") return "declined";
+  if (!data.awaitingStaffConfirmOrder) return "accepted";
+  return "checking";
+}
+
 function SuccessInner() {
   const { slug } = useParams<{ slug: string }>();
   const sp = useSearchParams();
   const orderNumber = cleanParam(sp.get("orderNumber"));
   const orderId = cleanParam(sp.get("orderId"));
+  const paymentParam = (sp.get("payment") || "").trim().toUpperCase();
+  const isPayAtStore = paymentParam === "PAY_AT_STORE";
   const sessionId = sp.get("session_id");
   const iposRedirectParams = extractIposRedirectParams(sp);
   const [businessName, setBusinessName] = useState<string>("");
-  const [paymentStatus, setPaymentStatus] = useState<"confirming" | "confirmed" | "pending" | "error">(
-    orderId ? "confirming" : "confirmed"
+  const [paymentStatus, setPaymentStatus] = useState<"confirming" | "confirmed" | "pending" | "error">(() =>
+    orderId && !isPayAtStore ? "confirming" : "confirmed",
   );
   const confirmedRef = useRef(false);
+
+  const [staffOutcome, setStaffOutcome] = useState<StaffOutcome | null>(
+    isPayAtStore && orderId && orderNumber ? "checking" : null,
+  );
 
   useEffect(() => {
     void (async () => {
@@ -110,7 +132,36 @@ function SuccessInner() {
   }, []);
 
   useEffect(() => {
-    if (!orderId || confirmedRef.current) return;
+    if (!orderId || !orderNumber || !isPayAtStore) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const qs = new URLSearchParams({ orderId, orderNumber: String(orderNumber) });
+        const res = await fetch(`/api/online-ordering/order-status?${qs.toString()}`, { cache: "no-store" });
+        const data = await res.json();
+        if (cancelled || !data.ok) return;
+        const next = staffOutcomeFromApi({
+          voided: !!data.voided,
+          status: String(data.status ?? ""),
+          awaitingStaffConfirmOrder: !!data.awaitingStaffConfirmOrder,
+        });
+        setStaffOutcome(next);
+      } catch {
+        /* keep last state */
+      }
+    };
+
+    void poll();
+    const t = window.setInterval(() => void poll(), 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [orderId, orderNumber, isPayAtStore]);
+
+  useEffect(() => {
+    if (!orderId || confirmedRef.current || isPayAtStore) return;
     confirmedRef.current = true;
 
     let attempts = 0;
@@ -149,14 +200,99 @@ function SuccessInner() {
     };
 
     void tryConfirm();
-  }, [orderId, iposRedirectParams]);
+  }, [orderId, iposRedirectParams, isPayAtStore]);
+
+  const legacyNumberOnly = !orderId && !!orderNumber;
+
+  const heroIcon = (() => {
+    if (isPayAtStore && staffOutcome) {
+      if (staffOutcome === "checking") return <ReviewSpinner />;
+      if (staffOutcome === "accepted") return <CheckCircle />;
+      return <XCircle />;
+    }
+    if (paymentStatus === "confirming") return <Spinner />;
+    return <CheckCircle />;
+  })();
+
+  const title = (() => {
+    if (isPayAtStore && staffOutcome) {
+      if (staffOutcome === "checking") return "Checking order";
+      if (staffOutcome === "accepted") return "Order accepted";
+      return "Order not accepted";
+    }
+    if (legacyNumberOnly) return "Order received";
+    if (paymentStatus === "confirming") return "Confirming payment…";
+    if (paymentStatus === "confirmed") return "Order approved";
+    if (paymentStatus === "pending") return "Order received";
+    if (paymentStatus === "error") return "We couldn't verify payment";
+    return "Order approved";
+  })();
+
+  const description = (() => {
+    if (isPayAtStore && staffOutcome) {
+      if (staffOutcome === "checking") {
+        return (
+          <p className="text-sm text-amber-800 max-w-xs mx-auto leading-relaxed">
+            Your order is in review. The store will confirm or decline it shortly &mdash; this page updates automatically.
+          </p>
+        );
+      }
+      if (staffOutcome === "accepted") {
+        return (
+          <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
+            The store accepted your order. Show your order number when you pick up. We&apos;ll have it ready for you.
+          </p>
+        );
+      }
+      return (
+        <p className="text-sm text-red-600 max-w-xs mx-auto leading-relaxed">
+          The store declined this order. If you have questions, please contact them directly.
+        </p>
+      );
+    }
+    if (legacyNumberOnly) {
+      return (
+        <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
+          Thank you. Show your order number when you pick up. If you pay at the store, staff will confirm your order there.
+        </p>
+      );
+    }
+    if (paymentStatus === "confirming") {
+      return (
+        <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
+          Please wait while we verify your payment&hellip;
+        </p>
+      );
+    }
+    if (paymentStatus === "confirmed") {
+      return (
+        <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
+          Payment successful. Your order is approved &mdash; show your order number when you pick up. We&apos;ll have it
+          ready for you.
+        </p>
+      );
+    }
+    if (paymentStatus === "pending") {
+      return (
+        <p className="text-sm text-amber-600 max-w-xs mx-auto leading-relaxed">
+          Your order is placed. Payment confirmation is still processing &mdash; it should update shortly.
+        </p>
+      );
+    }
+    if (paymentStatus === "error") {
+      return (
+        <p className="text-sm text-red-600 max-w-xs mx-auto leading-relaxed">
+          We could not verify your payment right now. Please contact the store if you have any questions.
+        </p>
+      );
+    }
+    return null;
+  })();
 
   return (
     <div className="min-h-screen bg-[#fafafa] flex flex-col items-center justify-center p-6 text-center">
       <div className="bg-white rounded-3xl shadow-sm border border-neutral-100 max-w-md w-full px-8 py-12 space-y-5">
-        <div className="flex justify-center">
-          {paymentStatus === "confirming" ? <Spinner /> : <CheckCircle />}
-        </div>
+        <div className="flex justify-center">{heroIcon}</div>
 
         {businessName && (
           <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
@@ -164,17 +300,7 @@ function SuccessInner() {
           </p>
         )}
 
-        <h1 className="text-2xl font-bold text-neutral-900">
-          {paymentStatus === "confirming"
-            ? "Confirming payment…"
-            : paymentStatus === "confirmed"
-              ? "Order approved"
-              : paymentStatus === "pending"
-                ? "Order received"
-                : paymentStatus === "error"
-                  ? "We couldn&apos;t verify payment"
-                  : "Order approved"}
-        </h1>
+        <h1 className="text-2xl font-bold text-neutral-900">{title}</h1>
 
         {orderNumber && (
           <div className="bg-neutral-50 rounded-xl px-5 py-4 inline-block">
@@ -191,27 +317,7 @@ function SuccessInner() {
           </p>
         )}
 
-        {paymentStatus === "confirming" && (
-          <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
-            Please wait while we verify your payment&hellip;
-          </p>
-        )}
-        {paymentStatus === "confirmed" && (
-          <p className="text-sm text-neutral-500 max-w-xs mx-auto leading-relaxed">
-            Payment successful. Your order is approved &mdash; show your order number when you pick up. We&apos;ll have it
-            ready for you.
-          </p>
-        )}
-        {paymentStatus === "pending" && (
-          <p className="text-sm text-amber-600 max-w-xs mx-auto leading-relaxed">
-            Your order is placed. Payment confirmation is still processing &mdash; it should update shortly.
-          </p>
-        )}
-        {paymentStatus === "error" && (
-          <p className="text-sm text-red-600 max-w-xs mx-auto leading-relaxed">
-            We could not verify your payment right now. Please contact the store if you have any questions.
-          </p>
-        )}
+        {description}
 
         <a
           href={`/order/${slug}`}
