@@ -112,6 +112,25 @@ export async function POST(req: Request) {
       }
     }
 
+    let uploadBuf = buf;
+    let uploadContentType = contentType;
+    if (businessLogo) {
+      try {
+        const sharp = (await import("sharp")).default;
+        uploadBuf = await sharp(buf)
+          .resize(512, 512, { fit: "inside", withoutEnlargement: true })
+          .png()
+          .toBuffer();
+        uploadContentType = "image/png";
+      } catch (e) {
+        console.error("[api/menu/item-image-commit-pexels] business logo normalize failed", e);
+        return NextResponse.json(
+          { error: "Could not process that logo. Try another image or upload a PNG/JPG." },
+          { status: 400 },
+        );
+      }
+    }
+
     const bucketName =
       process.env.FIREBASE_STORAGE_BUCKET ||
       process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
@@ -119,7 +138,13 @@ export async function POST(req: Request) {
       throw new Error("Storage bucket not configured");
     }
 
-    const ext = contentType.includes("svg") ? "svg" : contentType.includes("png") ? "png" : "jpg";
+    const ext = businessLogo
+      ? "png"
+      : uploadContentType.includes("svg")
+        ? "svg"
+        : uploadContentType.includes("png")
+          ? "png"
+          : "jpg";
     const storagePath = businessLogo
       ? `businesses/${decoded.uid}/logo.${ext}`
       : heroMode
@@ -129,7 +154,7 @@ export async function POST(req: Request) {
     const file = bucket.file(storagePath);
     const token = randomUUID();
 
-    await file.save(buf, {
+    await file.save(uploadBuf, {
       resumable: false,
       metadata: {
         contentType: ext === "svg" ? "image/svg+xml" : ext === "png" ? "image/png" : "image/jpeg",

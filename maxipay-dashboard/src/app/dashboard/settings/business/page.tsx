@@ -649,8 +649,10 @@ export default function BusinessInformationPage() {
                       src={data.logoUrl.trim()}
                       alt="Business logo"
                       className="w-14 h-14 rounded-lg object-contain bg-white border border-slate-200 p-1"
+                      referrerPolicy="no-referrer"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
+                        console.warn("[Business] logo preview failed", data.logoUrl.trim());
+                        (e.target as HTMLImageElement).style.opacity = "0.35";
                       }}
                     />
                     <div className="flex gap-3">
@@ -802,19 +804,26 @@ export default function BusinessInformationPage() {
                           "'Courier New', Courier, monospace",
                       }}
                     >
-                      {/* Logo */}
-                      {ps.showLogo && hasLogo && (
-                        <div className="flex justify-center mb-3">
-                          <img
-                            src={data.logoUrl.trim()}
-                            alt="Logo"
-                            className="h-16 sm:h-[4.5rem] max-w-[168px] object-contain"
-                            onError={(e) => {
-                              (
-                                e.target as HTMLImageElement
-                              ).style.display = "none";
-                            }}
-                          />
+                      {/* Logo — show whenever a URL is set; print toggle only affects printed receipts */}
+                      {hasLogo && (
+                        <div className="flex flex-col items-center mb-3 gap-1">
+                          <div className="flex justify-center w-full">
+                            <img
+                              src={data.logoUrl.trim()}
+                              alt="Logo"
+                              className="h-16 sm:h-[4.5rem] max-w-[168px] object-contain"
+                              referrerPolicy="no-referrer"
+                              onError={(e) => {
+                                const el = e.target as HTMLImageElement;
+                                el.style.display = "none";
+                              }}
+                            />
+                          </div>
+                          {!ps.showLogo && (
+                            <p className="text-[10px] text-amber-700 max-w-[200px] leading-snug">
+                              &ldquo;Show logo&rdquo; is off in Print Settings &mdash; receipts won&apos;t print the logo until you turn it on.
+                            </p>
+                          )}
                         </div>
                       )}
 

@@ -65,7 +65,7 @@ export async function POST(req: Request) {
         name: b.name ?? b.domain ?? "",
         domain: b.domain!,
         icon: b.icon ?? "",
-        logoUrl: `https://cdn.brandfetch.io/${b.domain}?c=${encodeURIComponent(clientId)}&t=icon&w=512&h=512`,
+        logoUrl: `https://cdn.brandfetch.io/${encodeURIComponent(b.domain)}?c=${encodeURIComponent(clientId)}&type=logo&w=512&h=512`,
       }));
 
     return NextResponse.json({ results });
