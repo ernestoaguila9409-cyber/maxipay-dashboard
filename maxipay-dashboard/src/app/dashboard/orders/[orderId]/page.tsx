@@ -34,6 +34,7 @@ import {
   formatTaxBreakdownLabel,
   formatTipSummaryLabel,
   groupAppliedDiscounts,
+  orderStatusDisplayForUi,
   orderTypeBadgeStyle,
   parseTaxBreakdown,
 } from "@/lib/orderDisplayUtils";
@@ -533,6 +534,9 @@ export default function OrderDetailPage() {
     ? firestoreDate(orderData as { createdAt?: Timestamp })
     : null;
   const status = String(orderData?.status ?? "");
+  const statusDisplayLabel = orderData
+    ? orderStatusDisplayForUi(orderData as Record<string, unknown>)
+    : "";
   const orderNumber = orderData?.orderNumber;
   const orderNumStr =
     typeof orderNumber === "number" || typeof orderNumber === "string"
@@ -681,7 +685,7 @@ export default function OrderDetailPage() {
                   Order #{orderNumStr}
                 </h2>
                 <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                  {status}
+                  {statusDisplayLabel}
                 </span>
               </div>
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">

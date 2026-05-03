@@ -20,7 +20,10 @@ export interface Order {
   orderType: string;
   orderTypeRaw?: string;
   total: number;
+  /** Canonical POS status for filters (OPEN, CLOSED, …). */
   status: string;
+  /** List badge when it differs (e.g. UNPAID for web online pay-at-store). */
+  statusDisplay?: string;
   date: string;
   time: string;
   source?: OrderSource;
@@ -52,6 +55,11 @@ const statusConfig: Record<
     icon: Clock,
     className: "bg-amber-50 text-amber-800",
     label: "Open",
+  },
+  UNPAID: {
+    icon: AlertCircle,
+    className: "bg-orange-50 text-orange-900",
+    label: "Unpaid",
   },
   CLOSED: {
     icon: CheckCircle2,
@@ -173,7 +181,8 @@ export default function OrdersTable({
           </thead>
           <tbody className="divide-y divide-slate-50">
             {orders.map((order) => {
-              const status = statusRow(order.status);
+              const badgeKey = order.statusDisplay ?? order.status;
+              const status = statusRow(badgeKey);
               const StatusIcon = status.icon;
               const typeBadge = orderTypeBadgeStyle(order.orderTypeRaw ?? "");
               const href = `${linkBase}/${encodeURIComponent(order.id)}`;

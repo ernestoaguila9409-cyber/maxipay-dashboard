@@ -29,6 +29,7 @@ import {
   effectivePosOrderStatus,
   formatOrdersListTime,
   mergeSalesActivityOrderWithVoidedSaleTx,
+  onlineOpenPaymentBadgeFromEffective,
   orderListNetCents,
   orderListStatusBadgeStyle,
   orderListStatusBarColor,
@@ -1667,15 +1668,19 @@ export default function SalesActivityClient() {
                       data: txData as Record<string, unknown>,
                     }))
                   );
-                  const status = effectivePosOrderStatus(displayRec);
+                  const statusCanonical = effectivePosOrderStatus(displayRec);
+                  const badgeKey = onlineOpenPaymentBadgeFromEffective(
+                    statusCanonical,
+                    displayRec
+                  );
                   const title = buildAndroidOrdersListTitle(displayRec);
                   const num = data.orderNumber as number | undefined;
                   const headline =
                     title.trim() ||
                     (num ? `#${num}` : `Order ${id.slice(0, 8)}`);
                   const netC = orderListNetCents(displayRec);
-                  const barColor = orderListStatusBarColor(status);
-                  const stBadge = orderListStatusBadgeStyle(status);
+                  const barColor = orderListStatusBarColor(badgeKey);
+                  const stBadge = orderListStatusBadgeStyle(badgeKey);
                   const otRaw = String(data.orderType ?? "").trim();
                   const typeBadge = orderTypeBadgeStyle(otRaw);
                   const ts = data.createdAt?.toDate?.() ?? new Date();
@@ -1683,7 +1688,9 @@ export default function SalesActivityClient() {
                   const refundedCents = Math.round(Number(data.totalRefundedInCents ?? 0));
                   const hasRefund = refundedCents > 0;
                   const preAuthLabel =
-                    String(status).toUpperCase() === "CLOSED" ? "PostAuth" : "PreAuth";
+                    String(statusCanonical).toUpperCase() === "CLOSED"
+                      ? "PostAuth"
+                      : "PreAuth";
 
                   return (
                     <Link

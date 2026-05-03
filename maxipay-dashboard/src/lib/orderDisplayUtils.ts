@@ -209,6 +209,8 @@ export function orderListStatusBarColor(statusRaw: string): string {
   switch (u) {
     case "OPEN":
       return "#2196F3";
+    case "UNPAID":
+      return "#F57C00";
     case "ACCEPTED":
       return "#2E7D32";
     case "READY":
@@ -240,6 +242,7 @@ export function orderListStatusBadgeStyle(statusRaw: string): {
   const u = label;
   const table: Record<string, readonly [string, string]> = {
     OPEN: ["#E3F2FD", "#1565C0"],
+    UNPAID: ["#FFF3E0", "#E65100"],
     ACCEPTED: ["#E8F5E9", "#2E7D32"],
     READY: ["#E3F2FD", "#1565C0"],
     DENIED: ["#FFEBEE", "#C62828"],
@@ -339,6 +342,34 @@ export function effectivePosOrderStatus(data: Record<string, unknown>): string {
 }
 
 /**
+ * When [effectiveStatus] is OPEN, maps web online checkout `onlinePaymentChoice`
+ * to UNPAID (pay at store, or pay online before fully paid). Matches Android
+ * [OnlineOrderStatusDisplay.listBadgeStatus].
+ */
+export function onlineOpenPaymentBadgeFromEffective(
+  effectiveStatus: string,
+  data: Record<string, unknown>
+): string {
+  const u = effectiveStatus.trim().toUpperCase();
+  if (u !== "OPEN") return u;
+  if (!isWebOnlineOrder(data)) return u;
+  const choice = String(data.onlinePaymentChoice ?? "").trim();
+  const total = Math.round(Number(data.totalInCents ?? 0));
+  const paid = Math.round(Number(data.totalPaidInCents ?? 0));
+  if (choice === "PAY_AT_STORE" || choice === "") return "UNPAID";
+  if (choice === "PAY_ONLINE_HPP" && total > 0 && paid < total) return "UNPAID";
+  return u;
+}
+
+/** Header / pill label: effective POS status with online unpaid override. */
+export function orderStatusDisplayForUi(data: Record<string, unknown>): string {
+  return onlineOpenPaymentBadgeFromEffective(
+    effectivePosOrderStatus(data),
+    data
+  );
+}
+
+/**
  * Sales activity (web): voiding a card sale updates `Transactions` (`voided`, `voidedBy`)
  * but the linked `Orders` row often stays `CLOSED` without `status: VOIDED`.
  * Merge void state from the sale/capture/pre-auth transaction so Orders tab badges
@@ -385,13 +416,17 @@ export function mapFirestoreOrderDoc(
       : docId.slice(-6);
   const otRaw = String(data.orderType ?? "");
   const online = isWebOnlineOrder(data);
+  const canonical = effectivePosOrderStatus(data);
+  const badge = onlineOpenPaymentBadgeFromEffective(canonical, data);
   return {
     id: docId,
     orderNumber,
     orderType: formatOrderTypeLabel(otRaw),
     orderTypeRaw: otRaw,
     total: totalInCents / 100,
-    status: effectivePosOrderStatus(data),
+    status: canonical,
+    statusDisplay:
+      badge !== canonical.trim().toUpperCase() ? badge : undefined,
     createdAt: createdAt ?? null,
     createdAtMs: createdAt ? createdAt.getTime() : 0,
     date: createdAt ? createdAt.toLocaleDateString() : "—",

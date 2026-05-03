@@ -30,6 +30,11 @@ const statusSolid: Record<
     className: "bg-amber-500 text-white",
     label: "Open",
   },
+  UNPAID: {
+    icon: AlertCircle,
+    className: "bg-orange-500 text-white",
+    label: "Unpaid",
+  },
   CLOSED: {
     icon: CheckCircle2,
     className: "bg-emerald-600 text-white",
@@ -125,7 +130,7 @@ export default function RecentOrdersGrid({
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
       {orders.map((order) => {
-        const status = statusPill(order.status);
+        const status = statusPill(order.statusDisplay ?? order.status);
         const StatusIcon = status.icon;
         const typeBadge = orderTypeBadgeStyle(order.orderTypeRaw ?? "");
         const href = `${linkBase}/${encodeURIComponent(order.id)}`;
