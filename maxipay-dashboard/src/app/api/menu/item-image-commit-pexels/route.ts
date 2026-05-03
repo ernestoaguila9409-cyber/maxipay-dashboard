@@ -117,10 +117,12 @@ export async function POST(req: Request) {
     if (businessLogo) {
       try {
         const sharp = (await import("sharp")).default;
-        uploadBuf = await sharp(buf)
-          .resize(512, 512, { fit: "inside", withoutEnlargement: true })
-          .png()
-          .toBuffer();
+        uploadBuf = Buffer.from(
+          await sharp(buf)
+            .resize(512, 512, { fit: "inside", withoutEnlargement: true })
+            .png()
+            .toBuffer(),
+        );
         uploadContentType = "image/png";
       } catch (e) {
         console.error("[api/menu/item-image-commit-pexels] business logo normalize failed", e);

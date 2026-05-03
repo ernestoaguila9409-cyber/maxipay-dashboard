@@ -59,11 +59,11 @@ export async function POST(req: Request) {
     }>;
 
     const results: BrandfetchResult[] = (Array.isArray(data) ? data : [])
-      .filter((b) => b.domain)
+      .filter((b): b is typeof b & { domain: string } => Boolean(b.domain?.trim()))
       .map((b) => ({
         brandId: b.brandId ?? "",
         name: b.name ?? b.domain ?? "",
-        domain: b.domain!,
+        domain: b.domain,
         icon: b.icon ?? "",
         logoUrl: `https://cdn.brandfetch.io/${encodeURIComponent(b.domain)}?c=${encodeURIComponent(clientId)}&type=logo&w=512&h=512`,
       }));
