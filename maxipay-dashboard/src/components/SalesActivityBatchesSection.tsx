@@ -9,6 +9,7 @@ import {
   query,
   where,
   type DocumentData,
+  type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { getApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -42,6 +43,24 @@ function closedAtMs(d: DocumentData): number {
   return 0;
 }
 
+/** Same rule as Cloud Function `resolveSpinSettleCredentials`: first active SPIN_P row. */
+const PAYMENT_TERMINALS = "payment_terminals";
+
+function firstSpinPSettlementTerminalLabel(
+  docs: QueryDocumentSnapshot<DocumentData>[]
+): string {
+  for (const doc of docs) {
+    const d = doc.data();
+    if (String(d.provider ?? "").toUpperCase() !== "SPIN_P") continue;
+    const model = String(d.deviceModel ?? "").trim();
+    const name = String(d.name ?? "").trim();
+    if (model) return model;
+    if (name) return name;
+    return "SPIn terminal";
+  }
+  return "";
+}
+
 interface ClosedBatchRow {
   id: string;
   totalSales: number;
@@ -62,6 +81,8 @@ export default function SalesActivityBatchesSection() {
   const [closeError, setCloseError] = useState<string | null>(null);
   const [closeOk, setCloseOk] = useState<string | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
+  /** From `payment_terminals` (Settings → Payments), first active SPIN_P — matches batch-close credential pick. */
+  const [settleTerminalLabel, setSettleTerminalLabel] = useState("");
 
   const canCloseFromWeb =
     !loadingOpen && preAuthCount === 0 && settleable > 0 && !closeBusy;
@@ -70,8 +91,12 @@ export default function SalesActivityBatchesSection() {
     if (!user || preAuthCount > 0 || settleable <= 0) return;
     setCloseError(null);
     setCloseOk(null);
+    const settleTarget =
+      settleTerminalLabel.length > 0
+        ? `your active SPIn profile for \u201c${settleTerminalLabel}\u201d (Settings \u2192 Payments)`
+        : "your active SPIn (P-series) profile in Settings \u2192 Payments";
     const ok = window.confirm(
-      "Close the open batch?\n\nThis will send a Z8 settlement request to your processor (SPIn / Dejavoo), then mark all open transactions as settled and start a new batch \u2014 the same steps the POS runs when you tap Settle batch."
+      `Close the open batch?\n\nThis sends a batch settlement to the processor using ${settleTarget}, then marks open transactions settled and starts a new batch \u2014 the same flow as Settle batch on the POS.`
     );
     if (!ok) return;
     setCloseBusy(true);
@@ -114,7 +139,23 @@ export default function SalesActivityBatchesSection() {
     } finally {
       setCloseBusy(false);
     }
-  }, [user, preAuthCount, settleable, openBatchId]);
+  }, [user, preAuthCount, settleable, openBatchId, settleTerminalLabel]);
+
+  useEffect(() => {
+    if (!user) return;
+    const qPay = query(
+      collection(db, PAYMENT_TERMINALS),
+      where("active", "==", true)
+    );
+    const unsubPay = onSnapshot(
+      qPay,
+      (snap) => {
+        setSettleTerminalLabel(firstSpinPSettlementTerminalLabel(snap.docs));
+      },
+      () => {}
+    );
+    return () => unsubPay();
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -256,8 +297,9 @@ export default function SalesActivityBatchesSection() {
         <Layers className="w-5 h-5 text-slate-600 shrink-0" aria-hidden />
         <h2 className="text-lg font-semibold text-slate-800">Batches</h2>
         <span className="text-xs text-slate-500 ml-auto max-w-md text-right">
-          Matches Settle batch on the POS. Sends a Z8 settlement to your
-          processor (SPIn / Dejavoo), then updates Firestore.
+          {settleTerminalLabel
+            ? `Matches Settle batch on the POS. Uses your Payments profile (${settleTerminalLabel}) for SPIn settlement, then updates Firestore.`
+            : "Matches Settle batch on the POS. Uses your active SPIn (P-series) Payments profile for settlement, then updates Firestore."}
         </span>
       </div>
 
