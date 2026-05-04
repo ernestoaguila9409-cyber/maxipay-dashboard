@@ -50,6 +50,8 @@ export interface OnlineModifierOption {
   /** Additional charge in dollars (same as Firestore / POS). */
   price: number;
   triggersModifierGroupIds: string[];
+  /** Optional Firebase image URL (dashboard modifier option photo). */
+  imageUrl?: string;
 }
 
 export interface OnlineModifierGroup {
@@ -105,14 +107,20 @@ function asRecord(data: DocumentData): Record<string, unknown> {
 
 function parseModifierGroupDoc(id: string, data: DocumentData): OnlineModifierGroup {
   const rawOptions = Array.isArray(data.options) ? data.options : [];
-  const options: OnlineModifierOption[] = rawOptions.map((o: Record<string, unknown>, i: number) => ({
-    id: (o.id as string) || `opt_${i}`,
-    name: (o.name as string) || "",
-    price: typeof o.price === "number" ? o.price : 0,
-    triggersModifierGroupIds: Array.isArray(o.triggersModifierGroupIds)
-      ? (o.triggersModifierGroupIds as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0)
-      : [],
-  }));
+  const options: OnlineModifierOption[] = rawOptions.map((o: Record<string, unknown>, i: number) => {
+    const imgRaw = o.imageUrl;
+    const imageUrl =
+      typeof imgRaw === "string" && imgRaw.trim() ? imgRaw.trim() : undefined;
+    return {
+      id: (o.id as string) || `opt_${i}`,
+      name: (o.name as string) || "",
+      price: typeof o.price === "number" ? o.price : 0,
+      triggersModifierGroupIds: Array.isArray(o.triggersModifierGroupIds)
+        ? (o.triggersModifierGroupIds as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0)
+        : [],
+      ...(imageUrl ? { imageUrl } : {}),
+    };
+  });
   return {
     id,
     name: (data.name as string) || "",

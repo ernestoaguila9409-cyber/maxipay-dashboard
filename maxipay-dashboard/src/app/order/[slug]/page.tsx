@@ -39,6 +39,7 @@ type ModifierOption = {
   name: string;
   price: number;
   triggersModifierGroupIds: string[];
+  imageUrl?: string;
 };
 
 type ModifierGroup = {
@@ -115,7 +116,7 @@ function formatRemoveModifierLabel(name: string): string {
   return `No ${t}`;
 }
 
-type ModifierCartRow = { label: string; remove: boolean; extraCents: number };
+type ModifierCartRow = { label: string; remove: boolean; extraCents: number; imageUrl?: string };
 
 /** Per-modifier rows for cart UI; [extraCents] is ADD-on price in cents (0 for REMOVE / free). */
 function modifierCartRows(selections: ModifierSelection[], groupMap: Map<string, ModifierGroup>): ModifierCartRow[] {
@@ -126,7 +127,8 @@ function modifierCartRows(selections: ModifierSelection[], groupMap: Map<string,
     if (!opt?.name) continue;
     const remove = g?.groupType === "REMOVE";
     const extraCents = remove ? 0 : Math.round(opt.price * 100);
-    out.push({ label: opt.name, remove, extraCents });
+    const img = opt.imageUrl?.trim();
+    out.push({ label: opt.name, remove, extraCents, ...(img ? { imageUrl: img } : {}) });
   }
   return out;
 }
@@ -159,9 +161,19 @@ function CartLinePriceBlock({
           {modRows.map((m, i) => (
             <div
               key={i}
-              className={`flex justify-between gap-2 pl-0.5 ${metaCls} mt-0.5 ${m.remove ? "text-red-700" : "text-neutral-600"}`}
+              className={`flex justify-between gap-2 items-center pl-0.5 ${metaCls} mt-0.5 ${m.remove ? "text-red-700" : "text-neutral-600"}`}
             >
-              <span className="min-w-0">• {m.remove ? formatRemoveModifierLabel(m.label) : m.label}</span>
+              <span className="min-w-0 flex items-center gap-2">
+                {m.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={m.imageUrl}
+                    alt=""
+                    className={`shrink-0 rounded-md object-cover border border-neutral-200 bg-neutral-50 ${compact ? "w-4 h-4" : "w-5 h-5"}`}
+                  />
+                ) : null}
+                <span>• {m.remove ? formatRemoveModifierLabel(m.label) : m.label}</span>
+              </span>
               {!m.remove && m.extraCents > 0 ? (
                 <span className={`shrink-0 tabular-nums font-medium ${O.primaryText}`}>+{fmt(m.extraCents)}</span>
               ) : null}
@@ -728,13 +740,24 @@ function CustomizeSheet({
                 {g.options.map((opt) => {
                   const picked = (draft[g.id] ?? []).includes(opt.id);
                   const priceLabel = g.groupType === "REMOVE" ? "" : opt.price > 0 ? ` +${fmt(Math.round(opt.price * 100))}` : "";
+                  const optImg = opt.imageUrl?.trim();
                   return (
                     <button key={opt.id} type="button" onClick={() => toggle(g, opt.id)}
-                      className={`flex items-center justify-between text-left rounded-xl border px-3 py-2.5 text-sm transition-colors ${
+                      className={`flex items-center justify-between gap-3 text-left rounded-xl border px-3 py-2.5 text-sm transition-colors ${
                         picked ? "border-[#EA580C] bg-orange-50" : "border-neutral-200 hover:border-neutral-300"
                       }`}
                     >
-                      <span className="font-medium text-neutral-900">{opt.name}</span>
+                      <span className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="shrink-0 w-11 h-11 rounded-lg border border-neutral-200 bg-neutral-100 overflow-hidden flex items-center justify-center">
+                          {optImg ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={optImg} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-neutral-300"><IconStore size={18} /></span>
+                          )}
+                        </span>
+                        <span className="font-medium text-neutral-900 truncate">{opt.name}</span>
+                      </span>
                       {priceLabel ? <span className="text-neutral-600 tabular-nums text-xs shrink-0">{priceLabel}</span> : null}
                     </button>
                   );
