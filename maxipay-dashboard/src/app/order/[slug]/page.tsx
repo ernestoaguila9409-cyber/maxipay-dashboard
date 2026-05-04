@@ -115,16 +115,67 @@ function formatRemoveModifierLabel(name: string): string {
   return `No ${t}`;
 }
 
-/** Per-modifier rows for cart UI (matches POS cart line bullets; REMOVE styled separately). */
-function modifierCartRows(selections: ModifierSelection[], groupMap: Map<string, ModifierGroup>): { label: string; remove: boolean }[] {
-  const out: { label: string; remove: boolean }[] = [];
+type ModifierCartRow = { label: string; remove: boolean; extraCents: number };
+
+/** Per-modifier rows for cart UI; [extraCents] is ADD-on price in cents (0 for REMOVE / free). */
+function modifierCartRows(selections: ModifierSelection[], groupMap: Map<string, ModifierGroup>): ModifierCartRow[] {
+  const out: ModifierCartRow[] = [];
   for (const s of selections) {
     const g = groupMap.get(s.groupId);
     const opt = g?.options.find((o) => o.id === s.optionId);
     if (!opt?.name) continue;
-    out.push({ label: opt.name, remove: g?.groupType === "REMOVE" });
+    const remove = g?.groupType === "REMOVE";
+    const extraCents = remove ? 0 : Math.round(opt.price * 100);
+    out.push({ label: opt.name, remove, extraCents });
   }
   return out;
+}
+
+/** Base item price + priced modifiers + line total (matches Android cart breakdown). */
+function CartLinePriceBlock({
+  line,
+  groupMap,
+  compact = false,
+}: {
+  line: CartLine;
+  groupMap: Map<string, ModifierGroup>;
+  compact?: boolean;
+}) {
+  const base = line.item.unitPriceCents;
+  const unit = unitPriceCentsForLine(line.item, line.selections, groupMap);
+  const lineTotal = unit * line.quantity;
+  const modRows = modifierCartRows(line.selections, groupMap);
+  const hasSelections = modRows.length > 0;
+  const metaCls = compact ? "text-[11px]" : "text-xs";
+  const totalCls = compact ? "text-xs" : "text-sm";
+  const totalMt = compact ? "mt-1" : "mt-1.5";
+
+  return (
+    <>
+      {hasSelections ? (
+        <>
+          <p className={`${metaCls} text-neutral-600 mt-0.5 tabular-nums`}>Base · {fmt(base)}</p>
+          <p className={`${metaCls} text-neutral-500 tabular-nums`}>Qty {line.quantity}</p>
+          {modRows.map((m, i) => (
+            <div
+              key={i}
+              className={`flex justify-between gap-2 pl-0.5 ${metaCls} mt-0.5 ${m.remove ? "text-red-700" : "text-neutral-600"}`}
+            >
+              <span className="min-w-0">• {m.remove ? formatRemoveModifierLabel(m.label) : m.label}</span>
+              {!m.remove && m.extraCents > 0 ? (
+                <span className={`shrink-0 tabular-nums font-medium ${O.primaryText}`}>+{fmt(m.extraCents)}</span>
+              ) : null}
+            </div>
+          ))}
+        </>
+      ) : (
+        <p className={`${metaCls} text-neutral-500 mt-0.5 tabular-nums`}>
+          Qty {line.quantity} · {fmt(base)} ea
+        </p>
+      )}
+      <p className={`${totalCls} font-bold text-emerald-900 ${totalMt} tabular-nums`}>Line total: {fmt(lineTotal)}</p>
+    </>
+  );
 }
 
 /* ═══════════════════════════════════════════
@@ -372,11 +423,7 @@ function CartSidebar({
         ) : (
           <>
             <div className="flex-1 overflow-y-auto px-5 py-3 space-y-4">
-              {lines.map((l) => {
-                const unit = unitPriceCentsForLine(l.item, l.selections, groupMap);
-                const lineTotal = unit * l.quantity;
-                const modRows = modifierCartRows(l.selections, groupMap);
-                return (
+              {lines.map((l) => (
                   <div key={l.lineId} className="flex items-start gap-3">
                     {l.item.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -386,17 +433,7 @@ function CartSidebar({
                     )}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-neutral-900 truncate">{l.item.name}</p>
-                      <p className="text-xs text-neutral-500 mt-0.5 tabular-nums">
-                        Qty {l.quantity} · {fmt(unit)} ea
-                      </p>
-                      {modRows.map((m, i) => (
-                        <p key={i} className={`text-[11px] mt-0.5 pl-0.5 ${m.remove ? "text-red-700" : "text-neutral-600"}`}>
-                          • {m.remove ? formatRemoveModifierLabel(m.label) : m.label}
-                        </p>
-                      ))}
-                      <p className="text-sm font-bold text-emerald-900 mt-1.5 tabular-nums">
-                        Line total: {fmt(lineTotal)}
-                      </p>
+                      <CartLinePriceBlock line={l} groupMap={groupMap} />
                       <div className={`flex items-center gap-0 mt-2 ${O.primaryText}`}>
                         <button type="button" onClick={() => onDec(l.lineId)} className="w-6 h-6 rounded-full border border-[#EA580C] flex items-center justify-center hover:bg-orange-50 transition-colors">
                           {l.quantity === 1 ? <IconTrash size={10} /> : <IconMinus size={12} />}
@@ -408,8 +445,7 @@ function CartSidebar({
                       </div>
                     </div>
                   </div>
-                );
-              })}
+              ))}
             </div>
 
             <div className="border-t border-neutral-100 px-5 py-4 space-y-2">
@@ -480,11 +516,7 @@ function MobileCartSheet({
           <button type="button" onClick={onClose} className="p-1.5 rounded-full hover:bg-neutral-100 transition-colors"><IconX size={20} /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {lines.map((l) => {
-            const unit = unitPriceCentsForLine(l.item, l.selections, groupMap);
-            const lineTotal = unit * l.quantity;
-            const modRows = modifierCartRows(l.selections, groupMap);
-            return (
+          {lines.map((l) => (
               <div key={l.lineId} className="flex items-start gap-3">
                 {l.item.imageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -494,15 +526,7 @@ function MobileCartSheet({
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-neutral-900 truncate">{l.item.name}</p>
-                  <p className="text-xs text-neutral-500 mt-0.5 tabular-nums">
-                    Qty {l.quantity} · {fmt(unit)} ea
-                  </p>
-                  {modRows.map((m, i) => (
-                    <p key={i} className={`text-[11px] mt-0.5 ${m.remove ? "text-red-700" : "text-neutral-600"}`}>
-                      • {m.remove ? formatRemoveModifierLabel(m.label) : m.label}
-                    </p>
-                  ))}
-                  <p className="text-sm font-bold text-emerald-900 mt-1 tabular-nums">Line total: {fmt(lineTotal)}</p>
+                  <CartLinePriceBlock line={l} groupMap={groupMap} compact />
                   <div className={`flex items-center gap-0 mt-2 ${O.primaryText}`}>
                     <button type="button" onClick={() => onDec(l.lineId)} className="w-7 h-7 rounded-full border border-[#EA580C] flex items-center justify-center hover:bg-orange-50 transition-colors">
                       {l.quantity === 1 ? <IconTrash size={11} /> : <IconMinus size={13} />}
@@ -514,8 +538,7 @@ function MobileCartSheet({
                   </div>
                 </div>
               </div>
-            );
-          })}
+          ))}
         </div>
         <div className="border-t border-neutral-100 px-5 py-4 space-y-3 pb-6">
           <div className="flex justify-between text-sm font-bold text-neutral-900">
@@ -565,27 +588,14 @@ function CheckoutModal({
           <div>
             <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Order summary</h3>
             <div className="space-y-2">
-              {lines.map((l) => {
-                const unit = unitPriceCentsForLine(l.item, l.selections, groupMap);
-                const lineTotal = unit * l.quantity;
-                const modRows = modifierCartRows(l.selections, groupMap);
-                return (
+              {lines.map((l) => (
                   <div key={l.lineId} className="text-sm border-b border-neutral-100 pb-2 last:border-0">
                     <div className="text-neutral-700 min-w-0">
                       <span className="font-semibold">{l.item.name}</span>
-                      <span className="block text-xs text-neutral-500 mt-0.5 tabular-nums">
-                        Qty {l.quantity} · {fmt(unit)} ea
-                      </span>
-                      {modRows.map((m, i) => (
-                        <span key={i} className={`block text-xs mt-0.5 ${m.remove ? "text-red-700" : "text-neutral-500"}`}>
-                          • {m.remove ? formatRemoveModifierLabel(m.label) : m.label}
-                        </span>
-                      ))}
-                      <span className="block text-xs font-bold text-emerald-900 mt-1 tabular-nums">Line total: {fmt(lineTotal)}</span>
+                      <CartLinePriceBlock line={l} groupMap={groupMap} compact />
                     </div>
                   </div>
-                );
-              })}
+              ))}
               <div className="flex justify-between text-sm font-bold pt-2 border-t border-neutral-100">
                 <span>Total</span><span className="tabular-nums">{fmt(subtotal)}</span>
               </div>
