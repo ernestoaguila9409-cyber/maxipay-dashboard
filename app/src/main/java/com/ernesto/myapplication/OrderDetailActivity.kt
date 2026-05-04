@@ -2201,6 +2201,7 @@ class OrderDetailActivity : AppCompatActivity() {
                             return@addOnSuccessListener
                         }
 
+                        val isPerItemRefund = !refundedLineKey.isNullOrBlank()
                         val txBatchId = txDoc.getString("batchId")?.takeIf { it.isNotBlank() }
                             ?: currentBatchId?.takeIf { it.isNotBlank() }
 
@@ -2208,8 +2209,9 @@ class OrderDetailActivity : AppCompatActivity() {
                             db.collection("Batches").document(txBatchId).get()
                                 .addOnSuccessListener batchCheck@{ batchDoc ->
                                     val batchIsClosed = batchDoc.getBoolean("closed") ?: true
-                                    if (batchIsClosed) {
-                                        finalizeRefund(transactionId, refundAmountInCents, finishAfter, refundedItemName, refundedLineKey, paymentType)
+                                    val useServerRefund = batchIsClosed || !isPerItemRefund
+                                    if (useServerRefund) {
+                                        callServerRefund(transactionId, refundAmountInCents, finishAfter, refundedItemName, refundedLineKey)
                                         return@batchCheck
                                     }
                                     val leg = SpinGatewayP.cardLegForHostReturnFromTxDoc(txDoc)
@@ -2246,21 +2248,7 @@ class OrderDetailActivity : AppCompatActivity() {
                                     )
                                 }
                         } else {
-                            val leg = SpinGatewayP.cardLegForHostReturnFromTxDoc(txDoc)
-                            if (leg.referenceId.isBlank() && leg.clientReferenceId.isBlank()) {
-                                Toast.makeText(this, "Cannot refund: no reference for this transaction.", Toast.LENGTH_LONG).show()
-                                return@addOnSuccessListener
-                            }
-                            callRefundApi(
-                                leg = leg,
-                                paymentType = paymentType,
-                                amount = refundAmountInCents / 100.0,
-                                originalTransactionId = transactionId,
-                                amountInCents = refundAmountInCents,
-                                finishAfter = finishAfter,
-                                refundedItemName = refundedItemName,
-                                refundedLineKey = refundedLineKey
-                            )
+                            callServerRefund(transactionId, refundAmountInCents, finishAfter, refundedItemName, refundedLineKey)
                         }
                     }
             }
@@ -2298,6 +2286,41 @@ class OrderDetailActivity : AppCompatActivity() {
                 finalizeRefund(originalTransactionId, amountInCents, finishAfter, refundedItemName, refundedLineKey, paymentType)
             }
         }
+    }
+    private fun callServerRefund(
+        transactionId: String,
+        amountInCents: Long,
+        finishAfter: Boolean,
+        refundedItemName: String? = null,
+        refundedLineKey: String? = null
+    ) {
+        val data = hashMapOf<String, Any>(
+            "transactionId" to transactionId,
+            "orderId" to orderId,
+            "amountInCents" to amountInCents
+        )
+        refundedLineKey?.takeIf { it.isNotBlank() }?.let { data["refundedLineKey"] = it }
+        refundedItemName?.takeIf { it.isNotBlank() }?.let { data["refundedItemName"] = it }
+
+        Toast.makeText(this, "Processing server refund…", Toast.LENGTH_SHORT).show()
+
+        FirebaseFunctions.getInstance()
+            .getHttpsCallable("processServerRefund")
+            .call(data)
+            .addOnSuccessListener { result ->
+                val response = result.data as? Map<*, *>
+                if (response?.get("success") == true) {
+                    val msg = response["message"]?.toString() ?: "Refund processed."
+                    Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                    if (finishAfter) finish() else loadHeader()
+                } else {
+                    val err = response?.get("error")?.toString() ?: "Refund failed."
+                    Toast.makeText(this, err, Toast.LENGTH_LONG).show()
+                }
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(this, "Refund failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
     }
     // ===============================
     // RECEIPT FLOW
