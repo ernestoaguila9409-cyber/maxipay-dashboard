@@ -8,9 +8,12 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.CheckBox
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import coil.load
+import coil.transform.RoundedCornersTransformation
 import androidx.appcompat.app.AlertDialog as AppCompatAlertDialog
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -25,6 +28,7 @@ data class ModifierOptionDisplay(
     val triggersModifierGroupIds: List<String> = emptyList(),
     /** Persisted `action` on Firestore (`ADD` / `REMOVE`). */
     val action: String = "ADD",
+    val imageUrl: String? = null,
 )
 
 class ModifierOptionAdapter(
@@ -40,6 +44,7 @@ class ModifierOptionAdapter(
     private var filteredList: List<ModifierOptionDisplay> = optionList
 
     inner class OptionViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val imgOptionThumb: ImageView = view.findViewById(R.id.imgOptionThumb)
         val txtOptionName: TextView = view.findViewById(R.id.txtOptionName)
         val txtOptionPrice: TextView = view.findViewById(R.id.txtOptionPrice)
         val btnEdit: ImageButton = view.findViewById(R.id.btnEdit)
@@ -77,6 +82,18 @@ class ModifierOptionAdapter(
         } else {
             holder.txtOptionPrice.text = "+$${String.format(Locale.US, "%.2f", option.price)}"
             holder.txtOptionPrice.visibility = View.VISIBLE
+        }
+
+        val thumb = option.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
+        if (thumb != null) {
+            holder.imgOptionThumb.visibility = View.VISIBLE
+            holder.imgOptionThumb.load(thumb) {
+                crossfade(true)
+                transformations(RoundedCornersTransformation(8f))
+            }
+        } else {
+            holder.imgOptionThumb.visibility = View.GONE
+            holder.imgOptionThumb.setImageDrawable(null)
         }
 
         holder.btnEdit.setOnClickListener { showEditOptionDialog(option) }
@@ -211,6 +228,7 @@ class ModifierOptionAdapter(
                                         "price" to newPrice,
                                         "triggersModifierGroupIds" to selectedTriggers,
                                         "action" to newAction,
+                                        "imageUrl" to (opt["imageUrl"] as? String ?: option.imageUrl ?: ""),
                                     )
                                 } else {
                                     opt

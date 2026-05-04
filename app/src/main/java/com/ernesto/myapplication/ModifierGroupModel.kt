@@ -17,4 +17,6 @@ data class ModifierOptionEntry(
     val triggersModifierGroupIds: List<String> = emptyList(),
     /** Per-option remove (e.g. "No onions"); stored on `ModifierOptions` / embedded `options[]` as `action`. */
     val action: String = "ADD",
+    /** Optional Firebase / HTTPS URL (Firestore `imageUrl` on option or `ModifierOptions`). */
+    val imageUrl: String? = null,
 )

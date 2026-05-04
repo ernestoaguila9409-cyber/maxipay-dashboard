@@ -23,7 +23,10 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
+import coil.imageLoader
 import coil.load
+import coil.request.ImageRequest
+import coil.size.Scale
 import coil.transform.RoundedCornersTransformation
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -1647,7 +1650,8 @@ class MenuActivity : AppCompatActivity() {
                 @Suppress("UNCHECKED_CAST")
                 val triggers = (map["triggersModifierGroupIds"] as? List<String>) ?: emptyList()
                 val act = normalizedModifierOptionAction(map["action"] as? String, groupType)
-                ModifierOptionEntry(oId, oN, oP, triggers, act)
+                val img = trimMenuImageUrl(map["imageUrl"]?.toString())
+                ModifierOptionEntry(oId, oN, oP, triggers, act, imageUrl = img)
             } ?: emptyList()
         }
 
@@ -1694,7 +1698,8 @@ class MenuActivity : AppCompatActivity() {
                             @Suppress("UNCHECKED_CAST")
                             val tr = (doc.get("triggersModifierGroupIds") as? List<String>) ?: emptyList()
                             val act = normalizedModifierOptionAction(doc.getString("action"), info.groupType)
-                            val entry = ModifierOptionEntry(doc.id, oN, oP, tr, act)
+                            val img = trimMenuImageUrl(doc.getString("imageUrl"))
+                            val entry = ModifierOptionEntry(doc.id, oN, oP, tr, act, imageUrl = img)
                             allGroupInfos[gId] = info.copy(options = info.options + entry)
                             tr.forEach { triggeredGroupIds.add(it) }
                         }
@@ -2065,10 +2070,49 @@ class MenuActivity : AppCompatActivity() {
         for (i in 0 until container.childCount) {
             when (val child = container.getChildAt(i)) {
                 is CheckBox -> child.isChecked = false
+                is RadioButton -> child.isChecked = false
                 is RadioGroup -> child.clearCheck()
                 is LinearLayout -> resetGroupSelectionUI(child)
             }
         }
+    }
+
+    /** Loads a small start thumbnail for modifier option rows (RadioButton / CheckBox). */
+    private fun loadModifierOptionThumb(target: TextView, imageUrl: String?) {
+        val u = trimMenuImageUrl(imageUrl)
+        if (u.isNullOrEmpty()) {
+            target.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, null, null)
+            target.compoundDrawablePadding = 0
+            return
+        }
+        val density = resources.displayMetrics.density
+        val sidePx = (44 * density).toInt()
+        target.compoundDrawablePadding = (10 * density).toInt()
+        val request = ImageRequest.Builder(this)
+            .data(u)
+            .size(sidePx, sidePx)
+            .scale(Scale.FIT)
+            .transformations(RoundedCornersTransformation(6f))
+            .listener(
+                onError = { _, _ ->
+                    target.post {
+                        target.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, null, null)
+                        target.compoundDrawablePadding = 0
+                    }
+                },
+                onSuccess = { _, result ->
+                    target.post {
+                        target.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                            result.drawable,
+                            null,
+                            null,
+                            null,
+                        )
+                    }
+                },
+            )
+            .build()
+        imageLoader.enqueue(request)
     }
 
     private fun renderNestedOptions(
@@ -2092,6 +2136,7 @@ class MenuActivity : AppCompatActivity() {
                     text = opt.name
                     setTextColor(Color.parseColor("#D32F2F"))
                 }
+                loadModifierOptionThumb(checkBox, opt.imageUrl)
                 groupContainer.addView(checkBox)
                 viewMap?.put(opt.id, checkBox)
 
@@ -2122,6 +2167,7 @@ class MenuActivity : AppCompatActivity() {
                     }
                     if (isLineRemove) setTextColor(Color.parseColor("#D32F2F"))
                 }
+                loadModifierOptionThumb(radioButton, opt.imageUrl)
                 radioGroup.addView(radioButton)
                 viewMap?.put(opt.id, radioButton)
 
@@ -2151,6 +2197,7 @@ class MenuActivity : AppCompatActivity() {
                     }
                     if (isLineRemove) setTextColor(Color.parseColor("#D32F2F"))
                 }
+                loadModifierOptionThumb(checkBox, opt.imageUrl)
                 groupContainer.addView(checkBox)
                 viewMap?.put(opt.id, checkBox)
 

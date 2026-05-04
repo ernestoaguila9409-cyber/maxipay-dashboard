@@ -98,6 +98,7 @@ class GlobalModifierActivity : AppCompatActivity() {
                             price = (opt["price"] as? Number)?.toDouble() ?: 0.0,
                             triggersModifierGroupIds = (opt["triggersModifierGroupIds"] as? List<String>) ?: emptyList(),
                             action = optAction,
+                            imageUrl = (opt["imageUrl"] as? String)?.trim()?.takeIf { it.isNotEmpty() },
                         )
                     }
 
@@ -176,6 +177,7 @@ class GlobalModifierActivity : AppCompatActivity() {
                             isRemove = showRemoveStyle,
                             triggersModifierGroupIds = (opt["triggersModifierGroupIds"] as? List<String>) ?: emptyList(),
                             action = storedAction,
+                            imageUrl = (opt["imageUrl"] as? String)?.trim()?.takeIf { it.isNotEmpty() },
                         )
                     }.sortedBy { it.name.lowercase() }
 
@@ -219,7 +221,9 @@ class GlobalModifierActivity : AppCompatActivity() {
                                     name = name,
                                     price = price,
                                     isRemove = showRemoveStyle,
+                                    triggersModifierGroupIds = (doc.get("triggersModifierGroupIds") as? List<String>) ?: emptyList(),
                                     action = storedAction,
+                                    imageUrl = doc.getString("imageUrl")?.trim()?.takeIf { it.isNotEmpty() },
                                 )
                             )
                         }
