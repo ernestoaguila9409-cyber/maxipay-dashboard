@@ -317,6 +317,8 @@ export default function OrderDetailPage() {
   );
   const [orderRefreshNonce, setOrderRefreshNonce] = useState(0);
 
+  const [batchClosed, setBatchClosed] = useState<boolean | null>(null);
+
   const [voidSubmitting, setVoidSubmitting] = useState(false);
   const [voidErr, setVoidErr] = useState<string | null>(null);
   const [voidCmdId, setVoidCmdId] = useState<string | null>(null);
@@ -333,6 +335,7 @@ export default function OrderDetailPage() {
     setOpenSwipeLineId(null);
     setDirectRefundTargetLine(null);
     setOrderRefreshNonce(0);
+    setBatchClosed(null);
     setVoidSubmitting(false);
     setVoidErr(null);
     setVoidCmdId(null);
@@ -393,6 +396,24 @@ export default function OrderDetailPage() {
         }
         const data = snap.data() as Record<string, unknown>;
         setOrderData(data);
+
+        const orderBatchId = String(data.batchId ?? "").trim();
+        if (orderBatchId) {
+          try {
+            const batchSnap = await getDoc(doc(db, "Batches", orderBatchId));
+            if (!cancelled) {
+              setBatchClosed(
+                batchSnap.exists()
+                  ? (batchSnap.data()?.closed as boolean) ?? true
+                  : null,
+              );
+            }
+          } catch {
+            if (!cancelled) setBatchClosed(null);
+          }
+        } else {
+          if (!cancelled) setBatchClosed(null);
+        }
 
         const saleId = String(
           data.saleTransactionId ?? data.transactionId ?? ""
@@ -602,6 +623,9 @@ export default function OrderDetailPage() {
         !String(p.paymentType ?? "").toLowerCase().includes("cash")
     );
 
+  const canDirectRefundFull = canDirectRefund;
+  const canDirectRefundPerItem = canDirectRefund && batchClosed === true;
+
   const canVoidUnsettled =
     user != null &&
     orderData != null &&
@@ -619,7 +643,7 @@ export default function OrderDetailPage() {
   );
 
   const lineSwipeRefundEnabled =
-    Boolean(user) && termCaps.supportsRefund && canDirectRefund;
+    Boolean(user) && termCaps.supportsRefund && canDirectRefundPerItem;
 
   const directRefundModalMaxCents = directRefundTargetLine
     ? Math.min(
@@ -1024,7 +1048,7 @@ export default function OrderDetailPage() {
               )}
             </div>
 
-            {termCaps.supportsRefund && canDirectRefund ? (
+            {termCaps.supportsRefund && canDirectRefundFull ? (
               <div className="bg-emerald-50/90 rounded-2xl border border-emerald-100 shadow-sm p-4 space-y-3">
                 <button
                   type="button"

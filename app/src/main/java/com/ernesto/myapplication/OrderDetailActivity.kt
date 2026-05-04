@@ -2201,21 +2201,69 @@ class OrderDetailActivity : AppCompatActivity() {
                             return@addOnSuccessListener
                         }
 
-                        val leg = SpinGatewayP.cardLegForHostReturnFromTxDoc(txDoc)
-                        if (leg.referenceId.isBlank() && leg.clientReferenceId.isBlank()) {
-                            Toast.makeText(this, "Cannot refund: no reference for this transaction.", Toast.LENGTH_LONG).show()
-                            return@addOnSuccessListener
+                        val isPerItemRefund = !refundedLineKey.isNullOrBlank()
+                        val txBatchId = txDoc.getString("batchId")?.takeIf { it.isNotBlank() }
+                            ?: currentBatchId?.takeIf { it.isNotBlank() }
+
+                        if (txBatchId != null) {
+                            db.collection("Batches").document(txBatchId).get()
+                                .addOnSuccessListener batchCheck@{ batchDoc ->
+                                    val batchIsClosed = batchDoc.getBoolean("closed") ?: true
+                                    val useDirectRefund = batchIsClosed || !isPerItemRefund
+                                    if (useDirectRefund) {
+                                        finalizeRefund(transactionId, refundAmountInCents, finishAfter, refundedItemName, refundedLineKey, paymentType)
+                                        return@batchCheck
+                                    }
+                                    val leg = SpinGatewayP.cardLegForHostReturnFromTxDoc(txDoc)
+                                    if (leg.referenceId.isBlank() && leg.clientReferenceId.isBlank()) {
+                                        Toast.makeText(this@OrderDetailActivity, "Cannot refund: no reference for this transaction.", Toast.LENGTH_LONG).show()
+                                        return@batchCheck
+                                    }
+                                    callRefundApi(
+                                        leg = leg,
+                                        paymentType = paymentType,
+                                        amount = refundAmountInCents / 100.0,
+                                        originalTransactionId = transactionId,
+                                        amountInCents = refundAmountInCents,
+                                        finishAfter = finishAfter,
+                                        refundedItemName = refundedItemName,
+                                        refundedLineKey = refundedLineKey
+                                    )
+                                }
+                                .addOnFailureListener {
+                                    val leg = SpinGatewayP.cardLegForHostReturnFromTxDoc(txDoc)
+                                    if (leg.referenceId.isBlank() && leg.clientReferenceId.isBlank()) {
+                                        Toast.makeText(this@OrderDetailActivity, "Cannot refund: no reference for this transaction.", Toast.LENGTH_LONG).show()
+                                        return@addOnFailureListener
+                                    }
+                                    callRefundApi(
+                                        leg = leg,
+                                        paymentType = paymentType,
+                                        amount = refundAmountInCents / 100.0,
+                                        originalTransactionId = transactionId,
+                                        amountInCents = refundAmountInCents,
+                                        finishAfter = finishAfter,
+                                        refundedItemName = refundedItemName,
+                                        refundedLineKey = refundedLineKey
+                                    )
+                                }
+                        } else {
+                            val leg = SpinGatewayP.cardLegForHostReturnFromTxDoc(txDoc)
+                            if (leg.referenceId.isBlank() && leg.clientReferenceId.isBlank()) {
+                                Toast.makeText(this, "Cannot refund: no reference for this transaction.", Toast.LENGTH_LONG).show()
+                                return@addOnSuccessListener
+                            }
+                            callRefundApi(
+                                leg = leg,
+                                paymentType = paymentType,
+                                amount = refundAmountInCents / 100.0,
+                                originalTransactionId = transactionId,
+                                amountInCents = refundAmountInCents,
+                                finishAfter = finishAfter,
+                                refundedItemName = refundedItemName,
+                                refundedLineKey = refundedLineKey
+                            )
                         }
-                        callRefundApi(
-                            leg = leg,
-                            paymentType = paymentType,
-                            amount = refundAmountInCents / 100.0,
-                            originalTransactionId = transactionId,
-                            amountInCents = refundAmountInCents,
-                            finishAfter = finishAfter,
-                            refundedItemName = refundedItemName,
-                            refundedLineKey = refundedLineKey
-                        )
                     }
             }
     }
