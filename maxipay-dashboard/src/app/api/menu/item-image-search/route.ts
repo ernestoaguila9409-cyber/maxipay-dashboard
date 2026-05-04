@@ -141,7 +141,7 @@ async function searchPexels(
 }
 
 /**
- * POST body: { itemName?: string, query?: string, searchKind?: "menu" | "storefront" | "businessLogo" }
+ * POST body: { itemName?: string, query?: string, searchKind?: "menu" | "storefront" | "businessLogo" | "modifier" }
  * - If `query` is non-empty, searches Pexels directly (manual refine).
  * - Else uses OpenAI to turn `itemName` into a query, then Pexels.
  *   When searchKind is "storefront", the AI prompt targets wide hero/banner imagery instead of a single dish.
@@ -163,7 +163,9 @@ export async function POST(req: Request) {
         ? "storefront"
         : searchKindRaw === "businessLogo"
           ? "businessLogo"
-          : "menu";
+          : searchKindRaw === "modifier"
+            ? "modifier"
+            : "menu";
 
     let finalQuery: string;
     if (manual) {
@@ -174,6 +176,7 @@ export async function POST(req: Request) {
       } else if (searchKind === "businessLogo") {
         finalQuery = await buildBusinessLogoQuery(itemName);
       } else {
+        // "menu" and "modifier" — same food/stock photo query (sauces, toppings, sizes, etc.)
         finalQuery = await buildSearchQueryFromItemName(itemName);
       }
     } else {

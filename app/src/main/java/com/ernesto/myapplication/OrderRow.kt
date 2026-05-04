@@ -5,7 +5,10 @@ import com.google.firebase.Timestamp
 data class OrderRow(
     val id: String,
     val orderNumber: Long = 0L,
+    /** Firestore workflow status — used for filters and selection (OPEN, CLOSED, …). */
     val status: String,
+    /** List accent + pill text; may be UNPAID for web online pay-at-store while [status] stays OPEN. */
+    val badgeStatus: String = status,
     val totalCents: Long,
     val totalRefundedInCents: Long = 0L,
     val employeeName: String,

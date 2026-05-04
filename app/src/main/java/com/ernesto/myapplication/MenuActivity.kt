@@ -65,6 +65,17 @@ data class CartItem(
 
 class MenuActivity : AppCompatActivity() {
 
+    companion object {
+        /**
+         * When true (set from order detail for unpaid web online checkout), catalog stays hidden until
+         * staff taps **Update**; avoids a flash of the menu before Firestore confirms order type.
+         */
+        const val EXTRA_CART_FIRST_UNPAID_ONLINE = "EXTRA_CART_FIRST_UNPAID_ONLINE"
+
+        private const val BUNDLE_KEY_UNPAID_MENU_BROWSE_SUPPRESSED = "unpaidOnlineMenuBrowseSuppressed"
+        private const val KITCHEN_DESTINATION_PROBE_INTERVAL_MS = 7_000L
+    }
+
     private var currentCategoryId: String? = null
     private val db = FirebaseFirestore.getInstance()
 
@@ -118,9 +129,41 @@ class MenuActivity : AppCompatActivity() {
     private lateinit var txtTotal: TextView
     private lateinit var btnSendKitchen: MaterialButton
     private lateinit var btnCheckout: MaterialButton
+    private lateinit var btnUpdate: MaterialButton
+
+    /** True when [ORDER_ID] load is an unpaid web online order (pay at store / unpaid HPP). */
+    private var unpaidOnlineUpdateMode = false
+    private var browseMenuAfterUnpaidUpdatePending = false
+
+    /** When true with [unpaidOnlineUpdateMode], [menuBrowsePanel] is hidden until staff taps Update. */
+    private var unpaidOnlineMenuBrowseSuppressed = false
+
+    /**
+     * After a fresh activity start, first Firestore order read may apply cart-first catalog suppression
+     * for unpaid web online; cleared so rotation / re-entry does not force-hide again.
+     */
+    private var unpaidCatalogCartFirstApplyPending = false
+
+    private lateinit var menuBrowsePanel: View
+
+    /**
+     * Snapshot of lineKey → qty when a web-online order cart finishes loading; [Send Update] only after
+     * the cart differs from this (new line, qty change, or removal) and there is kitchen delta.
+     */
+    private var webOnlineKitchenSessionBaseline: Map<String, Int>? = null
 
     /** True if this order has had at least one explicit kitchen send (Firestore `lastKitchenSentAt`). */
     private var kitchenSentForOrder = false
+
+    /**
+     * Web online ordering ([OnlineOrderStatusDisplay.isWebOnlineOrder]): hide kitchen send until the cart
+     * has qty not yet reflected in [kitchenSentEffectiveByLineCache] (approve path already notified KDS/printer).
+     */
+    private var webOnlineOrderKitchenUi = false
+
+    /** Mirrors [KitchenPrintHelper.effectiveSentWithLegacyOrderMap] after order+items load; updated after POS kitchen send. */
+    private var kitchenSentEffectiveByLineCache: Map<String, Int> = emptyMap()
+    private var kitchenSentEffectiveCacheReady = false
 
     /**
      * Any line [kdsStatus] **PREPARING** (KDS START) blocks line deletes from the cart.
@@ -229,6 +272,14 @@ class MenuActivity : AppCompatActivity() {
         guestNames = intent.getStringArrayListExtra("guestNames")?.toMutableList() ?: mutableListOf()
         currentBatchId = intent.getStringExtra("batchId")
 
+        menuBrowsePanel = findViewById(R.id.menuBrowsePanel)
+        unpaidCatalogCartFirstApplyPending = savedInstanceState == null
+        if (savedInstanceState != null) {
+            unpaidOnlineMenuBrowseSuppressed =
+                savedInstanceState.getBoolean(BUNDLE_KEY_UNPAID_MENU_BROWSE_SUPPRESSED, false)
+        } else if (intent.getBooleanExtra(EXTRA_CART_FIRST_UNPAID_ONLINE, false)) {
+            unpaidOnlineMenuBrowseSuppressed = true
+        }
         categoryContainer = findViewById(R.id.categoryContainer)
         editItemSearch = findViewById(R.id.editItemSearch)
         itemGrid = findViewById(R.id.itemGrid)
@@ -281,6 +332,9 @@ class MenuActivity : AppCompatActivity() {
         txtTotal = findViewById(R.id.txtTotal)
         btnSendKitchen = findViewById(R.id.btnSendKitchen)
         btnCheckout = findViewById(R.id.btnCheckout)
+        btnUpdate = findViewById(R.id.btnUpdate)
+        btnUpdate.visibility = View.GONE
+        btnUpdate.setOnClickListener { openMenuToAddItemsForUnpaidOnlineOrder() }
         updateSendKitchenButtonLabel()
         btnSendKitchen.setOnClickListener { sendToKitchen() }
 
@@ -401,6 +455,12 @@ class MenuActivity : AppCompatActivity() {
         }
 
         syncCartButtonStates()
+        applyUnpaidOnlineMenuBrowseVisibility()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(BUNDLE_KEY_UNPAID_MENU_BROWSE_SUPPRESSED, unpaidOnlineMenuBrowseSuppressed)
     }
 
     override fun onStart() {
@@ -514,10 +574,24 @@ class MenuActivity : AppCompatActivity() {
 
     private fun loadExistingOrderIntoCart(orderId: String) {
         attachOrderKitchenStatusListener(orderId)
+        kitchenSentEffectiveCacheReady = false
+        kitchenSentEffectiveByLineCache = emptyMap()
+        webOnlineKitchenSessionBaseline = null
 
         db.collection("Orders").document(orderId)
             .get()
             .addOnSuccessListener { orderDoc ->
+
+                webOnlineOrderKitchenUi = OnlineOrderStatusDisplay.isWebOnlineOrder(orderDoc)
+                unpaidOnlineUpdateMode = OnlineOrderStatusDisplay.isUnpaidWebOnlineOrder(orderDoc)
+                if (!unpaidOnlineUpdateMode) {
+                    unpaidOnlineMenuBrowseSuppressed = false
+                } else if (unpaidCatalogCartFirstApplyPending) {
+                    unpaidOnlineMenuBrowseSuppressed = true
+                }
+                unpaidCatalogCartFirstApplyPending = false
+                applyUnpaidOnlineMenuBrowseVisibility()
+                syncCartButtonStates()
 
                 val nameFromOrder = orderDoc.getString("employeeName")
                 if (!nameFromOrder.isNullOrBlank()) {
@@ -525,8 +599,16 @@ class MenuActivity : AppCompatActivity() {
                 }
 
                 val docOrderType = orderDoc.getString("orderType") ?: ""
+                val orderTypeBefore = orderType
                 if (orderType.isBlank() && docOrderType.isNotBlank()) {
                     orderType = docOrderType
+                }
+                if (orderType != orderTypeBefore && orderType.isNotBlank()) {
+                    allMenuItemsLoaded = false
+                    loadAllMenuItems()
+                    loadActiveSchedules {
+                        loadCategories()
+                    }
                 }
 
                 currentBatchId = orderDoc.getString("batchId")
@@ -629,6 +711,16 @@ class MenuActivity : AppCompatActivity() {
                                 printerLabel = linePrinterLabel,
                                 imageUrl = lineImageUrl,
                             )
+                        }
+
+                        kitchenSentEffectiveByLineCache =
+                            KitchenPrintHelper.effectiveSentWithLegacyOrderMap(orderDoc, docs)
+                        kitchenSentEffectiveCacheReady = true
+                        if (webOnlineOrderKitchenUi) {
+                            webOnlineKitchenSessionBaseline =
+                                cartMap.entries.associate { it.key to it.value.quantity }
+                        } else {
+                            webOnlineKitchenSessionBaseline = null
                         }
 
                         refreshCart()
@@ -860,66 +952,160 @@ class MenuActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadCategories() {
+    /**
+     * Categories/menu items often list [TO_GO] but not [ONLINE_PICKUP]. Allow those for web pickup orders.
+     */
+    private fun orderTypeAllowedOnMenuEntity(effectiveTypes: List<String>): Boolean {
+        if (orderType.isBlank()) return true
+        if (effectiveTypes.isEmpty()) return true
+        if (effectiveTypes.any { it.equals(orderType, ignoreCase = true) }) return true
+        if (orderType.equals("ONLINE_PICKUP", ignoreCase = true) &&
+            effectiveTypes.any { it.equals("TO_GO", ignoreCase = true) }
+        ) {
+            return true
+        }
+        return false
+    }
+
+    private fun clearCategorySidebarUi() {
         categoryContainer.removeAllViews()
         categoryButtons.clear()
+        categoryAvailabilityMap.clear()
+        categoryKitchenLabels.clear()
+    }
 
-        val query = if (orderType.isNotBlank()) {
+    /** Builds sidebar buttons from a Firestore Categories snapshot (respects schedules). */
+    private fun populateCategoryButtonsFromSnapshot(documents: QuerySnapshot) {
+        for (doc in documents) {
+            val name = doc.getString("name") ?: continue
+            val categoryId = doc.id
+
+            @Suppress("UNCHECKED_CAST")
+            val catScheduleIds = (doc.get("scheduleIds") as? List<String>) ?: emptyList()
+            if (catScheduleIds.isNotEmpty()) {
+                if (activeScheduleIds.isEmpty() || catScheduleIds.none { it in activeScheduleIds }) {
+                    continue
+                }
+            }
+
+            @Suppress("UNCHECKED_CAST")
+            val availableOrderTypes =
+                (doc.get("availableOrderTypes") as? List<String>) ?: emptyList()
+            categoryAvailabilityMap[categoryId] = availableOrderTypes
+            val catKitchenLabel = doc.getString("kitchenLabel")?.trim().orEmpty()
+            if (catKitchenLabel.isNotEmpty()) categoryKitchenLabels[categoryId] = catKitchenLabel
+
+            val btn = TextView(this).apply {
+                text = name
+                tag = categoryId
+                textSize = 13f
+                setTextColor(Color.parseColor("#444444"))
+                setBackgroundResource(R.drawable.bg_category_button)
+                gravity = Gravity.CENTER
+                setPadding(8, 20, 8, 20)
+                isAllCaps = true
+                setTypeface(null, Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { setMargins(2, 3, 2, 3) }
+                setOnClickListener {
+                    currentSubcategoryId = null
+                    editItemSearch.text.clear()
+                    loadItems(categoryId)
+                }
+            }
+            categoryButtons.add(btn)
+            categoryContainer.addView(btn)
+        }
+    }
+
+    private fun finalizeCategorySidebar() {
+        loadSubcategories {}
+        if (browseMenuAfterUnpaidUpdatePending) {
+            if (categoryButtons.isNotEmpty()) {
+                browseMenuAfterUnpaidUpdatePending = false
+                val cid = categoryButtons.first().tag as? String
+                if (cid != null) {
+                    currentSubcategoryId = null
+                    editItemSearch.setText("")
+                    loadItems(cid)
+                    Toast.makeText(
+                        this@MenuActivity,
+                        R.string.cart_update_order_hint,
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            } else {
+                browseMenuAfterUnpaidUpdatePending = false
+                Toast.makeText(
+                    this@MenuActivity,
+                    R.string.cart_update_order_no_categories,
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    /**
+     * Many stores never add [ONLINE_PICKUP] to category `availableOrderTypes` (only TO_GO / DINE_IN).
+     * Fall back so online orders can still open the menu from **Update**.
+     */
+    private fun loadCategories() {
+        clearCategorySidebarUi()
+
+        val primaryQuery = if (orderType.isNotBlank()) {
             db.collection("Categories")
                 .whereArrayContains("availableOrderTypes", orderType)
         } else {
             db.collection("Categories")
         }
 
-        query.get()
+        primaryQuery.get()
             .addOnSuccessListener { documents ->
-                categoryAvailabilityMap.clear()
-                categoryKitchenLabels.clear()
-
-                for (doc in documents) {
-                    val name = doc.getString("name") ?: continue
-                    val categoryId = doc.id
-
-                    @Suppress("UNCHECKED_CAST")
-                    val catScheduleIds = (doc.get("scheduleIds") as? List<String>) ?: emptyList()
-                    if (catScheduleIds.isNotEmpty()) {
-                        if (activeScheduleIds.isEmpty() || catScheduleIds.none { it in activeScheduleIds }) {
-                            continue
-                        }
+                populateCategoryButtonsFromSnapshot(documents)
+                when {
+                    categoryButtons.isNotEmpty() -> finalizeCategorySidebar()
+                    orderType.equals("ONLINE_PICKUP", ignoreCase = true) -> {
+                        db.collection("Categories")
+                            .whereArrayContains("availableOrderTypes", "TO_GO")
+                            .get()
+                            .addOnSuccessListener { togoSnap ->
+                                clearCategorySidebarUi()
+                                populateCategoryButtonsFromSnapshot(togoSnap)
+                                if (categoryButtons.isNotEmpty()) {
+                                    finalizeCategorySidebar()
+                                } else {
+                                    db.collection("Categories").get()
+                                        .addOnSuccessListener { allSnap ->
+                                            clearCategorySidebarUi()
+                                            populateCategoryButtonsFromSnapshot(allSnap)
+                                            finalizeCategorySidebar()
+                                        }
+                                        .addOnFailureListener {
+                                            clearCategorySidebarUi()
+                                            finalizeCategorySidebar()
+                                        }
+                                }
+                            }
+                            .addOnFailureListener {
+                                db.collection("Categories").get()
+                                    .addOnSuccessListener { allSnap ->
+                                        clearCategorySidebarUi()
+                                        populateCategoryButtonsFromSnapshot(allSnap)
+                                        finalizeCategorySidebar()
+                                    }
+                                    .addOnFailureListener {
+                                        finalizeCategorySidebar()
+                                    }
+                            }
                     }
-
-                    @Suppress("UNCHECKED_CAST")
-                    val availableOrderTypes =
-                        (doc.get("availableOrderTypes") as? List<String>) ?: emptyList()
-                    categoryAvailabilityMap[categoryId] = availableOrderTypes
-                    val catKitchenLabel = doc.getString("kitchenLabel")?.trim().orEmpty()
-                    if (catKitchenLabel.isNotEmpty()) categoryKitchenLabels[categoryId] = catKitchenLabel
-
-                    val btn = TextView(this).apply {
-                        text = name
-                        tag = categoryId
-                        textSize = 13f
-                        setTextColor(Color.parseColor("#444444"))
-                        setBackgroundResource(R.drawable.bg_category_button)
-                        gravity = Gravity.CENTER
-                        setPadding(8, 20, 8, 20)
-                        isAllCaps = true
-                        setTypeface(null, Typeface.BOLD)
-                        layoutParams = LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT
-                        ).apply { setMargins(2, 3, 2, 3) }
-                        setOnClickListener {
-                            currentSubcategoryId = null
-                            editItemSearch.text.clear()
-                            loadItems(categoryId)
-                        }
-                    }
-                    categoryButtons.add(btn)
-                    categoryContainer.addView(btn)
+                    else -> finalizeCategorySidebar()
                 }
-
-                loadSubcategories {}
+            }
+            .addOnFailureListener {
+                clearCategorySidebarUi()
+                finalizeCategorySidebar()
             }
     }
 
@@ -1126,7 +1312,7 @@ class MenuActivity : AppCompatActivity() {
 
                     val itemAvailability = doc.get("availableOrderTypes") as? List<String>
                     if (orderType.isNotBlank() && itemAvailability != null &&
-                        itemAvailability.isNotEmpty() && !itemAvailability.contains(orderType)
+                        itemAvailability.isNotEmpty() && !orderTypeAllowedOnMenuEntity(itemAvailability)
                     ) {
                         continue
                     }
@@ -1230,7 +1416,7 @@ class MenuActivity : AppCompatActivity() {
 
                     if (orderType.isNotBlank()) {
                         val effectiveTypes = itemAvailability ?: catAvailability
-                        if (effectiveTypes.isNotEmpty() && !effectiveTypes.contains(orderType)) {
+                        if (!orderTypeAllowedOnMenuEntity(effectiveTypes)) {
                             continue
                         }
                     }
@@ -2134,12 +2320,83 @@ class MenuActivity : AppCompatActivity() {
         if (!::btnCheckout.isInitialized) return
         val hasItems = cartMap.isNotEmpty()
         val busy = isSendingToKitchen || isCheckoutPending || isCaptureFlowActive
-        val showSendKitchen = kitchenSendDestinationReachable
+        val hasKitchenDelta = hasKitchenCartDeltaPending()
+        val showSendKitchen = kitchenSendDestinationReachable &&
+            (
+                !webOnlineOrderKitchenUi ||
+                    (
+                        kitchenSentEffectiveCacheReady &&
+                            hasKitchenDelta &&
+                            webOnlineCartEditedSinceSessionBaseline()
+                        )
+                )
         if (::btnSendKitchen.isInitialized) {
             btnSendKitchen.visibility = if (showSendKitchen) View.VISIBLE else View.GONE
             btnSendKitchen.isEnabled = showSendKitchen && hasItems && !busy
         }
         btnCheckout.isEnabled = hasItems && !busy
+        if (::btnUpdate.isInitialized) {
+            val show = unpaidOnlineUpdateMode && currentOrderId != null
+            btnUpdate.visibility = if (show) View.VISIBLE else View.GONE
+            btnUpdate.isEnabled = show && !busy
+        }
+        updateSendKitchenButtonLabel()
+    }
+
+    /** True when in-memory cart has strictly more qty on at least one line than [kitchenSentEffectiveByLineCache]. */
+    private fun hasKitchenCartDeltaPending(): Boolean {
+        val (lines, _) = kitchenDeltaFromCartAndSentMap(null, kitchenSentEffectiveByLineCache)
+        return lines.isNotEmpty()
+    }
+
+    /**
+     * For web-online orders, require the cart to differ from [webOnlineKitchenSessionBaseline] so the first
+     * Checkout screen does not show Send Update until staff changes the cart (qty or lines).
+     */
+    private fun webOnlineCartEditedSinceSessionBaseline(): Boolean {
+        if (!webOnlineOrderKitchenUi) return true
+        val baseline = webOnlineKitchenSessionBaseline ?: return false
+        if (cartMap.size != baseline.size) return true
+        for ((lineKey, item) in cartMap) {
+            if (baseline[lineKey] != item.quantity) return true
+        }
+        for (lineKey in baseline.keys) {
+            if (lineKey !in cartMap) return true
+        }
+        return false
+    }
+
+    private fun applyUnpaidOnlineMenuBrowseVisibility() {
+        if (!::menuBrowsePanel.isInitialized) return
+        val hide = unpaidOnlineUpdateMode && unpaidOnlineMenuBrowseSuppressed
+        menuBrowsePanel.visibility = if (hide) View.GONE else View.VISIBLE
+    }
+
+    /**
+     * Unpaid web online order: focus the catalog so staff can add more lines before checkout.
+     */
+    private fun openMenuToAddItemsForUnpaidOnlineOrder() {
+        if (!unpaidOnlineUpdateMode) return
+        unpaidOnlineMenuBrowseSuppressed = false
+        applyUnpaidOnlineMenuBrowseVisibility()
+        keyboardContainer.visibility = View.GONE
+        hideSystemKeyboard()
+        editItemSearch.clearFocus()
+        editItemSearch.setText("")
+        btnClearSearch.visibility = View.GONE
+
+        val firstId = categoryButtons.firstOrNull()?.tag as? String
+        if (firstId != null) {
+            currentSubcategoryId = null
+            loadItems(firstId)
+            Toast.makeText(this, R.string.cart_update_order_hint, Toast.LENGTH_SHORT).show()
+        } else {
+            browseMenuAfterUnpaidUpdatePending = true
+            Toast.makeText(this, R.string.cart_update_order_loading, Toast.LENGTH_SHORT).show()
+            loadActiveSchedules {
+                loadCategories()
+            }
+        }
     }
 
     private fun updateSendKitchenButtonLabel() {
@@ -2148,7 +2405,7 @@ class MenuActivity : AppCompatActivity() {
             btnSendKitchen.text = getString(R.string.cart_sending_kitchen)
             return
         }
-        btnSendKitchen.text = if (kitchenSentForOrder) {
+        btnSendKitchen.text = if (kitchenSentForOrder || webOnlineOrderKitchenUi) {
             getString(R.string.cart_send_update)
         } else {
             getString(R.string.cart_send_to_kitchen)
@@ -2405,6 +2662,15 @@ class MenuActivity : AppCompatActivity() {
                             .addOnSuccessListener {
                                 OrderLineKdsStatus.markSentOnKitchenAfterSend(db, orderId)
                                 runOnUiThread {
+                                    if (!qtyUpdates.isNullOrEmpty()) {
+                                        val merged = kitchenSentEffectiveByLineCache.toMutableMap()
+                                        qtyUpdates.forEach { (k, v) -> merged[k] = v }
+                                        kitchenSentEffectiveByLineCache = merged
+                                    }
+                                    if (webOnlineOrderKitchenUi) {
+                                        webOnlineKitchenSessionBaseline =
+                                            cartMap.entries.associate { it.key to it.value.quantity }
+                                    }
                                     kitchenSentForOrder = true
                                     isSendingToKitchen = false
                                     updateSendKitchenButtonLabel()
@@ -3935,8 +4201,14 @@ class MenuActivity : AppCompatActivity() {
         if (::repeatSuggestion.isInitialized) repeatSuggestion.onCustomerChanged(null)
         CustomerDisplayManager.setIdle(this, ReceiptSettings.load(this).businessName)
         kitchenSentForOrder = false
+        webOnlineOrderKitchenUi = false
+        kitchenSentEffectiveByLineCache = emptyMap()
+        kitchenSentEffectiveCacheReady = false
+        webOnlineKitchenSessionBaseline = null
+        unpaidOnlineMenuBrowseSuppressed = false
         updateSendKitchenButtonLabel()
         syncCartButtonStates()
+        applyUnpaidOnlineMenuBrowseVisibility()
     }
 
     // ── Bar Tab Capture Flow ────────────────────────────────────────
@@ -4287,8 +4559,4 @@ class MenuActivity : AppCompatActivity() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-
-    private companion object {
-        private const val KITCHEN_DESTINATION_PROBE_INTERVAL_MS = 7_000L
-    }
 }

@@ -195,6 +195,10 @@
     <string name="cart_send_to_kitchen">Send to Kitchen</string>
     <string name="cart_send_update">Send Update</string>
     <string name="cart_checkout">Checkout</string>
+    <string name="cart_update_order">Update</string>
+    <string name="cart_update_order_hint">Browse the menu to add items for this order.</string>
+    <string name="cart_update_order_loading">Loading menu…</string>
+    <string name="cart_update_order_no_categories">No menu categories are available. Check Categories (order types / schedules) in the dashboard.</string>
     <string name="cart_sent_to_kitchen">Sent to kitchen</string>
     <string name="cart_nothing_new_kitchen">Nothing new to send to the kitchen.</string>
     <string name="cart_kitchen_items_load_failed">Could not load items for kitchen print.</string>
@@ -337,4 +341,17 @@
     <string name="order_detail_order_type_editable">%1$s  ✎</string>
     <string name="order_detail_tip_adjust">Adjust Tip</string>
     <string name="order_detail_tip_add">Add Tip</string>
+
+    <!-- New online order real-time alert (POS dashboard) -->
+    <string name="online_order_alert_title">🛒 New Online Order Received</string>
+    <string name="online_order_alert_subtitle">Order #%1$d • %2$d items</string>
+    <string name="online_order_alert_customer_label">Customer</string>
+    <string name="online_order_alert_view_order">VIEW ORDER</string>
+
+    <!-- Dashboard: awaiting staff confirmation (replaces orange banner) -->
+    <string name="pending_online_sign_title">New online order — action required</string>
+    <string name="pending_online_sign_tap_hint">Tap here to review, accept, or decline</string>
+    <string name="pending_online_sign_more">+ %1$d more order(s) also awaiting</string>
+    <string name="pending_online_payment_card_online">Payment: card (paid online)</string>
+    <string name="pending_online_payment_pickup">Payment: pay at pickup</string>
 </resources>

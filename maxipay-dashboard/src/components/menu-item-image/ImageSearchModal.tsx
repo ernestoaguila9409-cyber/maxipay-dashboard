@@ -39,6 +39,19 @@ export type ImageSearchModalProps =
         firebaseDownloadUrl: string,
         storagePath?: string
       ) => void | boolean | Promise<void | boolean>;
+    }
+  | {
+      mode: "modifierOption";
+      open: boolean;
+      onClose: () => void;
+      optionName: string;
+      modifierGroupId: string;
+      modifierOptionId: string;
+      getIdToken: () => Promise<string>;
+      onCommitted: (
+        firebaseDownloadUrl: string,
+        storagePath?: string
+      ) => void | boolean | Promise<void | boolean>;
     };
 
 interface BrandfetchHit {
@@ -54,8 +67,20 @@ type LogoTab = "brand" | "stock";
 export function ImageSearchModal(props: ImageSearchModalProps) {
   const isStorefront = props.mode === "storefront";
   const isBusinessLogo = props.mode === "businessLogo";
-  const seedForSearch = isBusinessLogo || isStorefront ? props.businessName : props.itemName;
-  const searchKind = isBusinessLogo ? "businessLogo" : isStorefront ? "storefront" : "menu";
+  const isModifierOption = props.mode === "modifierOption";
+  const seedForSearch =
+    isBusinessLogo || isStorefront
+      ? props.businessName
+      : isModifierOption
+        ? props.optionName
+        : props.itemName;
+  const searchKind = isBusinessLogo
+    ? "businessLogo"
+    : isStorefront
+      ? "storefront"
+      : isModifierOption
+        ? "modifier"
+        : "menu";
 
   const { images, query, setQuery, loading, error, reset, searchFromItemName, searchWithQuery } =
     useImageSearch();
@@ -112,7 +137,9 @@ export function ImageSearchModal(props: ImageSearchModalProps) {
       setLogoTab("brand");
       return;
     }
-    const seed = seedForSearch.trim() || (isStorefront || isBusinessLogo ? "restaurant" : "");
+    const seed =
+      seedForSearch.trim() ||
+      (isStorefront || isBusinessLogo ? "restaurant" : isModifierOption ? "food" : "");
     if (isBusinessLogo) {
       setBfQuery(seed);
       void searchBrandfetch(seed, props.getIdToken);
@@ -124,6 +151,7 @@ export function ImageSearchModal(props: ImageSearchModalProps) {
     seedForSearch,
     isStorefront,
     isBusinessLogo,
+    isModifierOption,
     searchKind,
     props.getIdToken,
     reset,
@@ -159,7 +187,13 @@ export function ImageSearchModal(props: ImageSearchModalProps) {
         ? { businessLogo: true, sourceUrl }
         : isStorefront
           ? { heroSlideId: props.heroSlideId, sourceUrl }
-          : { itemId: props.itemId, sourceUrl };
+          : isModifierOption
+            ? {
+                modifierGroupId: props.modifierGroupId,
+                modifierOptionId: props.modifierOptionId,
+                sourceUrl,
+              }
+            : { itemId: props.itemId, sourceUrl };
       const res = await fetch("/api/menu/item-image-commit-pexels", {
         method: "POST",
         headers: {
@@ -201,7 +235,9 @@ export function ImageSearchModal(props: ImageSearchModalProps) {
     ? "Find logo image"
     : isStorefront
       ? "Find storefront picture"
-      : "Select image";
+      : isModifierOption
+        ? "Find modifier image"
+        : "Select image";
   const cellAspect = isStorefront ? "aspect-[16/9]" : "aspect-square";
   const gridClass = isStorefront
     ? "grid grid-cols-1 sm:grid-cols-2 gap-2"
@@ -301,7 +337,9 @@ export function ImageSearchModal(props: ImageSearchModalProps) {
                     ? "Describe the logo or brand look…"
                     : isStorefront
                       ? "Describe the banner image…"
-                      : "Describe the food photo…"
+                      : isModifierOption
+                        ? "Describe the modifier photo…"
+                        : "Describe the food photo…"
                 }
                 className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
                 disabled={loading || committing}

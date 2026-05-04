@@ -13,15 +13,11 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.viewpager2.widget.ViewPager2
 import android.media.RingtoneManager
-import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import android.widget.ScrollView
-import com.ernesto.myapplication.engine.MoneyUtils
-import java.util.Date
 import java.util.Locale
 
 /**
@@ -46,7 +42,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var dashboardAdapter: DashboardAdapter
     private lateinit var dashboardPager: ViewPager2
     private lateinit var pageIndicator: LinearLayout
-    private lateinit var bannerOnlineStaffConfirm: TextView
+    private lateinit var pendingOnlineOrderSign: View
+    private lateinit var txtPendingOnlineSignOrderLine: TextView
+    private lateinit var txtPendingOnlineSignCustomer: TextView
+    private lateinit var txtPendingOnlineSignPayment: TextView
+    private lateinit var txtPendingOnlineSignMore: TextView
 
     private var openOrdersListener: ListenerRegistration? = null
     private var pendingOnlineConfirmListener: ListenerRegistration? = null
@@ -54,6 +54,7 @@ class MainActivity : AppCompatActivity() {
     private var dashboardConfigListener: ListenerRegistration? = null
     private var uberOrdersListener: ListenerRegistration? = null
     private var currentSalesListener: ListenerRegistration? = null
+    private var onlineOrderAlertSystem: OnlineOrderAlertSystem? = null
     /** Latest modules from Firestore [Settings/dashboard] before ONLINE visibility merge. */
     private var lastRawDashboardModules: List<DashboardModule>? = null
 
@@ -68,6 +69,10 @@ class MainActivity : AppCompatActivity() {
 
     private var employeeName: String = ""
     private var employeeRole: String = ""
+
+    private var lastPendingOnlineConfirmIds: Set<String> = emptySet()
+    private var pendingOnlineConfirmListenerPrimed = false
+    private val incomingOrderChimePlayer by lazy { NewOrderSoundPlayer(this) }
 
     /**
      * When [moveTaskToBack] is false (rare), show a confirmation before [finishAffinity].
@@ -98,8 +103,12 @@ class MainActivity : AppCompatActivity() {
 
         txtTodayTotal = findViewById(R.id.txtTodayTotal)
         txtTodayCount = findViewById(R.id.txtTodayCount)
-        bannerOnlineStaffConfirm = findViewById(R.id.bannerOnlineStaffConfirm)
-        bannerOnlineStaffConfirm.setOnClickListener { onOnlineStaffConfirmBannerClicked() }
+        pendingOnlineOrderSign = findViewById(R.id.pendingOnlineOrderSign)
+        txtPendingOnlineSignOrderLine = findViewById(R.id.txtPendingOnlineSignOrderLine)
+        txtPendingOnlineSignCustomer = findViewById(R.id.txtPendingOnlineSignCustomer)
+        txtPendingOnlineSignPayment = findViewById(R.id.txtPendingOnlineSignPayment)
+        txtPendingOnlineSignMore = findViewById(R.id.txtPendingOnlineSignMore)
+        pendingOnlineOrderSign.setOnClickListener { onOnlineStaffConfirmBannerClicked() }
 
         setupDashboardGrid()
         OnlineOrderingDashboardSync.start(db)
@@ -108,6 +117,16 @@ class MainActivity : AppCompatActivity() {
         listenForOpenOrders()
         listenForPendingOnlineStaffConfirm()
         listenForUberOrders()
+        onlineOrderAlertSystem = OnlineOrderAlertSystem(
+            activity = this,
+            firestore = db,
+            getEmployeeName = { employeeName },
+            ordersCollectionPath = OnlineOrderAlertFirestoreListener.DEFAULT_ORDERS_COLLECTION,
+            sourceField = "orderSource",
+            sourceValue = "online_ordering",
+            statusField = OnlineOrderAlertFirestoreListener.DEFAULT_STATUS_FIELD,
+            statusValue = OnlineOrderAlertFirestoreListener.DEFAULT_STATUS_VALUE,
+        ).also { it.attach() }
         ensureOpenBatch()
         ReceiptSettings.startBusinessInfoSync(this)
 
@@ -362,6 +381,7 @@ class MainActivity : AppCompatActivity() {
         pendingOnlineConfirmListener?.remove()
         currentSalesListener?.remove()
         uberAlertDialog?.dismiss()
+        onlineOrderAlertSystem = null
     }
 
     private fun listenForOpenOrders() {
@@ -413,17 +433,48 @@ class MainActivity : AppCompatActivity() {
                     .sortedByDescending { it.getTimestamp("createdAt")?.seconds ?: 0 }
                 pendingOnlineConfirmDocs.clear()
                 pendingOnlineConfirmDocs.addAll(pending)
-                if (pending.isEmpty()) {
-                    bannerOnlineStaffConfirm.visibility = View.GONE
+                updatePendingOnlineOrderSign(pending)
+                val ids = pending.map { it.id }.toSet()
+                if (!pendingOnlineConfirmListenerPrimed) {
+                    pendingOnlineConfirmListenerPrimed = true
+                    lastPendingOnlineConfirmIds = ids
                 } else {
-                    bannerOnlineStaffConfirm.visibility = View.VISIBLE
-                    bannerOnlineStaffConfirm.text = if (pending.size == 1) {
-                        "Online ordering incoming — please check"
-                    } else {
-                        "${pending.size} online orders incoming — please check"
+                    val hasNewAwaiting = ids.any { it !in lastPendingOnlineConfirmIds }
+                    if (hasNewAwaiting && pending.isNotEmpty()) {
+                        incomingOrderChimePlayer.playNewOrderChime()
                     }
+                    lastPendingOnlineConfirmIds = ids
                 }
             }
+    }
+
+    private fun updatePendingOnlineOrderSign(pending: List<DocumentSnapshot>) {
+        if (pending.isEmpty()) {
+            pendingOnlineOrderSign.visibility = View.GONE
+            return
+        }
+        pendingOnlineOrderSign.visibility = View.VISIBLE
+        val doc = pending.first()
+        val orderNum = doc.getLong("orderNumber") ?: 0L
+        val itemCount = (doc.getLong("itemsCount") ?: doc.getLong("itemCount") ?: 0L).toInt()
+        txtPendingOnlineSignOrderLine.text = getString(
+            R.string.online_order_alert_subtitle,
+            orderNum,
+            itemCount,
+        )
+        val customer = doc.getString("customerName")?.trim().orEmpty().ifBlank { "Guest" }
+        txtPendingOnlineSignCustomer.text = customer
+        val payment = doc.getString("onlinePaymentChoice") ?: ""
+        txtPendingOnlineSignPayment.text = when (payment) {
+            "PAY_ONLINE_HPP" -> getString(R.string.pending_online_payment_card_online)
+            else -> getString(R.string.pending_online_payment_pickup)
+        }
+        if (pending.size > 1) {
+            txtPendingOnlineSignMore.visibility = View.VISIBLE
+            txtPendingOnlineSignMore.text = getString(R.string.pending_online_sign_more, pending.size - 1)
+        } else {
+            txtPendingOnlineSignMore.visibility = View.GONE
+        }
     }
 
     private fun onOnlineStaffConfirmBannerClicked() {
@@ -460,91 +511,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPendingOnlineOrderDialog(orderDoc: DocumentSnapshot) {
-        val orderId = orderDoc.id
-        val orderNum = orderDoc.getLong("orderNumber") ?: 0L
-        val customer = orderDoc.getString("customerName")?.trim().orEmpty().ifEmpty { "Guest" }
-        val payment = orderDoc.getString("onlinePaymentChoice") ?: ""
-        val payLine = when (payment) {
-            "PAY_ONLINE_HPP" -> "Payment: card (online)"
-            else -> "Payment: pay at pickup"
-        }
-        orderDoc.reference.collection("items").get()
-            .addOnSuccessListener { qs ->
-                val sb = StringBuilder()
-                sb.append("Customer: ").append(customer).append('\n').append(payLine).append("\n\n")
-                for (item in qs.documents) {
-                    val name = item.getString("name") ?: "Item"
-                    val qty = (item.getLong("quantity") ?: 1L).toInt().coerceAtLeast(1)
-                    val lineTotal = item.getLong("lineTotalInCents")
-                        ?: item.getLong("lineTotalWithTaxInCents")
-                        ?: 0L
-                    sb.append("• ").append(name).append(" ×").append(qty).append("   ")
-                        .append(MoneyUtils.centsToDisplay(lineTotal)).append('\n')
-                }
-                val totalCents = orderDoc.getLong("totalInCents") ?: 0L
-                sb.append("\nTotal ").append(MoneyUtils.centsToDisplay(totalCents))
-                val scroll = ScrollView(this)
-                val tv = TextView(this).apply {
-                    text = sb.toString()
-                    textSize = 15f
-                    setPadding(48, 32, 48, 24)
-                }
-                scroll.addView(tv)
-                MaterialAlertDialogBuilder(this)
-                    .setTitle("Order #$orderNum")
-                    .setView(scroll)
-                    .setPositiveButton("Accept") { _, _ -> acceptAwaitingOnlineOrder(orderId) }
-                    .setNegativeButton("Cancel order") { _, _ ->
-                        MaterialAlertDialogBuilder(this)
-                            .setMessage(
-                                "Decline this order? It will be voided and will not appear in Online orders.",
-                            )
-                            .setPositiveButton("Decline") { _, _ -> declineAwaitingOnlineOrder(orderId, orderDoc) }
-                            .setNegativeButton(android.R.string.cancel, null)
-                            .show()
-                    }
-                    .show()
-            }
-            .addOnFailureListener { e ->
-                Toast.makeText(this, "Could not load items: ${e.message}", Toast.LENGTH_LONG).show()
-            }
-    }
-
-    private fun acceptAwaitingOnlineOrder(orderId: String) {
-        db.collection("Orders").document(orderId).update(
-            mapOf(
-                OnlineOrderStaffConfirm.FIELD_AWAITING to false,
-                "staffConfirmedOrderAt" to Timestamp.now(),
-                "staffConfirmedOrderBy" to employeeName.ifBlank { "Staff" },
-                "updatedAt" to Date(),
-            ),
-        ).addOnFailureListener { e ->
-            Toast.makeText(this, "Accept failed: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun declineAwaitingOnlineOrder(orderId: String, orderDoc: DocumentSnapshot) {
-        val paid = orderDoc.getLong("totalPaidInCents") ?: 0L
-        if (paid > 0L) {
-            Toast.makeText(
-                this,
-                "This order is already paid online. Open it in Orders to handle a refund; it was not voided.",
-                Toast.LENGTH_LONG,
-            ).show()
-            return
-        }
-        db.collection("Orders").document(orderId).update(
-            mapOf(
-                "status" to "VOIDED",
-                "voided" to true,
-                "voidedAt" to Timestamp.now(),
-                "voidedBy" to employeeName.ifBlank { "Staff" },
-                OnlineOrderStaffConfirm.FIELD_AWAITING to false,
-                "updatedAt" to Date(),
-            ),
-        ).addOnFailureListener { e ->
-            Toast.makeText(this, "Could not cancel: ${e.message}", Toast.LENGTH_LONG).show()
-        }
+        OnlineOrderAwaitingStaffReviewDialog.showFromDocument(this, db, orderDoc, employeeName)
     }
 
     private fun listenForUberOrders() {

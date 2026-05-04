@@ -337,9 +337,9 @@ class BatchManagementActivity : AppCompatActivity() {
 
                             val msg = if (hostApproved && resultCode != "0") {
                                 val detail = settleDetails?.optJSONObject(0)?.optString("DetailedMessage", "") ?: ""
-                                "Z8 Batch Closed Successfully" + if (detail.isNotBlank()) "\n($detail)" else ""
+                                "Batch closed successfully" + if (detail.isNotBlank()) "\n($detail)" else ""
                             } else {
-                                "Z8 Batch Closed Successfully"
+                                "Batch closed successfully"
                             }
 
                             Toast.makeText(
@@ -375,7 +375,7 @@ class BatchManagementActivity : AppCompatActivity() {
         })
     }
 
-    // 🔹 CLOSE BATCH IN FIREBASE AFTER Z8 CONFIRMS
+    // 🔹 CLOSE BATCH IN FIREBASE AFTER PROCESSOR SETTLE CONFIRMS
     private fun closeBatchInFirebase() {
 
         db.collection("Batches")

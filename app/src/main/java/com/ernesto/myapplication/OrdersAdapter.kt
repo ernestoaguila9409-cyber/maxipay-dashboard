@@ -100,8 +100,8 @@ class OrdersAdapter(
 
             txtTotal.text = MoneyUtils.centsToDisplay(order.netCents)
 
-            bindStatusBar(order.status)
-            bindStatusBadge(order.status)
+            bindStatusBar(order.badgeStatus)
+            bindStatusBadge(order.badgeStatus)
 
             if (order.preAuthAmountCents > 0L) {
                 txtPreAuth.visibility = View.VISIBLE
@@ -143,6 +143,7 @@ class OrdersAdapter(
         private fun bindStatusBar(status: String) {
             val color = when (status.uppercase()) {
                 "OPEN" -> Color.parseColor("#2196F3")
+                "UNPAID" -> Color.parseColor("#F57C00")
                 "ACCEPTED" -> Color.parseColor("#2E7D32")
                 "READY" -> Color.parseColor("#1565C0")
                 "DENIED" -> Color.parseColor("#C62828")
@@ -164,6 +165,7 @@ class OrdersAdapter(
 
             val (bgColor, textColor) = when (status.uppercase()) {
                 "OPEN" -> Color.parseColor("#E3F2FD") to Color.parseColor("#1565C0")
+                "UNPAID" -> Color.parseColor("#FFF3E0") to Color.parseColor("#E65100")
                 "ACCEPTED" -> Color.parseColor("#E8F5E9") to Color.parseColor("#2E7D32")
                 "READY" -> Color.parseColor("#E3F2FD") to Color.parseColor("#1565C0")
                 "DENIED" -> Color.parseColor("#FFEBEE") to Color.parseColor("#C62828")

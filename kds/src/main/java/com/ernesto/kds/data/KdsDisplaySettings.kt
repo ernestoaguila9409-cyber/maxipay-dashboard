@@ -3,8 +3,10 @@ package com.ernesto.kds.data
 /**
  * Settings/kds document — same fields as the MaxiPay web KDS settings page.
  *
- * Ticket body background: white until ticketYellowAfterMinutes, yellow until
- * ticketRedAfterMinutes, then red (inclusive minute boundaries, same as legacy 5 / 10).
+ * When [showTimers] is true, ticket body background ages: white until
+ * [ticketYellowAfterMinutes], yellow until [ticketRedAfterMinutes], then red
+ * (inclusive minute boundaries, same as legacy 5 / 10). When timers are off, the
+ * body stays white; order-type header colors are unchanged.
  */
 data class KdsDisplaySettings(
     val showTimers: Boolean = true,

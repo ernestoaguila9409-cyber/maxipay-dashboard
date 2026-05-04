@@ -36,11 +36,16 @@ function isValidHeroSlideId(id: string): boolean {
   return /^[a-zA-Z0-9_-]{1,128}$/.test(id);
 }
 
+function isValidModifierStorageId(id: string): boolean {
+  return /^[a-zA-Z0-9_-]{1,128}$/.test(id);
+}
+
 /**
  * Downloads a Pexels image (validated host), uploads to Firebase Storage, returns a Firebase
  * download URL (never the Pexels URL) for storing on MenuItems or online-ordering hero slides.
  *
  * POST body: { itemId, sourceUrl } | { heroSlideId, sourceUrl } | { businessLogo: true, sourceUrl }
+ *   | { modifierGroupId, modifierOptionId, sourceUrl }
  */
 export async function POST(req: Request) {
   try {
@@ -51,14 +56,26 @@ export async function POST(req: Request) {
       itemId?: string;
       heroSlideId?: string;
       businessLogo?: boolean;
+      modifierGroupId?: string;
+      modifierOptionId?: string;
       sourceUrl?: string;
     };
     const itemId = typeof body.itemId === "string" ? body.itemId.trim() : "";
     const heroSlideId =
       typeof body.heroSlideId === "string" ? body.heroSlideId.trim() : "";
     const businessLogo = body.businessLogo === true;
+    const modifierGroupId =
+      typeof body.modifierGroupId === "string" ? body.modifierGroupId.trim() : "";
+    const modifierOptionId =
+      typeof body.modifierOptionId === "string" ? body.modifierOptionId.trim() : "";
     const sourceUrl = typeof body.sourceUrl === "string" ? body.sourceUrl.trim() : "";
 
+    const modifierMode =
+      Boolean(modifierGroupId) &&
+      Boolean(modifierOptionId) &&
+      !itemId &&
+      !heroSlideId &&
+      !businessLogo;
     const heroMode = Boolean(heroSlideId);
     const pexelsOk = isAllowedPexelsUrl(sourceUrl);
     const brandfetchOk = isAllowedBrandfetchUrl(sourceUrl);
@@ -74,11 +91,21 @@ export async function POST(req: Request) {
       if (!isValidHeroSlideId(heroSlideId)) {
         return NextResponse.json({ error: "Invalid heroSlideId." }, { status: 400 });
       }
+    } else if (modifierMode) {
+      if (
+        !isValidModifierStorageId(modifierGroupId) ||
+        !isValidModifierStorageId(modifierOptionId)
+      ) {
+        return NextResponse.json(
+          { error: "Invalid modifierGroupId or modifierOptionId." },
+          { status: 400 },
+        );
+      }
     } else if (!itemId) {
       return NextResponse.json(
         {
           error:
-            "Provide itemId for menu images, heroSlideId for storefront banner, or businessLogo: true for business logo.",
+            "Provide itemId for menu images, heroSlideId for storefront banner, businessLogo: true for business logo, or modifierGroupId + modifierOptionId for modifier options.",
         },
         { status: 400 }
       );
@@ -148,7 +175,9 @@ export async function POST(req: Request) {
       ? `businesses/${decoded.uid}/logo.${ext}`
       : heroMode
         ? `${HERO_STORAGE_PREFIX}/${heroSlideId}.${ext}`
-        : `menuItems/${itemId}_${Date.now()}.${ext}`;
+        : modifierMode
+          ? `modifierOptions/${modifierGroupId}/${modifierOptionId}_${Date.now()}.${ext}`
+          : `menuItems/${itemId}_${Date.now()}.${ext}`;
     const bucket = getStorage().bucket(bucketName);
     const file = bucket.file(storagePath);
     const token = randomUUID();

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
   addDoc,
@@ -28,13 +28,17 @@ import {
   ChevronRight,
   CheckSquare,
   Link2,
+  ImageIcon,
 } from "lucide-react";
+import { ModifierOptionImageSection } from "@/components/modifier-option-image/ModifierOptionImageSection";
 
 interface ModifierOption {
   id: string;
   name: string;
   price: number;
   triggersModifierGroupIds: string[];
+  /** Optional photo for POS / future web customize UI (Firebase download URL). */
+  imageUrl?: string;
 }
 
 interface ModifierGroup {
@@ -71,6 +75,9 @@ export default function ModifiersPage() {
   const [optionTriggerGroupIds, setOptionTriggerGroupIds] = useState<Set<string>>(new Set());
   const [optionNameError, setOptionNameError] = useState("");
   const [optionSaving, setOptionSaving] = useState(false);
+  const [optionImageUrl, setOptionImageUrl] = useState("");
+  /** Stable id for new options (upload / AI search before first save). */
+  const [draftOptionId, setDraftOptionId] = useState("");
 
   const [deleteGroupTarget, setDeleteGroupTarget] = useState<ModifierGroup | null>(null);
   const [deleteOptionTarget, setDeleteOptionTarget] = useState<ModifierOption | null>(null);
@@ -100,12 +107,20 @@ export default function ModifiersPage() {
       snap.forEach((d) => {
         const data = d.data();
         const rawOptions = Array.isArray(data.options) ? data.options : [];
-        const options: ModifierOption[] = rawOptions.map((o: Record<string, unknown>, i: number) => ({
-          id: (o.id as string) || `opt_${i}`,
-          name: (o.name as string) || "",
-          price: (o.price as number) || 0,
-          triggersModifierGroupIds: Array.isArray(o.triggersModifierGroupIds) ? (o.triggersModifierGroupIds as string[]) : [],
-        }));
+        const options: ModifierOption[] = rawOptions.map((o: Record<string, unknown>, i: number) => {
+          const imgRaw = o.imageUrl;
+          const imageUrl =
+            typeof imgRaw === "string" && imgRaw.trim() ? imgRaw.trim() : undefined;
+          return {
+            id: (o.id as string) || `opt_${i}`,
+            name: (o.name as string) || "",
+            price: (o.price as number) || 0,
+            triggersModifierGroupIds: Array.isArray(o.triggersModifierGroupIds)
+              ? (o.triggersModifierGroupIds as string[])
+              : [],
+            ...(imageUrl ? { imageUrl } : {}),
+          };
+        });
 
         list.push({
           id: d.id,
@@ -136,6 +151,45 @@ export default function ModifiersPage() {
     (o) => !search || o.name.toLowerCase().includes(search.toLowerCase())
   );
   const groupMap = new Map(groups.map((g) => [g.id, g]));
+
+  const optionTriggerDetailColSpan = useMemo(() => {
+    if (!selectedGroup) return 4;
+    return (
+      (optionSelectMode ? 1 : 0) +
+      1 + // image
+      1 + // name
+      (selectedGroup.groupType !== "REMOVE" ? 1 : 0) +
+      (!optionSelectMode ? 1 : 0)
+    );
+  }, [selectedGroup, optionSelectMode]);
+
+  const getModifierIdToken = useCallback(() => {
+    if (!user) throw new Error("Not signed in");
+    return user.getIdToken();
+  }, [user]);
+
+  const persistOptionImageUrl = useCallback(
+    async (url: string) => {
+      if (!selectedGroup) return;
+      const optId = editingOption?.id ?? draftOptionId;
+      if (!optId) return;
+      if (!editingOption) return;
+
+      const trimmed = url.trim();
+      const updatedOptions = selectedGroup.options.map((o) => {
+        if (o.id !== optId) return o;
+        const next: ModifierOption = { ...o };
+        if (trimmed) next.imageUrl = trimmed;
+        else delete next.imageUrl;
+        return next;
+      });
+      await updateDoc(doc(db, "ModifierGroups", selectedGroup.id), { options: updatedOptions });
+      const nextG = { ...selectedGroup, options: updatedOptions };
+      setSelectedGroup(nextG);
+      setGroups((prev) => prev.map((g) => (g.id === nextG.id ? nextG : g)));
+    },
+    [selectedGroup, editingOption, draftOptionId],
+  );
 
   // ── Group CRUD ──
 
@@ -244,18 +298,22 @@ export default function ModifiersPage() {
 
   const openAddOption = () => {
     setEditingOption(null);
+    setDraftOptionId(`opt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
     setOptionName("");
     setOptionPrice("");
     setOptionNameError("");
+    setOptionImageUrl("");
     setOptionTriggerGroupIds(new Set());
     setOptionModalOpen(true);
   };
 
   const openEditOption = (o: ModifierOption) => {
     setEditingOption(o);
+    setDraftOptionId("");
     setOptionName(o.name);
     setOptionPrice(o.price.toFixed(2));
     setOptionNameError("");
+    setOptionImageUrl(o.imageUrl?.trim() ?? "");
     setOptionTriggerGroupIds(new Set(o.triggersModifierGroupIds));
     setOptionModalOpen(true);
   };
@@ -271,20 +329,27 @@ export default function ModifiersPage() {
 
     setOptionSaving(true);
     try {
+      const img = optionImageUrl.trim();
       if (editingOption) {
-        const updatedOptions = selectedGroup.options.map((o) =>
-          o.id === editingOption.id ? { ...o, name, price, triggersModifierGroupIds } : o
-        );
+        const updatedOptions = selectedGroup.options.map((o) => {
+          if (o.id !== editingOption.id) return o;
+          const next: ModifierOption = { ...o, name, price, triggersModifierGroupIds };
+          if (img) next.imageUrl = img;
+          else delete next.imageUrl;
+          return next;
+        });
         await updateDoc(doc(db, "ModifierGroups", selectedGroup.id), {
           options: updatedOptions,
         });
       } else {
-        const newOption = {
-          id: `opt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        const newId = draftOptionId.trim() || `opt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const newOption: Record<string, unknown> = {
+          id: newId,
           name,
           price,
           triggersModifierGroupIds,
         };
+        if (img) newOption.imageUrl = img;
         await updateDoc(doc(db, "ModifierGroups", selectedGroup.id), {
           options: arrayUnion(newOption),
         });
@@ -788,6 +853,9 @@ export default function ModifiersPage() {
                                 />
                               </th>
                             )}
+                            <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-3 py-3 w-14">
+                              Photo
+                            </th>
                             <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-5 py-3">
                               Option Name
                             </th>
@@ -827,6 +895,16 @@ export default function ModifiersPage() {
                                   />
                                 </td>
                               )}
+                              <td className="px-3 py-3.5 w-14">
+                                <div className="w-10 h-10 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center shrink-0">
+                                  {opt.imageUrl ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={opt.imageUrl} alt="" className="w-full h-full object-cover" />
+                                  ) : (
+                                    <ImageIcon size={16} className="text-slate-300" />
+                                  )}
+                                </div>
+                              </td>
                               <td className="px-5 py-3.5">
                                 <span
                                   className={`text-sm font-medium ${
@@ -876,7 +954,7 @@ export default function ModifiersPage() {
                             </tr>
                             {triggeredGroups.length > 0 && (
                               <tr className="border-b border-slate-50">
-                                <td colSpan={optionSelectMode ? 4 : (selectedGroup.groupType === "REMOVE" ? 2 : 3)} className="px-5 pb-3 pt-0">
+                                <td colSpan={optionTriggerDetailColSpan} className="px-5 pb-3 pt-0">
                                   <div className="ml-4 flex flex-col gap-1.5">
                                     {triggeredGroups.map((tg) => (
                                       <div
@@ -1046,7 +1124,7 @@ export default function ModifiersPage() {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => !optionSaving && setOptionModalOpen(false)}
           />
-          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto border border-slate-100">
             <div className="px-6 py-5 space-y-5">
               <div className="flex items-center justify-between">
                 <div>
@@ -1108,6 +1186,19 @@ export default function ModifiersPage() {
                       className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
                     />
                   </div>
+                )}
+
+                {(editingOption?.id || draftOptionId) && (
+                  <ModifierOptionImageSection
+                    imageUrl={optionImageUrl}
+                    onImageUrlChange={setOptionImageUrl}
+                    onPersistImageUrl={persistOptionImageUrl}
+                    modifierGroupId={selectedGroup.id}
+                    modifierOptionId={editingOption?.id ?? draftOptionId}
+                    optionName={optionName}
+                    getIdToken={getModifierIdToken}
+                    disabled={optionSaving}
+                  />
                 )}
 
                 {/* Triggered Modifier Groups */}

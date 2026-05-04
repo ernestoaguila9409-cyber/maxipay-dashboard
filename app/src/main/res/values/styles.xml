@@ -35,6 +35,14 @@
         <item name="android:textSize">14sp</item>
     </style>
 
+    <style name="OnlineOrderAlertDialogTheme" parent="Theme.AppCompat.Light.Dialog">
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowMinWidthMajor">0%</item>
+        <item name="android:windowMinWidthMinor">0%</item>
+    </style>
+
     <style name="ThemeOverlay.MyApplication.TextInputBrand" parent="ThemeOverlay.MaterialComponents.TextInputEditText.OutlinedBox">
         <item name="colorPrimary">@color/brand_primary</item>
         <item name="colorControlActivated">@color/brand_primary</item>

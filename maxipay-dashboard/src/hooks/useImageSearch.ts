@@ -28,7 +28,7 @@ export function useImageSearch() {
       payload: {
         itemName?: string;
         query?: string;
-        searchKind?: "menu" | "storefront" | "businessLogo";
+        searchKind?: "menu" | "storefront" | "businessLogo" | "modifier";
       }
     ) => {
       setLoading(true);
@@ -68,7 +68,7 @@ export function useImageSearch() {
     async (
       itemName: string,
       getToken: () => Promise<string>,
-      searchKind: "menu" | "storefront" | "businessLogo" = "menu"
+      searchKind: "menu" | "storefront" | "businessLogo" | "modifier" = "menu"
     ) => {
       await runSearch(getToken, { itemName, searchKind });
     },
@@ -80,7 +80,7 @@ export function useImageSearch() {
     async (
       q: string,
       getToken: () => Promise<string>,
-      searchKind: "menu" | "storefront" | "businessLogo" = "menu"
+      searchKind: "menu" | "storefront" | "businessLogo" | "modifier" = "menu"
     ) => {
       await runSearch(getToken, { query: q, searchKind });
     },

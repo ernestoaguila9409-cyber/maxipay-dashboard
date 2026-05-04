@@ -7,6 +7,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage } from "@/firebase/firebaseConfig";
 
 const MENU_ITEMS_FOLDER = "menuItems";
+const MODIFIER_OPTIONS_FOLDER = "modifierOptions";
 
 export interface UploadMenuItemImageResult {
   storagePath: string;
@@ -25,6 +26,28 @@ export async function uploadMenuItemImageToFirebase(
   const contentType =
     opts?.contentType ?? (ext === "png" ? "image/png" : "image/jpeg");
   const storagePath = `${MENU_ITEMS_FOLDER}/${itemId}_${Date.now()}.${ext}`;
+  const storageRef = ref(storage, storagePath);
+  await uploadBytes(storageRef, blob, { contentType });
+  const downloadUrl = await getDownloadURL(storageRef);
+  return { storagePath, downloadUrl };
+}
+
+/**
+ * Client-side upload for a modifier option image (dashboard / future POS).
+ * Path: `modifierOptions/{groupId}/{optionId}_{timestamp}.jpg`
+ */
+export async function uploadModifierOptionImageToFirebase(
+  blob: Blob,
+  modifierGroupId: string,
+  modifierOptionId: string,
+  opts?: { contentType?: string; extension?: "jpg" | "png" }
+): Promise<UploadMenuItemImageResult> {
+  const ext = opts?.extension ?? (opts?.contentType?.includes("png") ? "png" : "jpg");
+  const contentType =
+    opts?.contentType ?? (ext === "png" ? "image/png" : "image/jpeg");
+  const safeG = modifierGroupId.replace(/[^\w-]/g, "_").slice(0, 120);
+  const safeO = modifierOptionId.replace(/[^\w-]/g, "_").slice(0, 120);
+  const storagePath = `${MODIFIER_OPTIONS_FOLDER}/${safeG}/${safeO}_${Date.now()}.${ext}`;
   const storageRef = ref(storage, storagePath);
   await uploadBytes(storageRef, blob, { contentType });
   const downloadUrl = await getDownloadURL(storageRef);

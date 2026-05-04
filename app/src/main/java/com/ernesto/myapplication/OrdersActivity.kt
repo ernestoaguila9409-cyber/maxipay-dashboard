@@ -369,6 +369,7 @@ class OrdersActivity : AppCompatActivity() {
                         if (OnlineOrderStaffConfirm.isAwaitingStaffWebOnline(doc)) continue
                         val id = doc.id
                         val status = effectiveOrderListStatus(doc)
+                        val badgeStatus = OnlineOrderStatusDisplay.listBadgeStatus(doc, status)
                         val totalCents = doc.getLong("totalInCents") ?: 0L
                         val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
                         val employee = doc.getString("employeeName") ?: "—"
@@ -395,6 +396,7 @@ class OrdersActivity : AppCompatActivity() {
                                 id = id,
                                 orderNumber = orderNumber,
                                 status = status,
+                                badgeStatus = badgeStatus,
                                 totalCents = totalCents,
                                 totalRefundedInCents = totalRefundedInCents,
                                 employeeName = displayEmployee,
@@ -467,6 +469,13 @@ class OrdersActivity : AppCompatActivity() {
         txtRefundCountSummary.visibility = View.VISIBLE
     }
 
+    /**
+     * Declined / voided web online orders (and similar) stay in **All** + history filters,
+     * but are hidden from Online / Uber-only tabs so staff only see actionable pipeline orders.
+     */
+    private fun isExcludedFromOnlineOrdersTab(row: OrderRow): Boolean =
+        row.status.equals("VOIDED", ignoreCase = true)
+
     private fun applyFilters(list: List<OrderRow>): List<OrderRow> {
         var result = applyStatusFilter(list)
         if (launchedFromOnlineTile) {
@@ -476,13 +485,14 @@ class OrdersActivity : AppCompatActivity() {
                 "UBER" -> result.filter { it.orderType == "UBER_EATS" }
                 else -> result
             }
+            result = result.filter { !isExcludedFromOnlineOrdersTab(it) }
         } else if (isGeneralOrdersList && !ordersTabIncludeOnlineWithAll) {
             result = result.filter { !it.isOnlineChannelOrder }
         }
         if (orderTypeFilter != "ALL" && !launchedFromOnlineTile) {
             result = when (orderTypeFilter) {
                 "BAR" -> result.filter { it.orderType == "BAR" || it.orderType == "BAR_TAB" }
-                "ONLINE" -> result.filter { it.isOnlineChannelOrder }
+                "ONLINE" -> result.filter { it.isOnlineChannelOrder && !isExcludedFromOnlineOrdersTab(it) }
                 else -> result.filter { it.orderType == orderTypeFilter }
             }
         }

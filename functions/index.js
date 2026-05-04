@@ -2144,7 +2144,7 @@ async function resolveSpinSettleCredentials(db) {
 }
 
 /**
- * Dashboard: close the open batch — calls SPIn settle (Z8) first,
+ * Dashboard: close the open batch — calls SPIn Payment/Settle first,
  * then updates Firestore exactly like the Android POS.
  */
 function computeNetAmountForBatchClose(data) {
@@ -2253,7 +2253,7 @@ exports.closeOpenBatchFromDashboard = onCall(
       };
     }
 
-    // --- Call SPIn Z8 settle (only SPIN_P terminals) ---
+    // --- Call SPIn settle (only SPIN_P terminals; device label from payment_terminals) ---
     const spinCreds = await resolveSpinSettleCredentials(db);
     if (!spinCreds.found) {
       return {
@@ -2281,7 +2281,7 @@ exports.closeOpenBatchFromDashboard = onCall(
       Authkey: spinCreds.authKey,
     };
 
-    logger.info("[closeOpenBatchFromDashboard] Calling SPIn settle (Z8)", {
+    logger.info("[closeOpenBatchFromDashboard] Calling SPIn settle", {
       url: spinCreds.settleUrl,
       tpn: spinCreds.tpn,
       deviceModel: spinCreds.deviceModel,
@@ -2337,7 +2337,7 @@ exports.closeOpenBatchFromDashboard = onCall(
       };
     }
 
-    // --- Z8 approved — now update Firestore (same as Android settleOpenBatch) ---
+    // --- Host approved settle — now update Firestore (same as Android settleOpenBatch) ---
 
     let totalSales = 0;
     let totalTipsCents = 0;
@@ -2410,8 +2410,8 @@ exports.closeOpenBatchFromDashboard = onCall(
 
     const deviceLabel = spinCreds.deviceModel || "terminal";
     const spinMsg = hostApproved && resultCode !== "0"
-      ? `Z8 Batch Closed Successfully on ${deviceLabel} (host approved, ResultCode=${resultCode})`
-      : `Z8 Batch Closed Successfully on ${deviceLabel}`;
+      ? `Batch closed successfully (${deviceLabel}; host approved, ResultCode=${resultCode})`
+      : `Batch closed successfully (${deviceLabel})`;
 
     return {
       success: true,

@@ -8,33 +8,41 @@
     android:fitsSystemWindows="true"
     android:background="#F5F5F5">
 
-    <!-- LEFT PANEL – Compact Category Sidebar (~18%) -->
-    <ScrollView
-        android:layout_width="0dp"
-        android:layout_height="match_parent"
-        android:layout_weight="0.85"
-        android:fillViewport="true"
-        android:background="#FFFFFF"
-        android:elevation="2dp"
-        android:scrollbars="none">
-
-        <LinearLayout
-            android:id="@+id/categoryContainer"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingTop="6dp"
-            android:paddingBottom="6dp"
-            android:paddingHorizontal="4dp"/>
-    </ScrollView>
-
-    <!-- CENTER PANEL – Search + Item Grid (~57%) -->
+    <!-- Categories + catalog (hidden for unpaid web online until staff taps Update). -->
     <LinearLayout
+        android:id="@+id/menuBrowsePanel"
         android:layout_width="0dp"
         android:layout_height="match_parent"
-        android:layout_weight="2.75"
-        android:orientation="vertical"
-        android:background="#F5F5F5">
+        android:layout_weight="3.6"
+        android:orientation="horizontal">
+
+        <!-- LEFT PANEL – Compact Category Sidebar (~18%) -->
+        <ScrollView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="0.85"
+            android:fillViewport="true"
+            android:background="#FFFFFF"
+            android:elevation="2dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/categoryContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:paddingHorizontal="4dp"/>
+        </ScrollView>
+
+        <!-- CENTER PANEL – Search + Item Grid (~57%) -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="2.75"
+            android:orientation="vertical"
+            android:background="#F5F5F5">
 
         <!-- Search bar -->
         <FrameLayout
@@ -129,6 +137,8 @@
             android:paddingTop="6dp"
             android:paddingBottom="8dp"
             android:visibility="gone" />
+
+        </LinearLayout>
 
     </LinearLayout>
 
@@ -287,6 +297,22 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:paddingTop="4dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnUpdate"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:visibility="gone"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="@string/cart_update_order"
+                android:textAllCaps="false"
+                android:textColor="@color/brand_primary"
+                android:textSize="15sp"
+                app:strokeColor="@color/brand_primary"
+                app:strokeWidth="1.5dp" />
 
             <LinearLayout
                 android:layout_width="match_parent"

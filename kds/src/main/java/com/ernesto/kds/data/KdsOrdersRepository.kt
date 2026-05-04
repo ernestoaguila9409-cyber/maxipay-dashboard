@@ -388,6 +388,10 @@ class KdsOrdersRepository(
         private const val FIELD_KITCHEN_STARTED_AT = "kitchenStartedAt"
         private const val FIELD_LAST_KITCHEN_SENT_AT = "lastKitchenSentAt"
         private const val FIELD_KITCHEN_CHITS_PRINTED_AT = "kitchenChitsPrintedAt"
+        /** Same field as POS [KitchenPrintHelper.KITCHEN_SENT_BY_LINE_MAP_FIELD]: cumulative qty sent per line id. */
+        private const val FIELD_KITCHEN_SENT_QTY_BY_LINE_KEY = "kitchenSentQtyByLineKey"
+        /** Legacy per-line sent qty (POS `kitchenSentQty`). */
+        private const val FIELD_KITCHEN_SENT_QTY_LEGACY = "kitchenSentQty"
         /** Map: [Order.cardKey] → `kds_devices` document id. First KDS to Start owns the ticket for other tablets. */
         private const val FIELD_KDS_CARD_CLAIMS = "kdsCardClaims"
         /** Mirrors POS `OrderLineKdsStatus.FIELD` — per-line KDS / kitchen workflow. */
@@ -530,6 +534,25 @@ class KdsOrdersRepository(
             }
         }
 
+        /** Mirrors POS [KitchenPrintHelper.kitchenSentByLineFromOrder]. */
+        private fun kitchenSentQtyByLineFromOrder(orderDoc: DocumentSnapshot): Map<String, Int> {
+            @Suppress("UNCHECKED_CAST")
+            val raw = orderDoc.get(FIELD_KITCHEN_SENT_QTY_BY_LINE_KEY) as? Map<*, *> ?: return emptyMap()
+            val out = mutableMapOf<String, Int>()
+            for ((k, v) in raw) {
+                val key = k?.toString() ?: continue
+                val qty = when (v) {
+                    is Long -> v.toInt()
+                    is Int -> v
+                    is Double -> v.toInt()
+                    is Number -> v.toInt()
+                    else -> continue
+                }
+                out[key] = qty.coerceAtLeast(0)
+            }
+            return out
+        }
+
         private fun parseCardClaims(doc: DocumentSnapshot): Map<String, String> {
             @Suppress("UNCHECKED_CAST")
             val raw = doc.get(FIELD_KDS_CARD_CLAIMS) as? Map<*, *> ?: return emptyMap()
@@ -585,7 +608,8 @@ class KdsOrdersRepository(
             val createdAt = doc.getTimestamp("createdAt")?.toDate()
             val lastKitchenSentAt = doc.getTimestamp(FIELD_LAST_KITCHEN_SENT_AT)?.toDate()
             val kitchenStartedAtFromOrder = doc.getTimestamp(FIELD_KITCHEN_STARTED_AT)?.toDate()
-            val rawItems = lineDocs.flatMap { parseLineItems(it) }
+            val sentByLine = kitchenSentQtyByLineFromOrder(doc)
+            val rawItems = lineDocs.flatMap { parseLineItems(it, sentByLine, isOnlineOrder) }
             val items = when (printing.printItemFilterMode) {
                 KdsPrintingConfig.ALL_ITEMS -> rawItems
                 else -> rawItems.filter { line ->
@@ -697,7 +721,11 @@ class KdsOrdersRepository(
          * One [OrderItem] per Firestore line (legacy), or one per [FIELD_KDS_SEND_BATCHES] entry when present
          * so the KDS can split active vs queued sends onto separate cards.
          */
-        private fun parseLineItems(doc: DocumentSnapshot): List<OrderItem> {
+        private fun parseLineItems(
+            doc: DocumentSnapshot,
+            sentByLine: Map<String, Int>,
+            isOnlineOrder: Boolean,
+        ): List<OrderItem> {
             if (!doc.exists()) return emptyList()
             val name = doc.getString("name")?.trim().orEmpty()
             if (name.isEmpty()) return emptyList()
@@ -708,6 +736,19 @@ class KdsOrdersRepository(
             @Suppress("UNCHECKED_CAST")
             val batchRaw = doc.get(FIELD_KDS_SEND_BATCHES) as? List<*>
             if (batchRaw.isNullOrEmpty()) {
+                // POS writes cart lines to Firestore before "Send to Kitchen". Once the order is
+                // released (printing trigger), omit unsent legacy lines so new cart items stay off
+                // the KDS until the next send creates `kdsSendBatches` / sent-qty map entries.
+                if (!isOnlineOrder) {
+                    val topKds = normKdsStatus(doc.getString(FIELD_KDS_LINE_STATUS))
+                    val legacySent =
+                        (doc.getLong(FIELD_KITCHEN_SENT_QTY_LEGACY) ?: 0L).toInt().coerceAtLeast(0)
+                    val orderSent = sentByLine[doc.id] ?: 0
+                    val effectiveSent = maxOf(orderSent, legacySent)
+                    if (topKds.isEmpty() && effectiveSent == 0) {
+                        return emptyList()
+                    }
+                }
                 val qty = (doc.getLong("quantity") ?: 0L).toInt().coerceAtLeast(1)
                 val kdsStatus = doc.getString(FIELD_KDS_LINE_STATUS)?.trim().orEmpty()
                 val kdsStartedAt = doc.getTimestamp(FIELD_KDS_STARTED_AT)?.toDate()

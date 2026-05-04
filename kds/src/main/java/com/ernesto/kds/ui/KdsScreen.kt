@@ -675,14 +675,18 @@ private fun OrderKdsCard(
             }
 
             val anchor = urgencyElapsedAnchor(order)
-            val elapsedMinutes = anchor?.let { t ->
-                ((nowMs - t.time) / 60_000L).toInt().coerceAtLeast(0)
-            } ?: 0
-            val urgencyBackground = getUrgencyColor(
-                elapsedMinutes,
-                ticketYellowAfterMinutes,
-                ticketRedAfterMinutes,
-            )
+            val urgencyBackground = if (showTimers) {
+                val elapsedMinutes = anchor?.let { t ->
+                    ((nowMs - t.time) / 60_000L).toInt().coerceAtLeast(0)
+                } ?: 0
+                getUrgencyColor(
+                    elapsedMinutes,
+                    ticketYellowAfterMinutes,
+                    ticketRedAfterMinutes,
+                )
+            } else {
+                Color.White
+            }
             val bodyShape = RoundedCornerShape(bottomStart = CardCorner, bottomEnd = CardCorner)
 
             Column(

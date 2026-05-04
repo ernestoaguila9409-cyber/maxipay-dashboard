@@ -329,6 +329,12 @@ class OrderDetailActivity : AppCompatActivity() {
                         btnCheckout.setOnClickListener {
                             val i = Intent(this, MenuActivity::class.java)
                             i.putExtra("ORDER_ID", orderId)
+                            if (orderType.isNotBlank()) {
+                                i.putExtra("orderType", orderType)
+                            }
+                            if (OnlineOrderStatusDisplay.isUnpaidWebOnlineOrder(doc)) {
+                                i.putExtra(MenuActivity.EXTRA_CART_FIRST_UNPAID_ONLINE, true)
+                            }
                             startActivity(i)
                         }
                     }
