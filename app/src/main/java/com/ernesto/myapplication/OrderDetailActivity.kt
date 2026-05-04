@@ -2201,7 +2201,6 @@ class OrderDetailActivity : AppCompatActivity() {
                             return@addOnSuccessListener
                         }
 
-                        val isPerItemRefund = !refundedLineKey.isNullOrBlank()
                         val txBatchId = txDoc.getString("batchId")?.takeIf { it.isNotBlank() }
                             ?: currentBatchId?.takeIf { it.isNotBlank() }
 
@@ -2209,8 +2208,7 @@ class OrderDetailActivity : AppCompatActivity() {
                             db.collection("Batches").document(txBatchId).get()
                                 .addOnSuccessListener batchCheck@{ batchDoc ->
                                     val batchIsClosed = batchDoc.getBoolean("closed") ?: true
-                                    val useDirectRefund = batchIsClosed || !isPerItemRefund
-                                    if (useDirectRefund) {
+                                    if (batchIsClosed) {
                                         finalizeRefund(transactionId, refundAmountInCents, finishAfter, refundedItemName, refundedLineKey, paymentType)
                                         return@batchCheck
                                     }
