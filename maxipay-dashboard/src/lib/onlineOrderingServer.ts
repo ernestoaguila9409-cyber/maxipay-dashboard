@@ -106,6 +106,31 @@ function asRecord(data: DocumentData): Record<string, unknown> {
   return data as unknown as Record<string, unknown>;
 }
 
+/** Firestore may store string ids or DocumentReference-like objects with [id] / [path]. */
+function normalizeTriggerModifierGroupIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const x of raw) {
+    if (typeof x === "string" && x.trim()) {
+      out.push(x.trim());
+      continue;
+    }
+    if (x && typeof x === "object") {
+      const id = (x as { id?: unknown }).id;
+      if (typeof id === "string" && id.trim()) {
+        out.push(id.trim());
+        continue;
+      }
+      const path = (x as { path?: unknown }).path;
+      if (typeof path === "string") {
+        const seg = path.split("/").pop();
+        if (seg) out.push(seg);
+      }
+    }
+  }
+  return out;
+}
+
 function parseModifierGroupDoc(id: string, data: DocumentData): OnlineModifierGroup {
   const rawOptions = Array.isArray(data.options) ? data.options : [];
   const options: OnlineModifierOption[] = rawOptions.map((o: Record<string, unknown>, i: number) => {
@@ -116,9 +141,7 @@ function parseModifierGroupDoc(id: string, data: DocumentData): OnlineModifierGr
       id: (o.id as string) || `opt_${i}`,
       name: (o.name as string) || "",
       price: typeof o.price === "number" ? o.price : 0,
-      triggersModifierGroupIds: Array.isArray(o.triggersModifierGroupIds)
-        ? (o.triggersModifierGroupIds as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0)
-        : [],
+      triggersModifierGroupIds: normalizeTriggerModifierGroupIds(o.triggersModifierGroupIds),
       ...(imageUrl ? { imageUrl } : {}),
     };
   });
@@ -138,6 +161,57 @@ function itemModifierGroupIds(data: DocumentData): string[] {
   const raw = data.modifierGroupIds;
   if (!Array.isArray(raw)) return [];
   return raw.filter((x): x is string => typeof x === "string" && x.length > 0);
+}
+
+const MODIFIER_GROUP_GETALL_CHUNK = 100;
+
+function chunkIds<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+  return chunks;
+}
+
+/**
+ * Loads ModifierGroups reachable from [seedIds], including any group ids listed on
+ * options as triggersModifierGroupIds (nested / combo flows). Without this, the
+ * public menu JSON omits triggered groups and the storefront cannot show them.
+ */
+async function loadModifierGroupsTransitive(
+  db: Firestore,
+  seedIds: Iterable<string>
+): Promise<OnlineModifierGroup[]> {
+  const pending = new Set<string>();
+  for (const id of seedIds) {
+    if (id) pending.add(id);
+  }
+  const fetched = new Set<string>();
+  const byId = new Map<string, OnlineModifierGroup>();
+
+  while (pending.size > 0) {
+    const batch = [...pending];
+    pending.clear();
+    const toRequest = batch.filter((id) => !fetched.has(id));
+    for (const id of toRequest) fetched.add(id);
+
+    for (const part of chunkIds(toRequest, MODIFIER_GROUP_GETALL_CHUNK)) {
+      if (part.length === 0) continue;
+      const snaps = await db.getAll(
+        ...part.map((id) => db.collection("ModifierGroups").doc(id))
+      );
+      for (const s of snaps) {
+        if (!s.exists) continue;
+        const g = parseModifierGroupDoc(s.id, s.data()!);
+        byId.set(g.id, g);
+        for (const opt of g.options) {
+          for (const tid of opt.triggersModifierGroupIds) {
+            if (tid && !fetched.has(tid)) pending.add(tid);
+          }
+        }
+      }
+    }
+  }
+
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Server-only: iPOSpays HPP credentials (Firestore `Settings/onlineOrdering`, env fallback). */
@@ -295,13 +369,7 @@ export async function loadOnlineMenu(
     });
   }
 
-  const groupRefs = [...modifierGroupIdSet].map((id) => db.collection("ModifierGroups").doc(id));
-  const groupSnaps = groupRefs.length > 0 ? await db.getAll(...groupRefs) : [];
-  const modifierGroups: OnlineModifierGroup[] = [];
-  for (const s of groupSnaps) {
-    if (s.exists) modifierGroups.push(parseModifierGroupDoc(s.id, s.data()!));
-  }
-  modifierGroups.sort((a, b) => a.name.localeCompare(b.name));
+  const modifierGroups = await loadModifierGroupsTransitive(db, modifierGroupIdSet);
 
   const catIdsUsed = new Set<string>();
   for (const it of items) {
