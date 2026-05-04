@@ -26,6 +26,44 @@ export function slugify(text: string): string {
 }
 
 /**
+ * Item-level modifier groups plus any groups triggered by the current picks (transitive).
+ * Order: [baseGroupIds] in given order, then newly discovered groups appended per sweep.
+ */
+export function expandModifierGroupIdsFromPicks(
+  baseGroupIds: readonly string[],
+  picksByGroup: Readonly<Record<string, readonly string[]>>,
+  hasGroup: (groupId: string) => boolean,
+  triggersForOption: (groupId: string, optionId: string) => readonly string[],
+): string[] {
+  const order: string[] = [];
+  const seen = new Set<string>();
+  for (const id of baseGroupIds) {
+    if (hasGroup(id) && !seen.has(id)) {
+      seen.add(id);
+      order.push(id);
+    }
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const gid of order) {
+      const oids = picksByGroup[gid];
+      if (!oids?.length) continue;
+      for (const oid of oids) {
+        for (const tid of triggersForOption(gid, oid)) {
+          if (hasGroup(tid) && !seen.has(tid)) {
+            seen.add(tid);
+            order.push(tid);
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+  return order;
+}
+
+/**
  * `AUTO` follows the `enabled` flag and, when enabled, optional business hours.
  * `OPEN` / `CLOSED` are manual overrides (OPEN ignores the schedule; CLOSED blocks orders).
  */

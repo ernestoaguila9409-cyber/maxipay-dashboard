@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { expandModifierGroupIdsFromPicks } from "@/lib/onlineOrderingShared";
 import type { HeroSlide, PublicStorefront } from "@/lib/storefrontShared";
 import { HeroCarousel } from "@/components/storefront/HeroCarousel";
 
@@ -659,11 +660,21 @@ function CheckoutModal({
    CustomizeSheet (orange accents)
    ═══════════════════════════════════════════ */
 
+function draftPicksByGroup(draft: Record<string, string[]>): Record<string, readonly string[]> {
+  const out: Record<string, readonly string[]> = {};
+  for (const [k, v] of Object.entries(draft)) {
+    if (v?.length) out[k] = v;
+  }
+  return out;
+}
+
 function CustomizeSheet({
-  open, item, groups, groupMap, onClose, onConfirm,
+  open, item, groupMap, onClose, onConfirm,
 }: {
-  open: boolean; item: MenuItem | null; groups: ModifierGroup[];
-  groupMap: Map<string, ModifierGroup>; onClose: () => void;
+  open: boolean;
+  item: MenuItem | null;
+  groupMap: Map<string, ModifierGroup>;
+  onClose: () => void;
   onConfirm: (selections: ModifierSelection[]) => void;
 }) {
   const [draft, setDraft] = useState<Record<string, string[]>>({});
@@ -672,16 +683,68 @@ function CustomizeSheet({
   useEffect(() => {
     if (!open || !item) return;
     const init: Record<string, string[]> = {};
-    for (const g of groups) init[g.id] = [];
+    for (const id of item.modifierGroupIds) {
+      if (groupMap.has(id)) init[id] = [];
+    }
     setDraft(init);
     setErr(null);
-  }, [open, item, groups]);
+  }, [open, item?.id, groupMap]);
+
+  const picksByGroup = useMemo(() => draftPicksByGroup(draft), [draft]);
+
+  const visibleGroupIds = useMemo(() => {
+    if (!item) return [];
+    return expandModifierGroupIdsFromPicks(
+      item.modifierGroupIds,
+      picksByGroup,
+      (id) => groupMap.has(id),
+      (gid, oid) =>
+        groupMap.get(gid)?.options.find((o) => o.id === oid)?.triggersModifierGroupIds ?? [],
+    );
+  }, [item, picksByGroup, groupMap]);
+
+  const visibleKey = visibleGroupIds.join("\0");
+  const visibleGroupIdsRef = useRef(visibleGroupIds);
+  visibleGroupIdsRef.current = visibleGroupIds;
+
+  useEffect(() => {
+    if (!open || !item) return;
+    const ids = visibleGroupIdsRef.current;
+    setDraft((prev) => {
+      const next: Record<string, string[]> = {};
+      for (const id of ids) {
+        next[id] = [...(prev[id] ?? [])];
+      }
+      const prevKeys = Object.keys(prev).sort().join("|");
+      const nextKeys = [...ids].sort().join("|");
+      if (prevKeys === nextKeys) {
+        let same = true;
+        for (const id of ids) {
+          const a = prev[id] ?? [];
+          const b = next[id];
+          if (a.length !== b.length || a.some((x, i) => x !== b[i])) {
+            same = false;
+            break;
+          }
+        }
+        if (same) return prev;
+      }
+      return next;
+    });
+  }, [open, item?.id, visibleKey]);
+
+  const visibleGroups = useMemo(
+    () => visibleGroupIds.map((id) => groupMap.get(id)).filter((g): g is ModifierGroup => g != null),
+    [visibleGroupIds, groupMap],
+  );
 
   const draftSelections = useMemo((): ModifierSelection[] => {
     const out: ModifierSelection[] = [];
-    for (const g of groups) { for (const oid of draft[g.id] ?? []) out.push({ groupId: g.id, optionId: oid }); }
+    for (const id of visibleGroupIds) {
+      for (const oid of draft[id] ?? []) out.push({ groupId: id, optionId: oid });
+    }
     return out;
-  }, [draft, groups]);
+  }, [draft, visibleGroupIds]);
 
   const previewUnitCents = item != null ? unitPriceCentsForLine(item, draftSelections, groupMap) : 0;
 
@@ -698,7 +761,7 @@ function CustomizeSheet({
 
   if (!open || !item) return null;
 
-  if (groups.length === 0) {
+  if (visibleGroups.length === 0) {
     return (
       <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center">
         <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
@@ -712,7 +775,7 @@ function CustomizeSheet({
   }
 
   const handleConfirm = () => {
-    for (const g of groups) {
+    for (const g of visibleGroups) {
       const n = (draft[g.id] ?? []).length;
       if (n < g.minSelection || n > g.maxSelection) { setErr(`Choose ${g.minSelection}\u2013${g.maxSelection} option(s) for \u201c${g.name}\u201d.`); return; }
     }
@@ -732,7 +795,7 @@ function CustomizeSheet({
           <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-neutral-100 shrink-0"><IconX size={20} /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
-          {groups.map((g) => (
+          {visibleGroups.map((g) => (
             <div key={g.id}>
               <p className="text-sm font-semibold text-neutral-900">{g.name}{g.minSelection > 0 && <span className="text-red-600 font-normal"> *</span>}</p>
               <p className="text-xs text-neutral-500 mt-0.5 mb-2">{g.maxSelection <= 1 ? "Choose one" : `Choose ${g.minSelection}\u2013${g.maxSelection}`}</p>
@@ -895,11 +958,6 @@ function PublicOrderPageInner() {
   }, [cartRows]);
 
   const customizeItem = useMemo(() => { if (!menu || !customizeItemId) return null; return menu.items.find((i) => i.id === customizeItemId) ?? null; }, [menu, customizeItemId]);
-  const customizeGroups = useMemo(() => {
-    if (!menu || !customizeItem) return [];
-    const map = new Map(menu.modifierGroups.map((g) => [g.id, g]));
-    return customizeItem.modifierGroupIds.map((id) => map.get(id)).filter((g): g is ModifierGroup => Boolean(g));
-  }, [menu, customizeItem]);
 
   const popularItems: MenuItem[] = useMemo(() => {
     if (!menu) return [];
@@ -1158,7 +1216,8 @@ function PublicOrderPageInner() {
 
       <CustomizeSheet
         open={customizeItemId != null && customizeItem != null && customizeItem.modifierGroupIds.length > 0}
-        item={customizeItem} groups={customizeGroups} groupMap={groupMap}
+        item={customizeItem}
+        groupMap={groupMap}
         onClose={() => setCustomizeItemId(null)}
         onConfirm={(selections) => { if (customizeItemId) addCustomizedLine(customizeItemId, selections); setCustomizeItemId(null); }}
       />

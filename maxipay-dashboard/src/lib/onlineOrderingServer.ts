@@ -5,6 +5,7 @@ import {
   BUSINESS_INFO_DOC,
   ONLINE_ORDERING_SETTINGS_DOC,
   SETTINGS_COLLECTION,
+  expandModifierGroupIdsFromPicks,
   formatPrepTimeRange,
   isStoreCurrentlyOpen,
   parseOnlineOrderingSettings,
@@ -400,12 +401,34 @@ function buildValidatedModifiersForLine(
       throw new OnlineOrderValidationError(`Duplicate modifier selection for "${itemName}".`);
     }
     seenPair.add(key);
-    if (!itemModifierGroupIds.includes(s.groupId)) {
+  }
+
+  const picksByGroup: Record<string, string[]> = {};
+  for (const s of selections) {
+    const list = picksByGroup[s.groupId] ?? [];
+    list.push(s.optionId);
+    picksByGroup[s.groupId] = list;
+  }
+
+  const allowedOrder = expandModifierGroupIdsFromPicks(
+    itemModifierGroupIds,
+    picksByGroup,
+    (id) => groupById.has(id),
+    (gid, oid) => {
+      const g = groupById.get(gid);
+      const opt = g?.options.find((o) => o.id === oid);
+      return opt?.triggersModifierGroupIds ?? [];
+    },
+  );
+  const allowedSet = new Set(allowedOrder);
+
+  for (const s of selections) {
+    if (!allowedSet.has(s.groupId)) {
       throw new OnlineOrderValidationError(`Invalid modifier group for "${itemName}".`);
     }
   }
 
-  for (const gid of itemModifierGroupIds) {
+  for (const gid of allowedOrder) {
     const g = groupById.get(gid);
     if (!g) {
       throw new OnlineOrderValidationError(`Modifier group is not available for "${itemName}".`);
@@ -421,7 +444,7 @@ function buildValidatedModifiersForLine(
   const modifierMaps: Record<string, unknown>[] = [];
   let modifiersTotalInCents = 0;
 
-  for (const gid of itemModifierGroupIds) {
+  for (const gid of allowedOrder) {
     const g = groupById.get(gid)!;
     const picks = selections.filter((x) => x.groupId === gid);
     for (const p of picks) {
