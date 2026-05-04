@@ -45,6 +45,8 @@ interface LineItem {
   quantity: number;
   unitPriceInCents: number;
   lineTotalInCents: number;
+  /** Menu item photo on the line doc (POS / online ordering). */
+  imageUrl?: string;
   modifiers: { name: string; action?: string; price?: number }[];
 }
 
@@ -487,12 +489,18 @@ export default function OrderDetailPage() {
                 };
               })
             : [];
+          const rawImg = x.imageUrl;
+          const imageUrl =
+            typeof rawImg === "string" && rawImg.trim().length > 0
+              ? rawImg.trim()
+              : undefined;
           parsed.push({
             id: d.id,
             name: String(x.name ?? x.itemName ?? "Item"),
             quantity: Number.isFinite(qty) ? qty : 1,
             unitPriceInCents: unit,
             lineTotalInCents: lineTotal,
+            imageUrl,
             modifiers,
           });
         });
@@ -832,57 +840,67 @@ export default function OrderDetailPage() {
                             line only.
                           </p>
                           <div className="flex justify-between gap-4">
-                            <div className="min-w-0">
-                              <p
-                                className={`font-medium ${
-                                  isRefunded
-                                    ? "text-[#999999] line-through decoration-[#999999]"
-                                    : "text-slate-800"
-                                }`}
-                              >
-                                {line.name}{" "}
-                                <span
-                                  className={
-                                    isRefunded
-                                      ? "text-[#999999] font-normal"
-                                      : "text-slate-500 font-normal"
-                                  }
-                                >
-                                  ×{line.quantity}
-                                </span>
-                              </p>
-                              {line.modifiers.length > 0 && (
-                                <ul className="mt-1 text-xs text-slate-600 space-y-0.5">
-                                  {line.modifiers.map((m, i) => (
-                                    <li key={i}>
-                                      {m.action === "ADD"
-                                        ? "+"
-                                        : m.action === "NO"
-                                          ? "−"
-                                          : ""}{" "}
-                                      {m.name}
-                                      {m.price != null && m.price !== 0
-                                        ? ` ($${Number(m.price).toFixed(2)})`
-                                        : ""}
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                              {isRefunded ? (
-                                <div className="mt-2 space-y-0.5">
-                                  <p className="text-xs font-bold uppercase tracking-wide text-red-600">
-                                    Refunded
-                                  </p>
-                                  {strike.by && strike.by !== "—" ? (
-                                    <p className="text-xs text-red-600/90">
-                                      Refunded by {strike.by}
-                                    </p>
-                                  ) : null}
-                                  {strike.at ? (
-                                    <p className="text-xs text-red-600/90">{strike.at}</p>
-                                  ) : null}
-                                </div>
+                            <div className="flex min-w-0 flex-1 gap-3">
+                              {line.imageUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={line.imageUrl}
+                                  alt=""
+                                  className="h-14 w-14 shrink-0 rounded-lg border border-slate-100 object-cover bg-slate-50"
+                                />
                               ) : null}
+                              <div className="min-w-0 flex-1">
+                                <p
+                                  className={`font-medium ${
+                                    isRefunded
+                                      ? "text-[#999999] line-through decoration-[#999999]"
+                                      : "text-slate-800"
+                                  }`}
+                                >
+                                  {line.name}{" "}
+                                  <span
+                                    className={
+                                      isRefunded
+                                        ? "text-[#999999] font-normal"
+                                        : "text-slate-500 font-normal"
+                                    }
+                                  >
+                                    ×{line.quantity}
+                                  </span>
+                                </p>
+                                {line.modifiers.length > 0 && (
+                                  <ul className="mt-1 text-xs text-slate-600 space-y-0.5">
+                                    {line.modifiers.map((m, i) => (
+                                      <li key={i}>
+                                        {m.action === "ADD"
+                                          ? "+"
+                                          : m.action === "NO"
+                                            ? "−"
+                                            : ""}{" "}
+                                        {m.name}
+                                        {m.price != null && m.price !== 0
+                                          ? ` ($${Number(m.price).toFixed(2)})`
+                                          : ""}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                                {isRefunded ? (
+                                  <div className="mt-2 space-y-0.5">
+                                    <p className="text-xs font-bold uppercase tracking-wide text-red-600">
+                                      Refunded
+                                    </p>
+                                    {strike.by && strike.by !== "—" ? (
+                                      <p className="text-xs text-red-600/90">
+                                        Refunded by {strike.by}
+                                      </p>
+                                    ) : null}
+                                    {strike.at ? (
+                                      <p className="text-xs text-red-600/90">{strike.at}</p>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
                             </div>
                             <div className="text-right shrink-0">
                               <p

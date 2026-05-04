@@ -10,130 +10,155 @@
     android:paddingTop="10dp"
     android:paddingBottom="10dp">
 
-    <!-- 1. Chevron (multi kitchen send) + item name + KDS status -->
+    <!-- Thumbnail (menu item only) + line body -->
     <LinearLayout
-        android:id="@+id/itemNameKdsRow"
+        android:id="@+id/itemMainRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:gravity="top">
 
-        <TextView
-            android:id="@+id/txtItemBatchChevron"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="▶"
-            android:textSize="12sp"
-            android:textColor="#666666"
-            android:paddingEnd="8dp"
+        <ImageView
+            android:id="@+id/imgItemThumb"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginEnd="12dp"
+            android:scaleType="centerCrop"
+            android:contentDescription=""
             android:visibility="gone" />
 
-        <TextView
-            android:id="@+id/txtItemNameQty"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:textStyle="bold"
-            android:textSize="14sp"
-            android:textColor="#222222"/>
+            android:orientation="vertical">
 
-        <androidx.compose.ui.platform.ComposeView
-            android:id="@+id/kdsStatusCompose"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"/>
-    </LinearLayout>
+            <!-- 1. Chevron (multi kitchen send) + item name + KDS status -->
+            <LinearLayout
+                android:id="@+id/itemNameKdsRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-    <!-- 2. Modifiers (bullets), optional -->
-    <TextView
-        android:id="@+id/txtItemModifiers"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="12sp"
-        android:textColor="#666666"
-        android:layout_marginTop="4dp"
-        android:visibility="gone"/>
+                <TextView
+                    android:id="@+id/txtItemBatchChevron"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="▶"
+                    android:textSize="12sp"
+                    android:textColor="#666666"
+                    android:paddingEnd="8dp"
+                    android:visibility="gone" />
 
-    <!-- 3. Line discount bullets, optional -->
-    <TextView
-        android:id="@+id/txtItemDiscounts"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="12sp"
-        android:textColor="#666666"
-        android:layout_marginTop="2dp"
-        android:visibility="gone"/>
+                <TextView
+                    android:id="@+id/txtItemNameQty"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textSize="14sp"
+                    android:textColor="#222222"/>
 
-    <!-- 4. Line total -->
-    <TextView
-        android:id="@+id/txtItemLineTotal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textStyle="bold"
-        android:textSize="13sp"
-        android:textColor="#1B5E20"
-        android:layout_marginTop="6dp"/>
+                <androidx.compose.ui.platform.ComposeView
+                    android:id="@+id/kdsStatusCompose"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"/>
+            </LinearLayout>
 
-    <LinearLayout
-        android:id="@+id/kdsBatchChildContainer"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:layout_marginTop="6dp"
-        android:visibility="gone" />
+            <!-- 2. Modifiers (bullets), optional -->
+            <TextView
+                android:id="@+id/txtItemModifiers"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="#666666"
+                android:layout_marginTop="4dp"
+                android:visibility="gone"/>
 
-    <!-- Hidden: base (compat) -->
-    <TextView
-        android:id="@+id/txtItemBase"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:visibility="gone"/>
+            <!-- 3. Line discount bullets, optional -->
+            <TextView
+                android:id="@+id/txtItemDiscounts"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="#666666"
+                android:layout_marginTop="2dp"
+                android:visibility="gone"/>
 
-    <!-- Payments info -->
-    <TextView
-        android:id="@+id/txtItemPayments"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textSize="12sp"
-        android:textColor="#555555"
-        android:layout_marginTop="2dp"
-        android:visibility="gone"/>
+            <!-- 4. Line total -->
+            <TextView
+                android:id="@+id/txtItemLineTotal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:textColor="#1B5E20"
+                android:layout_marginTop="6dp"/>
 
-    <!-- REFUNDED badge -->
-    <TextView
-        android:id="@+id/txtRefundedBadge"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="REFUNDED"
-        android:textSize="11sp"
-        android:textStyle="bold"
-        android:textColor="#C62828"
-        android:layout_marginTop="4dp"
-        android:visibility="gone"/>
+            <LinearLayout
+                android:id="@+id/kdsBatchChildContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="6dp"
+                android:visibility="gone" />
 
-    <!-- Refunded by + date -->
-    <LinearLayout
-        android:id="@+id/refundedByRow"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:layout_marginTop="2dp"
-        android:visibility="gone">
+            <!-- Hidden: base (compat) -->
+            <TextView
+                android:id="@+id/txtItemBase"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:visibility="gone"/>
 
-        <TextView
-            android:id="@+id/txtRefundedBy"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textSize="11sp"
-            android:textColor="#C62828"/>
+            <!-- Payments info -->
+            <TextView
+                android:id="@+id/txtItemPayments"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="#555555"
+                android:layout_marginTop="2dp"
+                android:visibility="gone"/>
 
-        <TextView
-            android:id="@+id/txtRefundedDate"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textSize="11sp"
-            android:textColor="#999999"
-            android:layout_marginTop="1dp"/>
+            <!-- REFUNDED badge -->
+            <TextView
+                android:id="@+id/txtRefundedBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="REFUNDED"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#C62828"
+                android:layout_marginTop="4dp"
+                android:visibility="gone"/>
+
+            <!-- Refunded by + date -->
+            <LinearLayout
+                android:id="@+id/refundedByRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="2dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/txtRefundedBy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:textColor="#C62828"/>
+
+                <TextView
+                    android:id="@+id/txtRefundedDate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:textColor="#999999"
+                    android:layout_marginTop="1dp"/>
+            </LinearLayout>
+        </LinearLayout>
     </LinearLayout>
 
     <View

@@ -701,6 +701,12 @@ export async function createOnlineOrderTransaction(
         createdAt: now,
       };
       if (rl.taxIds.length > 0) lineDoc.taxIds = rl.taxIds;
+      const itemData = byId.get(rl.itemId);
+      const itemImg =
+        itemData != null ? (itemData as Record<string, unknown>)["imageUrl"] : undefined;
+      if (typeof itemImg === "string" && itemImg.trim().length > 0) {
+        lineDoc.imageUrl = itemImg.trim();
+      }
       t.set(orderRef.collection("items").doc(rl.lineKey), lineDoc);
     }
 

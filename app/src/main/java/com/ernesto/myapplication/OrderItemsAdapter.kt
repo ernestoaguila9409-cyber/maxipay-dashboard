@@ -6,9 +6,12 @@ import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import coil.load
+import coil.transform.RoundedCornersTransformation
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.recyclerview.widget.RecyclerView
@@ -110,6 +113,7 @@ class OrderItemsAdapter(
     }
 
     class ItemVH(view: View) : RecyclerView.ViewHolder(view) {
+        val imgItemThumb: ImageView = view.findViewById(R.id.imgItemThumb)
         val itemNameKdsRow: View = view.findViewById(R.id.itemNameKdsRow)
         val batchChevron: TextView = view.findViewById(R.id.txtItemBatchChevron)
         val nameQty: TextView = view.findViewById(R.id.txtItemNameQty)
@@ -133,6 +137,7 @@ class OrderItemsAdapter(
     }
 
     class GroupVH(view: View) : RecyclerView.ViewHolder(view) {
+        val imgGroupItemThumb: ImageView = view.findViewById(R.id.imgGroupItemThumb)
         val headerRow: View = view.findViewById(R.id.groupHeaderRow)
         val chevron: TextView = view.findViewById(R.id.txtGroupChevron)
         val nameQty: TextView = view.findViewById(R.id.txtGroupNameQty)
@@ -176,8 +181,23 @@ class OrderItemsAdapter(
         }
     }
 
+    private fun bindLineItemThumb(imageView: ImageView, doc: DocumentSnapshot) {
+        val u = doc.getString("imageUrl")?.trim()?.takeIf { it.isNotEmpty() }
+        if (u != null) {
+            imageView.visibility = View.VISIBLE
+            imageView.load(u) {
+                crossfade(true)
+                transformations(RoundedCornersTransformation(8f))
+            }
+        } else {
+            imageView.visibility = View.GONE
+            imageView.setImageDrawable(null)
+        }
+    }
+
     private fun bindItem(holder: ItemVH, doc: DocumentSnapshot) {
         val ctx = holder.itemView.context
+        bindLineItemThumb(holder.imgItemThumb, doc)
         val batches = OrderLineKdsStatus.parseKdsSendBatches(doc)
         val multiBatch = batches.size > 1
 
@@ -399,6 +419,14 @@ class OrderItemsAdapter(
 
         holder.nameQty.text = "${group.name} (Qty: $totalQty)"
         holder.lineTotal.text = "Line Total: ${MoneyUtils.centsToDisplay(totalLineCents)}"
+
+        val thumbDoc = docs.firstOrNull { !it.getString("imageUrl").isNullOrBlank() } ?: docs.firstOrNull()
+        if (thumbDoc != null) {
+            bindLineItemThumb(holder.imgGroupItemThumb, thumbDoc)
+        } else {
+            holder.imgGroupItemThumb.visibility = View.GONE
+            holder.imgGroupItemThumb.setImageDrawable(null)
+        }
 
         if (kdsActive && hasKdsStatusIndicator(kdsRaw)) {
             holder.kdsCompose.visibility = View.VISIBLE
