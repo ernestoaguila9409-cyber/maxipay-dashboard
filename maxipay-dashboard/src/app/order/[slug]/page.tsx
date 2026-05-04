@@ -668,6 +668,114 @@ function draftPicksByGroup(draft: Record<string, string[]>): Record<string, read
   return out;
 }
 
+/** Modifier groups that should only appear nested under a selected option, not as a separate root block. */
+function nestedTriggerModifierGroupIds(
+  item: MenuItem,
+  draft: Record<string, string[]>,
+  groupMap: Map<string, ModifierGroup>,
+  visibleIds: ReadonlySet<string>,
+): Set<string> {
+  const nested = new Set<string>();
+  const visit = (gid: string) => {
+    const g = groupMap.get(gid);
+    if (!g || !visibleIds.has(gid)) return;
+    for (const oid of draft[g.id] ?? []) {
+      const opt = g.options.find((o) => o.id === oid);
+      if (!opt) continue;
+      for (const tid of opt.triggersModifierGroupIds) {
+        if (!groupMap.has(tid) || !visibleIds.has(tid)) continue;
+        nested.add(tid);
+        visit(tid);
+      }
+    }
+  };
+  for (const gid of item.modifierGroupIds) visit(gid);
+  return nested;
+}
+
+type ModifierGroupSectionProps = {
+  g: ModifierGroup;
+  depth: number;
+  draft: Record<string, string[]>;
+  toggle: (g: ModifierGroup, optionId: string) => void;
+  groupMap: Map<string, ModifierGroup>;
+  visibleIds: ReadonlySet<string>;
+  claimNestedPlacement: (groupId: string) => boolean;
+};
+
+function ModifierGroupSection({
+  g,
+  depth,
+  draft,
+  toggle,
+  groupMap,
+  visibleIds,
+  claimNestedPlacement,
+}: ModifierGroupSectionProps) {
+  return (
+    <div className={depth > 0 ? "mt-3 ml-0.5 pl-3 border-l-2 border-orange-200" : ""}>
+      <p className="text-sm font-semibold text-neutral-900">
+        {g.name}
+        {g.minSelection > 0 && <span className="text-red-600 font-normal"> *</span>}
+      </p>
+      <p className="text-xs text-neutral-500 mt-0.5 mb-2">
+        {g.maxSelection <= 1 ? "Choose one" : `Choose ${g.minSelection}\u2013${g.maxSelection}`}
+      </p>
+      <div className="flex flex-col gap-2">
+        {g.options.map((opt) => {
+          const picked = (draft[g.id] ?? []).includes(opt.id);
+          const priceLabel =
+            g.groupType === "REMOVE" ? "" : opt.price > 0 ? ` +${fmt(Math.round(opt.price * 100))}` : "";
+          const optImg = opt.imageUrl?.trim();
+          return (
+            <div key={opt.id} className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => toggle(g, opt.id)}
+                className={`flex items-center justify-between gap-3 text-left rounded-xl border px-3 py-2.5 text-sm transition-colors ${
+                  picked ? "border-[#EA580C] bg-orange-50" : "border-neutral-200 hover:border-neutral-300"
+                }`}
+              >
+                <span className="flex items-center gap-3 min-w-0 flex-1">
+                  <span className="shrink-0 w-11 h-11 rounded-lg border border-neutral-200 bg-neutral-100 overflow-hidden flex items-center justify-center">
+                    {optImg ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={optImg} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-neutral-300"><IconStore size={18} /></span>
+                    )}
+                  </span>
+                  <span className="font-medium text-neutral-900 truncate">{opt.name}</span>
+                </span>
+                {priceLabel ? <span className="text-neutral-600 tabular-nums text-xs shrink-0">{priceLabel}</span> : null}
+              </button>
+              {picked
+                ? opt.triggersModifierGroupIds.map((tid) => {
+                    if (!visibleIds.has(tid)) return null;
+                    const tg = groupMap.get(tid);
+                    if (!tg || !claimNestedPlacement(tid)) return null;
+                    return (
+                      <ModifierGroupSection
+                        key={tid}
+                        g={tg}
+                        depth={depth + 1}
+                        draft={draft}
+                        toggle={toggle}
+                        groupMap={groupMap}
+                        visibleIds={visibleIds}
+                        claimNestedPlacement={claimNestedPlacement}
+                      />
+                    );
+                  })
+                : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function CustomizeSheet({
   open, item, groupMap, onClose, onConfirm,
 }: {
@@ -738,6 +846,18 @@ function CustomizeSheet({
     [visibleGroupIds, groupMap],
   );
 
+  const visibleIdSet = useMemo(() => new Set(visibleGroupIds), [visibleGroupIds]);
+
+  const nestedTriggerIds = useMemo(() => {
+    if (!item) return new Set<string>();
+    return nestedTriggerModifierGroupIds(item, draft, groupMap, visibleIdSet);
+  }, [item, draft, groupMap, visibleIdSet]);
+
+  const rootModifierGroupIds = useMemo(() => {
+    if (!item) return [];
+    return item.modifierGroupIds.filter((gid) => groupMap.has(gid) && !nestedTriggerIds.has(gid));
+  }, [item, groupMap, nestedTriggerIds]);
+
   const draftSelections = useMemo((): ModifierSelection[] => {
     const out: ModifierSelection[] = [];
     for (const id of visibleGroupIds) {
@@ -783,6 +903,13 @@ function CustomizeSheet({
     onClose();
   };
 
+  const nestedPlacementTaken = new Set<string>();
+  const claimNestedPlacement = (gid: string) => {
+    if (nestedPlacementTaken.has(gid)) return false;
+    nestedPlacementTaken.add(gid);
+    return true;
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
@@ -795,39 +922,24 @@ function CustomizeSheet({
           <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-neutral-100 shrink-0"><IconX size={20} /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
-          {visibleGroups.map((g) => (
-            <div key={g.id}>
-              <p className="text-sm font-semibold text-neutral-900">{g.name}{g.minSelection > 0 && <span className="text-red-600 font-normal"> *</span>}</p>
-              <p className="text-xs text-neutral-500 mt-0.5 mb-2">{g.maxSelection <= 1 ? "Choose one" : `Choose ${g.minSelection}\u2013${g.maxSelection}`}</p>
-              <div className="flex flex-col gap-2">
-                {g.options.map((opt) => {
-                  const picked = (draft[g.id] ?? []).includes(opt.id);
-                  const priceLabel = g.groupType === "REMOVE" ? "" : opt.price > 0 ? ` +${fmt(Math.round(opt.price * 100))}` : "";
-                  const optImg = opt.imageUrl?.trim();
-                  return (
-                    <button key={opt.id} type="button" onClick={() => toggle(g, opt.id)}
-                      className={`flex items-center justify-between gap-3 text-left rounded-xl border px-3 py-2.5 text-sm transition-colors ${
-                        picked ? "border-[#EA580C] bg-orange-50" : "border-neutral-200 hover:border-neutral-300"
-                      }`}
-                    >
-                      <span className="flex items-center gap-3 min-w-0 flex-1">
-                        <span className="shrink-0 w-11 h-11 rounded-lg border border-neutral-200 bg-neutral-100 overflow-hidden flex items-center justify-center">
-                          {optImg ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={optImg} alt="" className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="text-neutral-300"><IconStore size={18} /></span>
-                          )}
-                        </span>
-                        <span className="font-medium text-neutral-900 truncate">{opt.name}</span>
-                      </span>
-                      {priceLabel ? <span className="text-neutral-600 tabular-nums text-xs shrink-0">{priceLabel}</span> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+          <div className="flex flex-col gap-6">
+            {rootModifierGroupIds.map((gid) => {
+              const g = groupMap.get(gid);
+              if (!g) return null;
+              return (
+                <ModifierGroupSection
+                  key={g.id}
+                  g={g}
+                  depth={0}
+                  draft={draft}
+                  toggle={toggle}
+                  groupMap={groupMap}
+                  visibleIds={visibleIdSet}
+                  claimNestedPlacement={claimNestedPlacement}
+                />
+              );
+            })}
+          </div>
           {err && <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{err}</div>}
         </div>
         <div className="sticky bottom-0 bg-white border-t border-neutral-100 px-5 py-4">
