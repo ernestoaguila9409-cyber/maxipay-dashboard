@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
   addDoc,
@@ -9,6 +9,7 @@ import {
   doc,
   onSnapshot,
   Timestamp,
+  getDoc,
   getDocs,
   writeBatch,
 } from "firebase/firestore";
@@ -127,6 +128,9 @@ export default function PaymentsPage() {
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationMsg, setMigrationMsg] = useState<string | null>(null);
 
+  /** Fingerprint of linked legacy rows' desired active state — avoids redundant getDoc/update loops. */
+  const lastLegacySyncKey = useRef<string>("");
+
   const provider: PaymentProviderCatalogEntry = PAYMENT_PROVIDERS[providerId];
 
   useEffect(() => {
@@ -157,6 +161,43 @@ export default function PaymentsPage() {
     });
     return () => unsub();
   }, [user]);
+
+  /** One-way: align legacy `Terminals.active` with dashboard `payment_terminals.active` (POS may still read legacy). */
+  useEffect(() => {
+    if (!user || loading || terminals.length === 0) return;
+    const key = terminals
+      .filter((t) => t.legacyTerminalId?.trim())
+      .map((t) => `${String(t.legacyTerminalId).trim()}:${t.active ? 1 : 0}`)
+      .sort()
+      .join("|");
+    if (key === lastLegacySyncKey.current) return;
+    lastLegacySyncKey.current = key;
+
+    const run = async () => {
+      for (const t of terminals) {
+        const lid = t.legacyTerminalId?.trim();
+        if (!lid) continue;
+        try {
+          const legRef = doc(db, LEGACY_COLLECTION, lid);
+          const legSnap = await getDoc(legRef);
+          if (!legSnap.exists()) continue;
+          const raw = legSnap.data()?.active;
+          const legActive =
+            typeof raw === "boolean"
+              ? raw
+              : raw === null || raw === undefined
+                ? true
+                : Boolean(raw);
+          if (legActive !== t.active) {
+            await updateDoc(legRef, { active: t.active });
+          }
+        } catch (e) {
+          console.error("Sync legacy Terminals.active:", e);
+        }
+      }
+    };
+    void run();
+  }, [user, loading, terminals]);
 
   const openAdd = () => {
     setEditing(null);
@@ -246,10 +287,23 @@ export default function PaymentsPage() {
 
   const handleToggle = async (t: TerminalRow) => {
     try {
+      const next = !t.active;
       await updateDoc(doc(db, PAYMENTS_COLLECTION, t.id), {
-        active: !t.active,
+        active: next,
         updatedAt: Timestamp.now(),
       });
+      // Android still falls back to legacy `Terminals` when `payment_terminals` is empty or
+      // not yet synced — mirror `active` so disabling in the dashboard blocks the POS either way.
+      const legacyId = t.legacyTerminalId?.trim();
+      if (legacyId) {
+        try {
+          await updateDoc(doc(db, LEGACY_COLLECTION, legacyId), {
+            active: next,
+          });
+        } catch (legacyErr) {
+          console.error("Failed to sync legacy Terminals.active:", legacyErr);
+        }
+      }
     } catch (err) {
       console.error("Failed to toggle terminal:", err);
     }

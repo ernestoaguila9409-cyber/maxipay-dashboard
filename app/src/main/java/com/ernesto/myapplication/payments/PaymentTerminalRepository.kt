@@ -139,6 +139,24 @@ object PaymentTerminalRepository {
         return null
     }
 
+    /**
+     * Dashboard uses boolean `active`; tolerate string/number from imports or older writes.
+     * Missing field defaults to enabled so existing docs keep working.
+     */
+    private fun readActiveFlag(doc: DocumentSnapshot): Boolean {
+        if (!doc.contains("active")) return true
+        return when (val v = doc.get("active")) {
+            is Boolean -> v
+            is String -> when (v.trim().lowercase()) {
+                "true", "1", "yes", "on" -> true
+                "false", "0", "no", "off" -> false
+                else -> true
+            }
+            is Number -> v.toDouble() != 0.0
+            else -> true
+        }
+    }
+
     private fun parseNew(doc: DocumentSnapshot): PaymentTerminalConfig? {
         if (!doc.exists()) return null
         val baseUrl = doc.getString("baseUrl").orEmpty()
@@ -163,7 +181,7 @@ object PaymentTerminalRepository {
             endpoints = endpoints,
             capabilities = capabilities,
             config = config,
-            active = doc.getBoolean("active") ?: true,
+            active = readActiveFlag(doc),
         )
     }
 
@@ -188,7 +206,7 @@ object PaymentTerminalRepository {
                 PaymentTerminalConfig.Companion.ConfigKey.REGISTER_ID to registerId,
                 PaymentTerminalConfig.Companion.ConfigKey.AUTH_KEY to authKey,
             ),
-            active = doc.getBoolean("active") ?: true,
+            active = readActiveFlag(doc),
         )
     }
 }
