@@ -64,6 +64,7 @@ data class CartItem(
     val taxIds: List<String> = emptyList(),
     val printerLabel: String? = null,
     val imageUrl: String? = null,
+    val courseId: String? = null,
 )
 
 class MenuActivity : AppCompatActivity() {
@@ -101,6 +102,8 @@ class MenuActivity : AppCompatActivity() {
     /** ALL menu items across every category, loaded once for global search. */
     private var allMenuItemsCache = listOf<MenuGridItem>()
     private var allMenuItemsLoaded = false
+    /** itemId → courseId mapping for course firing feature. */
+    private val menuItemCourseIds = mutableMapOf<String, String>()
     private lateinit var gridAdapter: MenuGridAdapter
     private val searchHandler = Handler(Looper.getMainLooper())
     private var searchRunnable: Runnable? = null
@@ -506,6 +509,7 @@ class MenuActivity : AppCompatActivity() {
     override fun onDestroy() {
         kitchenDestinationHandler.removeCallbacks(kitchenDestinationProbeRunnable)
         detachOrderKitchenStatusListener()
+        CourseFiringProgressionHandler.deactivate()
         super.onDestroy()
     }
 
@@ -616,6 +620,12 @@ class MenuActivity : AppCompatActivity() {
 
                 currentBatchId = orderDoc.getString("batchId")
 
+                if (orderType == "DINE_IN" && CourseFiringCache.enabled &&
+                    orderDoc.getBoolean("courseFiringActive") == true
+                ) {
+                    CourseFiringProgressionHandler.resumeIfNeeded(this, db, orderId)
+                }
+
                 val refId = orderDoc.getString("preAuthReferenceId")
                 val authCode = orderDoc.getString("preAuthAuthCode")
                 if (!refId.isNullOrBlank() && !authCode.isNullOrBlank()) {
@@ -700,6 +710,7 @@ class MenuActivity : AppCompatActivity() {
                             val lineTaxIds = (doc.get("taxIds") as? List<String>) ?: emptyList()
                             val linePrinterLabel = doc.getString("printerLabel")?.trim()?.takeIf { it.isNotEmpty() }
                             val lineImageUrl = trimMenuImageUrl(doc.getString("imageUrl"))
+                            val lineCourseId = doc.getString("courseId")?.trim()?.takeIf { it.isNotEmpty() }
 
                             cartMap[lineKey] = CartItem(
                                 itemId = itemId,
@@ -713,6 +724,7 @@ class MenuActivity : AppCompatActivity() {
                                 taxIds = lineTaxIds,
                                 printerLabel = linePrinterLabel,
                                 imageUrl = lineImageUrl,
+                                courseId = lineCourseId,
                             )
                         }
 
@@ -1279,6 +1291,7 @@ class MenuActivity : AppCompatActivity() {
             .addOnSuccessListener { documents ->
                 val seen = mutableSetOf<String>()
                 val items = mutableListOf<MenuGridItem>()
+                menuItemCourseIds.clear()
 
                 for (doc in documents) {
                     val itemId = doc.id
@@ -1328,6 +1341,8 @@ class MenuActivity : AppCompatActivity() {
                     val printerLabel = MenuItemRoutingLabel.resolve(itemLabel, subLabel, catLabel)
 
                     val imgUrl = trimMenuImageUrl(doc.getString("imageUrl"))
+                    val courseId = doc.getString("courseId")?.trim()?.takeIf { it.isNotEmpty() }
+                    if (courseId != null) menuItemCourseIds[itemId] = courseId
                     items.add(
                         MenuGridItem(
                             itemId = itemId,
@@ -2324,6 +2339,7 @@ class MenuActivity : AppCompatActivity() {
                 taxIds = cartItem.taxIds,
                 printerLabel = cartItem.printerLabel,
                 imageUrl = cartItem.imageUrl,
+                courseId = cartItem.courseId,
             ),
             isNewLine = isNewLine,
             onSuccess = { },
@@ -2755,8 +2771,16 @@ class MenuActivity : AppCompatActivity() {
                                     .addOnSuccessListener { itemsSnap ->
                                         val sent =
                                             KitchenPrintHelper.effectiveSentWithLegacyOrderMap(orderDoc, itemsSnap)
+                                        val courseFiringActive = CourseFiringCache.enabled &&
+                                            orderType == "DINE_IN" &&
+                                            CourseFiringCache.courses.isNotEmpty()
+                                        val courseFilter = if (courseFiringActive && !kitchenSentForOrder) {
+                                            CourseFiringCache.firstCourseId()
+                                        } else {
+                                            null
+                                        }
                                         val (lineItems, qtyUpdates) =
-                                            kitchenDeltaFromCartAndSentMap(orderDoc, sent)
+                                            kitchenDeltaFromCartAndSentMap(orderDoc, sent, courseFilter)
                                         if (lineItems.isNotEmpty()) {
                                             KitchenPrintHelper.printKitchenTickets(
                                                 this,
@@ -2771,6 +2795,12 @@ class MenuActivity : AppCompatActivity() {
                                                     notesMap,
                                                     itemsSnap,
                                                 )
+                                                if (courseFiringActive && courseFilter != null) {
+                                                    val oid = currentOrderId ?: return@printKitchenTickets
+                                                    CourseFiringProgressionHandler.activate(
+                                                        this, db, oid, courseFilter
+                                                    )
+                                                }
                                             }
                                         } else {
                                             Toast.makeText(
@@ -2814,7 +2844,13 @@ class MenuActivity : AppCompatActivity() {
                             val trigger = PrintingSettingsCache.printTriggerMode
                             val shouldPrintKitchen = trigger != PrintingSettingsFirestore.ON_PAYMENT
                             if (shouldPrintKitchen) {
-                                val (lineItems, qtyUpdates) = kitchenDeltaFromCartAndSentMap(null, emptyMap())
+                                val fallbackCourseFiring = CourseFiringCache.enabled &&
+                                    orderType == "DINE_IN" &&
+                                    CourseFiringCache.courses.isNotEmpty()
+                                val fallbackCourseFilter = if (fallbackCourseFiring && !kitchenSentForOrder) {
+                                    CourseFiringCache.firstCourseId()
+                                } else null
+                                val (lineItems, qtyUpdates) = kitchenDeltaFromCartAndSentMap(null, emptyMap(), fallbackCourseFilter)
                                 fun saveSendMeta(
                                     od: DocumentSnapshot,
                                     notesMap: Map<String, String>?,
@@ -2956,12 +2992,19 @@ class MenuActivity : AppCompatActivity() {
     private fun kitchenDeltaFromCartAndSentMap(
         orderDoc: DocumentSnapshot?,
         sentByLine: Map<String, Int>,
+        courseIdFilter: String? = null,
     ): Pair<List<KitchenTicketLineInput>, Map<String, Int>> {
         val lineItems = mutableListOf<KitchenTicketLineInput>()
         val qtyUpdates = mutableMapOf<String, Int>()
         val guestNamesSnapshot = guestNamesListForKitchenPrint(orderDoc)
+        val firstCourseId = CourseFiringCache.firstCourseId()
         for ((lineKey, item) in cartMap) {
             if (item.quantity <= 0) continue
+            if (courseIdFilter != null) {
+                val itemCourse = item.courseId?.trim().orEmpty()
+                val effectiveCourse = itemCourse.ifEmpty { firstCourseId.orEmpty() }
+                if (effectiveCourse != courseIdFilter) continue
+            }
             val sent = sentByLine[lineKey] ?: 0
             val delta = item.quantity - sent
             if (delta <= 0) continue
@@ -3006,7 +3049,9 @@ class MenuActivity : AppCompatActivity() {
         taxIds: List<String> = emptyList(),
         printerLabel: String? = null,
         imageUrl: String? = null,
+        courseId: String? = null,
     ) {
+        val resolvedCourseId = courseId ?: menuItemCourseIds[itemId]
 
         if (currentOrderId == null && isCreatingOrder) {
             Toast.makeText(this, "Creating order, please wait…", Toast.LENGTH_SHORT).show()
@@ -3071,6 +3116,7 @@ class MenuActivity : AppCompatActivity() {
                         taxIds = taxIds,
                         printerLabel = printerLabel,
                         imageUrl = trimMenuImageUrl(imageUrl),
+                        courseId = resolvedCourseId,
                     )
                 }
 

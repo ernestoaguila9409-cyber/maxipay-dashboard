@@ -8,6 +8,7 @@ import com.ernesto.myapplication.PrintingSettingsFirestore
 import com.ernesto.myapplication.TableFirestoreHelper
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.SetOptions
 import java.util.Date
 import java.util.Locale
@@ -29,6 +30,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
         val printerLabel: String? = null,
         /** Firebase Storage or HTTPS URL for menu item photo (dashboard / online ordering). */
         val imageUrl: String? = null,
+        val courseId: String? = null,
     )
 
     /** Create an order if orderId is null; otherwise keep existing orderId */
@@ -194,6 +196,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
         if (!pl.isNullOrEmpty()) itemMap["printerLabel"] = pl
         val img = input.imageUrl?.trim()
         if (!img.isNullOrEmpty()) itemMap["imageUrl"] = img
+        val cid = input.courseId?.trim()
+        if (!cid.isNullOrEmpty()) itemMap["courseId"] = cid
 
         val orderRef = db.collection("Orders").document(orderId)
         val lineRef = orderRef.collection("items").document(lineKey)
@@ -335,35 +339,62 @@ class OrderEngine(private val db: FirebaseFirestore) {
     ) {
         val orderRef = db.collection("Orders").document(orderId)
 
-        orderRef.collection("items")
-            .get()
-            .addOnSuccessListener { itemsSnap ->
+        var itemsResult: QuerySnapshot? = null
+        var taxesResult: QuerySnapshot? = null
+        var parallelError: Exception? = null
+        var completedCount = 0
+        val lock = Any()
 
-                var subtotalInCents = 0L
+        fun onParallelDone() {
+            val items: QuerySnapshot
+            val taxes: QuerySnapshot
+            synchronized(lock) {
+                completedCount++
+                if (completedCount < 2) return
+                if (parallelError != null) { onFailure(parallelError!!); return }
+                items = itemsResult!!
+                taxes = taxesResult!!
+            }
+            continueRecomputeWithSnapshots(orderRef, items, taxes, onSuccess, onFailure)
+        }
 
-                data class LineInfo(val lineKey: String, val lineTotalInCents: Long, val taxMode: String, val taxIds: List<String>)
-                val lineInfos = mutableListOf<LineInfo>()
+        orderRef.collection("items").get()
+            .addOnSuccessListener { snap -> synchronized(lock) { itemsResult = snap }; onParallelDone() }
+            .addOnFailureListener { e -> synchronized(lock) { parallelError = parallelError ?: e }; onParallelDone() }
 
-                for (doc in itemsSnap.documents) {
-                    val basePriceInCents = doc.getLong("basePriceInCents") ?: 0L
-                    val modifiersTotalInCents = doc.getLong("modifiersTotalInCents") ?: 0L
-                    val qty = (doc.getLong("quantity") ?: doc.getLong("qty") ?: 1L)
-                    val recomputedLineTotal = (basePriceInCents + modifiersTotalInCents) * qty
+        db.collection("Taxes").get()
+            .addOnSuccessListener { snap -> synchronized(lock) { taxesResult = snap }; onParallelDone() }
+            .addOnFailureListener { e -> synchronized(lock) { parallelError = parallelError ?: e }; onParallelDone() }
+    }
 
-                    val lineTotal = if (recomputedLineTotal > 0) recomputedLineTotal
-                        else doc.getLong("lineTotalInCents") ?: 0L
-                    subtotalInCents += lineTotal
-                    val mode = doc.getString("taxMode") ?: "INHERIT"
-                    @Suppress("UNCHECKED_CAST")
-                    val ids = (doc.get("taxIds") as? List<String>) ?: emptyList()
-                    lineInfos.add(LineInfo(doc.id, lineTotal, mode, ids))
-                }
+    private fun continueRecomputeWithSnapshots(
+        orderRef: com.google.firebase.firestore.DocumentReference,
+        itemsSnap: QuerySnapshot,
+        taxesSnap: QuerySnapshot,
+        onSuccess: () -> Unit,
+        onFailure: (Exception) -> Unit,
+    ) {
+        data class LineInfo(val lineKey: String, val lineTotalInCents: Long, val taxMode: String, val taxIds: List<String>)
 
-                db.collection("Taxes")
-                    .get()
-                    .addOnSuccessListener { taxesSnap ->
+        var subtotalInCents = 0L
+        val lineInfos = mutableListOf<LineInfo>()
 
-                        orderRef.get().addOnSuccessListener { orderDoc ->
+        for (doc in itemsSnap.documents) {
+            val basePriceInCents = doc.getLong("basePriceInCents") ?: 0L
+            val modifiersTotalInCents = doc.getLong("modifiersTotalInCents") ?: 0L
+            val qty = (doc.getLong("quantity") ?: doc.getLong("qty") ?: 1L)
+            val recomputedLineTotal = (basePriceInCents + modifiersTotalInCents) * qty
+
+            val lineTotal = if (recomputedLineTotal > 0) recomputedLineTotal
+                else doc.getLong("lineTotalInCents") ?: 0L
+            subtotalInCents += lineTotal
+            val mode = doc.getString("taxMode") ?: "INHERIT"
+            @Suppress("UNCHECKED_CAST")
+            val ids = (doc.get("taxIds") as? List<String>) ?: emptyList()
+            lineInfos.add(LineInfo(doc.id, lineTotal, mode, ids))
+        }
+
+        orderRef.get().addOnSuccessListener { orderDoc ->
                             val discountInCents = orderDoc.getLong("discountInCents") ?: 0L
                             val discountedSubtotalInCents = (subtotalInCents - discountInCents).coerceAtLeast(0L)
 
@@ -505,10 +536,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
                                     }
                                 }
                                 .addOnFailureListener { e -> onFailure(e) }
-                        }.addOnFailureListener { e -> onFailure(e) }
-                    }
-                    .addOnFailureListener { e -> onFailure(e) }
-            }
+                        }
             .addOnFailureListener { e -> onFailure(e) }
     }
 }

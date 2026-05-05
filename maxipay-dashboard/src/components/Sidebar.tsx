@@ -30,6 +30,7 @@ import {
   ShoppingBag,
   Globe,
   Layers,
+  ListOrdered,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
@@ -54,6 +55,7 @@ const navItems: NavItem[] = [
       { label: "Menus", href: "/dashboard/menus", icon: CalendarClock },
       { label: "Modifiers", href: "/dashboard/modifiers", icon: SlidersHorizontal },
       { label: "Online menu", href: "/dashboard/menu/online", icon: Globe },
+      { label: "Course firing", href: "/dashboard/menu/course-firing", icon: ListOrdered },
     ],
   },
   { label: "Employees", href: "/dashboard/employees", icon: Users },

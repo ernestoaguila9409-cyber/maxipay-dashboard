@@ -114,6 +114,7 @@ class MainActivity : AppCompatActivity() {
         OnlineOrderingDashboardSync.start(db)
         OnlineOrderingDashboardSync.addListener(onlineOrderingOpenStateListener)
         OnlineOrderKitchenRoutingCache.start(db)
+        CourseFiringCache.start(db)
         listenForOpenOrders()
         listenForPendingOnlineStaffConfirm()
         listenForUberOrders()
