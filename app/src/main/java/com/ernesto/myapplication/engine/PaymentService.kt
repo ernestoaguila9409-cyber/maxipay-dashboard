@@ -52,6 +52,11 @@ class PaymentService(private val context: Context) {
     ) {
         val formattedAmount = String.format(Locale.US, "%.2f", amount)
 
+        TerminalPrefs.spinOperationBlockedMessage(context)?.let { msg ->
+            onFailure(msg)
+            return
+        }
+
         val json = JSONObject().apply {
             put("Amount", formattedAmount)
             put("PaymentType", "Credit")
@@ -158,6 +163,11 @@ class PaymentService(private val context: Context) {
         onFailure: (String) -> Unit
     ) {
         val formattedAmount = String.format(Locale.US, "%.2f", amount)
+
+        TerminalPrefs.spinOperationBlockedMessage(context)?.let { msg ->
+            onFailure(msg)
+            return
+        }
 
         val json = JSONObject().apply {
             put("Amount", formattedAmount)
@@ -279,6 +289,11 @@ class PaymentService(private val context: Context) {
         onSuccess: (TipAdjustResult) -> Unit,
         onFailure: (String) -> Unit
     ) {
+        TerminalPrefs.spinOperationBlockedMessage(context)?.let { msg ->
+            onFailure(msg)
+            return
+        }
+
         val json = JSONObject().apply {
             put("Amount", String.format(Locale.US, "%.2f", originalAmount))
             put("TipAmount", String.format(Locale.US, "%.2f", tipAmount))

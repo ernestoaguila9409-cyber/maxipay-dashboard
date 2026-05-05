@@ -47,16 +47,39 @@ object TerminalPrefs {
     fun getAuthKey(context: Context): String =
         readCredential(context, PaymentTerminalConfig.Companion.ConfigKey.AUTH_KEY, KEY_AUTH_KEY, DEFAULT_AUTH_KEY)
 
+    /**
+     * Non-null when SPIn / Dejavoo HTTP calls must not run (disabled in web Payments, or missing credentials).
+     * Null when [getTpn], register id, and auth key are all non-blank.
+     */
+    fun spinOperationBlockedMessage(context: Context): String? {
+        val tpn = getTpn(context)
+        val reg = getRegisterId(context)
+        val auth = getAuthKey(context)
+        if (tpn.isNotBlank() && reg.isNotBlank() && auth.isNotBlank()) return null
+        return if (PaymentTerminalRepository.hasAnyTerminalDocument() && PaymentTerminalRepository.getActiveConfig(context) == null) {
+            "This payment terminal is turned off in the web dashboard (Settings → Payments). Turn it on to use the card reader."
+        } else {
+            "Card terminal is not configured. Add or enable a terminal in Settings → Payments on the web dashboard."
+        }
+    }
+
     private fun readCredential(
         context: Context,
         configKey: String,
         legacyPrefKey: String,
         defaultValue: String,
     ): String {
-        val fromRepo = PaymentTerminalRepository.getActiveConfig(context)
+        val active = PaymentTerminalRepository.getActiveConfig(context)
+        val fromRepo = active
             ?.credential(configKey)
             ?.takeIf { it.isNotBlank() }
         if (fromRepo != null) return fromRepo
+
+        // Dashboard or legacy Firestore has terminal rows but none is enabled for this device —
+        // do not use SharedPreferences or sample defaults (would still hit SPIn).
+        if (PaymentTerminalRepository.hasAnyTerminalDocument()) {
+            return ""
+        }
 
         val fromPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(legacyPrefKey, null)

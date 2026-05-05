@@ -135,7 +135,8 @@ class TerminalListActivity : AppCompatActivity() {
 
     private fun runHealthCheck() {
         val toCheck = terminals.filter {
-            it.tpn.isNotBlank() && it.registerId.isNotBlank() && it.authKey.isNotBlank()
+            it.paymentConfig?.active != false &&
+                it.tpn.isNotBlank() && it.registerId.isNotBlank() && it.authKey.isNotBlank()
         }
         if (toCheck.isEmpty()) return
 

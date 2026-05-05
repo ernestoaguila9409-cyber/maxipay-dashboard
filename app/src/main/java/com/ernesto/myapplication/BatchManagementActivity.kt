@@ -271,6 +271,21 @@ class BatchManagementActivity : AppCompatActivity() {
     }
 
     private fun sendSettleRequest() {
+        TerminalPrefs.spinOperationBlockedMessage(this)?.let { msg ->
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val settleUrl = SpinApiUrls.settle(this)
+        if (settleUrl.isBlank()) {
+            Toast.makeText(
+                this,
+                TerminalPrefs.spinOperationBlockedMessage(this) ?: "Settlement unavailable",
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+
         setSettlingState(true)
 
         val tpn = TerminalPrefs.getTpn(this)
@@ -292,7 +307,7 @@ class BatchManagementActivity : AppCompatActivity() {
         val body = json.toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
-            .url(SpinApiUrls.settle(this))
+            .url(settleUrl)
             .post(body)
             .addHeader("Content-Type", "application/json")
             .build()

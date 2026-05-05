@@ -37,10 +37,14 @@ object SpinApiUrls {
         url(context, PaymentTerminalConfig.Companion.EndpointKey.STATUS)
 
     /** Base URL currently in use (for logging / diagnostics). */
-    fun baseUrl(context: Context): String =
-        PaymentTerminalRepository.getActiveConfig(context)?.baseUrl
-            ?.takeIf { it.isNotBlank() }
-            ?: SpinDefaults.BASE_URL
+    fun baseUrl(context: Context): String {
+        val cfg = PaymentTerminalRepository.getActiveConfig(context)
+        if (cfg != null) {
+            return cfg.baseUrl.takeIf { it.isNotBlank() } ?: SpinDefaults.BASE_URL
+        }
+        if (PaymentTerminalRepository.hasAnyTerminalDocument()) return ""
+        return SpinDefaults.BASE_URL
+    }
 
     /**
      * Resolves the SPIn Status URL for a specific terminal (not necessarily the
@@ -59,8 +63,16 @@ object SpinApiUrls {
 
     private fun url(context: Context, endpointKey: String): String {
         val cfg = PaymentTerminalRepository.getActiveConfig(context)
-        val configured = cfg?.endpointUrl(endpointKey).orEmpty()
-        if (configured.isNotBlank()) return configured
+        if (cfg != null) {
+            val configured = cfg.endpointUrl(endpointKey)
+            if (configured.isNotBlank()) return configured
+            val fallbackPath = SpinDefaults.ENDPOINTS[endpointKey].orEmpty()
+            val base = SpinDefaults.BASE_URL.trimEnd('/')
+            return "$base$fallbackPath"
+        }
+        if (PaymentTerminalRepository.hasAnyTerminalDocument()) {
+            return ""
+        }
         val fallbackPath = SpinDefaults.ENDPOINTS[endpointKey].orEmpty()
         val base = SpinDefaults.BASE_URL.trimEnd('/')
         return "$base$fallbackPath"

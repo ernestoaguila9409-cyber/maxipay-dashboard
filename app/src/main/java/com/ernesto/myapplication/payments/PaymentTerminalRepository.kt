@@ -78,6 +78,10 @@ object PaymentTerminalRepository {
 
     fun isLoaded(): Boolean = loaded
 
+    /** True once Firestore has reported at least one terminal document (new or legacy collection). */
+    fun hasAnyTerminalDocument(): Boolean =
+        terminalsById.isNotEmpty() || legacyById.isNotEmpty()
+
     fun getAllTerminals(): List<PaymentTerminalConfig> =
         if (terminalsById.isNotEmpty()) terminalsById.values.toList()
         else legacyById.values.toList()
@@ -101,14 +105,24 @@ object PaymentTerminalRepository {
             .getString(KEY_ACTIVE_TERMINAL_ID, null)
             ?.takeIf { it.isNotBlank() }
 
-    /** Active config or null if nothing is configured yet. */
+    /**
+     * Active terminal for this device: the pinned row if it exists and [PaymentTerminalConfig.active]
+     * is true, otherwise the first Firestore row with `active: true`.
+     *
+     * If the dashboard disables the pinned terminal (or every terminal), this returns **null** so
+     * the POS does not fall back to a disabled terminal or baked-in credentials.
+     */
     fun getActiveConfig(context: Context): PaymentTerminalConfig? {
         val source = if (terminalsById.isNotEmpty()) terminalsById else legacyById
         if (source.isEmpty()) return null
         val pinnedId = getActiveTerminalId(context)
-        val pinned = pinnedId?.let { source[it] }
-        if (pinned != null && pinned.active) return pinned
-        return source.values.firstOrNull { it.active } ?: source.values.firstOrNull()
+        if (!pinnedId.isNullOrBlank()) {
+            val pinned = source[pinnedId]
+            if (pinned != null) {
+                return if (pinned.active) pinned else null
+            }
+        }
+        return source.values.firstOrNull { it.active }
     }
 
     /**

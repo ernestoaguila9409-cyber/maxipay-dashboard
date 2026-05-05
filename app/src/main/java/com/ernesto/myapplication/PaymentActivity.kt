@@ -1885,6 +1885,11 @@ class PaymentActivity : AppCompatActivity() {
 
     private fun processCardPayment(paymentType: String) {
 
+        TerminalPrefs.spinOperationBlockedMessage(this@PaymentActivity)?.let { msg ->
+            runOnUiThread { showDeclined(msg) }
+            return
+        }
+
         val clientReferenceId = UUID.randomUUID().toString()
 
         val jsonBody = SpinGatewayP.saleRequestJson(
@@ -1895,6 +1900,10 @@ class PaymentActivity : AppCompatActivity() {
         )
 
         val saleUrl = SpinApiUrls.sale(this@PaymentActivity)
+        if (saleUrl.isBlank()) {
+            runOnUiThread { showDeclined(TerminalPrefs.spinOperationBlockedMessage(this@PaymentActivity) ?: "Payment unavailable") }
+            return
+        }
         Log.d("DEJAVOO_SALE", "[SALE_REQ] PaymentType=$paymentType URL=$saleUrl Body=$jsonBody")
 
         val client = OkHttpClient.Builder()

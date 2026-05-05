@@ -222,6 +222,11 @@ object SpinGatewayP {
         readTimeoutSeconds: Long = 180,
         onComplete: (VoidHttpResult) -> Unit,
     ) {
+        TerminalPrefs.spinOperationBlockedMessage(context)?.let { msg ->
+            Log.w(TAG, "[REFUND] Blocked: $msg")
+            onComplete(VoidHttpResult(networkError = msg))
+            return
+        }
         val json = spinReturnJson(context, refundAmountDollars, paymentTypeForReturn, leg)
         Log.d(TAG, "[REFUND_REQ] $json")
 
@@ -266,6 +271,11 @@ object SpinGatewayP {
         readTimeoutSeconds: Long = 180,
         onComplete: (VoidHttpResult) -> Unit,
     ) {
+        TerminalPrefs.spinOperationBlockedMessage(context)?.let { msg ->
+            Log.w(TAG, "[VOID] Blocked: $msg")
+            onComplete(VoidHttpResult(networkError = msg))
+            return
+        }
         val refId = referenceIdForVoid.trim()
         val amountNumber = payment.amountInCents / 100.0
         val json = JSONObject().apply {
