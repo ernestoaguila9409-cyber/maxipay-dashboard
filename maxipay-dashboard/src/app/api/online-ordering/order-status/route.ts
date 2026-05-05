@@ -2,6 +2,7 @@ import admin from "firebase-admin";
 import type { DocumentData, QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp } from "@/lib/firebaseAdmin";
+import { placementCategoryIds } from "@/lib/kdsMenuAssignment";
 
 export const runtime = "nodejs";
 
@@ -50,6 +51,63 @@ function aggregateKdsPhase(itemDocs: QueryDocumentSnapshot<DocumentData>[]): Kds
   return "none";
 }
 
+function parseStringArray(val: unknown): string[] {
+  if (!Array.isArray(val)) return [];
+  return val.map((x) => String(x ?? "").trim()).filter((x) => x.length > 0);
+}
+
+/**
+ * Whether at least one active KDS device routes any of the given menu item IDs.
+ * A device with both assignedItemIds and assignedCategoryIds empty routes ALL items.
+ */
+async function anyItemRoutedToKds(
+  db: admin.firestore.Firestore,
+  orderItemIds: string[],
+): Promise<boolean> {
+  if (orderItemIds.length === 0) return false;
+
+  const kdsSnap = await db.collection("kds_devices").get();
+  if (kdsSnap.empty) return false;
+
+  const activeDevices = kdsSnap.docs.filter((doc: admin.firestore.QueryDocumentSnapshot) => {
+    const d = doc.data();
+    if (d.isActive === false) return false;
+    if (d.isPaired === false) return false;
+    return true;
+  });
+  if (activeDevices.length === 0) return false;
+
+  const menuItemIds = Array.from(new Set(orderItemIds));
+  const menuRefs = menuItemIds.map((id) => db.collection("MenuItems").doc(id));
+  const menuSnaps = await db.getAll(...menuRefs);
+
+  const itemPlacements = new Map<string, string[]>();
+  for (let i = 0; i < menuItemIds.length; i++) {
+    const snap = menuSnaps[i];
+    if (snap.exists) {
+      itemPlacements.set(menuItemIds[i], placementCategoryIds(snap.data() as Record<string, unknown>));
+    } else {
+      itemPlacements.set(menuItemIds[i], []);
+    }
+  }
+
+  for (const dev of activeDevices) {
+    const devData = dev.data();
+    const assignedItems = new Set(parseStringArray(devData.assignedItemIds));
+    const assignedCats = new Set(parseStringArray(devData.assignedCategoryIds));
+
+    if (assignedItems.size === 0 && assignedCats.size === 0) return true;
+
+    for (const itemId of menuItemIds) {
+      if (assignedItems.has(itemId)) return true;
+      const cats = itemPlacements.get(itemId) ?? [];
+      if (cats.some((c) => assignedCats.has(c))) return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Public read of minimal order fields for the customer success page (polling).
  * Caller must know both [orderId] and [orderNumber]; they must match the same document.
@@ -93,6 +151,15 @@ export async function GET(request: Request) {
     const itemsSnap = await db.collection("Orders").doc(orderId).collection("items").get();
     const kdsPhase = aggregateKdsPhase(itemsSnap.docs);
 
+    const ooSnap = await db.collection("Settings").doc("onlineOrdering").get();
+    const ooData = ooSnap.exists ? (ooSnap.data() ?? {}) : {};
+    const requireStaffConfirmOrder = ooData.requireStaffConfirmOrder === true;
+
+    const orderItemIds = itemsSnap.docs
+      .map((doc: admin.firestore.QueryDocumentSnapshot) => String(doc.data().itemId ?? "").trim())
+      .filter((id: string) => id.length > 0);
+    const kdsTrackingEligible = await anyItemRoutedToKds(db, orderItemIds);
+
     return NextResponse.json({
       ok: true,
       status,
@@ -100,6 +167,8 @@ export async function GET(request: Request) {
       awaitingStaffConfirmOrder: awaitingStaff,
       onlinePaymentChoice,
       kdsPhase,
+      requireStaffConfirmOrder,
+      kdsTrackingEligible,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

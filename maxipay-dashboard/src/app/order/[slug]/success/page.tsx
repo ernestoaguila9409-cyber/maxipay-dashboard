@@ -122,6 +122,8 @@ function SuccessInner() {
     isPayAtStore && orderId && orderNumber ? "checking" : null,
   );
   const [kdsPhase, setKdsPhase] = useState<KdsPhase>("none");
+  const [requireStaffConfirm, setRequireStaffConfirm] = useState<boolean | null>(null);
+  const [kdsTrackingEligible, setKdsTrackingEligible] = useState<boolean>(false);
 
   useEffect(() => {
     void (async () => {
@@ -151,13 +153,21 @@ function SuccessInner() {
         if (cancelled || !data.ok) return;
         const phase = (data.kdsPhase as KdsPhase) || "none";
         setKdsPhase(phase);
-        if (isPayAtStore) {
+        if (typeof data.requireStaffConfirmOrder === "boolean") {
+          setRequireStaffConfirm(data.requireStaffConfirmOrder);
+        }
+        if (typeof data.kdsTrackingEligible === "boolean") {
+          setKdsTrackingEligible(data.kdsTrackingEligible);
+        }
+        if (data.requireStaffConfirmOrder) {
           const next = staffOutcomeFromApi({
             voided: !!data.voided,
             status: String(data.status ?? ""),
             awaitingStaffConfirmOrder: !!data.awaitingStaffConfirmOrder,
           });
           setStaffOutcome(next);
+        } else {
+          setStaffOutcome(null);
         }
       } catch {
         /* keep last state */
@@ -170,7 +180,7 @@ function SuccessInner() {
       cancelled = true;
       window.clearInterval(t);
     };
-  }, [orderId, orderNumber, isPayAtStore]);
+  }, [orderId, orderNumber]);
 
   useEffect(() => {
     if (!orderId || confirmedRef.current || isPayAtStore) return;
@@ -217,25 +227,27 @@ function SuccessInner() {
   const legacyNumberOnly = !orderId && !!orderNumber;
 
   const kitchenTrackingEligible =
-    (isPayAtStore && staffOutcome === "accepted") ||
-    (!isPayAtStore && paymentStatus === "confirmed");
+    kdsTrackingEligible &&
+    ((staffOutcome === "accepted") ||
+    (!requireStaffConfirm && paymentStatus === "confirmed"));
 
   const heroIcon = (() => {
-    if (isPayAtStore && staffOutcome) {
+    if (staffOutcome) {
       if (staffOutcome === "checking") return <ReviewSpinner />;
       if (staffOutcome === "declined") return <XCircle />;
-      if (staffOutcome === "accepted" && kdsPhase === "preparing") return <ReviewSpinner />;
+      if (staffOutcome === "accepted" && kitchenTrackingEligible && kdsPhase === "preparing") return <ReviewSpinner />;
+      if (staffOutcome === "accepted" && kitchenTrackingEligible && kdsPhase === "ready") return <CheckCircle />;
       if (staffOutcome === "accepted") return <CheckCircle />;
     }
     if (paymentStatus === "confirming") return <Spinner />;
-    if (!isPayAtStore && paymentStatus === "confirmed" && kdsPhase === "preparing") {
+    if (kitchenTrackingEligible && kdsPhase === "preparing") {
       return <ReviewSpinner />;
     }
     return <CheckCircle />;
   })();
 
   const title = (() => {
-    if (isPayAtStore && staffOutcome) {
+    if (staffOutcome) {
       if (staffOutcome === "checking") return "Checking order";
       if (staffOutcome === "declined") return "Order not accepted";
       if (kitchenTrackingEligible && kdsPhase === "preparing") return "Order is being prepared";
@@ -253,7 +265,7 @@ function SuccessInner() {
   })();
 
   const description = (() => {
-    if (isPayAtStore && staffOutcome) {
+    if (staffOutcome) {
       if (staffOutcome === "checking") {
         return (
           <p className="text-sm text-amber-800 max-w-xs mx-auto leading-relaxed">
