@@ -96,6 +96,16 @@ function refundTxnAmountCentsAbs(rd: Record<string, unknown>): number {
   return 0;
 }
 
+/** Matches Android `RefundAttributionFormat` — web refunds use `Dashboard: email|uid`. */
+function formatRefundAttributionForDisplay(refundedByFirestore: string): string {
+  const raw = refundedByFirestore.trim();
+  if (!raw) return raw;
+  const m = /^Dashboard:\s*/i.exec(raw);
+  if (!m) return raw;
+  const detail = raw.slice(m[0].length).trim();
+  return detail ? `Dashboard — ${detail}` : "Dashboard";
+}
+
 function buildRefundStrikeIndex(
   sortedRefundDocs: Array<{ data: () => Record<string, unknown> }>
 ): RefundStrikeIndex {
@@ -110,7 +120,10 @@ function buildRefundStrikeIndex(
     const rd = d.data();
     const amountCents = refundTxnAmountCentsAbs(rd);
     totalFromRefundTxnsCents += amountCents;
-    const employee = String(rd.refundedBy ?? "").trim() || "—";
+    const rawBy = String(rd.refundedBy ?? "").trim();
+    const employee = rawBy
+      ? formatRefundAttributionForDisplay(rawBy)
+      : "—";
     const dateStr = formatFirestoreTimestamp(rd.createdAt) ?? "";
     const lk = String(rd.refundedLineKey ?? "").trim();
     const itemName = String(rd.refundedItemName ?? "").trim();
@@ -465,9 +478,12 @@ export default function OrderDetailPage() {
                 const amountInCents = Math.round(
                   typeof amt === "number" ? amt : Number(amt ?? 0)
                 );
+                const rawRb = String(rd.refundedBy ?? "").trim();
                 return {
                   id: d.id,
-                  refundedBy: String(rd.refundedBy ?? "").trim() || "—",
+                  refundedBy: rawRb
+                    ? formatRefundAttributionForDisplay(rawRb)
+                    : "—",
                   amountInCents,
                   createdAtLabel: formatFirestoreTimestamp(rd.createdAt),
                 };
