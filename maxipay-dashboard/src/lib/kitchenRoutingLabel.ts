@@ -69,3 +69,16 @@ export function resolveMenuItemKitchenRoutingLabel(
   const cat = categories.find((x) => x.id === item.categoryId);
   return resolveKitchenRoutingLabel(own, sub?.kitchenLabel, cat?.kitchenLabel);
 }
+
+/** Label from subcategory/category only (no item-level `labels` / `printerLabel`). */
+export function inheritedKitchenRoutingLabelOnly(
+  item: Pick<RoutingLabelMenuItem, "categoryId" | "subcategoryId" | "subcategoryByCategoryId">,
+  categories: RoutingLabelCategory[],
+  subcategories: RoutingLabelSubcategory[]
+): string | undefined {
+  return resolveMenuItemKitchenRoutingLabel(
+    { ...item, labels: undefined, printerLabel: undefined },
+    categories,
+    subcategories
+  );
+}

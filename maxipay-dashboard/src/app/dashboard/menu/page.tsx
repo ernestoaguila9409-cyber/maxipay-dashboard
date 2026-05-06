@@ -30,7 +30,10 @@ import {
   type KdsDevicePickerRow,
 } from "@/lib/kdsDeviceFirestore";
 import { kdsDeviceRoutesMenuItemLine } from "@/lib/kdsMenuAssignment";
-import { resolveMenuItemKitchenRoutingLabel } from "@/lib/kitchenRoutingLabel";
+import {
+  inheritedKitchenRoutingLabelOnly,
+  resolveMenuItemKitchenRoutingLabel,
+} from "@/lib/kitchenRoutingLabel";
 import Header from "@/components/Header";
 import MenuUploadModal from "@/components/MenuUploadModal";
 import { ItemImageSection } from "@/components/menu-item-image/ItemImageSection";
@@ -466,8 +469,6 @@ export default function MenuPage() {
   const [activePrinterRoutingLabels, setActivePrinterRoutingLabels] = useState<string[]>([]);
   const [addPrinterLabel, setAddPrinterLabel] = useState("");
   const [editPrinterLabel, setEditPrinterLabel] = useState("");
-  /** Effective routing on POS (read-only hint; includes category/subcategory inheritance). */
-  const [editEffectiveKitchenRoutingLabel, setEditEffectiveKitchenRoutingLabel] = useState("");
 
   const [addMenuId, setAddMenuId] = useState("");
   const [addMenuIds, setAddMenuIds] = useState<Record<string, boolean>>({});
@@ -1609,12 +1610,11 @@ export default function MenuPage() {
       txs[tId] = true;
     }
     setEditTaxes(txs);
-    setEditPrinterLabel(item.printerLabel?.trim() ?? "");
-    setEditEffectiveKitchenRoutingLabel(
+    const effectiveRouting =
       item.resolvedKitchenRoutingLabel?.trim() ??
-        resolveMenuItemKitchenRoutingLabel(item, categories, allSubcategories)?.trim() ??
-        ""
-    );
+      resolveMenuItemKitchenRoutingLabel(item, categories, allSubcategories)?.trim() ??
+      "";
+    setEditPrinterLabel(effectiveRouting);
     setEditImageUrl(typeof item.imageUrl === "string" ? item.imageUrl.trim() : "");
     setEditLabelExpanded(false);
     editKdsTouchedRef.current = false;
@@ -1690,11 +1690,13 @@ export default function MenuPage() {
       if (editMenuId) update.menuId = editMenuId;
 
       const pl = editPrinterLabel.trim();
-      if (pl) {
+      const inheritedOnly =
+        inheritedKitchenRoutingLabelOnly(editTarget, categories, allSubcategories)?.trim() ?? "";
+      if (!pl || pl === inheritedOnly) {
+        update.printerLabel = deleteField();
+      } else {
         update.printerLabel = pl;
         await mergeKitchenLabelToSettings(pl);
-      } else {
-        update.printerLabel = deleteField();
       }
 
       const img = editImageUrl.trim();
@@ -4607,11 +4609,9 @@ export default function MenuPage() {
                     <span className="flex items-center gap-2 min-w-0 text-sm font-medium text-slate-700">
                       <Printer size={15} className="text-slate-500 shrink-0" />
                       <span className="truncate">Assign label</span>
-                      {(editPrinterLabel.trim().length > 0 || editEffectiveKitchenRoutingLabel.trim().length > 0) && (
+                      {editPrinterLabel.trim().length > 0 && (
                         <span className="text-xs font-semibold text-blue-600 tabular-nums shrink-0 truncate max-w-[140px]">
-                          {editPrinterLabel.trim().length > 0
-                            ? `(${editPrinterLabel.trim()})`
-                            : `(POS: ${editEffectiveKitchenRoutingLabel.trim()})`}
+                          ({editPrinterLabel.trim()})
                         </span>
                       )}
                     </span>
@@ -4630,17 +4630,9 @@ export default function MenuPage() {
                     <div className="min-h-0 overflow-hidden">
                       <div className="px-3 py-3 space-y-1.5 border-t border-slate-100">
                         <p className="text-[10px] text-slate-400">
-                          Labels match kitchen printers on the POS. (None) clears routing.
+                          Labels match kitchen printers on the POS. (None) clears item routing; category or
+                          subcategory labels still apply on the POS.
                         </p>
-                        {editEffectiveKitchenRoutingLabel.trim().length > 0 && (
-                          <p className="text-xs text-slate-600 mb-1.5">
-                            <span className="font-medium text-slate-700">Effective on POS:</span>{" "}
-                            {editEffectiveKitchenRoutingLabel.trim()}
-                            {editPrinterLabel.trim().length === 0 && (
-                              <span className="text-slate-500"> (from category or subcategory)</span>
-                            )}
-                          </p>
-                        )}
                         <select
                           value={editPrinterLabel}
                           onChange={(e) => setEditPrinterLabel(e.target.value)}
