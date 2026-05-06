@@ -353,6 +353,7 @@ class CategoryAdapter(
             .setPositiveButton("Save") { dialog, _ ->
                 val selected = (dialog as AlertDialog).listView.checkedItemPosition
                 val label = if (selected <= 0) "" else available[selected - 1]
+                val previousLabel = category.kitchenLabel.trim()
                 val updates = if (label.isEmpty()) {
                     mapOf("kitchenLabel" to com.google.firebase.firestore.FieldValue.delete())
                 } else {
@@ -360,10 +361,36 @@ class CategoryAdapter(
                 }
                 db.collection("Categories").document(category.id).update(updates)
                     .addOnSuccessListener {
-                        Toast.makeText(context,
-                            if (label.isEmpty()) "Kitchen label removed" else "Label set to \"$label\"",
-                            Toast.LENGTH_SHORT).show()
-                        onDataChanged()
+                        if (label.isEmpty() && previousLabel.isNotEmpty()) {
+                            CategoryKitchenLabelCascade.afterCategoryKitchenLabelRemoved(
+                                db,
+                                category.id,
+                                previousLabel,
+                                onDone = {
+                                    Toast.makeText(
+                                        context,
+                                        "Kitchen label removed from category, subcategories, and matching items",
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                    onDataChanged()
+                                },
+                                onError = { e ->
+                                    Toast.makeText(
+                                        context,
+                                        "Category updated; cascade failed: ${e.message}",
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                    onDataChanged()
+                                },
+                            )
+                        } else {
+                            Toast.makeText(
+                                context,
+                                if (label.isEmpty()) "Kitchen label removed" else "Label set to \"$label\"",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            onDataChanged()
+                        }
                     }
                     .addOnFailureListener { e ->
                         Toast.makeText(context, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
