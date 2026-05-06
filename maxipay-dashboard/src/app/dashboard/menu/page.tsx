@@ -30,6 +30,7 @@ import {
   type KdsDevicePickerRow,
 } from "@/lib/kdsDeviceFirestore";
 import { kdsDeviceRoutesMenuItemLine } from "@/lib/kdsMenuAssignment";
+import { resolveMenuItemKitchenRoutingLabel } from "@/lib/kitchenRoutingLabel";
 import Header from "@/components/Header";
 import MenuUploadModal from "@/components/MenuUploadModal";
 import { ItemImageSection } from "@/components/menu-item-image/ItemImageSection";
@@ -78,6 +79,8 @@ interface Category {
   name: string;
   availableOrderTypes: string[];
   scheduleIds: string[];
+  /** Kitchen routing label on the category (inherited by items on POS). */
+  kitchenLabel?: string;
 }
 
 interface MenuEntity {
@@ -107,6 +110,8 @@ interface SubcategoryEntry {
   name: string;
   categoryId: string;
   order: number;
+  /** Kitchen routing label on the subcategory (inherited after item-level label on POS). */
+  kitchenLabel?: string;
 }
 
 interface ExternalMappings {
@@ -152,6 +157,10 @@ interface MenuItem {
   externalMappings?: ExternalMappings;
   /** Kitchen routing label; must match a label on a kitchen printer (POS). */
   printerLabel?: string;
+  /** Optional multi-label field; POS uses first entry over `printerLabel` when set. */
+  labels?: string[];
+  /** Resolved label (item → subcategory → category), same as POS routing. */
+  resolvedKitchenRoutingLabel?: string;
   /** Firebase Storage download URL (menu / online ordering). */
   imageUrl?: string;
 }
@@ -159,7 +168,11 @@ interface MenuItem {
 /** Firestore MenuItems row held in memory before rebuild() adds category-derived fields. */
 type MenuItemSnapRow = Omit<
   MenuItem,
-  "categoryName" | "effectiveOrderTypes" | "categoryScheduled" | "categoryScheduleIds"
+  | "categoryName"
+  | "effectiveOrderTypes"
+  | "categoryScheduled"
+  | "categoryScheduleIds"
+  | "resolvedKitchenRoutingLabel"
 >;
 
 function placementCategoryIds(item: Pick<MenuItem, "categoryId" | "categoryIds">): string[] {
@@ -453,6 +466,8 @@ export default function MenuPage() {
   const [activePrinterRoutingLabels, setActivePrinterRoutingLabels] = useState<string[]>([]);
   const [addPrinterLabel, setAddPrinterLabel] = useState("");
   const [editPrinterLabel, setEditPrinterLabel] = useState("");
+  /** Effective routing on POS (read-only hint; includes category/subcategory inheritance). */
+  const [editEffectiveKitchenRoutingLabel, setEditEffectiveKitchenRoutingLabel] = useState("");
 
   const [addMenuId, setAddMenuId] = useState("");
   const [addMenuIds, setAddMenuIds] = useState<Record<string, boolean>>({});
@@ -538,9 +553,13 @@ export default function MenuPage() {
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
   const [subscriptionKey, setSubscriptionKey] = useState(0);
 
-  const catSnap = useRef<Map<string, { name: string; availableOrderTypes: string[]; scheduleIds: string[] }>>(new Map());
+  const catSnap = useRef<
+    Map<string, { name: string; availableOrderTypes: string[]; scheduleIds: string[]; kitchenLabel?: string }>
+  >(new Map());
   const itemSnap = useRef<MenuItemSnapRow[]>([]);
   const bothReady = useRef({ cats: false, items: false });
+  const allSubcategoriesRef = useRef<SubcategoryEntry[]>([]);
+  const rebuildRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!user) return;
@@ -553,7 +572,13 @@ export default function MenuPage() {
 
       const catList: Category[] = [];
       catSnap.current.forEach((val, id) =>
-        catList.push({ id, name: val.name, availableOrderTypes: val.availableOrderTypes, scheduleIds: val.scheduleIds })
+        catList.push({
+          id,
+          name: val.name,
+          availableOrderTypes: val.availableOrderTypes,
+          scheduleIds: val.scheduleIds,
+          kitchenLabel: val.kitchenLabel?.trim() || undefined,
+        })
       );
       catList.sort((a, b) => a.name.localeCompare(b.name));
       setCategories(catList);
@@ -570,12 +595,16 @@ export default function MenuPage() {
           categoryScheduleIds: cat?.scheduleIds ?? [],
           categoryIds: raw.categoryIds,
           subcategoryByCategoryId: raw.subcategoryByCategoryId,
+          resolvedKitchenRoutingLabel:
+            resolveMenuItemKitchenRoutingLabel(raw, catList, allSubcategoriesRef.current) ?? undefined,
         };
       });
       menuItems.sort((a, b) => a.name.localeCompare(b.name));
       setItems(menuItems);
       setLoading(false);
     }
+
+    rebuildRef.current = rebuild;
 
     console.log("[Menu] Subscribing to Firestore collections. User UID:", user.uid);
 
@@ -587,10 +616,15 @@ export default function MenuPage() {
         snap.forEach((d) => {
           const data = d.data();
           if (data.name) {
+            const kitchenLabel =
+              typeof data.kitchenLabel === "string" && data.kitchenLabel.trim()
+                ? data.kitchenLabel.trim()
+                : undefined;
             catSnap.current.set(d.id, {
               name: data.name,
               availableOrderTypes: Array.isArray(data.availableOrderTypes) ? data.availableOrderTypes : [],
               scheduleIds: Array.isArray(data.scheduleIds) ? data.scheduleIds : [],
+              kitchenLabel,
             });
           }
         });
@@ -672,6 +706,12 @@ export default function MenuPage() {
             if (Object.keys(o).length > 0) subcategoryByCategoryId = o;
           }
 
+          const rawLabelsField = Array.isArray(data.labels) ? data.labels : [];
+          const labelsParsed = rawLabelsField
+            .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+            .map((x) => x.trim());
+          const labelsField = labelsParsed.length > 0 ? labelsParsed : undefined;
+
           list.push({
             id: d.id,
             name: data.name || "Unnamed",
@@ -696,6 +736,7 @@ export default function MenuPage() {
               typeof data.printerLabel === "string" && data.printerLabel.trim()
                 ? data.printerLabel.trim()
                 : undefined,
+            labels: labelsField,
             imageUrl:
               typeof data.imageUrl === "string" && data.imageUrl.trim()
                 ? data.imageUrl.trim()
@@ -805,14 +846,23 @@ export default function MenuPage() {
         const list: SubcategoryEntry[] = [];
         snap.forEach((d) => {
           const data = d.data();
+          const subKl =
+            typeof data.kitchenLabel === "string" && data.kitchenLabel.trim()
+              ? data.kitchenLabel.trim()
+              : undefined;
           list.push({
             id: d.id,
             name: data.name ?? "",
             categoryId: data.categoryId ?? "",
             order: data.order ?? 0,
+            kitchenLabel: subKl,
           });
         });
+        allSubcategoriesRef.current = list;
         setAllSubcategories(list);
+        if (bothReady.current.cats && bothReady.current.items) {
+          rebuildRef.current();
+        }
       },
       (err) => console.error("[Menu] subcategories onSnapshot error:", err.code, err.message)
     );
@@ -859,6 +909,10 @@ export default function MenuPage() {
       bothReady.current = { cats: false, items: false };
     };
   }, [user, subscriptionKey]);
+
+  useEffect(() => {
+    allSubcategoriesRef.current = allSubcategories;
+  }, [allSubcategories]);
 
   // Fallback: re-subscribe if tab becomes visible with no data loaded
   useEffect(() => {
@@ -1556,6 +1610,11 @@ export default function MenuPage() {
     }
     setEditTaxes(txs);
     setEditPrinterLabel(item.printerLabel?.trim() ?? "");
+    setEditEffectiveKitchenRoutingLabel(
+      item.resolvedKitchenRoutingLabel?.trim() ??
+        resolveMenuItemKitchenRoutingLabel(item, categories, allSubcategories)?.trim() ??
+        ""
+    );
     setEditImageUrl(typeof item.imageUrl === "string" ? item.imageUrl.trim() : "");
     setEditLabelExpanded(false);
     editKdsTouchedRef.current = false;
@@ -4548,9 +4607,11 @@ export default function MenuPage() {
                     <span className="flex items-center gap-2 min-w-0 text-sm font-medium text-slate-700">
                       <Printer size={15} className="text-slate-500 shrink-0" />
                       <span className="truncate">Assign label</span>
-                      {editPrinterLabel.trim().length > 0 && (
-                        <span className="text-xs font-semibold text-blue-600 tabular-nums shrink-0 truncate max-w-[120px]">
-                          ({editPrinterLabel.trim()})
+                      {(editPrinterLabel.trim().length > 0 || editEffectiveKitchenRoutingLabel.trim().length > 0) && (
+                        <span className="text-xs font-semibold text-blue-600 tabular-nums shrink-0 truncate max-w-[140px]">
+                          {editPrinterLabel.trim().length > 0
+                            ? `(${editPrinterLabel.trim()})`
+                            : `(POS: ${editEffectiveKitchenRoutingLabel.trim()})`}
                         </span>
                       )}
                     </span>
@@ -4571,6 +4632,15 @@ export default function MenuPage() {
                         <p className="text-[10px] text-slate-400">
                           Labels match kitchen printers on the POS. (None) clears routing.
                         </p>
+                        {editEffectiveKitchenRoutingLabel.trim().length > 0 && (
+                          <p className="text-xs text-slate-600 mb-1.5">
+                            <span className="font-medium text-slate-700">Effective on POS:</span>{" "}
+                            {editEffectiveKitchenRoutingLabel.trim()}
+                            {editPrinterLabel.trim().length === 0 && (
+                              <span className="text-slate-500"> (from category or subcategory)</span>
+                            )}
+                          </p>
+                        )}
                         <select
                           value={editPrinterLabel}
                           onChange={(e) => setEditPrinterLabel(e.target.value)}
