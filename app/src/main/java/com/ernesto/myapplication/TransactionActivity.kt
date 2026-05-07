@@ -14,6 +14,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.ernesto.myapplication.data.Transaction
@@ -32,8 +33,10 @@ import androidx.core.content.ContextCompat
 import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.ernesto.myapplication.engine.PaymentService
+import com.ernesto.myapplication.engine.TipAdjustHostLeg
 import com.ernesto.myapplication.engine.SplitReceiptPayload
 import com.ernesto.myapplication.engine.SplitReceiptReprintHelper
+import com.ernesto.myapplication.SessionEmployee
 import com.ernesto.myapplication.payments.SpinGatewayP
 import com.ernesto.myapplication.payments.TransactionVoidReferenceResolver
 import com.google.firebase.Timestamp
@@ -527,8 +530,14 @@ class TransactionActivity : AppCompatActivity() {
                 .show()
             return
         }
-        val tipLabel = if (transaction.tipAmountInCents > 0L) "Adjust Tip" else "Add Tip"
-        val options = arrayOf("See Order", "Refund", "Void", tipLabel, "\uD83E\uDDFE  Receipt", "Cancel")
+        val tipLabel = if (TipConfig.isTipsEnabled(this) && !TipConfig.isTipOnCustomerScreen(this)) {
+            if (transaction.tipAmountInCents > 0L) "Adjust Tip" else "Add Tip"
+        } else null
+        val options = if (tipLabel != null) {
+            arrayOf("See Order", "Refund", "Void", tipLabel, "\uD83E\uDDFE  Receipt", "Cancel")
+        } else {
+            arrayOf("See Order", "Refund", "Void", "\uD83E\uDDFE  Receipt", "Cancel")
+        }
         AlertDialog.Builder(this)
             .setTitle("Transaction Options")
             .setItems(options) { _, which ->
@@ -536,8 +545,10 @@ class TransactionActivity : AppCompatActivity() {
                     "See Order" -> navigateToOrder(transaction.orderId)
                     "Refund" -> processRefund(transaction, remainingCents)
                     "Void" -> processVoid(transaction)
-                    tipLabel -> showTipAdjustDialog(transaction)
                     "\uD83E\uDDFE  Receipt" -> showReceiptFlow(transaction)
+                    else -> if (tipLabel != null && options[which] == tipLabel) {
+                        showTipAdjustDialog(transaction)
+                    }
                 }
             }
             .show()
@@ -1077,7 +1088,8 @@ class TransactionActivity : AppCompatActivity() {
 
         val refundedByName = refundDocs.firstOrNull()?.getString("refundedBy")?.trim()?.takeIf { it.isNotBlank() }
         if (refundedByName != null) {
-            segs += EscPosPrinter.Segment("Refunded by: $refundedByName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+            val displayBy = RefundAttributionFormat.forDisplay(refundedByName)
+            segs += EscPosPrinter.Segment("Refunded by: $displayBy", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
         segs += EscPosPrinter.Segment("")
 
@@ -1542,10 +1554,16 @@ class TransactionActivity : AppCompatActivity() {
 
         Toast.makeText(this, "Processing tip adjustment\u2026", Toast.LENGTH_SHORT).show()
 
+        val cardLeg = transaction.payments.firstOrNull { p ->
+            p.paymentType.equals("Credit", true) || p.paymentType.equals("Debit", true)
+        }
+        val tipLeg = cardLeg?.let { TipAdjustHostLeg.fromCardPayment(it) }
+
         paymentService.tipAdjust(
-            originalAmount = baseAmountDollars,
+            baseAmount = baseAmountDollars,
             tipAmount = newTipDollars,
             referenceId = refId,
+            leg = tipLeg,
             onSuccess = { _ ->
                 runOnUiThread {
                     finalizeTipAdjustInFirestore(transaction, newTipCents, existingTipCents, baseAmountCents)
@@ -1875,7 +1893,7 @@ class TransactionActivity : AppCompatActivity() {
 
     private fun processRefund(transaction: Transaction, remainingCents: Long) {
         RefundDialogHelper.showRefundOptionsDialog(this, remainingCents) { amountCents ->
-            sendRefundRequest(transaction, amountCents / 100.0)
+            sendRefundRequest(transaction, amountCents, remainingCents)
         }
     }
 
@@ -1980,15 +1998,143 @@ class TransactionActivity : AppCompatActivity() {
             }
     }
 
-    private fun sendRefundRequest(transaction: Transaction, amount: Double) {
+    /**
+     * Card refund routing (aligned with [OrderDetailActivity.executeRefundForAmount] intent):
+     * - **Closed batch** → direct `processServerRefund` (any amount), when `orderId` is present.
+     * - **Open batch + full remaining refund** → direct refund.
+     * - **Open batch + partial (custom) amount** → Dejavoo P17 return via SPIn.
+     * - **No batch id** → direct refund if `orderId` present, else terminal.
+     * - **Ecommerce / HPP** → ledger refund only (callable rejects ecommerce).
+     * - **No order id** when direct refund is chosen** → fall back to terminal (callable requires order).
+     */
+    private fun sendRefundRequest(transaction: Transaction, requestedAmountCents: Long, remainingCents: Long) {
+        val amount = requestedAmountCents / 100.0
+        db.collection("Transactions").document(transaction.referenceId).get()
+            .addOnSuccessListener { txDoc ->
+                if (!txDoc.exists()) {
+                    Toast.makeText(this, "Transaction not found.", Toast.LENGTH_LONG).show()
+                    return@addOnSuccessListener
+                }
+                if (isTransactionEcommerce(txDoc)) {
+                    val oid = transaction.orderId.ifBlank { txDoc.getString("orderId") ?: "" }
+                    if (oid.isBlank()) {
+                        Toast.makeText(this, "Online sale has no linked order; cannot record refund here.", Toast.LENGTH_LONG).show()
+                        return@addOnSuccessListener
+                    }
+                    finalizeLedgerRefund(
+                        originalTransactionId = transaction.referenceId,
+                        orderId = oid,
+                        amountInCents = requestedAmountCents,
+                        orderNumberFallback = transaction.orderNumber,
+                        paymentType = "Credit",
+                    )
+                    return@addOnSuccessListener
+                }
+
+                @Suppress("UNCHECKED_CAST")
+                val payments = txDoc.get("payments") as? List<Map<String, Any>> ?: emptyList()
+                val firstPayment = payments.firstOrNull()
+                val paymentType = firstPayment?.get("paymentType")?.toString() ?: transaction.paymentType
+                if (paymentType.equals("Cash", ignoreCase = true)) {
+                    createLocalRefund(transaction, amount)
+                    return@addOnSuccessListener
+                }
+
+                val orderId = transaction.orderId.ifBlank { txDoc.getString("orderId") ?: "" }
+                val txBatchId = txDoc.getString("batchId")?.takeIf { it.isNotBlank() }
+                    ?: transaction.batchId.takeIf { it.isNotBlank() }
+                val isFullRefund = requestedAmountCents >= remainingCents
+
+                fun runTerminalRefund() {
+                    sendRefundViaDejavooTerminal(transaction, amount, paymentType)
+                }
+
+                fun maybeDirectRefund() {
+                    if (orderId.isNotBlank()) {
+                        callServerRefund(transaction.referenceId, orderId, requestedAmountCents)
+                    } else {
+                        Toast.makeText(
+                            this,
+                            "No order linked — use the card terminal for this refund.",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        runTerminalRefund()
+                    }
+                }
+
+                if (txBatchId.isNullOrBlank()) {
+                    maybeDirectRefund()
+                    return@addOnSuccessListener
+                }
+
+                db.collection("Batches").document(txBatchId).get()
+                    .addOnSuccessListener { batchDoc ->
+                        val batchIsClosed = batchDoc.getBoolean("closed") ?: true
+                        val useDirectRefund = batchIsClosed || isFullRefund
+                        if (useDirectRefund) {
+                            maybeDirectRefund()
+                        } else {
+                            runTerminalRefund()
+                        }
+                    }
+                    .addOnFailureListener {
+                        runTerminalRefund()
+                    }
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(this, "Failed to load sale: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+    }
+
+    private fun isTransactionEcommerce(txDoc: DocumentSnapshot): Boolean {
+        if (txDoc.getBoolean("ecommerce") == true) return true
+        val payments = txDoc.get("payments") as? List<*> ?: return false
+        return payments.any { p ->
+            (p as? Map<*, *>)?.get("entryType")?.toString()?.equals("ECOMMERCE", ignoreCase = true) == true
+        }
+    }
+
+    private fun resolvePosRefundedBy(): String {
+        currentEmployeeName.trim().takeIf { it.isNotBlank() }?.let { return it }
+        SessionEmployee.getEmployeeName(this).trim().takeIf { it.isNotBlank() }?.let { return it }
+        return ""
+    }
+
+    private fun callServerRefund(transactionId: String, orderId: String, amountInCents: Long) {
+        val data = hashMapOf<String, Any>(
+            "transactionId" to transactionId,
+            "orderId" to orderId,
+            "amountInCents" to amountInCents,
+        )
+        resolvePosRefundedBy().takeIf { it.isNotBlank() }?.let { data["posRefundedBy"] = it }
+
+        Toast.makeText(this, "Processing server refund…", Toast.LENGTH_SHORT).show()
+        FirebaseFunctions.getInstance()
+            .getHttpsCallable("processServerRefund")
+            .call(data)
+            .addOnSuccessListener { result ->
+                val response = result.data as? Map<*, *>
+                if (response?.get("success") == true) {
+                    val msg = response["message"]?.toString() ?: "Refund processed."
+                    Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                } else {
+                    val err = response?.get("error")?.toString() ?: "Refund failed."
+                    Toast.makeText(this, err, Toast.LENGTH_LONG).show()
+                }
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(this, "Refund failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+    }
+
+    /** In-store card return on Dejavoo P17 (open batch + partial amount). */
+    private fun sendRefundViaDejavooTerminal(transaction: Transaction, amount: Double, paymentTypeFromSale: String) {
         val leg = SpinGatewayP.cardLegForRefund(transaction)
         if (leg.referenceId.isBlank() && leg.clientReferenceId.isBlank()) {
             Toast.makeText(this, "Cannot refund: no gateway reference for this transaction.", Toast.LENGTH_LONG).show()
             return
         }
-
-        // Debit refunds use the same flow as credit (Credit Return); do not send Debit Return (Z8)
-        val returnPaymentType = if (transaction.paymentType.equals("Debit", true)) "Credit" else transaction.paymentType
+        val returnPaymentType = if (paymentTypeFromSale.equals("Debit", true)) "Credit" else paymentTypeFromSale
         SpinGatewayP.enqueueRefundPayment(this, amount, returnPaymentType, leg) { result ->
             runOnUiThread {
                 if (result.networkError != null) {
@@ -2015,6 +2161,91 @@ class TransactionActivity : AppCompatActivity() {
                 )
             }
         }
+    }
+
+    /** Ecommerce / HPP: record REFUND + order totals without `processServerRefund` (callable rejects ecommerce). */
+    private fun finalizeLedgerRefund(
+        originalTransactionId: String,
+        orderId: String,
+        amountInCents: Long,
+        orderNumberFallback: Long,
+        paymentType: String,
+    ) {
+        db.collection("Batches")
+            .whereEqualTo("closed", false)
+            .limit(1)
+            .get()
+            .addOnSuccessListener { batchSnap ->
+                if (batchSnap.isEmpty) {
+                    Toast.makeText(this, "Open a batch first", Toast.LENGTH_LONG).show()
+                    return@addOnSuccessListener
+                }
+                val openBatchId = batchSnap.documents.first().id
+                val orderRef = db.collection("Orders").document(orderId)
+                orderRef.get()
+                    .addOnSuccessListener { orderDoc ->
+                        if (!orderDoc.exists()) {
+                            Toast.makeText(this, "Order not found.", Toast.LENGTH_LONG).show()
+                            return@addOnSuccessListener
+                        }
+                        val refundedBy = resolvePosRefundedBy().ifBlank { "Unknown" }
+                        val newRefundTxRef = db.collection("Transactions").document()
+                        val batchRef = db.collection("Batches").document(openBatchId)
+                        val orderNumber = orderDoc.getLong("orderNumber") ?: orderNumberFallback
+                        val refundDocData = mutableMapOf<String, Any>(
+                            "orderId" to orderId,
+                            "orderNumber" to orderNumber,
+                            "type" to "REFUND",
+                            "amount" to amountInCents / 100.0,
+                            "amountInCents" to amountInCents,
+                            "originalReferenceId" to originalTransactionId,
+                            "createdAt" to Date(),
+                            "batchId" to openBatchId,
+                            "voided" to false,
+                            "settled" to false,
+                            "refundedBy" to refundedBy,
+                            "paymentType" to paymentType,
+                        )
+                        db.runTransaction { firestoreTxn ->
+                            val batchSnap2 = firestoreTxn.get(batchRef)
+                            val counter = batchSnap2.getLong("transactionCounter") ?: 0L
+                            val next = counter + 1
+                            firestoreTxn.update(batchRef, "transactionCounter", next)
+                            refundDocData["appTransactionNumber"] = next
+                            firestoreTxn.set(newRefundTxRef, refundDocData)
+                        }.addOnSuccessListener {
+                            val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+                            val currentRefunded = orderDoc.getLong("totalRefundedInCents") ?: 0L
+                            val newTotalRefunded = currentRefunded + amountInCents
+                            val orderUpdates = mutableMapOf<String, Any>(
+                                "totalRefundedInCents" to newTotalRefunded,
+                                "refundedAt" to Date(),
+                            )
+                            if (newTotalRefunded >= totalInCents) {
+                                orderUpdates["status"] = "REFUNDED"
+                            }
+                            orderRef.update(orderUpdates)
+                                .addOnSuccessListener {
+                                    db.collection("Batches").document(openBatchId)
+                                        .update(
+                                            mapOf(
+                                                "totalRefundsInCents" to FieldValue.increment(amountInCents),
+                                                "netTotalInCents" to FieldValue.increment(-amountInCents),
+                                                "transactionCount" to FieldValue.increment(1),
+                                            ),
+                                        )
+                                        .addOnSuccessListener {
+                                            ReceiptPromptHelper.promptForReceipt(
+                                                this,
+                                                ReceiptPromptHelper.ReceiptType.REFUND,
+                                                orderId,
+                                                originalTransactionId,
+                                            )
+                                        }
+                                }
+                        }
+                    }
+            }
     }
 
     private fun completeCardRefundAfterHostApproved(

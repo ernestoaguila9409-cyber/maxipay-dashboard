@@ -3,8 +3,10 @@ package com.ernesto.myapplication.engine
 import android.content.Context
 import android.util.Log
 import com.ernesto.myapplication.TerminalPrefs
+import com.ernesto.myapplication.data.TransactionPayment
 import com.ernesto.myapplication.payments.SpinApiUrls
 import com.ernesto.myapplication.payments.SpinCallTracker
+import com.ernesto.myapplication.payments.SpinGatewayP
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -25,6 +27,28 @@ data class TipAdjustResult(
     val approved: Boolean,
     val message: String
 )
+
+/**
+ * Optional fields from the original card leg so SPInPos Gateway can match the open-batch record.
+ * See [iPOSpays SPIn REST — Tip Adjust](https://uatdocs.ipospays.tech/spin-specification) (Theneo: Amount = total, TipAmount, ReferenceId, …).
+ */
+data class TipAdjustHostLeg(
+    val paymentType: String = "",
+    val batchNumber: String = "",
+    val transactionNumber: String = "",
+    val invoiceNumber: String = "",
+    val authCode: String = "",
+) {
+    companion object {
+        fun fromCardPayment(p: TransactionPayment): TipAdjustHostLeg = TipAdjustHostLeg(
+            paymentType = p.paymentType.trim(),
+            batchNumber = p.batchNumber.trim(),
+            transactionNumber = p.transactionNumber.trim(),
+            invoiceNumber = p.invoiceNumber.trim(),
+            authCode = p.authCode.trim(),
+        )
+    }
+}
 
 data class CaptureResult(
     val referenceId: String,
@@ -282,10 +306,20 @@ class PaymentService(private val context: Context) {
         })
     }
 
+    /**
+     * POST `/Payment/TipAdjust` (SPIn / SPInPos Gateway P).
+     *
+     * @param baseAmount Sale amount **excluding** the new tip (same dollars you use for receipts: total paid − tip).
+     * @param tipAmount New tip in dollars (not incremental delta).
+     * @param leg Optional batch/txn/invoice from the original sale response — improves host matching on P-series.
+     *
+     * Per SPIn REST docs, **Amount** is the **total** charged (base + tip), not the base alone.
+     */
     fun tipAdjust(
-        originalAmount: Double,
+        baseAmount: Double,
         tipAmount: Double,
         referenceId: String,
+        leg: TipAdjustHostLeg? = null,
         onSuccess: (TipAdjustResult) -> Unit,
         onFailure: (String) -> Unit
     ) {
@@ -294,15 +328,31 @@ class PaymentService(private val context: Context) {
             return
         }
 
+        val totalAmount = baseAmount + tipAmount
+        val paymentType = leg?.paymentType?.trim().orEmpty().ifBlank { "Credit" }
+
         val json = JSONObject().apply {
-            put("Amount", String.format(Locale.US, "%.2f", originalAmount))
+            put("Amount", String.format(Locale.US, "%.2f", totalAmount))
             put("TipAmount", String.format(Locale.US, "%.2f", tipAmount))
-            put("PaymentType", "Credit")
-            put("ReferenceId", referenceId)
+            put("PaymentType", paymentType)
+            put("ReferenceId", referenceId.trim())
+            put("PrintReceipt", "No")
+            put("GetReceipt", "No")
+            put("CaptureSignature", false)
             put("GetExtendedData", true)
             put("Tpn", TerminalPrefs.getTpn(context))
             put("RegisterId", TerminalPrefs.getRegisterId(context))
             put("Authkey", TerminalPrefs.getAuthKey(context))
+            leg?.let { h ->
+                if (h.authCode.isNotBlank()) put("AuthCode", h.authCode)
+                if (h.invoiceNumber.isNotBlank()) put("InvoiceNumber", h.invoiceNumber)
+                if (h.batchNumber.isNotBlank()) {
+                    put("BatchNumber", h.batchNumber.toIntOrNull() ?: h.batchNumber)
+                }
+                if (h.transactionNumber.isNotBlank()) {
+                    put("TransactionNumber", h.transactionNumber.toIntOrNull() ?: h.transactionNumber)
+                }
+            }
         }
 
         Log.d("TIP_ADJUST_REQ", json.toString())
@@ -339,14 +389,12 @@ class PaymentService(private val context: Context) {
                         ?.optString("ResultCode", "") ?: ""
 
                     if (resultCode == "0") {
-                        Log.d("TIP_ADJUST", "Approved – ref=$referenceId tip=$tipAmount")
+                        Log.d("TIP_ADJUST", "Approved – ref=$referenceId total=$totalAmount tip=$tipAmount")
                         onSuccess(TipAdjustResult(approved = true, message = "Tip adjusted successfully"))
                     } else {
-                        val msg = jsonObj.optJSONObject("GeneralResponse")
-                            ?.optString("ResultMessage", "")
-                            ?.takeIf { it.isNotBlank() }
-                            ?: "Tip adjustment declined."
-                        Log.w("TIP_ADJUST", "Declined – code=$resultCode msg=$msg")
+                        val msg = SpinGatewayP.voidDeclineMessage(responseText)
+                            .ifBlank { "Tip adjustment declined." }
+                        Log.w("TIP_ADJUST", "Declined – code=$resultCode msg=$msg raw=${responseText.take(500)}")
                         onFailure(msg)
                     }
                 } catch (e: Exception) {

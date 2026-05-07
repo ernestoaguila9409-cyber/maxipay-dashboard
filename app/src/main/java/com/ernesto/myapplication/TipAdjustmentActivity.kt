@@ -21,6 +21,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.ernesto.myapplication.engine.PaymentService
+import com.ernesto.myapplication.engine.TipAdjustHostLeg
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.firebase.Timestamp
@@ -44,6 +45,16 @@ class TipAdjustmentActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!TipConfig.isTipsEnabled(this) || TipConfig.isTipOnCustomerScreen(this)) {
+            val msg = if (!TipConfig.isTipsEnabled(this)) {
+                "Tips are disabled in settings."
+            } else {
+                "Tips are collected on the payment screen. This screen is not used."
+            }
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
         setContentView(R.layout.activity_tip_adjustment)
 
         paymentService = PaymentService(this)
@@ -92,6 +103,8 @@ class TipAdjustmentActivity : AppCompatActivity() {
                     val totalPaidCents = doc.getLong("totalPaidInCents") ?: 0L
                     val tipCents = doc.getLong("tipAmountInCents") ?: 0L
                     val tipAdjusted = doc.getBoolean("tipAdjusted") ?: false
+                    if (tipAdjusted) continue
+
                     val orderNumber = doc.getLong("orderNumber") ?: 0L
                     val orderId = doc.getString("orderId") ?: ""
                     val batchId = doc.getString("batchId") ?: ""
@@ -100,6 +113,15 @@ class TipAdjustmentActivity : AppCompatActivity() {
                     var cardBrand = ""
                     var last4 = ""
                     var gatewayRefId = ""
+                    var payType = ""
+                    var batchNum = ""
+                    var txnNum = ""
+                    var invNum = ""
+                    var authCd = ""
+                    fun strField(m: Map<*, *>, key: String): String {
+                        val v = m[key] ?: return ""
+                        return (v as? Number)?.toString()?.trim() ?: v.toString().trim()
+                    }
                     for (p in payments) {
                         val m = p as? Map<*, *> ?: continue
                         val pt = (m["paymentType"] as? String) ?: ""
@@ -110,6 +132,11 @@ class TipAdjustmentActivity : AppCompatActivity() {
                             cardBrand = (m["cardBrand"] as? String) ?: ""
                             last4 = (m["last4"] as? String) ?: ""
                             gatewayRefId = (m["referenceId"] as? String) ?: ""
+                            payType = pt
+                            batchNum = strField(m, "batchNumber")
+                            txnNum = strField(m, "transactionNumber")
+                            invNum = (m["invoiceNumber"] as? String) ?: ""
+                            authCd = (m["authCode"] as? String) ?: ""
                             break
                         }
                     }
@@ -128,7 +155,12 @@ class TipAdjustmentActivity : AppCompatActivity() {
                             cardBrand = cardBrand,
                             last4 = last4,
                             referenceId = gatewayRefId,
-                            createdAt = createdAt
+                            createdAt = createdAt,
+                            paymentType = payType,
+                            batchNumber = batchNum,
+                            transactionNumber = txnNum,
+                            invoiceNumber = invNum,
+                            authCode = authCd,
                         )
                     )
                 }
@@ -338,10 +370,18 @@ class TipAdjustmentActivity : AppCompatActivity() {
 
         Toast.makeText(this, "Processing tip adjustment\u2026", Toast.LENGTH_SHORT).show()
 
+        val hostLeg = TipAdjustHostLeg(
+            paymentType = item.paymentType,
+            batchNumber = item.batchNumber,
+            transactionNumber = item.transactionNumber,
+            invoiceNumber = item.invoiceNumber,
+            authCode = item.authCode,
+        )
         paymentService.tipAdjust(
-            originalAmount = baseAmountDollars,
+            baseAmount = baseAmountDollars,
             tipAmount = newTipDollars,
             referenceId = item.referenceId,
+            leg = hostLeg,
             onSuccess = { _ ->
                 runOnUiThread {
                     finalizeTipInFirestore(item, newTipCents, existingTipCents, baseAmountCents)
@@ -439,7 +479,12 @@ data class TipTransactionItem(
     val cardBrand: String,
     val last4: String,
     val referenceId: String,
-    val createdAt: Date?
+    val createdAt: Date?,
+    val paymentType: String = "",
+    val batchNumber: String = "",
+    val transactionNumber: String = "",
+    val invoiceNumber: String = "",
+    val authCode: String = "",
 )
 
 // ─── Adapter ──────────────────────────────────────────────────────────────

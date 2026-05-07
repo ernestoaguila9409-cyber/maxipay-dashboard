@@ -45,10 +45,12 @@ import com.ernesto.myapplication.engine.OrderEngine
 import com.ernesto.myapplication.engine.SplitReceiptPayload
 import com.ernesto.myapplication.engine.SplitReceiptReprintHelper
 import com.ernesto.myapplication.engine.PaymentService
+import com.ernesto.myapplication.engine.TipAdjustHostLeg
 import com.ernesto.myapplication.payments.SpinGatewayP
 import com.ernesto.myapplication.payments.TransactionVoidReferenceResolver
 import android.graphics.Typeface
 import com.google.firebase.Timestamp
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.functions.FirebaseFunctions
 import kotlin.math.roundToLong
 
@@ -102,6 +104,8 @@ class OrderDetailActivity : AppCompatActivity() {
     private var orderType: String = ""
     private var saleTransactionId: String? = null
     private var lastOrderStatusForBadge: String = ""
+    /** Filled when the order doc loads; used for refunds if intent/session lack an employee name. */
+    private var cachedOrderEmployeeName: String = ""
     private var dashboardListener: ListenerRegistration? = null
     private var orderItemsListener: ListenerRegistration? = null
 
@@ -266,7 +270,8 @@ class OrderDetailActivity : AppCompatActivity() {
                 if (!doc.exists()) return@addOnSuccessListener
 
                 val status = doc.getString("status") ?: ""
-                val employee = doc.getString("employeeName") ?: "Unknown"
+                cachedOrderEmployeeName = doc.getString("employeeName")?.trim().orEmpty()
+                val employee = cachedOrderEmployeeName.ifBlank { "Unknown" }
                 val customerName = doc.getString("customerName") ?: ""
                 val orderNumber = doc.getLong("orderNumber") ?: 0L
 
@@ -1097,10 +1102,13 @@ class OrderDetailActivity : AppCompatActivity() {
 
         Toast.makeText(this, "Processing tip adjustment\u2026", Toast.LENGTH_SHORT).show()
 
+        val tipLeg = TipAdjustHostLeg.fromCardPayment(SpinGatewayP.cardLegForHostReturnFromTxDoc(txDoc))
+
         paymentService.tipAdjust(
-            originalAmount = baseAmountDollars,
+            baseAmount = baseAmountDollars,
             tipAmount = newTipDollars,
             referenceId = refId,
+            leg = tipLeg,
             onSuccess = { _ ->
                 runOnUiThread {
                     finalizeTipAdjustInFirestore(saleTransactionId, batchId, newTipCents, existingTipCents, baseAmountCents)
@@ -1217,7 +1225,8 @@ class OrderDetailActivity : AppCompatActivity() {
                     val amountCents = refundDoc.getLong("amountInCents")
                         ?: ((refundDoc.getDouble("amount") ?: 0.0) * 100).toLong()
                     totalCents += amountCents
-                    val employee = refundDoc.getString("refundedBy")?.trim()?.takeIf { it.isNotBlank() } ?: "—"
+                    val rawRefundedBy = refundDoc.getString("refundedBy")?.trim()?.takeIf { it.isNotBlank() }
+                    val employee = rawRefundedBy?.let { RefundAttributionFormat.forDisplay(it) } ?: "—"
                     val createdAt = refundDoc.getTimestamp("createdAt")?.toDate()
                     val dateStr = if (createdAt != null) dateFormat.format(createdAt) else ""
                     val hasLineKey = refundDoc.getString("refundedLineKey")?.isNotBlank() == true
@@ -2155,6 +2164,9 @@ class OrderDetailActivity : AppCompatActivity() {
 
                 if (!orderDoc.exists()) return@addOnSuccessListener
 
+                orderDoc.getString("employeeName")?.trim()?.takeIf { it.isNotBlank() }
+                    ?.let { cachedOrderEmployeeName = it }
+
                 val status = orderDoc.getString("status") ?: ""
                 if (status == "REFUNDED") {
                     Toast.makeText(this, "Order already refunded", Toast.LENGTH_LONG).show()
@@ -2287,6 +2299,25 @@ class OrderDetailActivity : AppCompatActivity() {
             }
         }
     }
+
+    /**
+     * Who performed a POS-side refund. Intent/session are preferred; otherwise the order's
+     * [employeeName] (same as the header) so server refunds still attribute correctly when
+     * this screen was opened without `employeeName` (e.g. from transaction history).
+     */
+    private fun resolveRefundActorDisplayName(): String {
+        intent.getStringExtra("employeeName")?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+        SessionEmployee.getEmployeeName(this).trim().takeIf { it.isNotBlank() }?.let { return it }
+        cachedOrderEmployeeName.trim().takeIf { it.isNotBlank() }?.let { return it }
+        try {
+            val u = FirebaseAuth.getInstance().currentUser ?: return ""
+            u.displayName?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+            u.email?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+        } catch (_: Exception) {
+        }
+        return ""
+    }
+
     private fun callServerRefund(
         transactionId: String,
         amountInCents: Long,
@@ -2301,6 +2332,7 @@ class OrderDetailActivity : AppCompatActivity() {
         )
         refundedLineKey?.takeIf { it.isNotBlank() }?.let { data["refundedLineKey"] = it }
         refundedItemName?.takeIf { it.isNotBlank() }?.let { data["refundedItemName"] = it }
+        resolveRefundActorDisplayName().takeIf { it.isNotBlank() }?.let { data["posRefundedBy"] = it }
 
         Toast.makeText(this, "Processing server refund…", Toast.LENGTH_SHORT).show()
 
@@ -2827,7 +2859,8 @@ class OrderDetailActivity : AppCompatActivity() {
 
         val refundedByName = refundDocs.firstOrNull()?.getString("refundedBy")?.trim()?.takeIf { it.isNotBlank() }
         if (refundedByName != null) {
-            segs += EscPosPrinter.Segment("Refunded by: $refundedByName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+            val displayBy = RefundAttributionFormat.forDisplay(refundedByName)
+            segs += EscPosPrinter.Segment("Refunded by: $displayBy", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
         segs += EscPosPrinter.Segment("")
 
@@ -3222,8 +3255,8 @@ class OrderDetailActivity : AppCompatActivity() {
                 orderRef.get()
                     .addOnSuccessListener { orderDoc ->
                         if (!orderDoc.exists()) return@addOnSuccessListener
-                        val employeeName = intent.getStringExtra("employeeName")?.takeIf { it.isNotBlank() }
-                            ?: SessionEmployee.getEmployeeName(this@OrderDetailActivity)
+                        val employeeName = resolveRefundActorDisplayName()
+                            .ifBlank { "Unknown" }
 
                         val newRefundTxRef = db.collection("Transactions").document()
                         val batchRef = db.collection("Batches").document(openBatchId)
