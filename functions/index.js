@@ -311,7 +311,7 @@ function totalsHtml({
   appliedDiscounts,
   tipConfig,
   tipAmountInCents,
-  /** Email receipts omit tip rows to match requested layout (no tip line). */
+  /** When true, skip Tip row entirely (rare; standard receipts now show tips when present). */
   omitTipLine,
 }) {
   const totalColor = totalStrike ? "color:#999;text-decoration:line-through;" : "color:#222;";
@@ -690,6 +690,25 @@ async function fetchSaleTransactionForOrder(db, orderId, orderData) {
   return snap.empty ? null : snap.docs[0];
 }
 
+/**
+ * After Tip Adjust on the POS, `Transactions` (and usually `Orders`) carry `tipAmountInCents` / totals.
+ * Merge so email + web receipt preview match the card capture even if one doc lagged.
+ */
+function mergeOrderTotalsWithSaleTx(order, saleTxSnap) {
+  const orderTip = Math.round(Number(order?.tipAmountInCents ?? 0));
+  const orderTotal = Math.round(Number(order?.totalInCents ?? 0));
+  if (!saleTxSnap || !saleTxSnap.exists) {
+    return { tipAmountInCents: orderTip, totalInCents: orderTotal };
+  }
+  const t = saleTxSnap.data() || {};
+  const txTip = Math.round(Number(t.tipAmountInCents ?? 0));
+  const txTotal = Math.round(Number(t.totalPaidInCents ?? 0));
+  return {
+    tipAmountInCents: Math.max(orderTip, txTip),
+    totalInCents: txTotal > 0 ? txTotal : orderTotal,
+  };
+}
+
 /** Synced from app (Settings/tipConfig); mirrors Android TipConfig defaults when missing. */
 async function fetchTipConfig(db) {
   const snap = await db.collection("Settings").doc("tipConfig").get();
@@ -841,8 +860,6 @@ async function composeStandardReceiptWrappedHtml(db, orderId) {
     customerName: resolvedCustomerName || (order.customerName != null ? String(order.customerName).trim() : "") || "",
   };
 
-  const totalInCents = order.totalInCents ?? 0;
-  const tipAmountInCents = order.tipAmountInCents ?? 0;
   const taxBreakdown = order.taxBreakdown ?? [];
   const discountInCents = order.discountInCents ?? 0;
   const appliedDiscounts = order.appliedDiscounts ?? [];
@@ -852,6 +869,9 @@ async function composeStandardReceiptWrappedHtml(db, orderId) {
   const taxInCents = parseTax(taxBreakdown);
   const tipConfig = await fetchTipConfig(db);
   const saleTxSnap = await fetchSaleTransactionForOrder(db, orderId, order);
+  const merged = mergeOrderTotalsWithSaleTx(order, saleTxSnap);
+  const totalInCents = merged.totalInCents;
+  const tipAmountInCents = merged.tipAmountInCents;
   const txData = saleTxSnap ? saleTxSnap.data() : null;
   const payments = txData && txData.payments && txData.payments.length > 0
     ? txData.payments
@@ -877,7 +897,7 @@ async function composeStandardReceiptWrappedHtml(db, orderId) {
       appliedDiscounts,
       tipConfig,
       tipAmountInCents,
-      omitTipLine: true,
+      omitTipLine: false,
     }) +
     paymentHtml(payments) +
     footerHtml();
@@ -900,11 +920,14 @@ async function composeVoidReceiptWrappedHtml(db, orderId) {
     ...order,
     customerName: resolvedCustomerName || (order.customerName != null ? String(order.customerName).trim() : "") || "",
   };
-  const totalInCents = order.totalInCents ?? 0;
-  const tipAmountInCents = order.tipAmountInCents ?? 0;
   const taxBreakdown = order.taxBreakdown ?? [];
   const discountInCents = order.discountInCents ?? 0;
   const appliedDiscounts = order.appliedDiscounts ?? [];
+
+  const saleTxSnapV = await fetchSaleTransactionForOrder(db, orderId, order);
+  const mergedV = mergeOrderTotalsWithSaleTx(order, saleTxSnapV);
+  const totalInCents = mergedV.totalInCents;
+  const tipAmountInCents = mergedV.tipAmountInCents;
   const total = totalInCents / 100;
 
   const voidedBy = order.voidedBy ?? "";
@@ -916,7 +939,7 @@ async function composeVoidReceiptWrappedHtml(db, orderId) {
   const taxInCents = parseTax(taxBreakdown);
   const tipConfig = await fetchTipConfig(db);
   const reversedTxns = await fetchOrderReversedTransactions(db, orderId);
-  const saleTxSnap = await fetchSaleTransactionForOrder(db, orderId, order);
+  const saleTxSnap = saleTxSnapV;
   const txData = saleTxSnap ? saleTxSnap.data() : null;
   const fallbackPayments = txData && txData.payments && txData.payments.length > 0
     ? txData.payments
@@ -952,7 +975,7 @@ async function composeVoidReceiptWrappedHtml(db, orderId) {
       appliedDiscounts,
       tipConfig,
       tipAmountInCents,
-      omitTipLine: true,
+      omitTipLine: false,
     }) +
     (reversedTxns.length > 0 ? reversedPaymentsHtml(reversedTxns) : paymentHtml(fallbackPayments)) +
     footerHtml('<span style="color:#D32F2F;">This transaction has been voided.</span>');
@@ -1814,6 +1837,7 @@ exports.processServerRefund = onCall(async (request) => {
     amountInCents,
     refundedLineKey,
     refundedItemName,
+    posRefundedBy,
   } = request.data || {};
 
   if (!transactionId || !orderId) {
@@ -1984,7 +2008,14 @@ exports.processServerRefund = onCall(async (request) => {
 
   // --- 5. Persist refund in Firestore (mirrors RemoteRefundExecutor) ---
   const refundDollars = cappedAmount / 100;
-  const refundedByLabel = `Dashboard: ${request.auth.token?.email || request.auth.uid}`;
+  const posName = String(posRefundedBy ?? "")
+    .trim()
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .slice(0, 120);
+  const refundedByLabel =
+    posName.length > 0
+      ? posName
+      : `Dashboard: ${request.auth.token?.email || request.auth.uid}`;
   const refundAmountCents = cappedAmount;
 
   let batchSnap = await db
