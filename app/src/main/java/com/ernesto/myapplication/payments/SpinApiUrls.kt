@@ -36,6 +36,9 @@ object SpinApiUrls {
     fun status(context: Context): String =
         url(context, PaymentTerminalConfig.Companion.EndpointKey.STATUS)
 
+    fun cancel(context: Context): String =
+        url(context, PaymentTerminalConfig.Companion.EndpointKey.CANCEL)
+
     /** Base URL currently in use (for logging / diagnostics). */
     fun baseUrl(context: Context): String {
         val cfg = PaymentTerminalRepository.getActiveConfig(context)

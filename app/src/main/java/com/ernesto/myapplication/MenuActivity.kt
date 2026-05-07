@@ -708,7 +708,7 @@ class MenuActivity : AppCompatActivity() {
                             val lineTaxMode = doc.getString("taxMode") ?: "INHERIT"
                             @Suppress("UNCHECKED_CAST")
                             val lineTaxIds = (doc.get("taxIds") as? List<String>) ?: emptyList()
-                            val linePrinterLabel = doc.getString("printerLabel")?.trim()?.takeIf { it.isNotEmpty() }
+                            val linePrinterLabel = MenuItemRoutingLabel.fromOrderLineDoc(doc)
                             val lineImageUrl = trimMenuImageUrl(doc.getString("imageUrl"))
                             val lineCourseId = doc.getString("courseId")?.trim()?.takeIf { it.isNotEmpty() }
 

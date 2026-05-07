@@ -18,6 +18,7 @@ internal object SpinDefaults {
         PaymentTerminalConfig.Companion.EndpointKey.REFUND to "/Payment/Return",
         PaymentTerminalConfig.Companion.EndpointKey.SETTLE to "/Payment/Settle",
         PaymentTerminalConfig.Companion.EndpointKey.STATUS to "/Payment/Status",
+        PaymentTerminalConfig.Companion.EndpointKey.CANCEL to "/Payment/Cancel",
     )
 
     val CAPABILITIES: Map<String, Boolean> = mapOf(

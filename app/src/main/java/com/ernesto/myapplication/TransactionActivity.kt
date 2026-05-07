@@ -841,6 +841,7 @@ class TransactionActivity : AppCompatActivity() {
                 db.collection("Orders").document(orderId).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
                         val rs = ReceiptSettings.load(this)
+                        val signatureUrl = orderDoc.getString("signatureUrl")
                         val txId = orderDoc.getString("saleTransactionId") ?: saleTransactionId
                         if (txId.isNotBlank()) {
                             db.collection("Transactions").document(txId).get()
@@ -848,17 +849,25 @@ class TransactionActivity : AppCompatActivity() {
                                     val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
                                     val txStatus = txDoc?.getString("status")
                                     val txVoided = txDoc?.getBoolean("voided") ?: false
-                                    EscPosPrinter.print(
-                                        this,
+                                    printWithOptionalSignature(
                                         buildOriginalSegments(orderDoc, itemsSnap.documents, payments, txStatus, txVoided),
-                                        rs
+                                        rs,
+                                        signatureUrl
                                     )
                                 }
                                 .addOnFailureListener {
-                                    EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()), rs)
+                                    printWithOptionalSignature(
+                                        buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()),
+                                        rs,
+                                        signatureUrl
+                                    )
                                 }
                         } else {
-                            EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()), rs)
+                            printWithOptionalSignature(
+                                buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()),
+                                rs,
+                                signatureUrl
+                            )
                         }
                     }
                     .addOnFailureListener {
@@ -868,6 +877,21 @@ class TransactionActivity : AppCompatActivity() {
             .addOnFailureListener {
                 Toast.makeText(this, "Failed to load order", Toast.LENGTH_SHORT).show()
             }
+    }
+
+    private fun printWithOptionalSignature(
+        segments: List<EscPosPrinter.Segment>,
+        rs: ReceiptSettings,
+        signatureUrl: String?
+    ) {
+        if (!signatureUrl.isNullOrBlank()) {
+            Thread {
+                val sigBitmap = SignatureSettings.downloadSignatureBitmap(signatureUrl)
+                EscPosPrinter.print(this, segments, rs, signatureBitmap = sigBitmap)
+            }.start()
+        } else {
+            EscPosPrinter.print(this, segments, rs)
+        }
     }
 
     @Suppress("UNCHECKED_CAST")

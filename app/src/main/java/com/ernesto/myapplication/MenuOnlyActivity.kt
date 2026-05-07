@@ -221,73 +221,89 @@ class MenuOnlyActivity : AppCompatActivity() {
     // LOAD CATEGORIES
     // =========================================================
 
-    private fun loadCategories() {
-        loadSubcategories {
-            db.collection("Categories")
-                .get()
-                .addOnSuccessListener { documents ->
-                    val categoryList = mutableListOf<CategoryModel>()
+    /**
+     * @param syncOrphanKitchenLabels When true (default), clears category/subcategory `kitchenLabel`
+     * values that no longer exist on any saved printer, then loads the list. Set false when
+     * refreshing after a local category edit to avoid duplicate Firestore reads.
+     */
+    private fun loadCategories(syncOrphanKitchenLabels: Boolean = true) {
+        fun bindCategoriesFromFirestore() {
+            loadSubcategories {
+                db.collection("Categories")
+                    .get()
+                    .addOnSuccessListener { documents ->
+                        val categoryList = mutableListOf<CategoryModel>()
 
-                    for (doc in documents) {
-                        val name = doc.getString("name") ?: continue
-                        @Suppress("UNCHECKED_CAST")
-                        val availableOrderTypes =
-                            (doc.get("availableOrderTypes") as? List<String>) ?: emptyList()
-                        @Suppress("UNCHECKED_CAST")
-                        val scheduleIds =
-                            (doc.get("scheduleIds") as? List<String>) ?: emptyList()
+                        for (doc in documents) {
+                            val name = doc.getString("name") ?: continue
+                            @Suppress("UNCHECKED_CAST")
+                            val availableOrderTypes =
+                                (doc.get("availableOrderTypes") as? List<String>) ?: emptyList()
+                            @Suppress("UNCHECKED_CAST")
+                            val scheduleIds =
+                                (doc.get("scheduleIds") as? List<String>) ?: emptyList()
 
-                        if (scheduleIds.isNotEmpty()) {
-                            if (activeScheduleIds.isEmpty() || scheduleIds.none { it in activeScheduleIds }) {
-                                continue
+                            if (scheduleIds.isNotEmpty()) {
+                                if (activeScheduleIds.isEmpty() || scheduleIds.none { it in activeScheduleIds }) {
+                                    continue
+                                }
                             }
+
+                            categoryList.add(
+                                CategoryModel(
+                                    id = doc.id,
+                                    name = name,
+                                    normalizedName = doc.getString("normalizedName"),
+                                    availableOrderTypes = availableOrderTypes,
+                                    scheduleIds = scheduleIds,
+                                    kitchenLabel = doc.getString("kitchenLabel")?.trim().orEmpty(),
+                                )
+                            )
                         }
 
-                        categoryList.add(
-                            CategoryModel(
-                                id = doc.id,
-                                name = name,
-                                normalizedName = doc.getString("normalizedName"),
-                                availableOrderTypes = availableOrderTypes,
-                                scheduleIds = scheduleIds,
-                                kitchenLabel = doc.getString("kitchenLabel")?.trim().orEmpty(),
+                        categoryList.sortBy { it.name.lowercase() }
+
+                        categoryAvailabilityMap = categoryList.associate { it.id to it.availableOrderTypes }
+
+                        categoryRecycler.adapter =
+                            CategoryAdapter(
+                                categories = categoryList,
+                                subcategories = emptyList(),
+                                onCategoryClick = { categoryId ->
+                                    selectedCategoryId = categoryId
+                                    selectedSubcategoryId = null
+                                    val cat = categoryList.find { it.id == categoryId }
+                                    selectedCategoryAvailability =
+                                        cat?.availableOrderTypes ?: emptyList()
+                                    selectedCategoryScheduled =
+                                        cat?.scheduleIds?.isNotEmpty() == true
+                                    editSearch.setText("")
+                                    buildSubcategoryChips(categoryId)
+                                    loadItems(categoryId)
+                                },
+                                context = this,
+                                onDataChanged = {
+                                    loadCategories(syncOrphanKitchenLabels = false)
+                                }
                             )
-                        )
+
+                        if (selectedCategoryId != null) {
+                            buildSubcategoryChips(selectedCategoryId!!)
+                            loadItems(selectedCategoryId!!)
+                        } else if (editSearch.text.toString().trim().isEmpty()) {
+                            showEmptyState()
+                        }
                     }
+            }
+        }
 
-                    categoryList.sortBy { it.name.lowercase() }
-
-                    categoryAvailabilityMap = categoryList.associate { it.id to it.availableOrderTypes }
-
-                    categoryRecycler.adapter =
-                        CategoryAdapter(
-                            categories = categoryList,
-                            subcategories = emptyList(),
-                            onCategoryClick = { categoryId ->
-                                selectedCategoryId = categoryId
-                                selectedSubcategoryId = null
-                                val cat = categoryList.find { it.id == categoryId }
-                                selectedCategoryAvailability =
-                                    cat?.availableOrderTypes ?: emptyList()
-                                selectedCategoryScheduled =
-                                    cat?.scheduleIds?.isNotEmpty() == true
-                                editSearch.setText("")
-                                buildSubcategoryChips(categoryId)
-                                loadItems(categoryId)
-                            },
-                            context = this,
-                            onDataChanged = {
-                                loadCategories()
-                            }
-                        )
-
-                    if (selectedCategoryId != null) {
-                        buildSubcategoryChips(selectedCategoryId!!)
-                        loadItems(selectedCategoryId!!)
-                    } else if (editSearch.text.toString().trim().isEmpty()) {
-                        showEmptyState()
-                    }
-                }
+        if (!syncOrphanKitchenLabels) {
+            bindCategoriesFromFirestore()
+            return
+        }
+        MenuItemRoutingLabelCleanup.syncCategorySubcategoryKitchenLabelsToSavedPrinters(this, db) {
+            if (isFinishing) return@syncCategorySubcategoryKitchenLabelsToSavedPrinters
+            runOnUiThread { bindCategoriesFromFirestore() }
         }
     }
 
@@ -363,6 +379,26 @@ class MenuOnlyActivity : AppCompatActivity() {
     }
 
     private fun showSubcategoryKitchenLabelPicker(sub: SubcategoryModel, categoryId: String) {
+        if (PrintingSettingsCache.printItemFilterMode == PrintingSettingsFirestore.ALL_ITEMS) {
+            AlertDialog.Builder(this)
+                .setTitle("Kitchen labels not active")
+                .setMessage(
+                    "Kitchen printing is set to \"All items on every printer\" \u2014 routing labels won't take effect. Switch to \"By Label\" now?"
+                )
+                .setPositiveButton("Switch to By Label") { _, _ ->
+                    PrintingSettingsFirestore.documentRef(db)
+                        .update(PrintingSettingsFirestore.FIELD_PRINT_ITEM_FILTER_MODE, PrintingSettingsFirestore.BY_LABEL)
+                    Toast.makeText(this, "Switched to By Label", Toast.LENGTH_SHORT).show()
+                    openSubcategoryKitchenLabelPicker(sub, categoryId)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+        openSubcategoryKitchenLabelPicker(sub, categoryId)
+    }
+
+    private fun openSubcategoryKitchenLabelPicker(sub: SubcategoryModel, categoryId: String) {
         val available = KitchenRoutingLabelsFirestore
             .labelsForItemAssignmentPicker(this, listOfNotNull(sub.kitchenLabel.takeIf { it.isNotEmpty() }))
         if (available.isEmpty()) {

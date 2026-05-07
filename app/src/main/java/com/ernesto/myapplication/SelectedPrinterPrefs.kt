@@ -12,6 +12,8 @@ data class SelectedPrinterDisplay(
     val isOnline: Boolean = false,
     /** Kitchen routing labels (exact display strings; compare with [PrinterLabelKey.normalize]). */
     val labels: List<String> = emptyList(),
+    /** Persisted command set so kitchen prints use the correct protocol even before Firestore loads. */
+    val commandSet: String = "",
 )
 
 object PrinterLabelKey {
@@ -96,7 +98,7 @@ object SelectedPrinterPrefs {
             if (broadcastChange) {
                 sendPrintersPrefsChangedBroadcast(context.applicationContext, ip)
             }
-            MenuItemRoutingLabelCleanup.syncMenuItemLabelsToSavedPrinters(context.applicationContext)
+            MenuItemRoutingLabelCleanup.syncAllAssignedRoutingLabelsToSavedPrinters(context.applicationContext)
         }
     }
 
@@ -134,6 +136,25 @@ object SelectedPrinterPrefs {
         val p = current[idx]
         current[idx] = p.copy(labels = dedupeLabels(labels))
         persistPrintersJson(context, type, current)
+        MenuItemRoutingLabelCleanup.syncAllAssignedRoutingLabelsToSavedPrinters(context.applicationContext)
+    }
+
+    /**
+     * Persists the resolved [commandSet] for a printer so subsequent kitchen prints use
+     * the correct protocol without waiting for Firestore to load.
+     */
+    fun updateCommandSetForIp(context: Context, ipAddress: String, commandSet: PrinterCommandSet) {
+        val ip = ipAddress.trim()
+        if (ip.isEmpty()) return
+        val value = commandSet.firestoreValue
+        for (type in PrinterDeviceType.values()) {
+            val cur = getAll(context, type).toMutableList()
+            val idx = cur.indexOfFirst { it.ipAddress.trim() == ip }
+            if (idx < 0) continue
+            if (cur[idx].commandSet == value) continue
+            cur[idx] = cur[idx].copy(commandSet = value)
+            persistPrintersJson(context, type, cur)
+        }
     }
 
     /** Distinct kitchen label names from all saved kitchen printers (for menu item picker). */
@@ -204,6 +225,7 @@ object SelectedPrinterPrefs {
                 val ip = o.optString("ip", "").trim()
                 if (ip.isEmpty()) continue
                 val info = o.optString("info", "")
+                val cmdSet = o.optString("commandSet", "")
                 val labelArr = o.optJSONArray("labels")
                 val labels = if (labelArr != null) {
                     (0 until labelArr.length()).mapNotNull { i ->
@@ -212,7 +234,7 @@ object SelectedPrinterPrefs {
                 } else {
                     emptyList()
                 }
-                out.add(SelectedPrinterDisplay(name, ip, info, labels = dedupeLabels(labels)))
+                out.add(SelectedPrinterDisplay(name, ip, info, labels = dedupeLabels(labels), commandSet = cmdSet))
             }
             out
         } catch (_: Exception) {
@@ -228,6 +250,7 @@ object SelectedPrinterPrefs {
                     put("name", p.name)
                     put("ip", p.ipAddress)
                     put("info", p.modelLine)
+                    if (p.commandSet.isNotEmpty()) put("commandSet", p.commandSet)
                     val la = JSONArray()
                     for (l in p.labels) la.put(l)
                     put("labels", la)

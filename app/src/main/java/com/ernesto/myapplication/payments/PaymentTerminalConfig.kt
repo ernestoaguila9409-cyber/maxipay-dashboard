@@ -44,6 +44,7 @@ data class PaymentTerminalConfig(
             const val REFUND = "refund"
             const val SETTLE = "settle"
             const val STATUS = "status"
+            const val CANCEL = "cancel"
         }
 
         object ConfigKey {

@@ -13,10 +13,17 @@ import java.util.Locale
 import java.util.UUID
 
 /**
- * Watches an active dine-in order's items for KDS READY on the current course,
- * then fires the next course after the configured delay.
+ * Advances multi-course kitchen firing after the configured delay:
  *
- * Lifecycle: [activate] starts monitoring for a specific order + course;
+ * - **KDS online** ([KdsActiveCache.hasOnlineKds]): waits until every line in the current course
+ *   is marked KDS READY, then waits each course's `delayAfterReadySeconds`
+ *   before printing the next course.
+ * - **Printer-only** (no KDS online): treats the kitchen ticket print for that course as complete,
+ *   writes [courseReadyAt], and starts the same delay from that moment (first course from
+ *   [activate] after [MenuActivity] print success; later courses from print commit in
+ *   [fireNextCourse]).
+ *
+ * Lifecycle: [activate] starts monitoring or schedules the next course;
  * [deactivate] stops all monitoring. Only one order is tracked at a time.
  */
 object CourseFiringProgressionHandler {
@@ -29,12 +36,26 @@ object CourseFiringProgressionHandler {
     private var itemsListener: ListenerRegistration? = null
     private var pendingFireRunnable: Runnable? = null
 
+    /** When true, progression waits for KDS READY on line items; when false, after kitchen print. */
+    private fun useReadyBasedProgression(): Boolean = KdsActiveCache.hasOnlineKds
+
     fun activate(context: Context, db: FirebaseFirestore, orderId: String, firedCourseId: String) {
         deactivate()
         activeOrderId = orderId
         currentCourseId = firedCourseId
-        writeCourseState(db, orderId, firedCourseId, fired = true)
-        attachListener(context, db, orderId, firedCourseId)
+        if (useReadyBasedProgression()) {
+            writeCourseState(db, orderId, firedCourseId, fired = true)
+            attachListener(context, db, orderId, firedCourseId)
+        } else {
+            writeCourseState(db, orderId, firedCourseId, fired = true, ready = true)
+            val next = CourseFiringCache.nextCourseAfter(firedCourseId)
+            if (next == null) {
+                activeOrderId = null
+                currentCourseId = null
+                return
+            }
+            scheduleFireNext(context, db, orderId, firedCourseId, next.delayAfterReadySeconds * 1000L)
+        }
     }
 
     fun deactivate() {
@@ -90,12 +111,33 @@ object CourseFiringProgressionHandler {
             } else {
                 activeOrderId = orderId
                 currentCourseId = lastFiredCourse.id
-                attachListener(context, db, orderId, lastFiredCourse.id)
+                if (useReadyBasedProgression()) {
+                    attachListener(context, db, orderId, lastFiredCourse.id)
+                } else {
+                    val nextCourse = CourseFiringCache.nextCourseAfter(lastFiredCourse.id)
+                    if (nextCourse == null || firedAt.containsKey(nextCourse.id)) {
+                        return@addOnSuccessListener
+                    }
+                    val firedTimestamp = firedAt[lastFiredCourse.id]
+                    val anchorMs = when (firedTimestamp) {
+                        is Timestamp -> firedTimestamp.toDate().time
+                        is Date -> firedTimestamp.time
+                        else -> System.currentTimeMillis()
+                    }
+                    val elapsed = System.currentTimeMillis() - anchorMs
+                    val delayMs = (nextCourse.delayAfterReadySeconds * 1000L) - elapsed
+                    if (delayMs <= 0) {
+                        fireNextCourse(context, db, orderId, lastFiredCourse.id)
+                    } else {
+                        scheduleFireNext(context, db, orderId, lastFiredCourse.id, delayMs)
+                    }
+                }
             }
         }
     }
 
     private fun attachListener(context: Context, db: FirebaseFirestore, orderId: String, courseId: String) {
+        if (!useReadyBasedProgression()) return
         itemsListener?.remove()
         val firstCourseId = CourseFiringCache.firstCourseId()
         val itemsRef = db.collection("Orders").document(orderId).collection("items")
@@ -190,15 +232,13 @@ object CourseFiringProgressionHandler {
                     if (delta <= 0) continue
                     val name = doc.getString("name") ?: continue
                     val mods = parseModifiersFromDoc(doc.get("modifiers"))
-                    val label = doc.getString("printerLabel")?.trim()?.takeIf { it.isNotEmpty() }
+                    val label = MenuItemRoutingLabel.fromOrderLineDoc(doc)
                     lineItems.add(KitchenTicketLineInput(delta, name, mods, label, null))
                     qtyUpdates[lineKey] = qty
                 }
 
                 if (lineItems.isEmpty()) {
-                    writeCourseState(db, orderId, nextCourse.id, fired = true)
-                    currentCourseId = nextCourse.id
-                    attachListener(context, db, orderId, nextCourse.id)
+                    markCourseKitchenCompleteAndContinue(context, db, orderId, nextCourse.id)
                     return@addOnSuccessListener
                 }
 
@@ -235,11 +275,43 @@ object CourseFiringProgressionHandler {
                         }
                     }
                     wb.commit().addOnSuccessListener {
-                        writeCourseState(db, orderId, nextCourse.id, fired = true)
-                        currentCourseId = nextCourse.id
-                        attachListener(context, db, orderId, nextCourse.id)
+                        markCourseKitchenCompleteAndContinue(context, db, orderId, nextCourse.id)
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Called after a course's kitchen ticket is committed (or there was nothing new to print but
+     * the course is considered advanced). KDS mode: wait for READY on this course; printer mode:
+     * start delay for the following course.
+     */
+    private fun markCourseKitchenCompleteAndContinue(
+        context: Context,
+        db: FirebaseFirestore,
+        orderId: String,
+        completedCourseId: String,
+    ) {
+        if (useReadyBasedProgression()) {
+            writeCourseState(db, orderId, completedCourseId, fired = true)
+            currentCourseId = completedCourseId
+            attachListener(context, db, orderId, completedCourseId)
+        } else {
+            writeCourseState(db, orderId, completedCourseId, fired = true, ready = true)
+            val afterNext = CourseFiringCache.nextCourseAfter(completedCourseId)
+            if (afterNext != null) {
+                activeOrderId = orderId
+                currentCourseId = completedCourseId
+                scheduleFireNext(
+                    context,
+                    db,
+                    orderId,
+                    completedCourseId,
+                    afterNext.delayAfterReadySeconds * 1000L,
+                )
+            } else {
+                deactivate()
             }
         }
     }

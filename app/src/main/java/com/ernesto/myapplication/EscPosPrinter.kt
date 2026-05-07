@@ -123,7 +123,7 @@ object EscPosPrinter {
     // ── Public API ────────────────────────────────────────────────
 
     @SuppressLint("MissingPermission")
-    fun print(context: Context, segments: List<Segment>, settings: ReceiptSettings? = null) {
+    fun print(context: Context, segments: List<Segment>, settings: ReceiptSettings? = null, signatureBitmap: Bitmap? = null) {
         Log.d(TAG, "Print requested (${segments.size} segments) → Landi BT + optional LAN receipt")
 
         Thread {
@@ -133,7 +133,7 @@ object EscPosPrinter {
             }
 
             val payload = try {
-                buildReceiptEscPosPayload(segments, logoBitmap)
+                buildReceiptEscPosPayload(segments, logoBitmap, signatureBitmap)
             } catch (e: Exception) {
                 Log.e(TAG, "Build receipt payload failed: ${e.message}", e)
                 uiToast(context, "Print failed: ${e.message}")
@@ -145,7 +145,7 @@ object EscPosPrinter {
         }.start()
     }
 
-    private fun buildReceiptEscPosPayload(segments: List<Segment>, logoBitmap: Bitmap?): ByteArray {
+    private fun buildReceiptEscPosPayload(segments: List<Segment>, logoBitmap: Bitmap?, signatureBitmap: Bitmap? = null): ByteArray {
         val bos = ByteArrayOutputStream()
         val out: OutputStream = bos
         out.write(INIT)
@@ -161,6 +161,20 @@ object EscPosPrinter {
             out.write(ReceiptSettings.escPosSizeBytes(seg.fontSize))
             out.write(if (seg.bold) BOLD_ON else BOLD_OFF)
             out.printLine(seg.text)
+        }
+        if (signatureBitmap != null) {
+            out.write(ALIGN_CENTER)
+            out.write(SIZE_NORMAL)
+            out.write(BOLD_OFF)
+            out.write(LF)
+            val scaled = Bitmap.createScaledBitmap(
+                signatureBitmap,
+                PRINTER_WIDTH_PX,
+                (signatureBitmap.height * PRINTER_WIDTH_PX / signatureBitmap.width).coerceAtLeast(1),
+                true
+            )
+            printBitmap(out, scaled)
+            out.write(LF)
         }
         out.write(SIZE_NORMAL)
         out.write(BOLD_OFF)

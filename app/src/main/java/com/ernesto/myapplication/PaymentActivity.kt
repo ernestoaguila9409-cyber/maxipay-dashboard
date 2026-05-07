@@ -20,7 +20,7 @@ import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Source
+
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -51,6 +51,9 @@ class PaymentActivity : AppCompatActivity() {
     companion object {
         private const val REQ_BT_SPLIT_RECEIPT = 1003
     }
+
+    /** In-flight SPIn `/Payment/Sale`; cancelled in [onDestroy] so leaving the screen does not leave a zombie request. */
+    private var activeSaleCall: Call? = null
 
     private data class SplitShareInfo(
         val guestIndex: Int,
@@ -179,7 +182,15 @@ class PaymentActivity : AppCompatActivity() {
 
         updateMixPaymentsVisibility()
 
-        btnCancel.setOnClickListener { finish() }
+        btnCancel.setOnClickListener {
+            val pendingCall = activeSaleCall
+            if (pendingCall != null && !pendingCall.isCanceled()) {
+                pendingCall.cancel()
+                SpinGatewayP.enqueueCancelTransaction(this@PaymentActivity)
+            } else {
+                finish()
+            }
+        }
 
         btnMixMode.setOnClickListener {
             isMixMode = !isMixMode
@@ -293,80 +304,48 @@ class PaymentActivity : AppCompatActivity() {
     private fun loadRemainingBalance() {
         val oid = orderId ?: return
 
-        db.collection("Orders").document(oid).get(Source.SERVER)
+        db.collection("Orders").document(oid).get()
             .addOnSuccessListener { snap ->
-
-                orderType = snap.getString("orderType") ?: ""
-                updateMixPaymentsVisibility()
-                bindOrderSummary(snap)
-
-                val remainingInCents =
-                    (snap.get("remainingInCents") as? Number)?.toLong()
-                        ?: (snap.get("totalInCents") as? Number)?.toLong()
-                        ?: 0L
-
-                remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
-                remainingCents = remainingInCents
-
-                if (remainingInCents <= 0L) {
-                    if (orderLooksFullyPaid(snap, remainingInCents)) {
-                        setResult(RESULT_OK)
-                        finish()
-                    } else {
-                        Toast.makeText(
-                            this,
-                            "Order is not ready to pay. Try checkout again in a moment.",
-                            Toast.LENGTH_LONG
-                        ).show()
-                        setResult(RESULT_CANCELED)
-                        finish()
-                    }
-                    return@addOnSuccessListener
-                }
-
-                txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
-                CustomerDisplayManager.showPaymentWaiting(this, businessName, remainingInCents)
-
-                showSplitPayShareDialogIfNeeded()
+                applyOrderSnapshot(snap)
             }
             .addOnFailureListener {
-                db.collection("Orders").document(oid).get()
-                    .addOnSuccessListener { snap ->
-
-                        orderType = snap.getString("orderType") ?: ""
-                        updateMixPaymentsVisibility()
-                        bindOrderSummary(snap)
-
-                        val remainingInCents =
-                            (snap.get("remainingInCents") as? Number)?.toLong()
-                                ?: (snap.get("totalInCents") as? Number)?.toLong()
-                                ?: 0L
-
-                        remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
-                        remainingCents = remainingInCents
-
-                        if (remainingInCents <= 0L) {
-                            if (orderLooksFullyPaid(snap, remainingInCents)) {
-                                setResult(RESULT_OK)
-                                finish()
-                            } else {
-                                Toast.makeText(
-                                    this,
-                                    "Order is not ready to pay. Try checkout again in a moment.",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                                setResult(RESULT_CANCELED)
-                                finish()
-                            }
-                            return@addOnSuccessListener
-                        }
-
-                        txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
-                        CustomerDisplayManager.showPaymentWaiting(this, businessName, remainingInCents)
-
-                        showSplitPayShareDialogIfNeeded()
-                    }
+                Toast.makeText(this, "Could not load order.", Toast.LENGTH_SHORT).show()
             }
+    }
+
+    private fun applyOrderSnapshot(snap: DocumentSnapshot) {
+        orderType = snap.getString("orderType") ?: ""
+        updateMixPaymentsVisibility()
+        bindOrderSummary(snap)
+
+        val remainingInCents =
+            (snap.get("remainingInCents") as? Number)?.toLong()
+                ?: (snap.get("totalInCents") as? Number)?.toLong()
+                ?: 0L
+
+        remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
+        remainingCents = remainingInCents
+
+        if (remainingInCents <= 0L) {
+            if (orderLooksFullyPaid(snap, remainingInCents)) {
+                setResult(RESULT_OK)
+                finish()
+            } else {
+                Toast.makeText(
+                    this,
+                    "Order is not ready to pay. Try checkout again in a moment.",
+                    Toast.LENGTH_LONG
+                ).show()
+                setResult(RESULT_CANCELED)
+                finish()
+            }
+            return
+        }
+
+        txtPaymentTotal.text = MoneyUtils.centsToDisplay(remainingInCents)
+        CustomerDisplayManager.showPaymentWaiting(this, businessName, remainingInCents)
+
+        showSplitPayShareDialogIfNeeded()
     }
 
     private fun bindOrderSummary(snap: com.google.firebase.firestore.DocumentSnapshot) {
@@ -1397,6 +1376,8 @@ class PaymentActivity : AppCompatActivity() {
             setButtonsEnabled(true)
             return
         }
+        val stampCustomerScreenTip =
+            TipConfig.isTipsEnabled(this) && TipConfig.isTipOnCustomerScreen(this)
         if (!isSplitPayMode()) {
             paymentEngine.processPayment(
                 orderId = oid,
@@ -1416,6 +1397,7 @@ class PaymentActivity : AppCompatActivity() {
                 cashTenderedInCents = cashTenderedInCents,
                 cashChangeInCents = cashChangeInCents,
                 splitReceipt = null,
+                finalTipFromCustomerScreen = stampCustomerScreenTip,
                 onSuccess = onSuccess,
                 onFailure = onFailure
             )
@@ -1451,6 +1433,7 @@ class PaymentActivity : AppCompatActivity() {
                             cashTenderedInCents = cashTenderedInCents,
                             cashChangeInCents = cashChangeInCents,
                             splitReceipt = payload?.toFirestoreMap(),
+                            finalTipFromCustomerScreen = stampCustomerScreenTip,
                             onSuccess = onSuccess,
                             onFailure = {
                                 pendingSplitReceiptPayload = null
@@ -1478,6 +1461,7 @@ class PaymentActivity : AppCompatActivity() {
                             cashTenderedInCents = cashTenderedInCents,
                             cashChangeInCents = cashChangeInCents,
                             splitReceipt = null,
+                            finalTipFromCustomerScreen = stampCustomerScreenTip,
                             onSuccess = onSuccess,
                             onFailure = onFailure
                         )
@@ -1503,6 +1487,7 @@ class PaymentActivity : AppCompatActivity() {
                     cashTenderedInCents = cashTenderedInCents,
                     cashChangeInCents = cashChangeInCents,
                     splitReceipt = null,
+                    finalTipFromCustomerScreen = stampCustomerScreenTip,
                     onSuccess = onSuccess,
                     onFailure = onFailure
                 )
@@ -1920,28 +1905,50 @@ class PaymentActivity : AppCompatActivity() {
             .build()
 
         SpinCallTracker.beginCall()
-        client.newCall(request).enqueue(object : Callback {
+        val call = client.newCall(request)
+        activeSaleCall = call
+        call.enqueue(object : Callback {
 
             override fun onFailure(call: Call, e: IOException) {
                 SpinCallTracker.endCall()
+                activeSaleCall = null
                 Log.e("DEJAVOO_SALE", "[SALE] Network error PaymentType=$paymentType", e)
-                runOnUiThread { showDeclined("Payment Failed") }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (call.isCanceled()) {
+                        showCancelled("Transaction cancelled")
+                    } else {
+                        val msg = e.message?.lowercase(Locale.US).orEmpty()
+                        if (msg.contains("timeout") || msg.contains("timed out")) {
+                            showDeclined("Connection timed out. If the terminal already approved or declined, check this order before trying again.")
+                        } else {
+                            showDeclined("Payment Failed")
+                        }
+                    }
+                }
             }
 
             override fun onResponse(call: Call, response: Response) {
                 SpinCallTracker.endCall()
+                activeSaleCall = null
 
                 val responseText = response.body?.string() ?: ""
                 Log.d("DEJAVOO_SALE", "[SALE] HTTP ${response.code} PaymentType=$paymentType Response=$responseText")
 
                 runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
 
                     if (!response.isSuccessful) {
                         showDeclined("Server Error")
                         return@runOnUiThread
                     }
 
-                    val jsonObj = JSONObject(responseText)
+                    val jsonObj = try {
+                        JSONObject(responseText)
+                    } catch (_: Exception) {
+                        showDeclined("Invalid response from payment host")
+                        return@runOnUiThread
+                    }
 
                     val resultCode = jsonObj
                         .optJSONObject("GeneralResponse")
@@ -1986,12 +1993,35 @@ class PaymentActivity : AppCompatActivity() {
                         )
 
                     } else {
-                        showDeclined("Declined")
+                        val hostDetail = SpinGatewayP.voidDeclineMessage(responseText)
+                        val isCancel = hostMessageIndicatesUserCancel(hostDetail)
+                        val userMsg = when {
+                            isCancel -> "Transaction cancelled"
+                            hostDetail.isNotBlank() -> hostDetail
+                            else -> "Declined"
+                        }
+                        if (isCancel) showCancelled(userMsg) else showDeclined(userMsg)
                     }
                 }
             }
         })
     }
+
+    /** Heuristic: SPIn / Dejavoo often returns "cancel", "user abort", etc. when the customer backs out on the P17. */
+    private fun hostMessageIndicatesUserCancel(hostDetail: String): Boolean {
+        val d = hostDetail.lowercase(Locale.US)
+        if (d.isBlank()) return false
+        return d.contains("cancel") ||
+            d.contains("user abort") ||
+            d.contains("aborted") ||
+            d.contains("no transaction") ||
+            d.contains("operation cancelled") ||
+            d.contains("transaction void") ||
+            d.contains("voided") ||
+            d.contains("terminated") ||
+            d.contains("customer") && d.contains("stop")
+    }
+
     private fun completeCardPayment(
         paymentType: String,
         authCode: String,
@@ -2014,6 +2044,8 @@ class PaymentActivity : AppCompatActivity() {
             return
         }
         val amountInCents = MoneyUtils.dollarsToCents(paymentAmount)
+
+        showTerminalApprovedSaving(paymentType)
 
         executePaymentWithSplitMetadata(
             amountInCents = amountInCents,
@@ -2063,8 +2095,12 @@ class PaymentActivity : AppCompatActivity() {
             onFailure = {
                 pendingSplitReceiptPayload = null
                 runOnUiThread {
-                    Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
-                    setButtonsEnabled(true)
+                    if (!isFinishing && !isDestroyed) {
+                        statusContainer.visibility = View.VISIBLE
+                        showDeclined(it.message ?: "Could not save payment. Check the order and try again.")
+                    } else {
+                        setButtonsEnabled(true)
+                    }
                 }
             }
         )
@@ -2170,8 +2206,29 @@ class PaymentActivity : AppCompatActivity() {
         statusContainer.visibility = View.VISIBLE
         progressBar.visibility = View.VISIBLE
         txtStatus.text = "Waiting..."
-        txtSubStatus.text = "Processing payment"
+        txtStatus.setTextColor(android.graphics.Color.parseColor("#1565C0"))
+        txtSubStatus.text = "Complete or cancel on the payment terminal"
         setButtonsEnabled(false)
+    }
+
+    /** Shown immediately after the host approves, while Firestore records the sale (can take a moment on slow networks). */
+    private fun showTerminalApprovedSaving(paymentType: String) {
+        fireworksView.visibility = View.GONE
+        statusContainer.visibility = View.VISIBLE
+        progressBar.visibility = View.VISIBLE
+        txtStatus.text = "Approved"
+        txtStatus.setTextColor(android.graphics.Color.parseColor("#2E7D32"))
+        txtSubStatus.text = "Saving sale…"
+        setButtonsEnabled(false)
+        val chargedCents = MoneyUtils.dollarsToCents(paymentAmount)
+        val info = PaymentSuccessInfo(
+            isCash = paymentType == "Cash",
+            amountChargedCents = chargedCents,
+            tenderedCents = 0L,
+            changeCents = 0L,
+        )
+        CustomerDisplayManager.setPaymentSuccessInfo(info)
+        CustomerDisplayManager.showPaymentApproved(this, info)
     }
 
     private fun showDeclined(message: String) {
@@ -2183,8 +2240,22 @@ class PaymentActivity : AppCompatActivity() {
         CustomerDisplayManager.showDeclinedThenOrder(this, message, 2500L)
 
         Handler(Looper.getMainLooper()).postDelayed({
-            statusContainer.visibility = View.GONE
+            if (!isFinishing && !isDestroyed) statusContainer.visibility = View.GONE
         }, 2500)
+    }
+
+    private fun showCancelled(message: String) {
+        progressBar.visibility = View.GONE
+        statusContainer.visibility = View.VISIBLE
+        txtStatus.text = "CANCELLED"
+        txtStatus.setTextColor(android.graphics.Color.parseColor("#FF8F00"))
+        txtSubStatus.text = message
+        setButtonsEnabled(true)
+        CustomerDisplayManager.showDeclinedThenOrder(this, message, 1500L)
+
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (!isFinishing && !isDestroyed) statusContainer.visibility = View.GONE
+        }, 1500)
     }
 
     private fun setButtonsEnabled(enabled: Boolean) {
@@ -2217,6 +2288,8 @@ class PaymentActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        activeSaleCall?.cancel()
+        activeSaleCall = null
         dismissSplitReceiptChoiceDialog()
         CustomerDisplayManager.clearReceiptOptionCallback()
         CustomerDisplayManager.clearEmailInputCallbacks()

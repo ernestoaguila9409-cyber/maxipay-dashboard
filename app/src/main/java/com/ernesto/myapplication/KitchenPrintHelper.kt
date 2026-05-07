@@ -172,7 +172,7 @@ object KitchenPrintHelper {
             if (delta <= 0) continue
             val name = doc.getString("name") ?: continue
             val mods = parseModifiersFromFirestore(doc.get("modifiers"))
-            val label = doc.getString("printerLabel")?.trim()?.takeIf { it.isNotEmpty() }
+            val label = MenuItemRoutingLabel.fromOrderLineDoc(doc)
             val guestNum = (doc.getLong("guestNumber") ?: 0L).toInt()
             val guestLabel = KitchenTicketBuilder.guestKitchenLabelForLine(orderTypeRaw, guestNum, guestNames)
             lineItems.add(KitchenTicketLineInput(delta, name, mods, label, guestLabel))
@@ -248,7 +248,7 @@ object KitchenPrintHelper {
                     val batchIp = batch.printer.ipAddress
                     val mapKey = printerNotesMapKey(batch.printer)
                     val style = PrinterKitchenStyleCache.styleForIp(batchIp)
-                    val cmdSet = PrinterKitchenStyleCache.commandSetForKitchenLan(batchIp, batch.printer.modelLine)
+                    val cmdSet = PrinterKitchenStyleCache.commandSetForKitchenLan(batchIp, batch.printer)
                     val fullResolvedNotes = resolveBatchNotes(genericNotes, notesByLabel, batch.printer)
                     val normalized = fullResolvedNotes?.trim().orEmpty()
                     val lastPrinted = mergeNotesPrinted[mapKey]?.trim().orEmpty()
@@ -327,8 +327,16 @@ object KitchenPrintHelper {
         val extraBatches = mutableListOf<KitchenPrintBatch>()
         for (p in allTargets) {
             val docId = PrinterFirestoreSync.documentIdForLanIp(p.ipAddress)
-            if (docId in onlinePrinterDocIds && p.ipAddress.trim() !in coveredIps) {
-                extraBatches.add(KitchenPrintBatch(printer = p, ticketItems = lineItems.toList()))
+            if (docId !in onlinePrinterDocIds || p.ipAddress.trim() in coveredIps) continue
+            // Only lines whose routing label matches this printer — never duplicate the full ticket
+            // (previously every uncovered online-routed printer got all items).
+            val extraItems = lineItems.filter { line ->
+                val lab = line.routingLabel?.trim()?.takeIf { it.isNotEmpty() } ?: return@filter false
+                val key = PrinterLabelKey.normalize(lab)
+                p.labels.any { PrinterLabelKey.normalize(it) == key }
+            }
+            if (extraItems.isNotEmpty()) {
+                extraBatches.add(KitchenPrintBatch(printer = p, ticketItems = extraItems))
             }
         }
         return baseBatches + extraBatches

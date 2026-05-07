@@ -144,9 +144,70 @@ object OnlineOrderAwaitingStaffReviewDialog {
                 "staffConfirmedOrderBy" to employeeName.ifBlank { "Staff" },
                 "updatedAt" to Date(),
             ),
-        ).addOnFailureListener { e ->
+        ).addOnSuccessListener {
+            sendToKitchenAfterAccept(activity, db, orderId)
+        }.addOnFailureListener { e ->
             if (!activity.isFinishing && !activity.isDestroyed) {
                 Toast.makeText(activity, "Accept failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun sendToKitchenAfterAccept(activity: AppCompatActivity, db: FirebaseFirestore, orderId: String) {
+        val orderRef = db.collection("Orders").document(orderId)
+        orderRef.get().addOnSuccessListener { orderDoc ->
+            if (!orderDoc.exists()) return@addOnSuccessListener
+            if (orderDoc.getTimestamp(PrintingSettingsFirestore.FIELD_KITCHEN_CHITS_PRINTED_AT) != null) {
+                return@addOnSuccessListener
+            }
+            orderRef.collection("items").get().addOnSuccessListener { itemsSnap ->
+                val (lineItems, qtyUpdates) =
+                    KitchenPrintHelper.kitchenDeltaFromOrderAndItemsSnapshot(orderDoc, itemsSnap)
+                if (lineItems.isEmpty()) {
+                    orderRef.update(
+                        PrintingSettingsFirestore.FIELD_KITCHEN_CHITS_PRINTED_AT,
+                        com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                    )
+                    return@addOnSuccessListener
+                }
+                KitchenPrintHelper.printKitchenTickets(activity, orderId, lineItems) { notesPrintedByIp ->
+                    val merged = KitchenPrintHelper.kitchenSentByLineFromOrder(orderDoc).toMutableMap()
+                    qtyUpdates.forEach { (k, v) -> merged[k] = v }
+                    val update = mutableMapOf<String, Any>(
+                        PrintingSettingsFirestore.FIELD_KITCHEN_CHITS_PRINTED_AT to
+                            com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                        KitchenPrintHelper.KITCHEN_SENT_BY_LINE_MAP_FIELD to merged,
+                        "lastKitchenSentAt" to Date(),
+                    )
+                    if (notesPrintedByIp != null) {
+                        update[KitchenPrintHelper.KITCHEN_NOTES_LAST_PRINTED_BY_PRINTER_IP] = notesPrintedByIp
+                    }
+                    val wb = db.batch()
+                    wb.update(orderRef, update)
+                    val prevSent = KitchenPrintHelper.effectiveSentWithLegacyOrderMap(orderDoc, itemsSnap)
+                    val kitchenSendGroupId = java.util.UUID.randomUUID().toString()
+                    for ((lineKey, newHigh) in qtyUpdates) {
+                        val prev = prevSent[lineKey] ?: 0
+                        val delta = newHigh - prev
+                        if (delta > 0) {
+                            val entry = hashMapOf<String, Any>(
+                                OrderLineKdsStatus.BATCH_SUBFIELD_ID to java.util.UUID.randomUUID().toString(),
+                                OrderLineKdsStatus.BATCH_SUBFIELD_SEND_GROUP_ID to kitchenSendGroupId,
+                                "sentAt" to Timestamp.now(),
+                                "quantity" to delta.toLong(),
+                                OrderLineKdsStatus.BATCH_SUBFIELD_KDS_STATUS to OrderLineKdsStatus.SENT,
+                            )
+                            wb.update(
+                                orderRef.collection("items").document(lineKey),
+                                mapOf(
+                                    OrderLineKdsStatus.FIELD_KDS_SEND_BATCHES to
+                                        com.google.firebase.firestore.FieldValue.arrayUnion(entry),
+                                ),
+                            )
+                        }
+                    }
+                    wb.commit()
+                }
             }
         }
     }

@@ -8,6 +8,25 @@ import com.google.firebase.firestore.DocumentSnapshot
  */
 object MenuItemRoutingLabel {
 
+    /**
+     * Same resolution as [fromMenuItemDoc], for an **order line** under `Orders/{id}/items`.
+     * Online imports may set `labels` without `printerLabel`; kitchen routing must read both.
+     */
+    fun fromOrderLineDoc(doc: DocumentSnapshot): String? {
+        @Suppress("UNCHECKED_CAST")
+        val labelsField = (doc.get("labels") as? List<*>)
+            ?.mapNotNull { it as? String }
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
+        val printerLabelField = doc.getString("printerLabel")?.trim()?.takeIf { it.isNotEmpty() }
+        return when {
+            labelsField.isNotEmpty() -> labelsField.first()
+            printerLabelField != null -> printerLabelField
+            else -> null
+        }
+    }
+
     /** Returns the item-level label only (ignores category/subcategory inheritance). */
     fun fromMenuItemDoc(doc: DocumentSnapshot): String? {
         @Suppress("UNCHECKED_CAST")

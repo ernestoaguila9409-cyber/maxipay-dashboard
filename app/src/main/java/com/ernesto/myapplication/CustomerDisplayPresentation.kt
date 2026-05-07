@@ -2,6 +2,7 @@ package com.ernesto.myapplication
 
 import android.app.Presentation
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
@@ -77,6 +78,12 @@ class CustomerDisplayPresentation(
     private val emailBuffer = StringBuilder()
     private var emailShiftActive = false
 
+    // Signature pad overlay
+    private lateinit var signatureOverlay: LinearLayout
+    private lateinit var signaturePadView: SignaturePadView
+    private lateinit var btnSignatureClear: TextView
+    private lateinit var btnSignatureDone: TextView
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.presentation_customer_display)
@@ -134,6 +141,11 @@ class CustomerDisplayPresentation(
         btnEmailCancel = findViewById(R.id.btnEmailCancel)
         btnEmailSubmit = findViewById(R.id.btnEmailSubmit)
 
+        signatureOverlay = findViewById(R.id.signatureOverlay)
+        signaturePadView = findViewById(R.id.signaturePadView)
+        btnSignatureClear = findViewById(R.id.btnSignatureClear)
+        btnSignatureDone = findViewById(R.id.btnSignatureDone)
+
         buildKeypadGrid()
         buildEmailKeyboard()
     }
@@ -148,6 +160,7 @@ class CustomerDisplayPresentation(
         declinedContainer.visibility = View.GONE
         custKeypadOverlay.visibility = View.GONE
         custEmailOverlay.visibility = View.GONE
+        signatureOverlay.visibility = View.GONE
     }
 
     // ── IDLE ────────────────────────────────────────────────────────
@@ -517,6 +530,29 @@ class CustomerDisplayPresentation(
     fun hideEmailInput() {
         emailBuffer.clear()
         custEmailOverlay.visibility = View.GONE
+    }
+
+    // ── SIGNATURE PAD ─────────────────────────────────────────────────
+
+    fun showSignaturePad(onDone: (android.graphics.Bitmap) -> Unit) {
+        hideAll()
+        signaturePadView.clear()
+        signatureOverlay.visibility = View.VISIBLE
+
+        btnSignatureClear.setOnClickListener {
+            signaturePadView.clear()
+        }
+        btnSignatureDone.setOnClickListener {
+            if (!signaturePadView.isEmpty()) {
+                val bitmap = signaturePadView.getSignatureBitmap()
+                onDone(bitmap)
+            }
+        }
+    }
+
+    fun hideSignaturePad() {
+        signaturePadView.clear()
+        signatureOverlay.visibility = View.GONE
     }
 
     private fun buildEmailKeyboard() {

@@ -2622,26 +2622,50 @@ class OrderDetailActivity : AppCompatActivity() {
                     .addOnSuccessListener { itemsSnap ->
                         val txId = saleTransactionId ?: ""
                         val rs = ReceiptSettings.load(this)
+                        val signatureUrl = orderDoc.getString("signatureUrl")
                         if (txId.isNotBlank()) {
                             db.collection("Transactions").document(txId).get()
                                 .addOnSuccessListener { txDoc ->
                                     val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
                                     val txStatus = txDoc?.getString("status")
                                     val txVoided = txDoc?.getBoolean("voided") ?: false
-                                    EscPosPrinter.print(
-                                        this,
+                                    printWithOptionalSignature(
                                         buildOriginalSegments(orderDoc, itemsSnap.documents, payments, txStatus, txVoided),
-                                        rs
+                                        rs,
+                                        signatureUrl
                                     )
                                 }
                                 .addOnFailureListener {
-                                    EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()), rs)
+                                    printWithOptionalSignature(
+                                        buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()),
+                                        rs,
+                                        signatureUrl
+                                    )
                                 }
                         } else {
-                            EscPosPrinter.print(this, buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()), rs)
+                            printWithOptionalSignature(
+                                buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()),
+                                rs,
+                                signatureUrl
+                            )
                         }
                     }
             }
+    }
+
+    private fun printWithOptionalSignature(
+        segments: List<EscPosPrinter.Segment>,
+        rs: ReceiptSettings,
+        signatureUrl: String?
+    ) {
+        if (!signatureUrl.isNullOrBlank()) {
+            Thread {
+                val sigBitmap = SignatureSettings.downloadSignatureBitmap(signatureUrl)
+                EscPosPrinter.print(this, segments, rs, signatureBitmap = sigBitmap)
+            }.start()
+        } else {
+            EscPosPrinter.print(this, segments, rs)
+        }
     }
 
     @Suppress("UNCHECKED_CAST")

@@ -336,6 +336,26 @@ class CategoryAdapter(
     }
 
     private fun showKitchenLabelPicker(category: CategoryModel) {
+        if (PrintingSettingsCache.printItemFilterMode == PrintingSettingsFirestore.ALL_ITEMS) {
+            AlertDialog.Builder(context)
+                .setTitle("Kitchen labels not active")
+                .setMessage(
+                    "Kitchen printing is set to \"All items on every printer\" — routing labels won't take effect. Switch to \"By Label\" now?"
+                )
+                .setPositiveButton("Switch to By Label") { _, _ ->
+                    PrintingSettingsFirestore.documentRef(FirebaseFirestore.getInstance())
+                        .update(PrintingSettingsFirestore.FIELD_PRINT_ITEM_FILTER_MODE, PrintingSettingsFirestore.BY_LABEL)
+                    Toast.makeText(context, "Switched to By Label", Toast.LENGTH_SHORT).show()
+                    openKitchenLabelPickerForCategory(category)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+        openKitchenLabelPickerForCategory(category)
+    }
+
+    private fun openKitchenLabelPickerForCategory(category: CategoryModel) {
         val available = KitchenRoutingLabelsFirestore
             .labelsForItemAssignmentPicker(context, listOfNotNull(category.kitchenLabel.takeIf { it.isNotEmpty() }))
         if (available.isEmpty()) {

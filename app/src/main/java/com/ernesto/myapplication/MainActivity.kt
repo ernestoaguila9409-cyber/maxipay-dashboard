@@ -316,7 +316,18 @@ class MainActivity : AppCompatActivity() {
             "reports" -> startActivity(Intent(this, ReportsActivity::class.java))
             "printers" -> startActivity(Intent(this, PrintersActivity::class.java))
             "cash_flow" -> startActivity(Intent(this, CashFlowActivity::class.java))
-            "tips" -> startActivity(Intent(this, TipAdjustmentActivity::class.java))
+            "tips" -> {
+                if (TipConfig.isTipsEnabled(this) && !TipConfig.isTipOnCustomerScreen(this)) {
+                    startActivity(Intent(this, TipAdjustmentActivity::class.java))
+                } else {
+                    val msg = if (!TipConfig.isTipsEnabled(this)) {
+                        "Tips are disabled in settings."
+                    } else {
+                        "Tips are collected on the payment screen. Tip adjustment is not available here."
+                    }
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                }
+            }
             "reservation" -> {
                 val i = Intent(this, ReservationActivity::class.java)
                 i.putExtra("employeeName", employeeName)

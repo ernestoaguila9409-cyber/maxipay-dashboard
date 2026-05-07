@@ -1,5 +1,6 @@
 package com.ernesto.myapplication
 
+import android.content.Context
 import android.util.Log
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -30,21 +31,52 @@ object PrinterKitchenStyleCache {
     }
 
     /**
-     * Kitchen LAN chits only. If Firestore has not populated [commandSetByIp] for this IP yet,
-     * still use [STAR_DOT_MATRIX] when the saved [modelLine] matches a Star impact printer (SP700).
+     * Kitchen LAN chits only. Resolution order:
+     * 1. Firestore-cached value (real-time listener)
+     * 2. Model-line inference (Star SP7xx detection)
+     * 3. Locally persisted commandSet from [SelectedPrinterDisplay] (survives app restarts
+     *    and covers the window before the Firestore listener fires)
+     * 4. Default [ESCPOS]
      */
+    fun commandSetForKitchenLan(ip: String, printer: SelectedPrinterDisplay?): PrinterCommandSet {
+        val k = ip.trim()
+        if (k.isEmpty()) return PrinterCommandSet.ESCPOS
+        val cached = commandSetByIp[k]
+        if (cached != null) return cached
+        if (PrinterCommandSet.infer(null, printer?.modelLine) == PrinterCommandSet.STAR_DOT_MATRIX) {
+            return PrinterCommandSet.STAR_DOT_MATRIX
+        }
+        val local = printer?.commandSet?.trim()?.uppercase().orEmpty()
+        if (local.isNotEmpty()) {
+            return PrinterCommandSet.fromFirestore(local)
+        }
+        return PrinterCommandSet.ESCPOS
+    }
+
+    @Deprecated("Use commandSetForKitchenLan(ip, printer) instead")
     fun commandSetForKitchenLan(ip: String, savedModelLine: String?): PrinterCommandSet {
         val k = ip.trim()
         if (k.isEmpty()) return PrinterCommandSet.ESCPOS
         val cached = commandSetByIp[k]
-        if (cached == PrinterCommandSet.STAR_DOT_MATRIX) return PrinterCommandSet.STAR_DOT_MATRIX
+        if (cached != null) return cached
         if (PrinterCommandSet.infer(null, savedModelLine) == PrinterCommandSet.STAR_DOT_MATRIX) {
             return PrinterCommandSet.STAR_DOT_MATRIX
         }
-        return cached ?: PrinterCommandSet.ESCPOS
+        return PrinterCommandSet.ESCPOS
+    }
+
+    private var appContext: Context? = null
+
+    fun start(context: Context, db: FirebaseFirestore = FirebaseFirestore.getInstance()) {
+        appContext = context.applicationContext
+        startInternal(db)
     }
 
     fun start(db: FirebaseFirestore = FirebaseFirestore.getInstance()) {
+        startInternal(db)
+    }
+
+    private fun startInternal(db: FirebaseFirestore) {
         synchronized(this) {
             if (registration != null) return
             registration = db.collection(PrinterFirestoreSync.COLLECTION)
@@ -65,19 +97,26 @@ object PrinterKitchenStyleCache {
                             !nextStyle.containsKey(ip) ->
                                 nextStyle[ip] = KitchenTicketStyle.DEFAULT
                         }
-                        val storedCmd = doc.getString("commandSet")
+                        val storedCmd = doc.getString("commandSet")?.trim().orEmpty()
                         val docModel = doc.getString("model")
                         val docMfr = doc.getString("manufacturer")
-                        val parsed = PrinterCommandSet.fromFirestore(storedCmd)
+                        val parsed = PrinterCommandSet.fromFirestore(storedCmd.ifEmpty { null })
                         val inferred = PrinterCommandSet.infer(docMfr, docModel)
-                        val effective = if (inferred == PrinterCommandSet.STAR_DOT_MATRIX
-                            && parsed == PrinterCommandSet.ESCPOS) inferred else parsed
+                        val effective = when {
+                            storedCmd.isEmpty() -> inferred
+                            inferred == PrinterCommandSet.STAR_DOT_MATRIX
+                                && parsed == PrinterCommandSet.ESCPOS -> inferred
+                            else -> parsed
+                        }
                         nextCmd[ip] = effective
-                        if (effective != parsed) {
+                        if (effective.firestoreValue != storedCmd) {
                             Log.w(TAG, "Auto-repairing commandSet for $ip: " +
-                                    "$storedCmd → ${effective.firestoreValue} " +
+                                    "'$storedCmd' → ${effective.firestoreValue} " +
                                     "(model=$docModel, mfr=$docMfr)")
                             doc.reference.update("commandSet", effective.firestoreValue)
+                        }
+                        appContext?.let { ctx ->
+                            SelectedPrinterPrefs.updateCommandSetForIp(ctx, ip, effective)
                         }
                     }
                     styleByIp.clear()

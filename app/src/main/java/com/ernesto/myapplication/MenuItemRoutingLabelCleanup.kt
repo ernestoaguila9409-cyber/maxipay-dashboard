@@ -1,14 +1,25 @@
 package com.ernesto.myapplication
 
 import android.content.Context
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 
 /**
- * After LAN printers are removed or their routing labels change locally, keeps [MenuItems]
- * `labels` / `printerLabel` in sync with labels still defined on saved printers.
+ * After LAN printers are removed or their routing labels change locally, keeps
+ * [MenuItems] `labels` / `printerLabel` and [Categories] / `subcategories` `kitchenLabel`
+ * in sync with labels still defined on saved kitchen and receipt printers.
  */
 object MenuItemRoutingLabelCleanup {
+
+    /** Runs [syncMenuItemLabelsToSavedPrinters] and [syncCategorySubcategoryKitchenLabelsToSavedPrinters]. */
+    fun syncAllAssignedRoutingLabelsToSavedPrinters(
+        context: Context,
+        db: FirebaseFirestore = FirebaseFirestore.getInstance(),
+    ) {
+        syncMenuItemLabelsToSavedPrinters(context, db)
+        syncCategorySubcategoryKitchenLabelsToSavedPrinters(context, db)
+    }
 
     fun syncMenuItemLabelsToSavedPrinters(
         context: Context,
@@ -78,17 +89,67 @@ object MenuItemRoutingLabelCleanup {
                 }
 
                 if (pending.isEmpty()) return@addOnSuccessListener
-                commitInChunks(db, pending, 0)
+                commitInChunks(db, pending, 0) {}
             }
             .addOnFailureListener { /* ignore; best-effort cleanup */ }
     }
 
+    /**
+     * Clears `kitchenLabel` on categories and subcategories when it no longer exists on any
+     * saved printer (same rules as the item picker). Prevents "ghost" labels like Drinks
+     * after that label is removed from printer configuration.
+     */
+    fun syncCategorySubcategoryKitchenLabelsToSavedPrinters(
+        context: Context,
+        db: FirebaseFirestore = FirebaseFirestore.getInstance(),
+        onDone: () -> Unit = {},
+    ) {
+        val app = context.applicationContext
+        val validNorms = SelectedPrinterPrefs.allRoutingLabelsFromSavedPrinters(app)
+            .map { PrinterLabelKey.normalize(it) }
+            .filter { it.isNotEmpty() }
+            .toSet()
+
+        db.collection("Categories").get()
+            .addOnSuccessListener { catSnap ->
+                val pending = mutableListOf<Pair<DocumentReference, Map<String, Any>>>()
+                for (doc in catSnap.documents) {
+                    val kl = doc.getString("kitchenLabel")?.trim().orEmpty()
+                    if (kl.isEmpty()) continue
+                    if (PrinterLabelKey.normalize(kl) !in validNorms) {
+                        pending.add(doc.reference to mapOf("kitchenLabel" to FieldValue.delete()))
+                    }
+                }
+                db.collection("subcategories").get()
+                    .addOnSuccessListener { subSnap ->
+                        for (doc in subSnap.documents) {
+                            val kl = doc.getString("kitchenLabel")?.trim().orEmpty()
+                            if (kl.isEmpty()) continue
+                            if (PrinterLabelKey.normalize(kl) !in validNorms) {
+                                pending.add(doc.reference to mapOf("kitchenLabel" to FieldValue.delete()))
+                            }
+                        }
+                        if (pending.isEmpty()) {
+                            onDone()
+                            return@addOnSuccessListener
+                        }
+                        commitInChunks(db, pending, 0, onDone)
+                    }
+                    .addOnFailureListener { onDone() }
+            }
+            .addOnFailureListener { onDone() }
+    }
+
     private fun commitInChunks(
         db: FirebaseFirestore,
-        pending: List<Pair<com.google.firebase.firestore.DocumentReference, Map<String, Any>>>,
+        pending: List<Pair<DocumentReference, Map<String, Any>>>,
         start: Int,
+        onComplete: () -> Unit = {},
     ) {
-        if (start >= pending.size) return
+        if (start >= pending.size) {
+            onComplete()
+            return
+        }
         val end = minOf(start + 400, pending.size)
         val batch = db.batch()
         for (i in start until end) {
@@ -97,7 +158,8 @@ object MenuItemRoutingLabelCleanup {
         }
         batch.commit()
             .addOnSuccessListener {
-                commitInChunks(db, pending, end)
+                commitInChunks(db, pending, end, onComplete)
             }
+            .addOnFailureListener { onComplete() }
     }
 }

@@ -205,7 +205,7 @@ class PrintersActivity : AppCompatActivity() {
         btnTest.setOnClickListener {
             if (kitchenPrinter) {
                 val style = PrinterKitchenStyleCache.styleForIp(ip)
-                val cmdSet = PrinterKitchenStyleCache.commandSetForKitchenLan(ip, display.modelLine)
+                val cmdSet = PrinterKitchenStyleCache.commandSetForKitchenLan(ip, display)
                 val demoLabel = display.labels.firstOrNull()
                 val title = display.name.trim().ifBlank { getString(R.string.kitchen_printer) }
                 val segments = KitchenTicketBuilder.buildSampleDemoTicketSegments(

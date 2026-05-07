@@ -94,9 +94,7 @@ async function getStores(limit = 50) {
 
 /** GET /v1/eats/stores/{storeId}/pos_data — integration details for a store. */
 async function getIntegrationDetails(storeId) {
-  return uberFetch("GET", `/v1/eats/stores/${storeId}/pos_data`, {
-    useProvisioningToken: true,
-  });
+  return uberFetch("GET", `/v1/eats/stores/${storeId}/pos_data`);
 }
 
 /**

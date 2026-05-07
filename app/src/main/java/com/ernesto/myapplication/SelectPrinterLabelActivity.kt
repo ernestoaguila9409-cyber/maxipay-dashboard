@@ -104,6 +104,21 @@ class SelectPrinterLabelActivity : AppCompatActivity() {
         val assigned = if (currentRaw.isEmpty()) emptyList() else listOf(currentRaw)
         val merged = KitchenRoutingLabelsFirestore.labelsForItemAssignmentPicker(this, assigned)
         buildRadios(merged, currentNorm)
+
+        if (PrintingSettingsCache.printItemFilterMode == PrintingSettingsFirestore.ALL_ITEMS) {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Kitchen labels not active")
+                .setMessage(
+                    "Kitchen printing is set to \"All items on every printer\" \u2014 routing labels won't take effect. Switch to \"By Label\" now?"
+                )
+                .setPositiveButton("Switch to By Label") { _, _ ->
+                    PrintingSettingsFirestore.documentRef(db)
+                        .update(PrintingSettingsFirestore.FIELD_PRINT_ITEM_FILTER_MODE, PrintingSettingsFirestore.BY_LABEL)
+                    Toast.makeText(this, "Switched to By Label", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("Continue anyway", null)
+                .show()
+        }
     }
 
     private fun buildRadios(labels: List<String>, currentNorm: String) {

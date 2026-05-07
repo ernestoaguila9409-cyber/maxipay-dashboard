@@ -18,6 +18,7 @@ import com.ernesto.myapplication.engine.DiscountDisplay
 import com.ernesto.myapplication.engine.MoneyUtils
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.functions.FirebaseFunctions
+import com.google.firebase.storage.FirebaseStorage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -126,14 +127,59 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         }
     }
 
+    private var signatureCaptured = false
+
     override fun onResume() {
         super.onResume()
         CustomerDisplayManager.attach(this)
-        if (!skipCustomerReceiptMirror && CustomerDisplayManager.getPaymentSuccessInfo() != null) {
+        if (!signatureCaptured &&
+            SignatureSettings.getMode(this) == SignatureSettings.MODE_CUSTOMER_DISPLAY &&
+            CustomerDisplayManager.getPaymentSuccessInfo() != null &&
+            CustomerDisplayManager.hasCustomerDisplayAttached()
+        ) {
+            showSignaturePadOnCustomerDisplay()
+        } else if (!skipCustomerReceiptMirror && CustomerDisplayManager.getPaymentSuccessInfo() != null) {
             CustomerDisplayManager.showReceiptOptionsOnCustomerDisplay(this) { option ->
                 runOnUiThread { handleCustomerReceiptChoice(option) }
             }
         }
+    }
+
+    private fun showSignaturePadOnCustomerDisplay() {
+        CustomerDisplayManager.showSignaturePadOnCustomerDisplay(this) { bitmap ->
+            runOnUiThread {
+                signatureCaptured = true
+                saveSignatureBitmap(bitmap)
+                if (!skipCustomerReceiptMirror && CustomerDisplayManager.getPaymentSuccessInfo() != null) {
+                    CustomerDisplayManager.showReceiptOptionsOnCustomerDisplay(this) { option ->
+                        runOnUiThread { handleCustomerReceiptChoice(option) }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun saveSignatureBitmap(bitmap: android.graphics.Bitmap) {
+        val oid = orderId ?: return
+        val baos = java.io.ByteArrayOutputStream()
+        bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, baos)
+        val data = baos.toByteArray()
+
+        val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance()
+            .reference.child("signatures/$oid.png")
+        storageRef.putBytes(data)
+            .addOnSuccessListener {
+                storageRef.downloadUrl.addOnSuccessListener { uri ->
+                    db.collection("Orders").document(oid)
+                        .update("signatureUrl", uri.toString())
+                        .addOnSuccessListener { Log.d("Signature", "Saved signature URL for order $oid") }
+                        .addOnFailureListener { Log.w("Signature", "Failed to save URL", it) }
+                }
+            }
+            .addOnFailureListener { e ->
+                Log.e("Signature", "Failed to upload signature", e)
+                Toast.makeText(this, "Failed to save signature", Toast.LENGTH_SHORT).show()
+            }
     }
 
     private fun handleCustomerReceiptChoice(option: ReceiptOption) {
@@ -169,6 +215,7 @@ class ReceiptOptionsActivity : AppCompatActivity() {
     override fun onDestroy() {
         CustomerDisplayManager.clearReceiptOptionCallback()
         CustomerDisplayManager.clearEmailInputCallbacks()
+        CustomerDisplayManager.clearSignatureCallback()
         super.onDestroy()
     }
 
@@ -426,6 +473,12 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         }
 
         // ── Footer ──
+        if (SignatureSettings.getMode(this) == SignatureSettings.MODE_RECEIPT) {
+            segs += EscPosPrinter.Segment("")
+            segs += EscPosPrinter.Segment("")
+            segs += EscPosPrinter.Segment("Signature: " + "_".repeat((lwt - 11).coerceIn(8, 30)), bold = bt, fontSize = ft)
+            segs += EscPosPrinter.Segment("")
+        }
         footer("Thank you for dining with us!")
 
         return segs

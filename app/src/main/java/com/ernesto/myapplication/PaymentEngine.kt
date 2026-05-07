@@ -2,6 +2,7 @@ package com.ernesto.myapplication.engine
 
 import com.ernesto.myapplication.BarTabSeatHelper
 import com.ernesto.myapplication.TableFirestoreHelper
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.*
@@ -30,12 +31,23 @@ class PaymentEngine(private val db: FirebaseFirestore) {
 
         splitReceipt: Map<String, Any>? = null,
 
+        /**
+         * When true, tip was already chosen on the customer-facing flow before this card auth
+         * (including $0). The sale total includes that tip, so the transaction is marked
+         * [tipAdjusted] and [tipAmountInCents] is copied from the order — receipt-mode Tip
+         * adjustment must not list it again.
+         */
+        finalTipFromCustomerScreen: Boolean = false,
+
         onSuccess: (Long) -> Unit,
         onFailure: (Exception) -> Unit
     ) {
 
         val orderRef = db.collection("Orders").document(orderId)
         val transactionsRef = db.collection("Transactions")
+
+        fun isCardPayment(pt: String): Boolean =
+            pt.equals("Credit", ignoreCase = true) || pt.equals("Debit", ignoreCase = true)
 
         db.runTransaction { transaction ->
 
@@ -106,6 +118,12 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                 )
                 if (orderNumber > 0L) saleData["orderNumber"] = orderNumber
                 if (appTxnNumber > 0L) saleData["appTransactionNumber"] = appTxnNumber
+                if (finalTipFromCustomerScreen && isCardPayment(paymentType)) {
+                    val orderTipCents = orderSnap.getLong("tipAmountInCents") ?: 0L
+                    saleData["tipAmountInCents"] = orderTipCents
+                    saleData["tipAdjusted"] = true
+                    saleData["tipAdjustedAt"] = Timestamp.now()
+                }
                 transaction.set(saleRef, saleData)
 
                 val orderUpdates = mutableMapOf<String, Any>("saleTransactionId" to saleRef.id)
@@ -115,14 +133,20 @@ class PaymentEngine(private val db: FirebaseFirestore) {
             } else {
 
                 // Second / third payment → append to payments array
-                transaction.update(
-                    saleRef,
-                    mapOf(
-                        "payments" to FieldValue.arrayUnion(paymentEntry),
-                        "totalPaidInCents" to newPaid,
-                        "status" to if (newRemaining <= 0L) "COMPLETED" else "OPEN"
-                    )
+                val saleSnap = transaction.get(saleRef)
+                val saleUpdates = mutableMapOf<String, Any>(
+                    "payments" to FieldValue.arrayUnion(paymentEntry),
+                    "totalPaidInCents" to newPaid,
+                    "status" to if (newRemaining <= 0L) "COMPLETED" else "OPEN"
                 )
+                val alreadyTipFinal = saleSnap.getBoolean("tipAdjusted") ?: false
+                if (finalTipFromCustomerScreen && isCardPayment(paymentType) && !alreadyTipFinal) {
+                    val orderTipCents = orderSnap.getLong("tipAmountInCents") ?: 0L
+                    saleUpdates["tipAmountInCents"] = orderTipCents
+                    saleUpdates["tipAdjusted"] = true
+                    saleUpdates["tipAdjustedAt"] = Timestamp.now()
+                }
+                transaction.update(saleRef, saleUpdates)
             }
 
             val newStatus = if (newRemaining <= 0L) "CLOSED" else "OPEN"

@@ -10,7 +10,7 @@ class PosApplication : Application() {
     private val authStateListener = FirebaseAuth.AuthStateListener { auth ->
         if (auth.currentUser != null) {
             PrintingSettingsCache.start()
-            PrinterKitchenStyleCache.start()
+            PrinterKitchenStyleCache.start(this)
             PrinterDashboardCommandListener.start(this)
             RemoteVoidCommandListener.start(this)
             OnlineTerminalPaymentListener.start(this)

@@ -15,10 +15,10 @@
       </SelectionState>
       <SelectionState runConfigName="kds">
         <option name="selectionMode" value="DROPDOWN" />
-        <DropdownSelection timestamp="2026-05-03T14:31:20.524019300Z">
+        <DropdownSelection timestamp="2026-05-05T02:37:23.272153300Z">
           <Target type="DEFAULT_BOOT">
             <handle>
-              <DeviceId pluginId="PhysicalDevice" identifier="serial=256RCCM06543" />
+              <DeviceId pluginId="PhysicalDevice" identifier="serial=A08D914P25481515" />
             </handle>
           </Target>
         </DropdownSelection>

@@ -191,7 +191,8 @@ object ReceiptPromptHelper {
 
         val refundedByName = refundDocs.firstOrNull()?.getString("refundedBy")?.trim()?.takeIf { it.isNotBlank() }
         if (refundedByName != null) {
-            segs += EscPosPrinter.Segment("Refunded by: $refundedByName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+            val displayBy = RefundAttributionFormat.forDisplay(refundedByName)
+            segs += EscPosPrinter.Segment("Refunded by: $displayBy", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
         segs += EscPosPrinter.Segment("")
 

@@ -262,8 +262,41 @@ object SpinGatewayP {
     }
 
     /**
-     * POST void for one card leg. [onComplete] runs on OkHttp’s background thread.
+     * Fire-and-forget `/Payment/Cancel` so the P17 drops an in-progress Sale immediately
+     * instead of making the POS wait for SPIn's full timeout.
      */
+    fun enqueueCancelTransaction(context: Context) {
+        val cancelUrl = SpinApiUrls.cancel(context)
+        if (cancelUrl.isBlank()) return
+
+        val json = JSONObject().apply {
+            put("Tpn", TerminalPrefs.getTpn(context))
+            put("RegisterId", TerminalPrefs.getRegisterId(context))
+            put("Authkey", TerminalPrefs.getAuthKey(context))
+        }.toString()
+
+        Log.d(TAG, "[CANCEL_REQ] $json")
+
+        val client = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
+            .build()
+        val body = json.toRequestBody("application/json".toMediaType())
+        val request = Request.Builder().url(cancelUrl).post(body).build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                Log.w(TAG, "[CANCEL] Network error (best-effort)", e)
+            }
+            override fun onResponse(call: okhttp3.Call, response: Response) {
+                val resp = response.body?.string().orEmpty()
+                Log.d(TAG, "[CANCEL] HTTP ${response.code} Response: $resp")
+            }
+        })
+    }
+
+    /** POST void for one card leg. [onComplete] runs on OkHttp's background thread. */
     fun enqueueVoidPayment(
         context: Context,
         payment: TransactionPayment,

@@ -16,6 +16,7 @@ enum class DisplayState {
     SUCCESS,
     RECEIPT_OPTIONS,
     EMAIL_INPUT,
+    SIGNATURE,
     DECLINED
 }
 
@@ -44,6 +45,7 @@ object CustomerDisplayManager {
     private var onReceiptOptionFromCustomer: ((ReceiptOption) -> Unit)? = null
     private var onEmailSubmittedFromCustomer: ((String) -> Unit)? = null
     private var onEmailCancelledFromCustomer: (() -> Unit)? = null
+    private var onSignatureCompleted: ((android.graphics.Bitmap) -> Unit)? = null
 
     // ── Display detection ───────────────────────────────────────────
 
@@ -111,6 +113,9 @@ object CustomerDisplayManager {
                     onSubmit = { email -> onEmailSubmittedFromCustomer?.invoke(email) },
                     onCancel = { onEmailCancelledFromCustomer?.invoke() }
                 )
+            }
+            DisplayState.SIGNATURE -> {
+                p.showSignaturePad(onDone = { bitmap -> onSignatureCompleted?.invoke(bitmap) })
             }
             DisplayState.DECLINED -> p.showDeclined(declinedMessage)
         }
@@ -303,6 +308,22 @@ object CustomerDisplayManager {
             val p = ensurePresentation(activity) ?: return@postDelayed
             p.showOrder(businessName, orderItems, orderTotalCents, orderSummary)
         }, delayMs)
+    }
+
+    // ── SIGNATURE ─────────────────────────────────────────────────
+
+    fun showSignaturePadOnCustomerDisplay(
+        activity: Activity,
+        onDone: (android.graphics.Bitmap) -> Unit
+    ) {
+        currentState = DisplayState.SIGNATURE
+        onSignatureCompleted = onDone
+        val p = ensurePresentation(activity) ?: return
+        p.showSignaturePad(onDone = onDone)
+    }
+
+    fun clearSignatureCallback() {
+        onSignatureCompleted = null
     }
 
     // ── Lifecycle ───────────────────────────────────────────────────

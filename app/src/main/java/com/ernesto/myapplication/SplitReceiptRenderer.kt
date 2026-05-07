@@ -227,6 +227,14 @@ object SplitReceiptRenderer {
         segs += EscPosPrinter.Segment("")
         footer("Payment: ${payload.paymentMethod}")
         segs += EscPosPrinter.Segment("")
+        if (SignatureSettings.getMode(context) == SignatureSettings.MODE_RECEIPT) {
+            segs += EscPosPrinter.Segment("")
+            segs += EscPosPrinter.Segment(
+                "Signature: " + "_".repeat((lwt - 11).coerceIn(8, 30)),
+                bold = bt, fontSize = ft
+            )
+            segs += EscPosPrinter.Segment("")
+        }
         footer("Thank you for dining with us!")
 
         return segs

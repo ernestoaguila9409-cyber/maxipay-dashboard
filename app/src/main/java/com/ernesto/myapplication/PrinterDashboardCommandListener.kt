@@ -108,13 +108,18 @@ object PrinterDashboardCommandListener {
                 rememberHandled(path)
                 if (kitchenPrinter) {
                     val style = KitchenTicketStyle.fromPrinterDocument(printerSnap)
-                    val parsedCmd = PrinterCommandSet.fromFirestore(printerSnap.getString("commandSet"))
+                    val storedCmdRaw = printerSnap.getString("commandSet")?.trim().orEmpty()
+                    val parsedCmd = PrinterCommandSet.fromFirestore(storedCmdRaw.ifEmpty { null })
                     val inferredCmd = PrinterCommandSet.infer(
                         printerSnap.getString("manufacturer"),
                         printerSnap.getString("model"),
                     )
-                    val cmdSet = if (inferredCmd == PrinterCommandSet.STAR_DOT_MATRIX
-                        && parsedCmd == PrinterCommandSet.ESCPOS) inferredCmd else parsedCmd
+                    val cmdSet = when {
+                        storedCmdRaw.isEmpty() -> inferredCmd
+                        inferredCmd == PrinterCommandSet.STAR_DOT_MATRIX
+                            && parsedCmd == PrinterCommandSet.ESCPOS -> inferredCmd
+                        else -> parsedCmd
+                    }
                     val title = printerSnap.getString("name")?.trim().orEmpty()
                         .ifBlank { "Kitchen" }
                     val segments = KitchenTicketBuilder.buildSampleDemoTicketSegments(
