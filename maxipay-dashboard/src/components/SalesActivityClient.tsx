@@ -232,6 +232,24 @@ function canRequestRemoteVoid(data: DocumentData): boolean {
   return true;
 }
 
+/** Credit card sale/capture, unsettled, not voided, tip not already adjusted — eligible for tip adjust. */
+function canRequestTipAdjust(data: DocumentData): boolean {
+  const type = String(data.type ?? "");
+  if (type !== "SALE" && type !== "CAPTURE") return false;
+  if (data.voided === true) return false;
+  if (data.settled === true) return false;
+  if (data.tipAdjusted === true) return false;
+  if (transactionHasCashTender(data)) return false;
+  if (transactionIsEcommerce(data)) return false;
+  const payments = Array.isArray(data.payments) ? data.payments : [];
+  const hasCreditWithRrn = payments.some(
+    (p: Record<string, unknown>) =>
+      String(p.paymentType ?? "").toLowerCase() === "credit" &&
+      String(p.pnReferenceId || p.PNReferenceId || "").trim().length > 0
+  );
+  return hasCreditWithRrn;
+}
+
 function inFinancialTx(data: DocumentData): boolean {
   const type = String(data.type ?? "");
   if (type === "CASH_ADD" || type === "PAID_OUT") return false;
@@ -669,6 +687,11 @@ export default function SalesActivityClient() {
     remainingInCents: number;
   } | null>(null);
 
+  const [tipAmountInput, setTipAmountInput] = useState("");
+  const [tipSubmitting, setTipSubmitting] = useState(false);
+  const [tipSubmitErr, setTipSubmitErr] = useState<string | null>(null);
+  const [tipResult, setTipResult] = useState<string | null>(null);
+
   useEffect(() => {
     setVoidCmdId(null);
     setVoidSubmitErr(null);
@@ -686,6 +709,10 @@ export default function SalesActivityClient() {
     setDirectRefundModalAmount("");
     setDirectRefundModalErr(null);
     setOrderRefundCaps(null);
+    setTipAmountInput("");
+    setTipSubmitting(false);
+    setTipSubmitErr(null);
+    setTipResult(null);
     if (txModal) {
       const t = String(txModal.data.type ?? "");
       const c = txAmountCents(txModal.data, t);
@@ -2213,6 +2240,96 @@ export default function SalesActivityClient() {
                           <p className="text-amber-900/90 break-words">{voidCmdDetail}</p>
                         ) : null}
                       </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ) : null}
+
+            {txModal && canRequestTipAdjust(txModal.data) ? (
+              <div className="rounded-xl border border-teal-100 bg-teal-50/80 px-3 py-3 space-y-2">
+                <p className="text-xs font-medium text-teal-900">
+                  {Number(txModal.data.tipAmountInCents ?? 0) > 0 ? "Adjust tip" : "Add tip"}
+                </p>
+                {!user ? (
+                  <p className="text-xs text-teal-900">Sign in to adjust tip.</p>
+                ) : (
+                  <>
+                    {Number(txModal.data.tipAmountInCents ?? 0) > 0 ? (
+                      <p className="text-xs text-teal-900/90">
+                        Current tip: {fmtMoney(Number(txModal.data.tipAmountInCents))}
+                      </p>
+                    ) : null}
+                    <label className="block text-[11px] font-medium text-teal-900">
+                      Tip amount (USD)
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={tipAmountInput}
+                        onChange={(e) => {
+                          setTipAmountInput(e.target.value);
+                          setTipSubmitErr(null);
+                        }}
+                        disabled={tipSubmitting}
+                        className="mt-1 w-full rounded-lg border border-teal-200 bg-white px-2 py-1.5 text-sm text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                        placeholder="e.g. 5.00"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={tipSubmitting}
+                      onClick={async () => {
+                        if (!user || !txModal) return;
+                        const dollars = parseFloat(tipAmountInput);
+                        if (!Number.isFinite(dollars) || dollars <= 0) {
+                          setTipSubmitErr("Enter a valid tip amount greater than zero.");
+                          return;
+                        }
+                        const tipCents = Math.round(dollars * 100);
+                        const oid = String(txModal.data.orderId ?? "").trim();
+                        if (!oid) {
+                          setTipSubmitErr("This transaction has no linked order.");
+                          return;
+                        }
+                        setTipSubmitting(true);
+                        setTipSubmitErr(null);
+                        setTipResult(null);
+                        try {
+                          const region = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION;
+                          const app = getApp();
+                          const functions = region ? getFunctions(app, region) : getFunctions(app);
+                          const call = httpsCallable(functions, "processTipAdjust");
+                          const res = await call({
+                            transactionId: txModal.id,
+                            orderId: oid,
+                            tipAmountInCents: tipCents,
+                          });
+                          const d = res.data as Record<string, unknown>;
+                          if (d.success) {
+                            setTipResult(String(d.message ?? "Tip applied successfully."));
+                            setTipAmountInput("");
+                          } else {
+                            setTipSubmitErr(String(d.error ?? "Tip adjustment failed."));
+                          }
+                        } catch (err) {
+                          console.error("[SalesActivity] tip adjust", err);
+                          setTipSubmitErr(
+                            err instanceof Error ? err.message : "Could not process tip adjustment"
+                          );
+                        } finally {
+                          setTipSubmitting(false);
+                        }
+                      }}
+                      className="w-full py-2.5 rounded-xl bg-teal-700 text-white text-sm font-semibold hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {tipSubmitting ? "Processing…" : "Apply tip"}
+                    </button>
+                    {tipSubmitErr ? (
+                      <p className="text-xs text-red-700">{tipSubmitErr}</p>
+                    ) : null}
+                    {tipResult ? (
+                      <p className="text-xs text-teal-800 font-medium">{tipResult}</p>
                     ) : null}
                   </>
                 )}

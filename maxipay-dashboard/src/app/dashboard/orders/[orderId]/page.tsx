@@ -338,6 +338,11 @@ export default function OrderDetailPage() {
   const [voidCmdStatus, setVoidCmdStatus] = useState<string | null>(null);
   const [voidCmdDetail, setVoidCmdDetail] = useState<string | null>(null);
 
+  const [tipAmountInput, setTipAmountInput] = useState("");
+  const [tipSubmitting, setTipSubmitting] = useState(false);
+  const [tipSubmitErr, setTipSubmitErr] = useState<string | null>(null);
+  const [tipResult, setTipResult] = useState<string | null>(null);
+
   useEffect(() => {
     setDirectRefundModalOpen(false);
     setDirectRefundModalAmount("");
@@ -354,6 +359,10 @@ export default function OrderDetailPage() {
     setVoidCmdId(null);
     setVoidCmdStatus(null);
     setVoidCmdDetail(null);
+    setTipAmountInput("");
+    setTipSubmitting(false);
+    setTipSubmitErr(null);
+    setTipResult(null);
   }, [orderId]);
 
   useEffect(() => {
@@ -652,6 +661,29 @@ export default function OrderDetailPage() {
     !isSaleSettled &&
     !txRecordHasCashTender(saleTransactionData) &&
     !txRecordIsEcommerce(saleTransactionData);
+
+  const canTipAdjust =
+    user != null &&
+    orderData != null &&
+    saleTransactionData != null &&
+    status === "CLOSED" &&
+    saleIdForRefund.length > 0 &&
+    saleTransactionData.voided !== true &&
+    saleTransactionData.settled !== true &&
+    saleTransactionData.tipAdjusted !== true &&
+    batchClosed !== true &&
+    !txRecordHasCashTender(saleTransactionData) &&
+    !txRecordIsEcommerce(saleTransactionData) &&
+    (() => {
+      const payments = Array.isArray(saleTransactionData.payments)
+        ? (saleTransactionData.payments as Record<string, unknown>[])
+        : [];
+      return payments.some(
+        (p) =>
+          String(p.paymentType ?? "").toLowerCase() === "credit" &&
+          String(p.pnReferenceId || p.PNReferenceId || "").trim().length > 0
+      );
+    })();
 
   const maxDirectRefundCents = Math.min(
     Math.max(0, totalInCents),
@@ -1146,6 +1178,88 @@ export default function OrderDetailPage() {
                       </p>
                     ) : null}
                   </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {canTipAdjust ? (
+              <div className="bg-teal-50/90 rounded-2xl border border-teal-100 shadow-sm p-4 space-y-3">
+                <h4 className="text-sm font-semibold text-teal-900">
+                  {tipAmountInCents > 0 ? "Adjust tip" : "Add tip"}
+                </h4>
+                {tipAmountInCents > 0 ? (
+                  <p className="text-xs text-teal-800">
+                    Current tip: ${centsToMoney(tipAmountInCents)}
+                  </p>
+                ) : null}
+                <label className="block text-xs font-medium text-teal-900">
+                  Tip amount (USD)
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={tipAmountInput}
+                    onChange={(e) => {
+                      setTipAmountInput(e.target.value);
+                      setTipSubmitErr(null);
+                    }}
+                    disabled={tipSubmitting}
+                    className="mt-1 w-full rounded-lg border border-teal-200 bg-white px-3 py-2 text-sm text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="e.g. 5.00"
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={tipSubmitting}
+                  onClick={async () => {
+                    if (!user) return;
+                    const dollars = parseFloat(tipAmountInput);
+                    if (!Number.isFinite(dollars) || dollars <= 0) {
+                      setTipSubmitErr("Enter a valid tip amount greater than zero.");
+                      return;
+                    }
+                    const tipCents = Math.round(dollars * 100);
+                    setTipSubmitting(true);
+                    setTipSubmitErr(null);
+                    setTipResult(null);
+                    try {
+                      const region = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION;
+                      const app = getApp();
+                      const functions = region ? getFunctions(app, region) : getFunctions(app);
+                      const call = httpsCallable(functions, "processTipAdjust");
+                      const res = await call({
+                        transactionId: saleIdForRefund,
+                        orderId,
+                        tipAmountInCents: tipCents,
+                      });
+                      const d = res.data as Record<string, unknown>;
+                      if (d.success) {
+                        setTipResult(String(d.message ?? "Tip applied successfully."));
+                        setTipAmountInput("");
+                        setOrderRefreshNonce((n) => n + 1);
+                      } else {
+                        setTipSubmitErr(String(d.error ?? "Tip adjustment failed."));
+                      }
+                    } catch (err) {
+                      console.error("[Order detail] tip adjust", err);
+                      setTipSubmitErr(
+                        err instanceof Error
+                          ? err.message
+                          : "Could not process tip adjustment"
+                      );
+                    } finally {
+                      setTipSubmitting(false);
+                    }
+                  }}
+                  className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-teal-700 text-white text-sm font-semibold hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {tipSubmitting ? "Processing…" : "Apply tip"}
+                </button>
+                {tipSubmitErr ? (
+                  <p className="text-xs text-red-700 break-words">{tipSubmitErr}</p>
+                ) : null}
+                {tipResult ? (
+                  <p className="text-xs text-teal-800 font-medium break-words">{tipResult}</p>
                 ) : null}
               </div>
             ) : null}

@@ -2134,6 +2134,231 @@ exports.processServerRefund = onCall(async (request) => {
   };
 });
 
+// ---------------------------------------------------------------------------
+// Server-side tip adjust — iPOS Transact API (transactionType 7)
+// ---------------------------------------------------------------------------
+
+exports.processTipAdjust = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    return { success: false, error: "You must be signed in to adjust a tip." };
+  }
+  const { transactionId, orderId, tipAmountInCents } = request.data || {};
+
+  if (!transactionId || !orderId) {
+    return { success: false, error: "transactionId and orderId are required." };
+  }
+  if (!Number.isFinite(tipAmountInCents) || tipAmountInCents < 0) {
+    return { success: false, error: "tipAmountInCents must be a non-negative integer." };
+  }
+
+  const db = admin.firestore();
+
+  const txDoc = await db.collection("Transactions").doc(transactionId).get();
+  if (!txDoc.exists) {
+    return { success: false, error: "Transaction not found." };
+  }
+  const tx = txDoc.data();
+  const txType = String(tx.type ?? "");
+  if (!["SALE", "CAPTURE"].includes(txType)) {
+    return { success: false, error: `Tip adjust only applies to SALE/CAPTURE, got: ${txType}` };
+  }
+  if (tx.voided === true) {
+    return { success: false, error: "Transaction is voided." };
+  }
+  if (tx.tipAdjusted === true) {
+    return { success: false, error: "Tip has already been adjusted for this transaction." };
+  }
+  if (tx.settled === true) {
+    return { success: false, error: "Transaction is already settled. Tips can only be adjusted before batch settlement." };
+  }
+
+  const payments = Array.isArray(tx.payments) ? tx.payments : [];
+  const creditLeg = payments.find(
+    (p) =>
+      String(p.paymentType ?? "").toLowerCase() === "credit" &&
+      String(p.pnReferenceId || p.PNReferenceId || "").trim().length > 0
+  );
+  if (!creditLeg) {
+    return {
+      success: false,
+      error: "No credit card payment with a processor reference (RRN) found on this transaction.",
+    };
+  }
+  const rrn = String(creditLeg.pnReferenceId || creditLeg.PNReferenceId || "").trim();
+
+  const orderDoc = await db.collection("Orders").doc(orderId).get();
+  if (!orderDoc.exists) {
+    return { success: false, error: "Order not found." };
+  }
+
+  const batchId = String(tx.batchId ?? "").trim();
+  if (!batchId) {
+    return { success: false, error: "No batch associated with this transaction." };
+  }
+  const batchDoc = await db.collection("Batches").doc(batchId).get();
+  if (!batchDoc.exists) {
+    return { success: false, error: "Batch not found." };
+  }
+  if (batchDoc.data().closed === true) {
+    return { success: false, error: "Batch is already closed. Tips cannot be adjusted after settlement." };
+  }
+
+  const creds = await resolveIposTransactCredentials(db);
+  if (!creds.tpn || !creds.authToken) {
+    return {
+      success: false,
+      error: "iPOS Transact credentials not configured. Set iposHppTpn + iposHppAuthToken in Settings/onlineOrdering.",
+    };
+  }
+
+  const tipRefId = `TIP${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const iposPayload = {
+    merchantAuthentication: {
+      merchantId: creds.tpn,
+      transactionReferenceId: tipRefId,
+    },
+    transactionRequest: {
+      transactionType: 7,
+      rrn: rrn,
+      amount: String(tipAmountInCents),
+    },
+  };
+
+  logger.info("[processTipAdjust] Calling iPOS Transact", {
+    url: creds.baseUrl,
+    transactionId,
+    orderId,
+    tipAmountInCents,
+    rrn,
+    tpn: creds.tpn,
+  });
+
+  let iposResponse;
+  let httpStatus;
+  try {
+    const resp = await fetch(creds.baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        token: creds.authToken,
+      },
+      body: JSON.stringify(iposPayload),
+    });
+    httpStatus = resp.status;
+    iposResponse = await resp.json();
+  } catch (err) {
+    logger.error("[processTipAdjust] iPOS Transact network error", {
+      error: err.message,
+    });
+    return {
+      success: false,
+      error: `Network error calling iPOS Transact: ${err.message}`,
+    };
+  }
+
+  logger.info("[processTipAdjust] iPOS Transact response", {
+    httpStatus,
+    iposResponse: JSON.stringify(iposResponse).slice(0, 2000),
+    transactionId,
+  });
+
+  if (iposResponse.errors) {
+    const errMsg = iposResponse.errors
+      .map((e) => `${e.field}: ${e.message}`)
+      .join("; ");
+    return { success: false, error: errMsg, iposResponse };
+  }
+
+  const txnResp = iposResponse.iposhpresponse
+    || iposResponse.iposTransactResponse
+    || iposResponse.iposHPResponse
+    || iposResponse;
+  const responseCode = Number(txnResp.responseCode ?? -1);
+  const responseMessage = String(txnResp.responseMessage ?? "").trim();
+  const errResponseCode = String(txnResp.errResponseCode ?? "").trim();
+  const errResponseMessage = String(txnResp.errResponseMessage ?? "").trim();
+
+  if (responseCode !== 200) {
+    const rawSnippet = JSON.stringify(iposResponse).slice(0, 500);
+    const detail = [
+      errResponseMessage,
+      responseMessage,
+      errResponseCode ? `errCode=${errResponseCode}` : "",
+      `responseCode=${responseCode}`,
+      `HTTP=${httpStatus}`,
+      `TPN=${creds.tpn}`,
+      `RRN=${rrn}`,
+      `RAW=${rawSnippet}`,
+    ].filter(Boolean).join(" | ");
+    return { success: false, error: detail, iposResponse };
+  }
+
+  const existingTipCents = Number(tx.tipAmountInCents ?? 0);
+  const totalPaidCents = Number(tx.totalPaidInCents ?? 0);
+  const baseAmountCents = totalPaidCents - existingTipCents;
+  const newTotalPaidCents = baseAmountCents + tipAmountInCents;
+  const deltaTipCents = tipAmountInCents - existingTipCents;
+
+  try {
+    await db.runTransaction(async (firestoreTxn) => {
+      const freshTx = await firestoreTxn.get(db.collection("Transactions").doc(transactionId));
+      const freshOrder = await firestoreTxn.get(db.collection("Orders").doc(orderId));
+      const freshBatch = await firestoreTxn.get(db.collection("Batches").doc(batchId));
+
+      if (freshTx.data()?.tipAdjusted === true) {
+        throw new Error("Tip was already adjusted (concurrent update).");
+      }
+      if (freshBatch.data()?.closed === true) {
+        throw new Error("Batch closed during tip adjustment.");
+      }
+
+      firestoreTxn.update(db.collection("Transactions").doc(transactionId), {
+        tipAmountInCents: tipAmountInCents,
+        totalPaidInCents: newTotalPaidCents,
+        tipAdjusted: true,
+        tipAdjustedAt: admin.firestore.FieldValue.serverTimestamp(),
+        tipAdjustedBy: `Dashboard: ${request.auth.token?.email || request.auth.uid}`,
+      });
+
+      const orderTotalCents = Number(freshOrder.data()?.totalInCents ?? 0);
+      const orderTipCents = Number(freshOrder.data()?.tipAmountInCents ?? 0);
+      const newOrderTotalCents = orderTotalCents - orderTipCents + tipAmountInCents;
+      firestoreTxn.update(db.collection("Orders").doc(orderId), {
+        tipAmountInCents: tipAmountInCents,
+        totalInCents: newOrderTotalCents,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      const currentBatchTips = Number(freshBatch.data()?.totalTipsInCents ?? 0);
+      firestoreTxn.update(db.collection("Batches").doc(batchId), {
+        totalTipsInCents: currentBatchTips + deltaTipCents,
+        netTotalInCents: admin.firestore.FieldValue.increment(deltaTipCents),
+      });
+    });
+  } catch (err) {
+    logger.error("[processTipAdjust] Firestore transaction failed", {
+      error: err.message,
+    });
+    return {
+      success: false,
+      error: `Tip approved by processor but failed to save: ${err.message}`,
+    };
+  }
+
+  const tipDollars = tipAmountInCents / 100;
+  logger.info("[processTipAdjust] Tip adjust complete", {
+    transactionId,
+    orderId,
+    tipAmountInCents,
+  });
+
+  return {
+    success: true,
+    message: `Tip of $${tipDollars.toFixed(2)} applied successfully.`,
+    iposResponse,
+  };
+});
+
 /**
  * Resolve SPIn P-series terminal credentials from Firestore.
  * Only SPIN_P terminals support dashboard-initiated settlement;
