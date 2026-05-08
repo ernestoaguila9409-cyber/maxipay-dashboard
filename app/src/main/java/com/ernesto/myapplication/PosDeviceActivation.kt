@@ -91,6 +91,7 @@ object PosDeviceActivation {
                     "appVersionCode" to verCode,
                     "activatedAt" to FieldValue.serverTimestamp(),
                     "enrolledFromDashboard" to true,
+                    PosDeviceDeactivationWatch.FIELD_DEACTIVATED to false,
                     "lastSeen" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp(),
                 )

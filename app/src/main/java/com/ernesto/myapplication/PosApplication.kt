@@ -18,6 +18,7 @@ class PosApplication : Application() {
             PaymentTerminalRepository.start()
             PaymentTerminalReachabilitySync.start(this)
             PosDevicePresenceSync.start(this)
+            PosDeviceDeactivationWatch.start(this)
         } else {
             PrintingSettingsCache.stop()
             PrinterKitchenStyleCache.stop()
@@ -28,6 +29,7 @@ class PosApplication : Application() {
             PaymentTerminalRepository.stop()
             PaymentTerminalReachabilitySync.stop()
             PosDevicePresenceSync.stop()
+            PosDeviceDeactivationWatch.stop()
         }
     }
 

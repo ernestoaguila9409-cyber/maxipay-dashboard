@@ -14,6 +14,7 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.functions.FirebaseFunctions
 
 class LoginActivity : AppCompatActivity() {
@@ -50,6 +51,8 @@ class LoginActivity : AppCompatActivity() {
 
         val bizName = ReceiptSettings.load(this).businessName
         CustomerDisplayManager.setIdle(this, bizName)
+
+        scheduleActivationLockIfNeeded()
 
         dotsContainer = findViewById(R.id.dotsContainer)
         pinDots = listOf(
@@ -111,6 +114,31 @@ class LoginActivity : AppCompatActivity() {
                 }
             }
             false
+        }
+    }
+
+    /** If the dashboard deactivated this installation, block PIN until a new activation code is entered. */
+    private fun scheduleActivationLockIfNeeded() {
+        fun readDeviceAndMaybeLock() {
+            PosDeviceIdentity.resolveInstallationDocId(this) { docId ->
+                FirebaseFirestore.getInstance()
+                    .collection("PosDevices")
+                    .document(docId)
+                    .get()
+                    .addOnSuccessListener { snap ->
+                        if (!snap.exists()) return@addOnSuccessListener
+                        if (snap.getBoolean(PosDeviceDeactivationWatch.FIELD_DEACTIVATED) != true) {
+                            return@addOnSuccessListener
+                        }
+                        DeviceActivationActivity.launchForceLock(this)
+                        finish()
+                    }
+            }
+        }
+        if (auth.currentUser != null) {
+            readDeviceAndMaybeLock()
+        } else {
+            auth.signInAnonymously().addOnCompleteListener { readDeviceAndMaybeLock() }
         }
     }
 

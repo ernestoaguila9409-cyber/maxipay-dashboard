@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   onSnapshot,
   serverTimestamp,
   setDoc,
   Timestamp,
+  updateDoc,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
@@ -19,9 +21,9 @@ import {
   DEVICE_ACTIVATIONS_COLLECTION,
   DEVICE_ACTIVATION_TTL_MS,
 } from "@/lib/posDevicesFirestore";
-import { Smartphone, Circle, Plus, Copy, X, Loader2 } from "lucide-react";
+import { Smartphone, Circle, Plus, Copy, X, Loader2, Lock } from "lucide-react";
 
-type LiveStatus = "online" | "offline";
+type LiveStatus = "online" | "offline" | "locked";
 
 interface PosDeviceRow {
   id: string;
@@ -31,6 +33,7 @@ interface PosDeviceRow {
   appVersion: string;
   lastSeen: Date | null;
   enrolled: boolean;
+  deactivated: boolean;
 }
 
 function parseFirestoreDate(value: unknown): Date | null {
@@ -40,7 +43,12 @@ function parseFirestoreDate(value: unknown): Date | null {
   return null;
 }
 
-function getLiveStatus(lastSeen: Date | null, nowMs: number): LiveStatus {
+function getLiveStatus(
+  lastSeen: Date | null,
+  nowMs: number,
+  deactivated: boolean
+): LiveStatus {
+  if (deactivated) return "locked";
   if (!lastSeen) return "offline";
   const age = nowMs - lastSeen.getTime();
   if (age < POS_DEVICE_ONLINE_THRESHOLD_MS) return "online";
@@ -64,6 +72,7 @@ function formatLastSeenAgo(lastSeen: Date | null, nowMs: number): string {
 function parseDevice(id: string, data: Record<string, unknown>): PosDeviceRow {
   const activatedAt = parseFirestoreDate(data.activatedAt);
   const enrolledFlag = data.enrolledFromDashboard === true;
+  const deactivated = data.deactivated === true;
   return {
     id,
     platform: String(data.platform ?? "").trim() || "—",
@@ -71,7 +80,8 @@ function parseDevice(id: string, data: Record<string, unknown>): PosDeviceRow {
     osVersion: String(data.osVersion ?? "").trim() || "—",
     appVersion: String(data.appVersion ?? "").trim() || "—",
     lastSeen: parseFirestoreDate(data.lastSeen),
-    enrolled: enrolledFlag || activatedAt != null,
+    enrolled: !deactivated && (enrolledFlag || activatedAt != null),
+    deactivated,
   };
 }
 
@@ -92,6 +102,16 @@ async function createDeviceActivationCode(): Promise<{ code: string; expiresAtMs
     return { code, expiresAtMs };
   }
   throw new Error("Could not generate a unique code. Try again.");
+}
+
+async function deactivatePosDevice(deviceId: string): Promise<void> {
+  const ref = doc(db, POS_DEVICES_COLLECTION, deviceId);
+  await updateDoc(ref, {
+    deactivated: true,
+    deactivatedAt: serverTimestamp(),
+    enrolledFromDashboard: false,
+    activatedAt: deleteField(),
+  });
 }
 
 function formatCountdown(msRemaining: number): string {
@@ -115,6 +135,9 @@ export default function PosDevicesSettingsPage() {
   const [modalExpiresAtMs, setModalExpiresAtMs] = useState<number | null>(null);
   const [creatingCode, setCreatingCode] = useState(false);
   const [copyDone, setCopyDone] = useState(false);
+
+  const [confirmDeactivate, setConfirmDeactivate] = useState<PosDeviceRow | null>(null);
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 5_000);
@@ -195,7 +218,23 @@ export default function PosDevicesSettingsPage() {
     setCopyDone(false);
   }, []);
 
-  const onlineCount = devices.filter((d) => getLiveStatus(d.lastSeen, nowMs) === "online").length;
+  const onlineCount = devices.filter(
+    (d) => getLiveStatus(d.lastSeen, nowMs, d.deactivated) === "online"
+  ).length;
+
+  const runDeactivate = useCallback(async (row: PosDeviceRow) => {
+    setDeactivatingId(row.id);
+    setError(null);
+    try {
+      await deactivatePosDevice(row.id);
+      setConfirmDeactivate(null);
+    } catch (e) {
+      console.error(e);
+      setError(e instanceof Error ? e.message : "Could not deactivate device");
+    } finally {
+      setDeactivatingId(null);
+    }
+  }, []);
 
   return (
     <>
@@ -264,29 +303,43 @@ export default function PosDevicesSettingsPage() {
                     <th className="px-4 py-3 font-semibold text-slate-600">OS</th>
                     <th className="px-4 py-3 font-semibold text-slate-600">App</th>
                     <th className="px-4 py-3 font-semibold text-slate-600">Last seen</th>
+                    <th className="px-4 py-3 font-semibold text-slate-600 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {devices.map((d) => {
-                    const live = getLiveStatus(d.lastSeen, nowMs);
+                    const live = getLiveStatus(d.lastSeen, nowMs, d.deactivated);
                     const ago = formatLastSeenAgo(d.lastSeen, nowMs);
                     return (
                       <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50/50">
                         <td className="px-4 py-3.5">
                           <span
                             className={
-                              live === "online"
-                                ? "inline-flex items-center gap-1.5 text-emerald-700 font-medium"
-                                : "inline-flex items-center gap-1.5 text-slate-500"
+                              live === "locked"
+                                ? "inline-flex items-center gap-1.5 text-amber-800 font-medium"
+                                : live === "online"
+                                  ? "inline-flex items-center gap-1.5 text-emerald-700 font-medium"
+                                  : "inline-flex items-center gap-1.5 text-slate-500"
                             }
                           >
-                            <Circle
-                              size={10}
-                              className={
-                                live === "online" ? "fill-emerald-500 text-emerald-500" : "fill-slate-300 text-slate-300"
-                              }
-                            />
-                            {live === "online" ? "Online" : "Offline"}
+                            {live === "locked" ? (
+                              <>
+                                <Lock size={12} className="text-amber-700" />
+                                Locked
+                              </>
+                            ) : (
+                              <>
+                                <Circle
+                                  size={10}
+                                  className={
+                                    live === "online"
+                                      ? "fill-emerald-500 text-emerald-500"
+                                      : "fill-slate-300 text-slate-300"
+                                  }
+                                />
+                                {live === "online" ? "Online" : "Offline"}
+                              </>
+                            )}
                           </span>
                         </td>
                         <td className="px-4 py-3.5">
@@ -307,6 +360,16 @@ export default function PosDevicesSettingsPage() {
                         <td className="px-4 py-3.5 text-slate-600">{d.osVersion}</td>
                         <td className="px-4 py-3.5 text-slate-600">{d.appVersion}</td>
                         <td className="px-4 py-3.5 text-slate-600">{ago}</td>
+                        <td className="px-4 py-3.5 text-right">
+                          <button
+                            type="button"
+                            disabled={d.deactivated || deactivatingId === d.id}
+                            onClick={() => setConfirmDeactivate(d)}
+                            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-45 disabled:pointer-events-none"
+                          >
+                            {d.deactivated ? "Deactivated" : deactivatingId === d.id ? "Working…" : "Deactivation"}
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
@@ -316,6 +379,43 @@ export default function PosDevicesSettingsPage() {
           )}
         </div>
       </div>
+
+      {confirmDeactivate && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="deactivate-title"
+        >
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6">
+            <h3 id="deactivate-title" className="text-lg font-semibold text-slate-800">
+              Deactivate this device?
+            </h3>
+            <p className="text-sm text-slate-600 mt-2">
+              <span className="font-medium text-slate-800">{confirmDeactivate.deviceModel}</span> will
+              be sent to the activation screen and must enter a new code from{" "}
+              <strong>Add device</strong> before the POS can be used again.
+            </p>
+            <div className="mt-6 flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setConfirmDeactivate(null)}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deactivatingId != null}
+                onClick={() => runDeactivate(confirmDeactivate)}
+                className="rounded-xl bg-red-600 text-white px-4 py-2.5 text-sm font-semibold hover:bg-red-700 disabled:opacity-50"
+              >
+                Deactivate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modalOpen && modalCode && (
         <div
