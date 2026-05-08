@@ -164,6 +164,7 @@ export default function PosDevicesSettingsPage() {
       (snap) => {
         const rows = snap.docs
           .map((d) => parseDevice(d.id, d.data() as Record<string, unknown>))
+          .filter((row) => !row.deactivated)
           .sort((a, b) => {
             const ta = a.lastSeen?.getTime() ?? 0;
             const tb = b.lastSeen?.getTime() ?? 0;
@@ -363,11 +364,11 @@ export default function PosDevicesSettingsPage() {
                         <td className="px-4 py-3.5 text-right">
                           <button
                             type="button"
-                            disabled={d.deactivated || deactivatingId === d.id}
+                            disabled={deactivatingId === d.id}
                             onClick={() => setConfirmDeactivate(d)}
                             className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-45 disabled:pointer-events-none"
                           >
-                            {d.deactivated ? "Deactivated" : deactivatingId === d.id ? "Working…" : "Deactivation"}
+                            {deactivatingId === d.id ? "Working…" : "Deactivation"}
                           </button>
                         </td>
                       </tr>
