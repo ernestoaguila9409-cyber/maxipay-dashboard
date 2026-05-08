@@ -5,6 +5,7 @@ import {
   BUSINESS_INFO_DOC,
   ONLINE_ORDERING_SETTINGS_DOC,
   SETTINGS_COLLECTION,
+  computeOnlineOrderTax,
   expandModifierGroupIdsFromPicks,
   formatPrepTimeRange,
   isStoreCurrentlyOpen,
@@ -12,6 +13,7 @@ import {
   slugify,
   type OnlineOrderingSettings,
   type OnlinePaymentChoice,
+  type OnlineTaxRule,
 } from "@/lib/onlineOrderingShared";
 import {
   HERO_SLIDES_COLLECTION,
@@ -80,6 +82,8 @@ export interface OnlineMenuItem {
   isFeatured: boolean;
   /** Modifier group document ids, in display order (see `ModifierGroups`). */
   modifierGroupIds: string[];
+  /** Assigned tax doc ids (used with `FORCE_APPLY` on POS; exposed for parity). */
+  taxIds: string[];
 }
 
 export interface OnlineMenuCategory {
@@ -104,6 +108,24 @@ function menuItemOnlinePriceCents(data: DocumentData): number {
 
 function asRecord(data: DocumentData): Record<string, unknown> {
   return data as unknown as Record<string, unknown>;
+}
+
+function parseFirestoreTaxDoc(id: string, data: DocumentData): OnlineTaxRule | null {
+  const name = typeof data.name === "string" ? data.name.trim() : "";
+  const type = typeof data.type === "string" ? data.type.trim() : "";
+  if (!name || !type) return null;
+  const rawAmount = data.amount;
+  let amount: number | undefined;
+  if (typeof rawAmount === "number" && Number.isFinite(rawAmount)) {
+    amount = rawAmount;
+  } else if (typeof rawAmount === "string") {
+    const n = Number(rawAmount);
+    if (Number.isFinite(n)) amount = n;
+  }
+  if (amount === undefined) return null;
+  const enabled = typeof data.enabled === "boolean" ? data.enabled : true;
+  const enabledOnline = typeof data.enabledOnline === "boolean" ? data.enabledOnline : false;
+  return { id, name, type, amount, enabled, enabledOnline };
 }
 
 /** Firestore may store string ids or DocumentReference-like objects with [id] / [path]. */
@@ -322,11 +344,13 @@ export async function loadOnlineMenu(
   categories: OnlineMenuCategory[];
   items: OnlineMenuItem[];
   modifierGroups: OnlineModifierGroup[];
+  taxes: OnlineTaxRule[];
 }> {
-  const [catSnap, itemSnap, ooSnap] = await Promise.all([
+  const [catSnap, itemSnap, ooSnap, taxSnap] = await Promise.all([
     db.collection("Categories").get(),
     db.collection("MenuItems").get(),
     db.collection(SETTINGS_COLLECTION).doc(ONLINE_ORDERING_SETTINGS_DOC).get(),
+    db.collection("Taxes").get(),
   ]);
   const oo = parseOnlineOrderingSettings(
     ooSnap.data() as Record<string, unknown> | undefined
@@ -342,6 +366,12 @@ export async function loadOnlineMenu(
   });
   categories.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
 
+  const taxes: OnlineTaxRule[] = [];
+  for (const d of taxSnap.docs) {
+    const t = parseFirestoreTaxDoc(d.id, d.data());
+    if (t) taxes.push(t);
+  }
+
   const featuredSet = new Set(oo.featuredItemIds);
   const items: OnlineMenuItem[] = [];
   const modifierGroupIdSet = new Set<string>();
@@ -354,6 +384,9 @@ export async function loadOnlineMenu(
     const categoryId =
       rawCategoryIds[0] || (typeof data.categoryId === "string" ? data.categoryId : "");
     const modifierGroupIds = itemModifierGroupIds(data);
+    const taxIds = Array.isArray(data.taxIds)
+      ? (data.taxIds as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0)
+      : [];
     for (const mg of modifierGroupIds) modifierGroupIdSet.add(mg);
     items.push({
       id: d.id,
@@ -366,6 +399,7 @@ export async function loadOnlineMenu(
       imageUrl: typeof data.imageUrl === "string" ? data.imageUrl : "",
       isFeatured: featuredSet.has(d.id),
       modifierGroupIds,
+      taxIds,
     });
   }
 
@@ -379,7 +413,7 @@ export async function loadOnlineMenu(
   }
   const filteredCategories = categories.filter((c) => catIdsUsed.has(c.id));
 
-  return { categories: filteredCategories, items, modifierGroups };
+  return { categories: filteredCategories, items, modifierGroups, taxes };
 }
 
 /**
@@ -590,13 +624,20 @@ export async function createOnlineOrderTransaction(
     }
   }
   const groupRefs = [...modifierGroupIdSet].map((id) => db.collection("ModifierGroups").doc(id));
+  const taxSnapPromise = db.collection("Taxes").get();
   const groupSnaps = groupRefs.length > 0 ? await db.getAll(...groupRefs) : [];
+  const taxSnap = await taxSnapPromise;
   const groupById = new Map<string, OnlineModifierGroup>();
   for (const s of groupSnaps) {
     if (s.exists) groupById.set(s.id, parseModifierGroupDoc(s.id, s.data()!));
   }
 
-  let totalInCents = 0;
+  const onlineTaxRules: OnlineTaxRule[] = [];
+  for (const d of taxSnap.docs) {
+    const t = parseFirestoreTaxDoc(d.id, d.data());
+    if (t) onlineTaxRules.push(t);
+  }
+
   const resolvedLines: {
     lineKey: string;
     itemId: string;
@@ -634,7 +675,6 @@ export async function createOnlineOrderTransaction(
     );
     const unitPriceInCents = basePriceCents + modifiersTotalInCents;
     const lineTotalInCents = unitPriceInCents * line.quantity;
-    totalInCents += lineTotalInCents;
     resolvedLines.push({
       lineKey: randomUUID(),
       itemId: line.itemId,
@@ -648,6 +688,19 @@ export async function createOnlineOrderTransaction(
       lineTotalInCents,
     });
   }
+
+  const taxResult = computeOnlineOrderTax({
+    taxes: onlineTaxRules,
+    lines: resolvedLines.map((r) => ({
+      lineKey: r.lineKey,
+      lineTotalInCents: r.lineTotalInCents,
+      taxMode: "INHERIT",
+      taxIds: r.taxIds,
+    })),
+    discountInCents: 0,
+    forOnlineOrdering: true,
+  });
+  const totalInCents = taxResult.grandTotalInCents;
 
   const now = Timestamp.now();
   const customerName = params.customerName.trim();
@@ -683,6 +736,9 @@ export async function createOnlineOrderTransaction(
       customerPhone: customerPhone,
       customerEmail: customerEmail,
     };
+    if (taxResult.taxBreakdown.length > 0) {
+      orderFields.taxBreakdown = taxResult.taxBreakdown;
+    }
 
     t.set(orderRef, orderFields);
 
@@ -701,6 +757,11 @@ export async function createOnlineOrderTransaction(
         createdAt: now,
       };
       if (rl.taxIds.length > 0) lineDoc.taxIds = rl.taxIds;
+      const lineTax = taxResult.perItemTaxCents[rl.lineKey] ?? 0;
+      lineDoc.lineTaxInCents = lineTax;
+      lineDoc.lineTotalWithTaxInCents = rl.lineTotalInCents + lineTax;
+      const itemTb = taxResult.perItemTaxBreakdown[rl.lineKey];
+      if (itemTb && itemTb.length > 0) lineDoc.taxBreakdown = itemTb;
       const itemData = byId.get(rl.itemId);
       const itemImg =
         itemData != null ? (itemData as Record<string, unknown>)["imageUrl"] : undefined;

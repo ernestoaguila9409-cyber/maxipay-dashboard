@@ -2,7 +2,12 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { expandModifierGroupIdsFromPicks } from "@/lib/onlineOrderingShared";
+import {
+  computeOnlineOrderTax,
+  expandModifierGroupIdsFromPicks,
+  type OnlineOrderTaxBreakdownEntry,
+  type OnlineTaxRule,
+} from "@/lib/onlineOrderingShared";
 import type { HeroSlide, PublicStorefront } from "@/lib/storefrontShared";
 import { HeroCarousel } from "@/components/storefront/HeroCarousel";
 
@@ -64,6 +69,7 @@ type MenuItem = {
   imageUrl: string;
   isFeatured: boolean;
   modifierGroupIds: string[];
+  taxIds?: string[];
 };
 
 type MenuCategory = { id: string; name: string; sortOrder: number };
@@ -403,9 +409,13 @@ function MenuItemCard({
    ═══════════════════════════════════════════ */
 
 function CartSidebar({
-  lines, subtotal, groupMap, onAdd, onDec, onCheckout,
+  lines, subtotal, taxBreakdown, grandTotal, groupMap, onAdd, onDec, onCheckout,
 }: {
-  lines: CartLine[]; subtotal: number; groupMap: Map<string, ModifierGroup>;
+  lines: CartLine[];
+  subtotal: number;
+  taxBreakdown: OnlineOrderTaxBreakdownEntry[];
+  grandTotal: number;
+  groupMap: Map<string, ModifierGroup>;
   onAdd: (lineId: string) => void; onDec: (lineId: string) => void; onCheckout: () => void;
 }) {
   const itemCount = lines.reduce((s, l) => s + l.quantity, 0);
@@ -466,9 +476,17 @@ function CartSidebar({
                 <span className="text-neutral-500">Subtotal</span>
                 <span className="font-semibold text-neutral-900 tabular-nums">{fmt(subtotal)}</span>
               </div>
+              {taxBreakdown.map((t, i) => (
+                <div key={`${t.name}-${i}`} className="flex justify-between text-sm text-neutral-600">
+                  <span className="min-w-0 pr-2">
+                    {t.taxType === "PERCENTAGE" ? `${t.name} (${t.rate}%)` : t.name}
+                  </span>
+                  <span className="shrink-0 tabular-nums font-medium text-neutral-800">{fmt(t.amountInCents)}</span>
+                </div>
+              ))}
               <div className="flex justify-between text-sm font-bold text-neutral-900 pt-1 border-t border-neutral-100">
                 <span>Total</span>
-                <span className="tabular-nums">{fmt(subtotal)}</span>
+                <span className="tabular-nums">{fmt(grandTotal)}</span>
               </div>
               <button
                 type="button"
@@ -489,7 +507,7 @@ function CartSidebar({
    MobileCartBar (sticky bottom on mobile)
    ═══════════════════════════════════════════ */
 
-function MobileCartBar({ count, subtotal, onOpen }: { count: number; subtotal: number; onOpen: () => void }) {
+function MobileCartBar({ count, grandTotal, onOpen }: { count: number; grandTotal: number; onOpen: () => void }) {
   if (count === 0) return null;
   return (
     <div className="fixed bottom-0 inset-x-0 z-30 p-3 lg:hidden">
@@ -502,7 +520,7 @@ function MobileCartBar({ count, subtotal, onOpen }: { count: number; subtotal: n
           <span className="bg-white/20 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center tabular-nums">{count}</span>
           <span className="font-semibold text-[15px]">View cart</span>
         </span>
-        <span className="font-semibold text-[15px] tabular-nums">{fmt(subtotal)}</span>
+        <span className="font-semibold text-[15px] tabular-nums">{fmt(grandTotal)}</span>
       </button>
     </div>
   );
@@ -513,9 +531,14 @@ function MobileCartBar({ count, subtotal, onOpen }: { count: number; subtotal: n
    ═══════════════════════════════════════════ */
 
 function MobileCartSheet({
-  open, lines, subtotal, groupMap, onClose, onAdd, onDec, onCheckout,
+  open, lines, subtotal, taxBreakdown, grandTotal, groupMap, onClose, onAdd, onDec, onCheckout,
 }: {
-  open: boolean; lines: CartLine[]; subtotal: number; groupMap: Map<string, ModifierGroup>;
+  open: boolean;
+  lines: CartLine[];
+  subtotal: number;
+  taxBreakdown: OnlineOrderTaxBreakdownEntry[];
+  grandTotal: number;
+  groupMap: Map<string, ModifierGroup>;
   onClose: () => void; onAdd: (lineId: string) => void; onDec: (lineId: string) => void; onCheckout: () => void;
 }) {
   if (!open) return null;
@@ -554,8 +577,17 @@ function MobileCartSheet({
           ))}
         </div>
         <div className="border-t border-neutral-100 px-5 py-4 space-y-3 pb-6">
-          <div className="flex justify-between text-sm font-bold text-neutral-900">
-            <span>Total</span><span className="tabular-nums">{fmt(subtotal)}</span>
+          <div className="flex justify-between text-sm text-neutral-600">
+            <span>Subtotal</span><span className="tabular-nums font-medium text-neutral-800">{fmt(subtotal)}</span>
+          </div>
+          {taxBreakdown.map((t, i) => (
+            <div key={`${t.name}-${i}`} className="flex justify-between text-sm text-neutral-600">
+              <span className="min-w-0 pr-2">{t.taxType === "PERCENTAGE" ? `${t.name} (${t.rate}%)` : t.name}</span>
+              <span className="shrink-0 tabular-nums font-medium text-neutral-800">{fmt(t.amountInCents)}</span>
+            </div>
+          ))}
+          <div className="flex justify-between text-sm font-bold text-neutral-900 pt-1 border-t border-neutral-100">
+            <span>Total</span><span className="tabular-nums">{fmt(grandTotal)}</span>
           </div>
           <button
             type="button"
@@ -575,12 +607,19 @@ function MobileCartSheet({
    ═══════════════════════════════════════════ */
 
 function CheckoutModal({
-  open, cfg, lines, subtotal, groupMap, onClose, onSubmit, submitting, submitError,
+  open, cfg, lines, subtotal, taxBreakdown, grandTotal, groupMap, onClose, onSubmit, submitting, submitError,
 }: {
-  open: boolean; cfg: PublicConfig; lines: CartLine[]; subtotal: number;
-  groupMap: Map<string, ModifierGroup>; onClose: () => void;
+  open: boolean;
+  cfg: PublicConfig;
+  lines: CartLine[];
+  subtotal: number;
+  taxBreakdown: OnlineOrderTaxBreakdownEntry[];
+  grandTotal: number;
+  groupMap: Map<string, ModifierGroup>;
+  onClose: () => void;
   onSubmit: (data: { customerName: string; customerPhone: string; customerEmail: string; paymentChoice: "PAY_AT_STORE" | "PAY_ONLINE_HPP" }) => void;
-  submitting: boolean; submitError: string | null;
+  submitting: boolean;
+  submitError: string | null;
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -609,8 +648,17 @@ function CheckoutModal({
                     </div>
                   </div>
               ))}
-              <div className="flex justify-between text-sm font-bold pt-2 border-t border-neutral-100">
-                <span>Total</span><span className="tabular-nums">{fmt(subtotal)}</span>
+              <div className="flex justify-between text-sm text-neutral-600 pt-2">
+                <span>Subtotal</span><span className="tabular-nums font-medium text-neutral-800">{fmt(subtotal)}</span>
+              </div>
+              {taxBreakdown.map((t, i) => (
+                <div key={`${t.name}-${i}`} className="flex justify-between text-sm text-neutral-600">
+                  <span className="min-w-0 pr-2">{t.taxType === "PERCENTAGE" ? `${t.name} (${t.rate}%)` : t.name}</span>
+                  <span className="shrink-0 tabular-nums font-medium text-neutral-800">{fmt(t.amountInCents)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between text-sm font-bold pt-2 border-t border-neutral-100 text-neutral-900">
+                <span>Total</span><span className="tabular-nums">{fmt(grandTotal)}</span>
               </div>
             </div>
           </div>
@@ -648,7 +696,7 @@ function CheckoutModal({
             onClick={() => onSubmit({ customerName: name, customerPhone: phone, customerEmail: email, paymentChoice: pay })}
             className={`w-full h-14 rounded-2xl ${O.primary} ${O.primaryHover} text-white font-semibold text-base disabled:bg-neutral-300 disabled:text-neutral-500 active:scale-[0.98] transition-all`}
           >
-            {submitting ? "Placing order\u2026" : `Place order \u00B7 ${fmt(subtotal)}`}
+            {submitting ? "Placing order\u2026" : `Place order \u00B7 ${fmt(grandTotal)}`}
           </button>
         </div>
       </div>
@@ -989,7 +1037,13 @@ function PublicOrderPageInner() {
 
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
   const [storefront, setStorefront] = useState<PublicStorefront | null>(null);
-  const [menu, setMenu] = useState<{ categories: MenuCategory[]; items: MenuItem[]; modifierGroups: ModifierGroup[]; bestSellerItemIds?: string[] } | null>(null);
+  const [menu, setMenu] = useState<{
+    categories: MenuCategory[];
+    items: MenuItem[];
+    modifierGroups: ModifierGroup[];
+    taxes: OnlineTaxRule[];
+    bestSellerItemIds?: string[];
+  } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [menuLoading, setMenuLoading] = useState(false);
 
@@ -1024,11 +1078,45 @@ function PublicOrderPageInner() {
     setMenuLoading(true);
     try {
       const res = await fetch("/api/online-ordering/menu", { cache: "no-store" });
-      const data = (await res.json()) as { categories?: MenuCategory[]; items?: MenuItem[]; modifierGroups?: ModifierGroup[]; bestSellerItemIds?: string[]; error?: string };
+      const data = (await res.json()) as {
+        categories?: MenuCategory[];
+        items?: MenuItem[];
+        modifierGroups?: ModifierGroup[];
+        taxes?: OnlineTaxRule[];
+        bestSellerItemIds?: string[];
+        error?: string;
+      };
       if (!res.ok) { setMenu(null); setLoadError(data.error || "Menu unavailable."); return; }
       const rawItems = Array.isArray(data.items) ? data.items : [];
-      const items: MenuItem[] = rawItems.map((it) => ({ ...it, modifierGroupIds: Array.isArray(it.modifierGroupIds) ? it.modifierGroupIds.filter((x): x is string => typeof x === "string" && x.length > 0) : [] }));
-      setMenu({ categories: Array.isArray(data.categories) ? data.categories : [], items, modifierGroups: Array.isArray(data.modifierGroups) ? data.modifierGroups : [], bestSellerItemIds: Array.isArray(data.bestSellerItemIds) ? data.bestSellerItemIds : [] });
+      const items: MenuItem[] = rawItems.map((it) => ({
+        ...it,
+        modifierGroupIds: Array.isArray(it.modifierGroupIds)
+          ? it.modifierGroupIds.filter((x): x is string => typeof x === "string" && x.length > 0)
+          : [],
+        taxIds: Array.isArray(it.taxIds)
+          ? it.taxIds.filter((x): x is string => typeof x === "string" && x.length > 0)
+          : [],
+      }));
+      const taxes: OnlineTaxRule[] = Array.isArray(data.taxes)
+        ? data.taxes.filter(
+            (r): r is OnlineTaxRule =>
+              r != null &&
+              typeof r === "object" &&
+              typeof (r as OnlineTaxRule).id === "string" &&
+              typeof (r as OnlineTaxRule).name === "string" &&
+              typeof (r as OnlineTaxRule).type === "string" &&
+              typeof (r as OnlineTaxRule).amount === "number" &&
+              typeof (r as OnlineTaxRule).enabled === "boolean" &&
+              typeof (r as OnlineTaxRule).enabledOnline === "boolean"
+          )
+        : [];
+      setMenu({
+        categories: Array.isArray(data.categories) ? data.categories : [],
+        items,
+        modifierGroups: Array.isArray(data.modifierGroups) ? data.modifierGroups : [],
+        taxes,
+        bestSellerItemIds: Array.isArray(data.bestSellerItemIds) ? data.bestSellerItemIds : [],
+      });
       setLoadError(null);
     } finally { setMenuLoading(false); }
   }, []);
@@ -1061,6 +1149,22 @@ function PublicOrderPageInner() {
   }, [cartRows, menu]);
 
   const subtotalCents = useMemo(() => cartLines.reduce((s, l) => s + unitPriceCentsForLine(l.item, l.selections, groupMap) * l.quantity, 0), [cartLines, groupMap]);
+  const orderTax = useMemo(
+    () =>
+      computeOnlineOrderTax({
+        taxes: menu?.taxes ?? [],
+        lines: cartLines.map((l) => ({
+          lineKey: l.lineId,
+          lineTotalInCents: unitPriceCentsForLine(l.item, l.selections, groupMap) * l.quantity,
+          taxMode: "INHERIT",
+          taxIds: l.item.taxIds ?? [],
+        })),
+        discountInCents: 0,
+        forOnlineOrdering: true,
+      }),
+    [menu?.taxes, cartLines, groupMap]
+  );
+  const grandTotalCents = orderTax.grandTotalInCents;
   const cartCount = useMemo(() => cartLines.reduce((s, l) => s + l.quantity, 0), [cartLines]);
 
   const simpleQtyByItemId = useMemo(() => {
@@ -1301,7 +1405,16 @@ function PublicOrderPageInner() {
           {/* RIGHT: cart sidebar (desktop) */}
           <aside className="hidden lg:block w-[340px] shrink-0">
             <div className="sticky top-[120px]">
-              <CartSidebar lines={cartLines} subtotal={subtotalCents} groupMap={groupMap} onAdd={incLine} onDec={decLine} onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }} />
+              <CartSidebar
+                lines={cartLines}
+                subtotal={subtotalCents}
+                taxBreakdown={orderTax.taxBreakdown}
+                grandTotal={grandTotalCents}
+                groupMap={groupMap}
+                onAdd={incLine}
+                onDec={decLine}
+                onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}
+              />
             </div>
           </aside>
         </div>
@@ -1320,11 +1433,34 @@ function PublicOrderPageInner() {
       </footer>
 
       {/* Mobile bottom bar + sheet */}
-      <MobileCartBar count={cartCount} subtotal={subtotalCents} onOpen={() => setMobileCartOpen(true)} />
-      <MobileCartSheet open={mobileCartOpen} lines={cartLines} subtotal={subtotalCents} groupMap={groupMap} onClose={() => setMobileCartOpen(false)} onAdd={incLine} onDec={decLine} onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }} />
+      <MobileCartBar count={cartCount} grandTotal={grandTotalCents} onOpen={() => setMobileCartOpen(true)} />
+      <MobileCartSheet
+        open={mobileCartOpen}
+        lines={cartLines}
+        subtotal={subtotalCents}
+        taxBreakdown={orderTax.taxBreakdown}
+        grandTotal={grandTotalCents}
+        groupMap={groupMap}
+        onClose={() => setMobileCartOpen(false)}
+        onAdd={incLine}
+        onDec={decLine}
+        onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}
+      />
 
       {/* Checkout modal */}
-      <CheckoutModal open={checkoutOpen} cfg={cfg} lines={cartLines} subtotal={subtotalCents} groupMap={groupMap} onClose={() => setCheckoutOpen(false)} onSubmit={(d) => void submitOrder(d)} submitting={submitting} submitError={submitError} />
+      <CheckoutModal
+        open={checkoutOpen}
+        cfg={cfg}
+        lines={cartLines}
+        subtotal={subtotalCents}
+        taxBreakdown={orderTax.taxBreakdown}
+        grandTotal={grandTotalCents}
+        groupMap={groupMap}
+        onClose={() => setCheckoutOpen(false)}
+        onSubmit={(d) => void submitOrder(d)}
+        submitting={submitting}
+        submitError={submitError}
+      />
 
       <CustomizeSheet
         open={customizeItemId != null && customizeItem != null && customizeItem.modifierGroupIds.length > 0}

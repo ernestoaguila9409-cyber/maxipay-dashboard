@@ -357,3 +357,135 @@ export function isStoreCurrentlyOpen(s: OnlineOrderingSettings, now: Date = new 
   if (!s.businessHoursEnforced) return true;
   return isWithinWeeklyBusinessHours(s, now);
 }
+
+/** One tax rule from Firestore `Taxes` (mirrors Android `OrderEngine` fields). */
+export interface OnlineTaxRule {
+  id: string;
+  name: string;
+  type: string;
+  amount: number;
+  /** Firestore `enabled` — main POS / app toggle. */
+  enabled: boolean;
+  /** Firestore `enabledOnline` — online ordering toggle. */
+  enabledOnline: boolean;
+}
+
+export interface OnlineOrderTaxLineInput {
+  lineKey: string;
+  lineTotalInCents: number;
+  taxMode: string;
+  taxIds: readonly string[];
+}
+
+export interface OnlineOrderTaxBreakdownEntry {
+  name: string;
+  rate: number;
+  taxType: string;
+  amountInCents: number;
+}
+
+export interface ComputeOnlineOrderTaxResult {
+  discountedSubtotalInCents: number;
+  taxTotalCents: number;
+  grandTotalInCents: number;
+  taxBreakdown: OnlineOrderTaxBreakdownEntry[];
+  perItemTaxCents: Record<string, number>;
+  perItemTaxBreakdown: Record<string, OnlineOrderTaxBreakdownEntry[]>;
+}
+
+/**
+ * Matches Android `OrderEngine.recomputeOrderTotals` tax math for storefront + online order creation.
+ * When [forOnlineOrdering] is true, a tax applies if `enabled || enabledOnline`; otherwise only `enabled`.
+ */
+export function computeOnlineOrderTax(args: {
+  taxes: readonly OnlineTaxRule[];
+  lines: readonly OnlineOrderTaxLineInput[];
+  discountInCents: number;
+  forOnlineOrdering: boolean;
+}): ComputeOnlineOrderTaxResult {
+  const { taxes, lines, discountInCents, forOnlineOrdering } = args;
+  const subtotalInCents = lines.reduce((s, l) => s + l.lineTotalInCents, 0);
+  const discountedSubtotalInCents = Math.max(0, subtotalInCents - discountInCents);
+
+  const taxBreakdown: OnlineOrderTaxBreakdownEntry[] = [];
+  const perItemTaxCents: Record<string, number> = {};
+  const perItemTaxBreakdown: Record<string, OnlineOrderTaxBreakdownEntry[]> = {};
+  for (const l of lines) {
+    perItemTaxCents[l.lineKey] = 0;
+    perItemTaxBreakdown[l.lineKey] = [];
+  }
+
+  let taxTotalCents = 0;
+
+  for (const rule of taxes) {
+    const taxActiveForOrder = forOnlineOrdering
+      ? rule.enabled === true || rule.enabledOnline === true
+      : rule.enabled === true;
+
+    let taxableBaseCents = 0;
+    const taxableItems: { lineKey: string; effectiveLineCents: number }[] = [];
+
+    for (const li of lines) {
+      const effectiveLineCents =
+        subtotalInCents > 0
+          ? Math.trunc((li.lineTotalInCents / subtotalInCents) * discountedSubtotalInCents)
+          : 0;
+
+      const isTaxable =
+        li.taxMode === "FORCE_APPLY" ? li.taxIds.includes(rule.id) : taxActiveForOrder;
+
+      if (isTaxable) {
+        taxableBaseCents += effectiveLineCents;
+        taxableItems.push({ lineKey: li.lineKey, effectiveLineCents });
+      }
+    }
+
+    if (taxableBaseCents <= 0) continue;
+
+    const type = rule.type;
+    const amount = rule.amount;
+    const taxCents =
+      type === "PERCENTAGE"
+        ? Math.trunc((taxableBaseCents * amount) / 100)
+        : Math.trunc(amount * 100);
+
+    if (taxCents <= 0) continue;
+
+    taxTotalCents += taxCents;
+    taxBreakdown.push({
+      name: rule.name,
+      rate: amount,
+      taxType: type,
+      amountInCents: taxCents,
+    });
+
+    if (taxableItems.length > 0) {
+      let distributed = 0;
+      for (let idx = 0; idx < taxableItems.length; idx++) {
+        const { lineKey, effectiveLineCents } = taxableItems[idx]!;
+        const share =
+          idx === taxableItems.length - 1
+            ? taxCents - distributed
+            : Math.round((taxCents * effectiveLineCents) / taxableBaseCents);
+        perItemTaxCents[lineKey] = (perItemTaxCents[lineKey] ?? 0) + share;
+        perItemTaxBreakdown[lineKey]!.push({
+          name: rule.name,
+          rate: amount,
+          taxType: type,
+          amountInCents: share,
+        });
+        distributed += share;
+      }
+    }
+  }
+
+  const grandTotalInCents = discountedSubtotalInCents + taxTotalCents;
+  return {
+    discountedSubtotalInCents,
+    taxTotalCents,
+    grandTotalInCents,
+    taxBreakdown,
+    perItemTaxCents,
+    perItemTaxBreakdown,
+  };
+}
