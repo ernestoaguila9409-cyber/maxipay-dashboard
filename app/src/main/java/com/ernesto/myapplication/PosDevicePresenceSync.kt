@@ -4,7 +4,6 @@ import android.app.Application
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
@@ -13,7 +12,6 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
-import com.google.firebase.installations.FirebaseInstallations
 
 /**
  * Writes a periodic heartbeat to Firestore [COLLECTION] while the POS app is in the foreground,
@@ -43,7 +41,7 @@ object PosDevicePresenceSync {
         if (app != null) return
         app = application
 
-        resolveDocId(application) { id ->
+        PosDeviceIdentity.resolveInstallationDocId(application) { id ->
             resolvedDocId = id
             if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                 scheduleHeartbeat()
@@ -72,31 +70,6 @@ object PosDevicePresenceSync {
         resolvedDocId = null
         app = null
     }
-
-    private fun resolveDocId(application: Application, onReady: (String) -> Unit) {
-        FirebaseInstallations.getInstance().id
-            .addOnSuccessListener { fid ->
-                if (fid.isNotBlank()) onReady(sanitizeDocId(fid))
-                else onReady(fallbackDocId(application))
-            }
-            .addOnFailureListener { e ->
-                Log.w(TAG, "Installations id failed: ${e.message}")
-                onReady(fallbackDocId(application))
-            }
-    }
-
-    private fun fallbackDocId(application: Application): String {
-        val androidId = try {
-            Settings.Secure.getString(application.contentResolver, Settings.Secure.ANDROID_ID)
-        } catch (_: Exception) {
-            null
-        }
-        val raw = androidId?.trim()?.takeIf { it.isNotEmpty() && it != "9774d56d682e549c" }
-        return sanitizeDocId("android_${raw ?: Build.FINGERPRINT.hashCode()}")
-    }
-
-    private fun sanitizeDocId(raw: String): String =
-        raw.replace(Regex("[/#.\\[\\]]"), "_").take(700).ifBlank { "device_unknown" }
 
     private fun scheduleHeartbeat() {
         cancelHeartbeat()

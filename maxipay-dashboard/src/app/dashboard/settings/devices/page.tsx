@@ -1,15 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { collection, onSnapshot } from "firebase/firestore";
+import { useCallback, useEffect, useState } from "react";
+import {
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+  Timestamp,
+} from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import {
   POS_DEVICES_COLLECTION,
   POS_DEVICE_ONLINE_THRESHOLD_MS,
+  DEVICE_ACTIVATIONS_COLLECTION,
+  DEVICE_ACTIVATION_TTL_MS,
 } from "@/lib/posDevicesFirestore";
-import { Smartphone, Circle } from "lucide-react";
+import { Smartphone, Circle, Plus, Copy, X, Loader2 } from "lucide-react";
 
 type LiveStatus = "online" | "offline";
 
@@ -20,6 +30,7 @@ interface PosDeviceRow {
   osVersion: string;
   appVersion: string;
   lastSeen: Date | null;
+  enrolled: boolean;
 }
 
 function parseFirestoreDate(value: unknown): Date | null {
@@ -51,6 +62,8 @@ function formatLastSeenAgo(lastSeen: Date | null, nowMs: number): string {
 }
 
 function parseDevice(id: string, data: Record<string, unknown>): PosDeviceRow {
+  const activatedAt = parseFirestoreDate(data.activatedAt);
+  const enrolledFlag = data.enrolledFromDashboard === true;
   return {
     id,
     platform: String(data.platform ?? "").trim() || "—",
@@ -58,7 +71,36 @@ function parseDevice(id: string, data: Record<string, unknown>): PosDeviceRow {
     osVersion: String(data.osVersion ?? "").trim() || "—",
     appVersion: String(data.appVersion ?? "").trim() || "—",
     lastSeen: parseFirestoreDate(data.lastSeen),
+    enrolled: enrolledFlag || activatedAt != null,
   };
+}
+
+async function createDeviceActivationCode(): Promise<{ code: string; expiresAtMs: number }> {
+  const ttl = DEVICE_ACTIVATION_TTL_MS;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const code = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
+    const ref = doc(db, DEVICE_ACTIVATIONS_COLLECTION, code);
+    const existing = await getDoc(ref);
+    if (existing.exists()) continue;
+    const expiresAtMs = Date.now() + ttl;
+    await setDoc(ref, {
+      code,
+      createdAt: serverTimestamp(),
+      expiresAt: Timestamp.fromMillis(expiresAtMs),
+      consumed: false,
+    });
+    return { code, expiresAtMs };
+  }
+  throw new Error("Could not generate a unique code. Try again.");
+}
+
+function formatCountdown(msRemaining: number): string {
+  if (msRemaining <= 0) return "Expired";
+  const sec = Math.ceil(msRemaining / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m <= 0) return `${s}s`;
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
 export default function PosDevicesSettingsPage() {
@@ -68,10 +110,25 @@ export default function PosDevicesSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalCode, setModalCode] = useState<string | null>(null);
+  const [modalExpiresAtMs, setModalExpiresAtMs] = useState<number | null>(null);
+  const [creatingCode, setCreatingCode] = useState(false);
+  const [copyDone, setCopyDone] = useState(false);
+
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 5_000);
     return () => clearInterval(t);
   }, []);
+
+  const modalRemainingMs =
+    modalExpiresAtMs != null ? modalExpiresAtMs - nowMs : 0;
+
+  useEffect(() => {
+    if (!modalOpen || modalExpiresAtMs == null) return;
+    const t = setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => clearInterval(t);
+  }, [modalOpen, modalExpiresAtMs]);
 
   useEffect(() => {
     if (authLoading || !user) {
@@ -103,6 +160,41 @@ export default function PosDevicesSettingsPage() {
     return () => unsub();
   }, [user, authLoading]);
 
+  const handleAddDevice = useCallback(async () => {
+    setCreatingCode(true);
+    setError(null);
+    setCopyDone(false);
+    try {
+      const { code, expiresAtMs } = await createDeviceActivationCode();
+      setModalCode(code);
+      setModalExpiresAtMs(expiresAtMs);
+      setModalOpen(true);
+    } catch (e) {
+      console.error(e);
+      setError(e instanceof Error ? e.message : "Could not create activation code");
+    } finally {
+      setCreatingCode(false);
+    }
+  }, []);
+
+  const copyCode = useCallback(async () => {
+    if (!modalCode) return;
+    try {
+      await navigator.clipboard.writeText(modalCode);
+      setCopyDone(true);
+      setTimeout(() => setCopyDone(false), 2000);
+    } catch {
+      setError("Could not copy to clipboard");
+    }
+  }, [modalCode]);
+
+  const closeModal = useCallback(() => {
+    setModalOpen(false);
+    setModalCode(null);
+    setModalExpiresAtMs(null);
+    setCopyDone(false);
+  }, []);
+
   const onlineCount = devices.filter((d) => getLiveStatus(d.lastSeen, nowMs) === "online").length;
 
   return (
@@ -110,24 +202,39 @@ export default function PosDevicesSettingsPage() {
       <Header title="Devices" />
       <div className="p-6 space-y-6 max-w-5xl">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-          <div className="flex items-start gap-4">
-            <div className="p-3 rounded-xl bg-slate-50">
-              <Smartphone size={24} className="text-slate-600" />
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="p-3 rounded-xl bg-slate-50">
+                <Smartphone size={24} className="text-slate-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-800">POS devices</h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  Tablets and phones running the POS app send a heartbeat while the app is open in the
+                  foreground. A device shows <span className="font-medium text-slate-700">Online</span>{" "}
+                  when the last heartbeat was within{" "}
+                  {Math.round(POS_DEVICE_ONLINE_THRESHOLD_MS / 60_000)} minutes.
+                </p>
+                <p className="text-sm text-slate-600 mt-3">
+                  <span className="font-semibold text-emerald-600">{onlineCount}</span> online
+                  <span className="text-slate-400 mx-2">·</span>
+                  <span className="font-semibold text-slate-700">{devices.length}</span> total seen
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800">POS devices</h2>
-              <p className="text-sm text-slate-500 mt-1">
-                Tablets and phones running the POS app send a heartbeat while the app is open in the
-                foreground. A device shows <span className="font-medium text-slate-700">Online</span>{" "}
-                when the last heartbeat was within{" "}
-                {Math.round(POS_DEVICE_ONLINE_THRESHOLD_MS / 60_000)} minutes.
-              </p>
-              <p className="text-sm text-slate-600 mt-3">
-                <span className="font-semibold text-emerald-600">{onlineCount}</span> online
-                <span className="text-slate-400 mx-2">·</span>
-                <span className="font-semibold text-slate-700">{devices.length}</span> total seen
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={handleAddDevice}
+              disabled={creatingCode || authLoading || !user}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 text-white px-4 py-2.5 text-sm font-semibold shadow-sm hover:bg-blue-700 disabled:opacity-50 disabled:pointer-events-none shrink-0"
+            >
+              {creatingCode ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <Plus size={18} />
+              )}
+              Add device
+            </button>
           </div>
         </div>
 
@@ -143,7 +250,8 @@ export default function PosDevicesSettingsPage() {
           ) : devices.length === 0 ? (
             <div className="p-10 text-center text-slate-500 text-sm">
               No devices have reported in yet. Open the POS app on a terminal (and sign in) with this
-              project — devices appear here automatically.
+              project — devices appear here automatically. Use <strong>Add device</strong> to link a
+              terminal with a one-time code (Configuration → Link device on the POS).
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -152,6 +260,7 @@ export default function PosDevicesSettingsPage() {
                   <tr className="border-b border-slate-100 bg-slate-50/80">
                     <th className="px-4 py-3 font-semibold text-slate-600">Status</th>
                     <th className="px-4 py-3 font-semibold text-slate-600">Device</th>
+                    <th className="px-4 py-3 font-semibold text-slate-600">Enrolled</th>
                     <th className="px-4 py-3 font-semibold text-slate-600">OS</th>
                     <th className="px-4 py-3 font-semibold text-slate-600">App</th>
                     <th className="px-4 py-3 font-semibold text-slate-600">Last seen</th>
@@ -188,6 +297,13 @@ export default function PosDevicesSettingsPage() {
                               : d.id}
                           </div>
                         </td>
+                        <td className="px-4 py-3.5">
+                          {d.enrolled ? (
+                            <span className="text-emerald-700 font-medium">Yes</span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3.5 text-slate-600">{d.osVersion}</td>
                         <td className="px-4 py-3.5 text-slate-600">{d.appVersion}</td>
                         <td className="px-4 py-3.5 text-slate-600">{ago}</td>
@@ -200,6 +316,67 @@ export default function PosDevicesSettingsPage() {
           )}
         </div>
       </div>
+
+      {modalOpen && modalCode && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="activation-code-title"
+        >
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 relative">
+            <button
+              type="button"
+              onClick={closeModal}
+              className="absolute top-4 right-4 p-1 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              aria-label="Close"
+            >
+              <X size={20} />
+            </button>
+            <h3 id="activation-code-title" className="text-lg font-semibold text-slate-800 pr-8">
+              Activation code
+            </h3>
+            <p className="text-sm text-slate-500 mt-2">
+              On the POS: <span className="font-medium text-slate-700">Configuration</span> →{" "}
+              <span className="font-medium text-slate-700">Link device (activation code)</span>, then
+              enter this code. Single use; expires in {Math.round(DEVICE_ACTIVATION_TTL_MS / 60_000)}{" "}
+              minutes.
+            </p>
+            <div className="mt-6 flex items-center justify-center gap-3 flex-wrap">
+              <span
+                className="text-4xl font-mono font-bold tracking-[0.25em] text-slate-900 bg-slate-50 px-6 py-4 rounded-xl border border-slate-200"
+                data-testid="activation-code-display"
+              >
+                {modalCode}
+              </span>
+            </div>
+            <p className="text-center text-sm text-slate-500 mt-3">
+              {modalRemainingMs > 0 ? (
+                <>Expires in {formatCountdown(modalRemainingMs)}</>
+              ) : (
+                <span className="text-amber-700 font-medium">This code has expired — generate a new one.</span>
+              )}
+            </p>
+            <div className="mt-6 flex gap-2">
+              <button
+                type="button"
+                onClick={copyCode}
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Copy size={16} />
+                {copyDone ? "Copied!" : "Copy code"}
+              </button>
+              <button
+                type="button"
+                onClick={closeModal}
+                className="flex-1 rounded-xl bg-blue-600 text-white px-4 py-2.5 text-sm font-semibold hover:bg-blue-700"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

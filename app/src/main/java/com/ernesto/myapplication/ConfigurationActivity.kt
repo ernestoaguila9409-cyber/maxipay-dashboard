@@ -12,6 +12,10 @@ class ConfigurationActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "Configuration"
 
+        findViewById<android.view.View>(R.id.optionLinkDevice).setOnClickListener {
+            startActivity(Intent(this, DeviceActivationActivity::class.java))
+        }
+
         findViewById<android.view.View>(R.id.optionTaxesAndFees).setOnClickListener {
             startActivity(Intent(this, TaxesAndFeesActivity::class.java))
         }
