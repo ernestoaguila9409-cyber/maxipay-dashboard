@@ -40,6 +40,10 @@ object PrinterFirestoreSync {
             onComplete(null)
             return
         }
+        if (InternalKitchenPrinter.isInternalAddress(trimmed)) {
+            onComplete(null)
+            return
+        }
         val col = db.collection(COLLECTION)
         val primaryId = documentIdForLanIp(trimmed)
         if (!isValidLanDocId(primaryId)) {
@@ -75,6 +79,7 @@ object PrinterFirestoreSync {
     ) {
         val ip = display.ipAddress.trim()
         if (ip.isEmpty()) return
+        if (InternalKitchenPrinter.isInternalAddress(ip)) return
         val docId = documentIdForLanIp(ip)
         if (!isValidLanDocId(docId)) return
         val data = buildRegistrationData(type, display, ip, model, manufacturer, includeLabels, includeCommandSet)
@@ -169,6 +174,7 @@ object PrinterFirestoreSync {
     fun updateReachability(db: FirebaseFirestore, ip: String, online: Boolean, nowMs: Long) {
         val trimmed = ip.trim()
         if (trimmed.isEmpty()) return
+        if (InternalKitchenPrinter.isInternalAddress(trimmed)) return
         val docId = documentIdForLanIp(trimmed)
         if (!isValidLanDocId(docId)) return
         val data = mutableMapOf<String, Any>(

@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.text.InputType
 import android.util.TypedValue
+import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
@@ -23,8 +24,17 @@ object ReceiptEmailKeypadDialog {
 
     fun insertAtCaret(edit: EditText, token: String) {
         val ed = edit.text ?: return
-        var start = edit.selectionStart.coerceIn(0, ed.length)
-        var end = edit.selectionEnd.coerceIn(0, ed.length)
+        // After tapping keypad keys, selection is often -1 until the next layout pass; coercing
+        // to 0 made backspace a no-op and new text insert at the start. Treat invalid as caret-at-end.
+        var rawStart = edit.selectionStart
+        var rawEnd = edit.selectionEnd
+        if (rawStart < 0 || rawEnd < 0) {
+            val len = ed.length
+            rawStart = len
+            rawEnd = len
+        }
+        var start = rawStart.coerceIn(0, ed.length)
+        var end = rawEnd.coerceIn(0, ed.length)
         if (start > end) start = end.also { end = start }
 
         when (token) {
@@ -76,6 +86,7 @@ object ReceiptEmailKeypadDialog {
             KeypadVariant.GUEST_NAME -> PosQwertyKeypad.Variant.GUEST_NAME
         }
         val keys = PosQwertyKeypad.build(context, posVariant, onInsert)
+        stripKeypadFocus(keys)
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(ContextCompat.getColor(context, R.color.pos_keyboard_panel_bg))
@@ -86,6 +97,18 @@ object ReceiptEmailKeypadDialog {
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                 ),
             )
+            stripKeypadFocus(this)
+        }
+    }
+
+    /** Keypad keys must not take focus, or [EditText] selection becomes -1 and backspace fails. */
+    private fun stripKeypadFocus(v: View) {
+        v.isFocusable = false
+        v.isFocusableInTouchMode = false
+        if (v is ViewGroup) {
+            for (i in 0 until v.childCount) {
+                stripKeypadFocus(v.getChildAt(i))
+            }
         }
     }
 

@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.card.MaterialCardView
 import com.ernesto.myapplication.data.SaleWithRefunds
 import com.ernesto.myapplication.data.Transaction
 import com.ernesto.myapplication.data.TransactionPayment
@@ -64,6 +65,7 @@ class TransactionAdapter(
         bindTxnNumber(holder, sale)
         bindRefunds(holder, refunds)
         bindVoided(holder, sale)
+        bindTipAdjustedCard(holder, sale)
 
         holder.itemView.setOnClickListener { onTransactionClick(sale) }
     }
@@ -152,6 +154,9 @@ class TransactionAdapter(
         val parts = mutableListOf<String>()
         if (sale.orderNumber > 0L) parts.add("Order #${sale.orderNumber}")
         if (sale.appTransactionNumber > 0L) parts.add("Txn #${sale.appTransactionNumber}")
+        if (sale.tipAdjusted && !sale.voided && tipAdjustableCardSale(sale)) {
+            parts.add("Tip finalized")
+        }
 
         if (parts.isNotEmpty()) {
             holder.txtOrderNumber.text = parts.joinToString(" \u2022 ")
@@ -219,6 +224,28 @@ class TransactionAdapter(
             holder.txtVoidedBy.visibility = View.GONE
             holder.itemView.alpha = 1.0f
             holder.txtAmount.paintFlags = holder.txtAmount.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
+        }
+    }
+
+    /** Credit/debit sales that use post-auth tip adjustment (same idea as [TipAdjustmentActivity]). */
+    private fun tipAdjustableCardSale(sale: Transaction): Boolean {
+        if (sale.type != "SALE" && sale.type != "CAPTURE") return false
+        val pays = sale.payments
+        if (pays.isEmpty()) {
+            return sale.paymentType.equals("Credit", true) || sale.paymentType.equals("Debit", true)
+        }
+        return pays.any {
+            it.paymentType.equals("Credit", true) || it.paymentType.equals("Debit", true)
+        }
+    }
+
+    private fun bindTipAdjustedCard(holder: VH, sale: Transaction) {
+        val card = holder.itemView as? MaterialCardView ?: return
+        when {
+            sale.voided -> card.setCardBackgroundColor(Color.WHITE)
+            sale.tipAdjusted && tipAdjustableCardSale(sale) ->
+                card.setCardBackgroundColor(Color.parseColor("#ECEFF1"))
+            else -> card.setCardBackgroundColor(Color.WHITE)
         }
     }
 

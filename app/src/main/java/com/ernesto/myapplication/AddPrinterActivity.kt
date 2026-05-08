@@ -6,10 +6,16 @@ import android.content.Intent
 import android.os.Bundle
 import android.text.InputType
 import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -33,6 +39,7 @@ class AddPrinterActivity : AppCompatActivity() {
     private lateinit var txtEmpty: TextView
     private lateinit var recyclerDiscovered: RecyclerView
     private lateinit var btnAddManually: MaterialButton
+    private lateinit var btnAddInternalKitchen: MaterialButton
 
     private val adapter by lazy {
         DiscoveredIpAdapter(this) { printer -> showNameDialogAndSave(printer) }
@@ -58,11 +65,14 @@ class AddPrinterActivity : AppCompatActivity() {
         txtEmpty = findViewById(R.id.txtEmpty)
         recyclerDiscovered = findViewById(R.id.recyclerDiscovered)
         btnAddManually = findViewById(R.id.btnAddManually)
+        btnAddInternalKitchen = findViewById(R.id.btnAddInternalKitchen)
 
         recyclerDiscovered.layoutManager = LinearLayoutManager(this)
         recyclerDiscovered.adapter = adapter
 
         btnAddManually.setOnClickListener { showManualIpDialog() }
+        btnAddInternalKitchen.setOnClickListener { showInternalKitchenNameDialog() }
+        updateInternalKitchenButtonVisibility()
 
         lifecycleScope.launch {
             ThermalPrinterScanner.clearCache()
@@ -72,6 +82,52 @@ class AddPrinterActivity : AppCompatActivity() {
                 emptyList()
             }
             showResults(filterOutAlreadyConfiguredPrinters(found))
+        }
+    }
+
+    private fun hasInternalKitchenSaved(): Boolean =
+        SelectedPrinterPrefs.getAll(this, PrinterDeviceType.KITCHEN)
+            .any { InternalKitchenPrinter.isInternalAddress(it.ipAddress) }
+
+    private fun updateInternalKitchenButtonVisibility() {
+        if (printerType != PrinterDeviceType.KITCHEN) {
+            btnAddInternalKitchen.visibility = View.GONE
+            return
+        }
+        if (hasInternalKitchenSaved() || !InternalKitchenPrinter.isBluetoothPathAvailable()) {
+            btnAddInternalKitchen.visibility = View.GONE
+            return
+        }
+        btnAddInternalKitchen.visibility = View.VISIBLE
+    }
+
+    private fun showInternalKitchenNameDialog() {
+        showPrinterNameKeypadDialog(
+            title = getString(R.string.internal_kitchen_printer_dialog_title),
+            message = null,
+            initialName = InternalKitchenPrinter.defaultDisplayName(this),
+        ) { name -> persistInternalKitchenPrinter(name) }
+    }
+
+    private fun persistInternalKitchenPrinter(name: String) {
+        lifecycleScope.launch {
+            try {
+                SelectedPrinterPrefs.add(
+                    this@AddPrinterActivity,
+                    PrinterDeviceType.KITCHEN,
+                    name = name,
+                    ipAddress = InternalKitchenPrinter.ADDRESS_KEY,
+                    modelLine = InternalKitchenPrinter.modelLine(this@AddPrinterActivity),
+                )
+                Toast.makeText(this@AddPrinterActivity, R.string.printer_saved, Toast.LENGTH_SHORT).show()
+                finish()
+            } catch (e: Exception) {
+                Toast.makeText(
+                    this@AddPrinterActivity,
+                    getString(R.string.printer_save_failed, e.message ?: ""),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
         }
     }
 
@@ -93,6 +149,7 @@ class AddPrinterActivity : AppCompatActivity() {
     }
 
     private fun showResults(found: List<DetectedPrinter>) {
+        updateInternalKitchenButtonVisibility()
         txtScanning.visibility = View.GONE
         progressScan.visibility = View.GONE
         txtResultsHeader.visibility = View.VISIBLE
@@ -154,21 +211,6 @@ class AddPrinterActivity : AppCompatActivity() {
     }
 
     private fun showNameDialogAndSave(printer: DetectedPrinter) {
-        val density = resources.displayMetrics.density
-        val padH = (24 * density).toInt()
-        val padV = (8 * density).toInt()
-
-        val til = TextInputLayout(this).apply {
-            setPadding(padH, padV, padH, 0)
-            boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
-            hint = getString(R.string.printer_name)
-        }
-        val edit = TextInputEditText(til.context).apply {
-            setText(defaultPrinterName(printer))
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
-        }
-        til.addView(edit)
-
         val infoLine = buildString {
             append(getString(R.string.save_printer_ip_message, printer.ipAddress))
             if (!printer.model.isNullOrBlank() || !printer.manufacturer.isNullOrBlank()) {
@@ -176,24 +218,86 @@ class AddPrinterActivity : AppCompatActivity() {
                 append(printer.displayLabel)
             }
         }
+        showPrinterNameKeypadDialog(
+            title = getString(R.string.save_printer),
+            message = infoLine,
+            initialName = defaultPrinterName(printer),
+        ) { name -> persistPrinter(name, printer) }
+    }
 
-        val dialog = MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.save_printer)
-            .setMessage(infoLine)
-            .setView(til)
+    private fun showPrinterNameKeypadDialog(
+        title: String,
+        message: String? = null,
+        initialName: String,
+        onSave: (String) -> Unit,
+    ) {
+        val dp = { v: Float ->
+            (v * resources.displayMetrics.density).toInt()
+        }
+
+        val buffer = StringBuilder(initialName)
+
+        val display = TextView(this).apply {
+            text = buffer.toString()
+            hint = getString(R.string.printer_name)
+            textSize = 17f
+            setPadding(dp(14f), dp(14f), dp(14f), dp(10f))
+            setBackgroundResource(android.R.drawable.edit_text)
+            minHeight = dp(48f)
+        }
+
+        val keypad = ReceiptEmailKeypadDialog.buildKeypadView(
+            this,
+            ReceiptEmailKeypadDialog.KeypadVariant.GUEST_NAME,
+        ) { token ->
+            when (token) {
+                "⌫" -> if (buffer.isNotEmpty()) buffer.deleteCharAt(buffer.length - 1)
+                "SPACE" -> buffer.append(' ')
+                else -> buffer.append(token)
+            }
+            display.text = buffer.toString()
+        }
+
+        val inner = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20f), dp(4f), dp(20f), dp(4f))
+            addView(display, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ))
+            addView(keypad, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(10f) })
+        }
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            addView(inner, ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ))
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .apply { if (!message.isNullOrBlank()) setMessage(message) }
+            .setView(scroll)
             .setPositiveButton(R.string.save, null)
             .setNegativeButton(android.R.string.cancel, null)
             .create()
 
         dialog.setOnShowListener {
-            dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener {
-                val name = edit.text?.toString()?.trim().orEmpty()
+            dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
+
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = buffer.toString().trim()
                 if (name.isEmpty()) {
                     Toast.makeText(this, R.string.printer_name_required, Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
                 dialog.dismiss()
-                persistPrinter(name, printer)
+                onSave(name)
             }
         }
         dialog.show()

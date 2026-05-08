@@ -115,6 +115,12 @@
     <string name="printer_detail_label_duplicate">That label is already on this printer.</string>
     <string name="kitchen_print_failed">Kitchen printer %1$s: %2$s</string>
 
+    <string name="internal_kitchen_printer_button">Inner printer</string>
+    <string name="internal_kitchen_printer_dialog_title">Inner printer</string>
+    <string name="internal_kitchen_printer_default_name">Inner printer</string>
+    <string name="internal_kitchen_printer_model_line">Built-in thermal · Bluetooth</string>
+    <string name="printer_connection_internal">This device — built-in printer (Bluetooth)</string>
+
     <string name="menu_item_printer_label">Printer label</string>
     <string name="menu_item_printer_label_none">None</string>
     <string name="menu_item_printer_label_hint">Choose a label that matches a kitchen printer. None = do not print to kitchen.</string>

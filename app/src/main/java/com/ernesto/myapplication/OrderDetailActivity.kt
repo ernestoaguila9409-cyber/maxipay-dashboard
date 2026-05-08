@@ -67,6 +67,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private lateinit var recycler: RecyclerView
     private lateinit var txtEmptyItems: TextView
     private lateinit var btnCheckout: MaterialButton
+    private lateinit var btnUpdateOnlineOrder: MaterialButton
     private lateinit var bottomActions: View
     private lateinit var btnVoid: MaterialButton
     private lateinit var btnRefund: MaterialButton
@@ -152,6 +153,23 @@ class OrderDetailActivity : AppCompatActivity() {
             }
         }
 
+    private var orderDetailCheckoutInProgress = false
+    /** Only [finish] after payment when we actually launched tip/payment from this screen (avoids stray RESULT_OK). */
+    private var awaitingPaymentActivityResult = false
+
+    private val paymentFromDetailLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            orderDetailCheckoutInProgress = false
+            if (::btnCheckout.isInitialized) {
+                btnCheckout.isEnabled = true
+            }
+            val shouldClose = awaitingPaymentActivityResult
+            awaitingPaymentActivityResult = false
+            if (shouldClose && result.resultCode == RESULT_OK) {
+                finish()
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_order_detail)
@@ -171,6 +189,7 @@ class OrderDetailActivity : AppCompatActivity() {
         recycler = findViewById(R.id.recyclerOrderItems)
         txtEmptyItems = findViewById(R.id.txtEmptyItems)
         btnCheckout = findViewById(R.id.btnCheckout)
+        btnUpdateOnlineOrder = findViewById(R.id.btnUpdateOnlineOrder)
         bottomActions = findViewById(R.id.bottomActions)
         btnVoid = findViewById(R.id.btnVoid)
         btnRefund = findViewById(R.id.btnRefund)
@@ -250,6 +269,7 @@ class OrderDetailActivity : AppCompatActivity() {
         // Reset UI first
         txtSplitBanner.visibility = View.GONE
         btnCheckout.visibility = View.GONE
+        btnUpdateOnlineOrder.visibility = View.GONE
         bottomActions.visibility = View.GONE
         btnVoid.visibility = View.GONE
         btnRefund.visibility = View.GONE
@@ -330,17 +350,32 @@ class OrderDetailActivity : AppCompatActivity() {
                         btnAcceptUber.setOnClickListener { acceptUberOrder() }
                         btnDenyUber.setOnClickListener { confirmDenyUberOrder() }
                     } else {
+                        val unpaidWeb = OnlineOrderStatusDisplay.isUnpaidWebOnlineOrder(doc)
                         btnCheckout.visibility = View.VISIBLE
-                        btnCheckout.setOnClickListener {
-                            val i = Intent(this, MenuActivity::class.java)
-                            i.putExtra("ORDER_ID", orderId)
-                            if (orderType.isNotBlank()) {
-                                i.putExtra("orderType", orderType)
+                        if (unpaidWeb) {
+                            btnUpdateOnlineOrder.visibility = View.VISIBLE
+                            btnUpdateOnlineOrder.setOnClickListener {
+                                val i = Intent(this, MenuActivity::class.java)
+                                i.putExtra("ORDER_ID", orderId)
+                                if (orderType.isNotBlank()) {
+                                    i.putExtra("orderType", orderType)
+                                }
+                                i.putExtra(MenuActivity.EXTRA_UNPAID_ONLINE_CATALOG_FIRST, true)
+                                startActivity(i)
                             }
-                            if (OnlineOrderStatusDisplay.isUnpaidWebOnlineOrder(doc)) {
-                                i.putExtra(MenuActivity.EXTRA_CART_FIRST_UNPAID_ONLINE, true)
+                            btnCheckout.setOnClickListener {
+                                launchUnpaidWebOnlineCheckoutToPayment()
                             }
-                            startActivity(i)
+                        } else {
+                            btnUpdateOnlineOrder.visibility = View.GONE
+                            btnCheckout.setOnClickListener {
+                                val i = Intent(this, MenuActivity::class.java)
+                                i.putExtra("ORDER_ID", orderId)
+                                if (orderType.isNotBlank()) {
+                                    i.putExtra("orderType", orderType)
+                                }
+                                startActivity(i)
+                            }
                         }
                     }
                 }
@@ -712,6 +747,41 @@ class OrderDetailActivity : AppCompatActivity() {
             totalRefundedInCents,
             isVoided
         )
+    }
+
+    /** Unpaid web online: skip menu/cart and open tip/payment like [MenuActivity] checkout. */
+    private fun launchUnpaidWebOnlineCheckoutToPayment() {
+        if (orderDetailCheckoutInProgress) return
+        orderDetailCheckoutInProgress = true
+        btnCheckout.isEnabled = false
+        orderEngine.waitForPendingWrites {
+            orderEngine.recomputeOrderTotals(
+                orderId = orderId,
+                onSuccess = {
+                    val targetActivity =
+                        if (TipConfig.isTipsEnabled(this) && TipConfig.isTipOnCustomerScreen(this)) {
+                            TipActivity::class.java
+                        } else {
+                            PaymentActivity::class.java
+                        }
+                    val payIntent = Intent(this, targetActivity).apply {
+                        putExtra("ORDER_ID", orderId)
+                        putExtra("BATCH_ID", currentBatchId ?: "")
+                    }
+                    awaitingPaymentActivityResult = true
+                    paymentFromDetailLauncher.launch(payIntent)
+                },
+                onFailure = { e ->
+                    orderDetailCheckoutInProgress = false
+                    btnCheckout.isEnabled = true
+                    Toast.makeText(
+                        this,
+                        e.message ?: "Could not update totals",
+                        Toast.LENGTH_LONG
+                    ).show()
+                },
+            )
+        }
     }
 
     private fun recomputeAndRefreshSummary() {

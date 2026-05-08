@@ -137,7 +137,9 @@ class PrintersActivity : AppCompatActivity() {
             PrinterFirestoreSync.mergeRegistration(db, PrinterDeviceType.RECEIPT, p)
         }
         for (p in kitchenPrinters) {
-            PrinterFirestoreSync.mergeRegistration(db, PrinterDeviceType.KITCHEN, p)
+            if (!InternalKitchenPrinter.isInternalAddress(p.ipAddress)) {
+                PrinterFirestoreSync.mergeRegistration(db, PrinterDeviceType.KITCHEN, p)
+            }
         }
 
         val inflater = LayoutInflater.from(this)
@@ -181,7 +183,11 @@ class PrintersActivity : AppCompatActivity() {
             },
         )
         nameView.text = display.name
-        ipView.text = display.ipAddress
+        ipView.text = if (InternalKitchenPrinter.isInternalAddress(display.ipAddress)) {
+            InternalKitchenPrinter.displayConnectionLine(this)
+        } else {
+            display.ipAddress
+        }
         infoView.text = display.modelLine
         infoView.visibility =
             if (display.modelLine.isBlank()) View.GONE else View.VISIBLE
@@ -197,9 +203,13 @@ class PrintersActivity : AppCompatActivity() {
             labelsView.visibility = View.GONE
         }
 
-        applyCheckingStatus(statusView)
         val ip = display.ipAddress.trim()
-        statusTargets.add(PrinterStatusTarget(statusView, ip))
+        if (InternalKitchenPrinter.isInternalAddress(ip)) {
+            applyOnlineStatus(statusView, InternalKitchenPrinter.isBluetoothPathAvailable())
+        } else {
+            applyCheckingStatus(statusView)
+            statusTargets.add(PrinterStatusTarget(statusView, ip))
+        }
 
         val kitchenPrinter = type == PrinterDeviceType.KITCHEN
         btnTest.setOnClickListener {
@@ -250,7 +260,7 @@ class PrintersActivity : AppCompatActivity() {
         var anyUpdated = false
         for ((type, saved) in allPrinters) {
             val ip = saved.ipAddress.trim()
-            if (ip.isEmpty()) continue
+            if (ip.isEmpty() || InternalKitchenPrinter.isInternalAddress(ip)) continue
             try {
                 val detected = withContext(Dispatchers.IO) {
                     ThermalPrinterScanner.scanLastOctetRange(

@@ -31,6 +31,7 @@ import {
   Globe,
   Layers,
   ListOrdered,
+  Smartphone,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
@@ -87,6 +88,7 @@ const navItems: NavItem[] = [
       { label: "Payments", href: "/dashboard/payments", icon: CreditCard },
       { label: "Online ordering", href: "/dashboard/settings/online-ordering", icon: ShoppingBag },
       { label: "KDS", href: "/dashboard/settings/kds", icon: Monitor },
+      { label: "Devices", href: "/dashboard/settings/devices", icon: Smartphone },
       { label: "Customize Dashboard", href: "/dashboard/settings/customize-dashboard", icon: LayoutGrid },
     ],
   },

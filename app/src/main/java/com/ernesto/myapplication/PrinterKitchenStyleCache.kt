@@ -40,6 +40,7 @@ object PrinterKitchenStyleCache {
      */
     fun commandSetForKitchenLan(ip: String, printer: SelectedPrinterDisplay?): PrinterCommandSet {
         val k = ip.trim()
+        if (InternalKitchenPrinter.isInternalAddress(k)) return PrinterCommandSet.ESCPOS
         if (k.isEmpty()) return PrinterCommandSet.ESCPOS
         val cached = commandSetByIp[k]
         if (cached != null) return cached

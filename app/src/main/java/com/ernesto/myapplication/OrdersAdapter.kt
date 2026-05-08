@@ -72,8 +72,10 @@ class OrdersAdapter(
         private val kdsCompose: ComposeView = itemView.findViewById(R.id.kdsOrderListCompose)
 
         init {
+            // RecyclerView rows are not lifecycle-owned like fragments; DisposeOnViewTreeLifecycleDestroyed
+            // can crash (e.g. missing ViewTreeLifecycleOwner) when binding KDS Compose on the orders list.
             kdsCompose.setViewCompositionStrategy(
-                ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed,
+                ViewCompositionStrategy.DisposeOnDetachedFromWindow,
             )
         }
 

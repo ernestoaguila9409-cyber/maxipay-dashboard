@@ -233,11 +233,9 @@ object PosQwertyKeypad {
                         ViewGroup.LayoutParams.WRAP_CONTENT,
                     )
                 }
+                // One backspace only (icon row above); full-width space bar.
                 bottomRow.addView(
-                    textAuxKey(context, "Space", 2.2f, minH, marginH, marginV, compactSp) { onInsert("SPACE") },
-                )
-                bottomRow.addView(
-                    textAuxKey(context, "⌫", 0.85f, minH, marginH, marginV, labelSp) { onInsert("⌫") },
+                    textAuxKey(context, "Space", 1f, minH, marginH, marginV, compactSp) { onInsert("SPACE") },
                 )
                 panel.addView(bottomRow)
             }

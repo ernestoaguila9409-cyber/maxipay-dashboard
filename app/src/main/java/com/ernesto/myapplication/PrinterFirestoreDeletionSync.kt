@@ -70,6 +70,7 @@ object PrinterFirestoreDeletionSync {
             val ip = doc.getString("ipAddress")?.trim()?.takeIf { it.isNotEmpty() }
                 ?: doc.getString("ip")?.trim()?.takeIf { it.isNotEmpty() }
                 ?: continue
+            if (InternalKitchenPrinter.isInternalAddress(ip)) continue
 
             val name = doc.getString("name")?.trim().orEmpty()
             val typeStr = doc.getString("type")?.trim().orEmpty()

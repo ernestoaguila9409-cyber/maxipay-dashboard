@@ -185,39 +185,53 @@ object EscPosPrinter {
         return bos.toByteArray()
     }
 
+    /**
+     * Sends raw bytes to the Landi built-in printer over Bluetooth SPP.
+     * @return true if payload was written successfully.
+     */
     @SuppressLint("MissingPermission")
-    private fun printPayloadToLandiBluetooth(context: Context, payload: ByteArray) {
+    fun sendPayloadToLandiBluetooth(context: Context, payload: ByteArray): Boolean {
         var socket: BluetoothSocket? = null
-        try {
+        return try {
             val adapter = BluetoothAdapter.getDefaultAdapter()
             if (adapter == null || !adapter.isEnabled) {
-                uiToast(context, "Bluetooth not available or disabled")
-                return
+                Log.w(TAG, "Landi BT: adapter missing or disabled")
+                return false
             }
-
             val device = adapter.getRemoteDevice(LANDI_BT_ADDRESS)
             Log.d(TAG, "Landi device: ${device.name ?: "(null)"}")
-
             socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
             socket.connect()
             Log.d(TAG, "Landi connected")
-
             socket.outputStream.apply {
                 write(payload)
                 flush()
             }
-
             Log.d(TAG, "Landi print complete")
-            uiToast(context, "Receipt printed!")
+            true
         } catch (e: Exception) {
             Log.e(TAG, "Landi print failed: ${e.message}", e)
-            uiToast(context, "Print failed: ${e.message}")
+            false
         } finally {
             try {
                 socket?.close()
             } catch (_: Exception) {
             }
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun printPayloadToLandiBluetooth(context: Context, payload: ByteArray) {
+        if (!sendPayloadToLandiBluetooth(context, payload)) {
+            val adapter = BluetoothAdapter.getDefaultAdapter()
+            if (adapter == null || !adapter.isEnabled) {
+                uiToast(context, "Bluetooth not available or disabled")
+            } else {
+                uiToast(context, "Print failed: could not reach built-in printer")
+            }
+            return
+        }
+        uiToast(context, "Receipt printed!")
     }
 
     private fun printPayloadToLanReceiptPrinterIfConfigured(context: Context, payload: ByteArray) {
@@ -426,7 +440,9 @@ object EscPosPrinter {
     }
 
     /**
-     * Styled kitchen chit to one LAN printer (no Bluetooth, no cut — feed only).
+     * Styled kitchen chit to one destination:
+     * - [InternalKitchenPrinter.ADDRESS_KEY]: Landi built-in thermal over Bluetooth (ESC/POS + cut).
+     * - Otherwise: LAN raw TCP port 9100 (feed only, no cut).
      */
     fun printKitchenChitToLan(
         context: Context,
@@ -437,6 +453,38 @@ object EscPosPrinter {
         showSuccessToast: Boolean = false,
     ) {
         Thread {
+            if (InternalKitchenPrinter.isInternalAddress(ipAddress)) {
+                try {
+                    val friendly = InternalKitchenPrinter.displayConnectionLine(context)
+                    val bos = ByteArrayOutputStream()
+                    bos.write(buildKitchenLanPayload(segments, PrinterCommandSet.ESCPOS))
+                    bos.write(CUT)
+                    val ok = sendPayloadToLandiBluetooth(context, bos.toByteArray())
+                    if (ok) {
+                        if (showSuccessToast) {
+                            uiToast(context, context.getString(R.string.printer_test_sent))
+                        }
+                    } else {
+                        uiToast(
+                            context,
+                            context.getString(R.string.kitchen_print_failed, friendly, "Bluetooth off or printer unreachable"),
+                            Toast.LENGTH_SHORT,
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Kitchen internal print failed: ${e.message}", e)
+                    try {
+                        val friendly = InternalKitchenPrinter.displayConnectionLine(context)
+                        uiToast(
+                            context,
+                            context.getString(R.string.kitchen_print_failed, friendly, e.message ?: ""),
+                            Toast.LENGTH_SHORT,
+                        )
+                    } catch (_: Exception) { }
+                }
+                return@Thread
+            }
+
             var socket: Socket? = null
             try {
                 val payload = buildKitchenLanPayload(segments, commandSet)

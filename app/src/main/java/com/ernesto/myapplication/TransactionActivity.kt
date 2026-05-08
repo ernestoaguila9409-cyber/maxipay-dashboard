@@ -530,7 +530,11 @@ class TransactionActivity : AppCompatActivity() {
                 .show()
             return
         }
-        val tipLabel = if (TipConfig.isTipsEnabled(this) && !TipConfig.isTipOnCustomerScreen(this)) {
+        val tipLabel = if (
+            TipConfig.isTipsEnabled(this) &&
+            !TipConfig.isTipOnCustomerScreen(this) &&
+            !transaction.tipAdjusted
+        ) {
             if (transaction.tipAmountInCents > 0L) "Adjust Tip" else "Add Tip"
         } else null
         val options = if (tipLabel != null) {
@@ -1528,6 +1532,10 @@ class TransactionActivity : AppCompatActivity() {
     // ===============================
 
     private fun showTipAdjustDialog(transaction: Transaction) {
+        if (transaction.tipAdjusted) {
+            Toast.makeText(this, "Tip already finalized for this transaction.", Toast.LENGTH_LONG).show()
+            return
+        }
         if (transaction.settled) {
             Toast.makeText(this, "Batch already closed. Cannot adjust tip.", Toast.LENGTH_LONG).show()
             return

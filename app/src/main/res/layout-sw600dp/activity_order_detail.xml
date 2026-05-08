@@ -399,6 +399,18 @@
                 </LinearLayout>
             </LinearLayout>
 
+            <!-- Unpaid web online: edit items in menu (catalog + cart) -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnUpdateOnlineOrder"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Update order"
+                android:visibility="gone"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginTop="8dp"/>
+
             <!-- CHECKOUT BUTTON -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnCheckout"

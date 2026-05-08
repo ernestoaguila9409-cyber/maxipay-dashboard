@@ -7,6 +7,9 @@ private const val PRINTER_RAW_PORT = 9100
 private const val CONNECT_TIMEOUT_MS = 500
 
 fun isPrinterOnline(ip: String): Boolean {
+    if (InternalKitchenPrinter.isInternalAddress(ip)) {
+        return try { InternalKitchenPrinter.isBluetoothPathAvailable() } catch (_: Exception) { false }
+    }
     var socket: Socket? = null
     return try {
         socket = Socket()

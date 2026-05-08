@@ -75,6 +75,8 @@ class MenuActivity : AppCompatActivity() {
          * staff taps **Update**; avoids a flash of the menu before Firestore confirms order type.
          */
         const val EXTRA_CART_FIRST_UNPAID_ONLINE = "EXTRA_CART_FIRST_UNPAID_ONLINE"
+        /** Unpaid web online order: show catalog + cart together (skip initial cart-only view). */
+        const val EXTRA_UNPAID_ONLINE_CATALOG_FIRST = "EXTRA_UNPAID_ONLINE_CATALOG_FIRST"
 
         private const val BUNDLE_KEY_UNPAID_MENU_BROWSE_SUPPRESSED = "unpaidOnlineMenuBrowseSuppressed"
         private const val KITCHEN_DESTINATION_PROBE_INTERVAL_MS = 7_000L
@@ -149,6 +151,7 @@ class MenuActivity : AppCompatActivity() {
      * for unpaid web online; cleared so rotation / re-entry does not force-hide again.
      */
     private var unpaidCatalogCartFirstApplyPending = false
+    private var unpaidOnlineCatalogFirstIntent = false
 
     private lateinit var menuBrowsePanel: View
 
@@ -279,6 +282,7 @@ class MenuActivity : AppCompatActivity() {
         currentBatchId = intent.getStringExtra("batchId")
 
         menuBrowsePanel = findViewById(R.id.menuBrowsePanel)
+        unpaidOnlineCatalogFirstIntent = intent.getBooleanExtra(EXTRA_UNPAID_ONLINE_CATALOG_FIRST, false)
         unpaidCatalogCartFirstApplyPending = savedInstanceState == null
         if (savedInstanceState != null) {
             unpaidOnlineMenuBrowseSuppressed =
@@ -515,23 +519,27 @@ class MenuActivity : AppCompatActivity() {
 
     private fun runKitchenDestinationReachabilityProbe() {
         Thread {
-            val printers = SelectedPrinterPrefs.getAll(applicationContext, PrinterDeviceType.KITCHEN)
-            val anyKitchenPrinterOnline = printers.any { isPrinterOnline(it.ipAddress) }
-            val kdsUp = KdsActiveCache.hasOnlineKds
-            val show = anyKitchenPrinterOnline || kdsUp
-            runOnUiThread {
-                if (isFinishing) return@runOnUiThread
-                if (kitchenSendDestinationReachable != show) {
-                    kitchenSendDestinationReachable = show
-                    syncCartButtonStates()
+            try {
+                val printers = SelectedPrinterPrefs.getAll(applicationContext, PrinterDeviceType.KITCHEN)
+                val anyKitchenPrinterOnline = printers.any { isPrinterOnline(it.ipAddress) }
+                val kdsUp = KdsActiveCache.hasOnlineKds
+                val show = anyKitchenPrinterOnline || kdsUp
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    if (kitchenSendDestinationReachable != show) {
+                        kitchenSendDestinationReachable = show
+                        syncCartButtonStates()
+                    }
+                    kitchenDestinationHandler.removeCallbacks(kitchenDestinationProbeRunnable)
+                    if (kitchenDestinationProbeLoopActive && !isFinishing) {
+                        kitchenDestinationHandler.postDelayed(
+                            kitchenDestinationProbeRunnable,
+                            KITCHEN_DESTINATION_PROBE_INTERVAL_MS,
+                        )
+                    }
                 }
-                kitchenDestinationHandler.removeCallbacks(kitchenDestinationProbeRunnable)
-                if (kitchenDestinationProbeLoopActive && !isFinishing) {
-                    kitchenDestinationHandler.postDelayed(
-                        kitchenDestinationProbeRunnable,
-                        KITCHEN_DESTINATION_PROBE_INTERVAL_MS,
-                    )
-                }
+            } catch (e: Exception) {
+                android.util.Log.w("MenuActivity", "Kitchen probe failed: ${e.message}", e)
             }
         }.start()
     }
@@ -593,7 +601,7 @@ class MenuActivity : AppCompatActivity() {
                 unpaidOnlineUpdateMode = OnlineOrderStatusDisplay.isUnpaidWebOnlineOrder(orderDoc)
                 if (!unpaidOnlineUpdateMode) {
                     unpaidOnlineMenuBrowseSuppressed = false
-                } else if (unpaidCatalogCartFirstApplyPending) {
+                } else if (unpaidCatalogCartFirstApplyPending && !unpaidOnlineCatalogFirstIntent) {
                     unpaidOnlineMenuBrowseSuppressed = true
                 }
                 unpaidCatalogCartFirstApplyPending = false

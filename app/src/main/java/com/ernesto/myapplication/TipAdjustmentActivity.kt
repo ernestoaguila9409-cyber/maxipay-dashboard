@@ -24,7 +24,9 @@ import com.ernesto.myapplication.engine.PaymentService
 import com.ernesto.myapplication.engine.TipAdjustHostLeg
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
+import com.google.android.gms.tasks.Tasks
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -42,6 +44,8 @@ class TipAdjustmentActivity : AppCompatActivity() {
     private lateinit var progressBar: ProgressBar
     private val adapter = TipTransactionAdapter { item -> showTipDialog(item) }
     private var listener: ListenerRegistration? = null
+    /** Invalidates in-flight batch lookups when a newer Firestore snapshot arrives. */
+    private var tipListSnapshotRequestId = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,8 +89,13 @@ class TipAdjustmentActivity : AppCompatActivity() {
                     return@addSnapshotListener
                 }
 
+                val requestId = ++tipListSnapshotRequestId
+
                 val items = mutableListOf<TipTransactionItem>()
                 for (doc in snapshots) {
+                    if (doc.getBoolean("voided") == true) continue
+                    if (doc.getBoolean("settled") == true) continue
+
                     val type = doc.getString("type") ?: "SALE"
                     if (type != "SALE" && type != "CAPTURE") continue
 
@@ -103,7 +112,6 @@ class TipAdjustmentActivity : AppCompatActivity() {
                     val totalPaidCents = doc.getLong("totalPaidInCents") ?: 0L
                     val tipCents = doc.getLong("tipAmountInCents") ?: 0L
                     val tipAdjusted = doc.getBoolean("tipAdjusted") ?: false
-                    if (tipAdjusted) continue
 
                     val orderNumber = doc.getLong("orderNumber") ?: 0L
                     val orderId = doc.getString("orderId") ?: ""
@@ -165,16 +173,60 @@ class TipAdjustmentActivity : AppCompatActivity() {
                     )
                 }
 
-                adapter.submitList(items)
-                progressBar.visibility = View.GONE
-                txtEmpty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
-                recycler.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+                submitTipListAfterBatchCheck(requestId, items)
             }
+    }
+
+    /**
+     * Drops transactions tied to a [Batches] document that is already closed (settlement),
+     * so rows disappear after batch close even if a document were ever out of sync on [settled].
+     * [requestId] drops stale async results when the listener fires again.
+     */
+    private fun submitTipListAfterBatchCheck(requestId: Int, provisional: List<TipTransactionItem>) {
+        val batchIds = provisional.map { it.batchId }.filter { it.isNotBlank() }.distinct()
+        if (batchIds.isEmpty()) {
+            applyTipTransactionListUi(requestId, provisional)
+            return
+        }
+        val tasks = batchIds.map { id -> db.collection("Batches").document(id).get() }
+        Tasks.whenAllSuccess<DocumentSnapshot>(tasks)
+            .addOnSuccessListener { batchDocs ->
+                if (requestId != tipListSnapshotRequestId || isFinishing) return@addOnSuccessListener
+                val closedIds = batchDocs
+                    .filter { it.exists() && it.getBoolean("closed") == true }
+                    .map { it.id }
+                    .toSet()
+                val filtered = provisional.filter { item ->
+                    item.batchId.isBlank() || item.batchId !in closedIds
+                }
+                applyTipTransactionListUi(requestId, filtered)
+            }
+            .addOnFailureListener { e ->
+                Log.w("TIP_ADJUST", "Batch lookup failed; tip list may briefly include closed-batch items", e)
+                if (requestId != tipListSnapshotRequestId || isFinishing) return@addOnFailureListener
+                applyTipTransactionListUi(requestId, provisional)
+            }
+    }
+
+    private fun applyTipTransactionListUi(requestId: Int, items: List<TipTransactionItem>) {
+        if (requestId != tipListSnapshotRequestId || isFinishing) return
+        adapter.submitList(items)
+        progressBar.visibility = View.GONE
+        txtEmpty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        recycler.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
     }
 
     // ─── Tip dialog ──────────────────────────────────────────────────────
 
     private fun showTipDialog(item: TipTransactionItem) {
+        if (item.tipAdjusted) {
+            Toast.makeText(
+                this,
+                "Tip already added for this order.",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
         val baseAmountCents = item.totalPaidCents - item.tipAmountCents
         val baseAmountDollars = baseAmountCents / 100.0
 
@@ -495,6 +547,9 @@ class TipTransactionAdapter(
 
     private var items = listOf<TipTransactionItem>()
     private val dateFmt = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US)
+    private val grayCard = Color.parseColor("#ECEFF1")
+    private val grayPrimaryText = Color.parseColor("#616161")
+    private val graySecondaryText = Color.parseColor("#9E9E9E")
 
     fun submitList(newItems: List<TipTransactionItem>) {
         items = newItems
@@ -536,23 +591,60 @@ class TipTransactionAdapter(
         holder.txtDate.text = if (item.createdAt != null) dateFmt.format(item.createdAt) else ""
 
         val baseAmount = item.totalPaidCents - item.tipAmountCents
-        holder.txtAmount.text = MoneyUtils.centsToDisplay(baseAmount)
 
-        if (item.tipAdded) {
-            holder.card.setCardBackgroundColor(Color.parseColor("#E8F5E9"))
+        if (item.tipAdjusted) {
+            holder.card.setCardBackgroundColor(grayCard)
+            holder.card.strokeWidth = 0
+            holder.card.isClickable = false
+            holder.txtOrderNum.setTextColor(grayPrimaryText)
+            holder.txtCardInfo.setTextColor(graySecondaryText)
+            holder.txtDate.setTextColor(graySecondaryText)
+            holder.txtAmount.setTextColor(grayPrimaryText)
             holder.txtTipBadge.visibility = View.VISIBLE
+            holder.txtTipBadge.text =
+                if (item.tipAmountCents > 0L) "TIP ADDED" else "FINALIZED"
             holder.txtTipInfo.visibility = View.VISIBLE
+            holder.txtTipInfo.setTextColor(graySecondaryText)
+            holder.txtTipInfo.text = if (item.tipAmountCents > 0L) {
+                "Sale ${MoneyUtils.centsToDisplay(baseAmount)} + tip ${MoneyUtils.centsToDisplay(item.tipAmountCents)}"
+            } else {
+                "Sale ${MoneyUtils.centsToDisplay(baseAmount)} · no tip"
+            }
+            holder.txtAmount.text = MoneyUtils.centsToDisplay(item.totalPaidCents)
+            holder.txtTotal.visibility = View.GONE
+        } else if (item.tipAdded) {
+            holder.card.isClickable = true
+            holder.card.setCardBackgroundColor(Color.parseColor("#E8F5E9"))
+            holder.txtOrderNum.setTextColor(Color.parseColor("#1A1A1A"))
+            holder.txtCardInfo.setTextColor(Color.parseColor("#666666"))
+            holder.txtDate.setTextColor(Color.parseColor("#999999"))
+            holder.txtAmount.setTextColor(Color.parseColor("#1A1A1A"))
+            holder.txtTipBadge.visibility = View.VISIBLE
+            holder.txtTipBadge.text = "TIP ADDED"
+            holder.txtTipInfo.visibility = View.VISIBLE
+            holder.txtTipInfo.setTextColor(Color.parseColor("#2E7D32"))
             holder.txtTipInfo.text = "Tip: ${MoneyUtils.centsToDisplay(item.tipAmountCents)}"
+            holder.txtAmount.text = MoneyUtils.centsToDisplay(baseAmount)
             holder.txtTotal.visibility = View.VISIBLE
+            holder.txtTotal.setTextColor(Color.parseColor("#2E7D32"))
             holder.txtTotal.text = "Total: ${MoneyUtils.centsToDisplay(item.totalPaidCents)}"
         } else {
+            holder.card.isClickable = true
             holder.card.setCardBackgroundColor(Color.WHITE)
+            holder.txtOrderNum.setTextColor(Color.parseColor("#1A1A1A"))
+            holder.txtCardInfo.setTextColor(Color.parseColor("#666666"))
+            holder.txtDate.setTextColor(Color.parseColor("#999999"))
+            holder.txtAmount.setTextColor(Color.parseColor("#1A1A1A"))
             holder.txtTipBadge.visibility = View.GONE
             holder.txtTipInfo.visibility = View.GONE
             holder.txtTotal.visibility = View.GONE
+            holder.txtAmount.text = MoneyUtils.centsToDisplay(baseAmount)
         }
 
-        holder.card.setOnClickListener { onItemClick(item) }
+        holder.card.setOnClickListener {
+            if (item.tipAdjusted) return@setOnClickListener
+            onItemClick(item)
+        }
     }
 
     override fun getItemCount() = items.size

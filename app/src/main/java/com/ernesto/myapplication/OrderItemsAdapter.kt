@@ -130,8 +130,9 @@ class OrderItemsAdapter(
         val kdsBatchChildContainer: LinearLayout = view.findViewById(R.id.kdsBatchChildContainer)
 
         init {
+            // RecyclerView rows: use detached-from-window disposal (see OrdersAdapter).
             kdsCompose.setViewCompositionStrategy(
-                ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed,
+                ViewCompositionStrategy.DisposeOnDetachedFromWindow,
             )
         }
     }
@@ -148,7 +149,7 @@ class OrderItemsAdapter(
 
         init {
             kdsCompose.setViewCompositionStrategy(
-                ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed,
+                ViewCompositionStrategy.DisposeOnDetachedFromWindow,
             )
         }
     }
@@ -363,7 +364,7 @@ class OrderItemsAdapter(
                                     ViewGroup.LayoutParams.WRAP_CONTENT,
                                 )
                                 setViewCompositionStrategy(
-                                    ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed,
+                                    ViewCompositionStrategy.DisposeOnDetachedFromWindow,
                                 )
                                 setContent {
                                     KdsStatusIcon(status = batch.kdsStatus) { msg ->
@@ -526,7 +527,7 @@ class OrderItemsAdapter(
                                 ViewGroup.LayoutParams.WRAP_CONTENT,
                             )
                             setViewCompositionStrategy(
-                                ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed,
+                                ViewCompositionStrategy.DisposeOnDetachedFromWindow,
                             )
                             setContent {
                                 KdsStatusIcon(status = lineKdsStatus) { msg ->

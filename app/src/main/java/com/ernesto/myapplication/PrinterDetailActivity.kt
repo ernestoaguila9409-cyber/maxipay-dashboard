@@ -104,7 +104,11 @@ class PrinterDetailActivity : AppCompatActivity() {
         txtDetailStatus.setText(R.string.printer_status_checking)
         txtDetailStatus.setTextColor(ContextCompat.getColor(this, R.color.printer_status_checking))
         txtDetailName.text = printerName.ifBlank { getString(R.string.unknown_printer) }
-        txtDetailIp.text = getString(R.string.printer_detail_ip_line, ipAddress)
+        txtDetailIp.text = if (InternalKitchenPrinter.isInternalAddress(ipAddress)) {
+            InternalKitchenPrinter.displayConnectionLine(this)
+        } else {
+            getString(R.string.printer_detail_ip_line, ipAddress)
+        }
         if (modelLine.isNotBlank()) {
             txtDetailModel.text = modelLine
             txtDetailModel.visibility = android.view.View.VISIBLE
@@ -259,13 +263,15 @@ class PrinterDetailActivity : AppCompatActivity() {
             FirebaseFirestore.getInstance(),
             labelList,
         )
-        val display = SelectedPrinterDisplay(
-            name = printerName,
-            ipAddress = ipAddress,
-            modelLine = modelLine,
-            labels = labelList.toList(),
-        )
-        PrinterFirestoreSync.mergeRegistration(db, deviceType, display, includeLabels = true)
+        if (!InternalKitchenPrinter.isInternalAddress(ipAddress)) {
+            val display = SelectedPrinterDisplay(
+                name = printerName,
+                ipAddress = ipAddress,
+                modelLine = modelLine,
+                labels = labelList.toList(),
+            )
+            PrinterFirestoreSync.mergeRegistration(db, deviceType, display, includeLabels = true)
+        }
     }
 
     private fun showEditNameDialog() {
@@ -317,13 +323,15 @@ class PrinterDetailActivity : AppCompatActivity() {
             modelLine = modelLine,
         )
 
-        val display = SelectedPrinterDisplay(
-            name = newName,
-            ipAddress = ipAddress,
-            modelLine = modelLine,
-            labels = labelList.toList(),
-        )
-        PrinterFirestoreSync.mergeRegistration(db, deviceType, display, includeLabels = true)
+        if (!InternalKitchenPrinter.isInternalAddress(ipAddress)) {
+            val display = SelectedPrinterDisplay(
+                name = newName,
+                ipAddress = ipAddress,
+                modelLine = modelLine,
+                labels = labelList.toList(),
+            )
+            PrinterFirestoreSync.mergeRegistration(db, deviceType, display, includeLabels = true)
+        }
 
         Toast.makeText(this, R.string.printer_name_updated, Toast.LENGTH_SHORT).show()
     }
