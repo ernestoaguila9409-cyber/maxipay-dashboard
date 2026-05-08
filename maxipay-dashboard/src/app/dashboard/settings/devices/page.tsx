@@ -219,6 +219,22 @@ export default function PosDevicesSettingsPage() {
     setCopyDone(false);
   }, []);
 
+  /** When the POS redeems the code, Android sets [consumed] on the same doc — close the modal. */
+  useEffect(() => {
+    if (!modalOpen || !modalCode) return;
+    const ref = doc(db, DEVICE_ACTIVATIONS_COLLECTION, modalCode);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) return;
+        const consumed = snap.get("consumed");
+        if (consumed === true) closeModal();
+      },
+      (e) => console.error("activation code listen:", e)
+    );
+    return () => unsub();
+  }, [modalOpen, modalCode, closeModal]);
+
   const onlineCount = devices.filter(
     (d) => getLiveStatus(d.lastSeen, nowMs, d.deactivated) === "online"
   ).length;
