@@ -10,24 +10,37 @@ import com.google.firebase.installations.FirebaseInstallations
 object PosDeviceIdentity {
 
     private const val TAG = "PosDeviceIdentity"
+    private const val PREFS_NAME = "pos_device_identity"
+    private const val KEY_DOC_ID = "firestore_doc_id"
 
     fun sanitizeDocId(raw: String): String =
         raw.replace(Regex("[/#.\\[\\]]"), "_").take(700).ifBlank { "device_unknown" }
 
     /**
      * Resolves the same id used by [PosDevicePresenceSync] heartbeats (Firebase Installation ID
-     * when available, else ANDROID_ID-based fallback).
+     * when available, else ANDROID_ID-based fallback). The first resolved value is **persisted** so
+     * all callers (presence, deactivation watch, activation redeem) use one document path.
      */
     fun resolveInstallationDocId(context: Context, onResult: (String) -> Unit) {
         val appContext = context.applicationContext
+        val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val cached = prefs.getString(KEY_DOC_ID, null)?.trim()
+        if (!cached.isNullOrEmpty()) {
+            onResult(cached)
+            return
+        }
+
         FirebaseInstallations.getInstance().id
             .addOnSuccessListener { fid ->
-                if (fid.isNotBlank()) onResult(sanitizeDocId(fid))
-                else onResult(fallbackDocId(appContext))
+                val id = if (fid.isNotBlank()) sanitizeDocId(fid) else fallbackDocId(appContext)
+                prefs.edit().putString(KEY_DOC_ID, id).apply()
+                onResult(id)
             }
             .addOnFailureListener { e ->
                 Log.w(TAG, "Installations id failed: ${e.message}")
-                onResult(fallbackDocId(appContext))
+                val id = fallbackDocId(appContext)
+                prefs.edit().putString(KEY_DOC_ID, id).apply()
+                onResult(id)
             }
     }
 
