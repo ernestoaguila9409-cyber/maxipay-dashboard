@@ -397,6 +397,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
         orderRef.get().addOnSuccessListener { orderDoc ->
                             val discountInCents = orderDoc.getLong("discountInCents") ?: 0L
                             val discountedSubtotalInCents = (subtotalInCents - discountInCents).coerceAtLeast(0L)
+                            val orderSource = orderDoc.getString("orderSource") ?: ""
 
                             var newTotalInCents = discountedSubtotalInCents
                             val taxBreakdown = mutableListOf<Map<String, Any>>()
@@ -412,7 +413,13 @@ class OrderEngine(private val db: FirebaseFirestore) {
                                 val name = taxDoc.getString("name") ?: continue
                                 val type = taxDoc.getString("type") ?: continue
                                 val amount = taxDoc.getDouble("amount") ?: taxDoc.getLong("amount")?.toDouble() ?: continue
-                                val taxEnabled = taxDoc.getBoolean("enabled") ?: true
+                                val enabledApp = taxDoc.getBoolean("enabled") ?: true
+                                val enabledOnline = taxDoc.getBoolean("enabledOnline") ?: false
+                                val taxActiveForOrder = if (orderSource == "online_ordering") {
+                                    enabledApp || enabledOnline
+                                } else {
+                                    enabledApp
+                                }
 
                                 var taxableBaseCents = 0L
                                 val taxableItems = mutableListOf<Pair<String, Long>>()
@@ -424,7 +431,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
                                     val isTaxable = if (li.taxMode == "FORCE_APPLY") {
                                         li.taxIds.contains(taxId)
                                     } else {
-                                        taxEnabled
+                                        taxActiveForOrder
                                     }
                                     if (isTaxable) {
                                         taxableBaseCents += effectiveLineCents

@@ -29,6 +29,8 @@ interface TaxEntry {
   type: "PERCENTAGE" | "FIXED";
   amount: number;
   enabled: boolean;
+  /** When true, this tax applies to online ordering even if [enabled] is false (POS). */
+  enabledOnline: boolean;
 }
 
 export default function TaxesPage() {
@@ -58,6 +60,7 @@ export default function TaxesPage() {
           type: data.type ?? "PERCENTAGE",
           amount: data.amount ?? 0,
           enabled: data.enabled ?? true,
+          enabledOnline: data.enabledOnline === true,
         });
       });
       list.sort((a, b) => a.name.localeCompare(b.name));
@@ -103,6 +106,7 @@ export default function TaxesPage() {
           type: taxType,
           amount,
           enabled: true,
+          enabledOnline: false,
           createdAt: Timestamp.now(),
         });
       }
@@ -119,6 +123,14 @@ export default function TaxesPage() {
       await updateDoc(doc(db, "Taxes", t.id), { enabled: !t.enabled });
     } catch (err) {
       console.error("Failed to toggle tax:", err);
+    }
+  };
+
+  const handleToggleOnline = async (t: TaxEntry) => {
+    try {
+      await updateDoc(doc(db, "Taxes", t.id), { enabledOnline: !t.enabledOnline });
+    } catch (err) {
+      console.error("Failed to toggle online tax:", err);
     }
   };
 
@@ -142,7 +154,11 @@ export default function TaxesPage() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm text-slate-500">
-              Manage tax rates. Assign taxes to menu items from the Menu page.
+              Manage tax rates. Assign taxes to menu items from the Menu page.{" "}
+              <span className="text-slate-600">
+                <strong>Online</strong> applies a tax to online ordering only; it can be on while{" "}
+                <strong>Status</strong> (POS) is off.
+              </span>
             </p>
           </div>
           <button
@@ -182,6 +198,9 @@ export default function TaxesPage() {
                   <th className="text-center text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-24">
                     Status
                   </th>
+                  <th className="text-center text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-24">
+                    Online
+                  </th>
                   <th className="text-right text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-28">
                     Actions
                   </th>
@@ -212,10 +231,27 @@ export default function TaxesPage() {
                       <button
                         onClick={() => handleToggle(t)}
                         className="inline-flex items-center"
-                        title={t.enabled ? "Disable" : "Enable"}
+                        title={t.enabled ? "Disable for POS" : "Enable for POS"}
                       >
                         {t.enabled ? (
                           <ToggleRight size={28} className="text-emerald-500" />
+                        ) : (
+                          <ToggleLeft size={28} className="text-slate-300" />
+                        )}
+                      </button>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <button
+                        onClick={() => handleToggleOnline(t)}
+                        className="inline-flex items-center"
+                        title={
+                          t.enabledOnline
+                            ? "Disable for online ordering"
+                            : "Enable for online ordering"
+                        }
+                      >
+                        {t.enabledOnline ? (
+                          <ToggleRight size={28} className="text-sky-600" />
                         ) : (
                           <ToggleLeft size={28} className="text-slate-300" />
                         )}

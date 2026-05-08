@@ -88,6 +88,7 @@ class AddTaxActivity : AppCompatActivity() {
         if (taxId == null) {
             data["createdAt"] = Date()
             data["enabled"] = true
+            data["enabledOnline"] = false
         } else {
             data["updatedAt"] = Date()
         }

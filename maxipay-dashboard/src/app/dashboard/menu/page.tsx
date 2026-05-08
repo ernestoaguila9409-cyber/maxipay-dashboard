@@ -335,6 +335,7 @@ interface TaxEntry {
   amount: number;
   type: string;
   enabled: boolean;
+  enabledOnline: boolean;
 }
 
 const FIRESTORE_BATCH_LIMIT = 450;
@@ -810,6 +811,7 @@ export default function MenuPage() {
               amount: data.amount ?? 0,
               type: data.type ?? "PERCENTAGE",
               enabled: data.enabled ?? true,
+              enabledOnline: data.enabledOnline === true,
             });
           }
         });
@@ -4280,8 +4282,8 @@ export default function MenuPage() {
 
                 {/* ── Assign Taxes (collapsible) ── */}
                 {taxes.length > 0 && (() => {
-                  const enabledTaxes = taxes.filter((t) => t.enabled);
-                  const selectedTaxCount = Object.entries(addTaxes).filter(([id, v]) => v && enabledTaxes.some((t) => t.id === id)).length;
+                  const assignableTaxes = taxes.filter((t) => t.enabled || t.enabledOnline);
+                  const selectedTaxCount = Object.entries(addTaxes).filter(([id, v]) => v && assignableTaxes.some((t) => t.id === id)).length;
                   return (
                   <div className="rounded-xl border border-slate-200/80 overflow-hidden">
                     <button
@@ -4312,7 +4314,7 @@ export default function MenuPage() {
                     >
                       <div className="min-h-0 overflow-hidden">
                         <div className="flex flex-col gap-2 px-3 py-3 max-h-40 overflow-y-auto border-t border-slate-100">
-                          {enabledTaxes.map((t) => (
+                          {assignableTaxes.map((t) => (
                             <label
                               key={t.id}
                               className="flex items-center gap-2 cursor-pointer"
@@ -4812,9 +4814,9 @@ export default function MenuPage() {
 
                 {/* ── Assign Taxes (collapsible) ── */}
                 {taxes.length > 0 && (() => {
-                  const enabledEditTaxes = taxes.filter((t) => t.enabled);
+                  const assignableEditTaxes = taxes.filter((t) => t.enabled || t.enabledOnline);
                   const selectedEditTaxCount = Object.entries(editTaxes).filter(
-                    ([id, v]) => v && enabledEditTaxes.some((t) => t.id === id)
+                    ([id, v]) => v && assignableEditTaxes.some((t) => t.id === id)
                   ).length;
                   return (
                   <div className="rounded-xl border border-slate-200/80 overflow-hidden">
@@ -4846,7 +4848,7 @@ export default function MenuPage() {
                     >
                       <div className="min-h-0 overflow-hidden">
                         <div className="flex flex-col gap-2 px-3 py-3 max-h-40 overflow-y-auto border-t border-slate-100">
-                          {enabledEditTaxes.map((t) => (
+                          {assignableEditTaxes.map((t) => (
                             <label
                               key={t.id}
                               className="flex items-center gap-2 cursor-pointer"
