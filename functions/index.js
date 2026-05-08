@@ -2359,6 +2359,201 @@ exports.processTipAdjust = onCall(async (request) => {
   };
 });
 
+// ---------------------------------------------------------------------------
+// Server-side card void — iPOS Transact API (transactionType 2)
+// ---------------------------------------------------------------------------
+
+exports.processServerVoid = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    return { success: false, error: "You must be signed in to void a transaction." };
+  }
+  const { transactionId } = request.data || {};
+
+  if (!transactionId) {
+    return { success: false, error: "transactionId is required." };
+  }
+
+  const db = admin.firestore();
+
+  const txDoc = await db.collection("Transactions").doc(transactionId).get();
+  if (!txDoc.exists) {
+    return { success: false, error: "Transaction not found." };
+  }
+  const tx = txDoc.data();
+  const txType = String(tx.type ?? "");
+  if (!["SALE", "CAPTURE", "PRE_AUTH"].includes(txType)) {
+    return { success: false, error: `Unsupported transaction type for void: ${txType}` };
+  }
+  if (tx.voided === true) {
+    return { success: false, error: "Transaction is already voided." };
+  }
+  if (tx.settled === true) {
+    return { success: false, error: "Transaction is already settled. Use refund instead." };
+  }
+
+  const payments = Array.isArray(tx.payments) ? tx.payments : [];
+  const hasCash = payments.some(
+    (p) => String(p.paymentType ?? "").toLowerCase() === "cash"
+  );
+  if (hasCash) {
+    return { success: false, error: "Transaction includes cash tender. Void must be performed on the POS." };
+  }
+
+  const cardLeg = payments.find(
+    (p) =>
+      !String(p.paymentType ?? "").toLowerCase().includes("cash") &&
+      String(p.pnReferenceId || p.PNReferenceId || "").trim().length > 0
+  );
+  if (!cardLeg) {
+    return {
+      success: false,
+      error: "No processor reference (RRN) found on this transaction. Cannot void server-side.",
+    };
+  }
+  const rrn = String(cardLeg.pnReferenceId || cardLeg.PNReferenceId || "").trim();
+
+  const totalPaidCents = Number(tx.totalPaidInCents ?? 0) ||
+    Math.round((Number(tx.totalPaid ?? 0) || Number(tx.amount ?? 0)) * 100);
+
+  const creds = await resolveIposTransactCredentials(db);
+  if (!creds.tpn || !creds.authToken) {
+    return {
+      success: false,
+      error: "iPOS Transact credentials not configured. Set iposHppTpn + iposHppAuthToken in Settings/onlineOrdering.",
+    };
+  }
+
+  const voidRefId = `VD${randomUUID().replace(/-/g, "").slice(0, 18)}`;
+  const iposPayload = {
+    merchantAuthentication: {
+      merchantId: creds.tpn,
+      transactionReferenceId: voidRefId,
+    },
+    transactionRequest: {
+      transactionType: 2,
+      rrn: rrn,
+      amount: String(totalPaidCents),
+    },
+  };
+
+  logger.info("[processServerVoid] Calling iPOS Transact", {
+    url: creds.baseUrl,
+    transactionId,
+    totalPaidCents,
+    rrn,
+    tpn: creds.tpn,
+  });
+
+  let iposResponse;
+  let httpStatus;
+  try {
+    const resp = await fetch(creds.baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        token: creds.authToken,
+      },
+      body: JSON.stringify(iposPayload),
+    });
+    httpStatus = resp.status;
+    iposResponse = await resp.json();
+  } catch (err) {
+    logger.error("[processServerVoid] iPOS Transact network error", {
+      error: err.message,
+    });
+    return {
+      success: false,
+      error: `Network error calling iPOS Transact: ${err.message}`,
+    };
+  }
+
+  logger.info("[processServerVoid] iPOS Transact response", {
+    httpStatus,
+    iposResponse: JSON.stringify(iposResponse).slice(0, 2000),
+    transactionId,
+  });
+
+  if (iposResponse.errors) {
+    const errMsg = iposResponse.errors
+      .map((e) => `${e.field}: ${e.message}`)
+      .join("; ");
+    return { success: false, error: errMsg, iposResponse };
+  }
+
+  const txnResp = iposResponse.iposhpresponse
+    || iposResponse.iposTransactResponse
+    || iposResponse.iposHPResponse
+    || iposResponse;
+  const responseCode = Number(txnResp.responseCode ?? -1);
+  const responseMessage = String(txnResp.responseMessage ?? "").trim();
+  const errResponseCode = String(txnResp.errResponseCode ?? "").trim();
+  const errResponseMessage = String(txnResp.errResponseMessage ?? "").trim();
+
+  if (responseCode !== 200) {
+    const rawSnippet = JSON.stringify(iposResponse).slice(0, 500);
+    const detail = [
+      errResponseMessage,
+      responseMessage,
+      errResponseCode ? `errCode=${errResponseCode}` : "",
+      `responseCode=${responseCode}`,
+      `HTTP=${httpStatus}`,
+      `TPN=${creds.tpn}`,
+      `RRN=${rrn}`,
+      `RAW=${rawSnippet}`,
+    ].filter(Boolean).join(" | ");
+    return { success: false, error: detail, iposResponse };
+  }
+
+  const voidedByLabel = `Dashboard: ${request.auth.token?.email || request.auth.uid}`;
+  const orderId = String(tx.orderId ?? "").trim();
+  const batchId = String(tx.batchId ?? "").trim();
+  const amountDollars = totalPaidCents / 100;
+
+  const updatedPayments = payments.map((p) => ({ ...p, status: "VOIDED" }));
+
+  try {
+    const txRef = db.collection("Transactions").doc(transactionId);
+    await txRef.update({
+      voided: true,
+      voidedBy: voidedByLabel,
+      voidedAt: admin.firestore.FieldValue.serverTimestamp(),
+      payments: updatedPayments,
+    });
+
+    if (batchId) {
+      await db.collection("Batches").doc(batchId).update({
+        totalSales: admin.firestore.FieldValue.increment(-amountDollars),
+        netTotal: admin.firestore.FieldValue.increment(-amountDollars),
+        transactionCount: admin.firestore.FieldValue.increment(-1),
+      }).catch((e) => logger.warn("[processServerVoid] batch update", e.message));
+    }
+
+    if (orderId) {
+      await db.collection("Orders").doc(orderId).update({
+        status: "VOIDED",
+        voidedAt: admin.firestore.FieldValue.serverTimestamp(),
+        voidedBy: voidedByLabel,
+      }).catch((e) => logger.warn("[processServerVoid] order update", e.message));
+    }
+  } catch (err) {
+    logger.error("[processServerVoid] Firestore write failed", {
+      error: err.message,
+    });
+    return {
+      success: false,
+      error: `Void approved by processor but failed to save: ${err.message}`,
+    };
+  }
+
+  logger.info("[processServerVoid] Void complete", { transactionId, orderId });
+
+  return {
+    success: true,
+    message: `Transaction voided successfully ($${amountDollars.toFixed(2)}).`,
+    iposResponse,
+  };
+});
+
 /**
  * Resolve SPIn P-series terminal credentials from Firestore.
  * Only SPIN_P terminals support dashboard-initiated settlement;

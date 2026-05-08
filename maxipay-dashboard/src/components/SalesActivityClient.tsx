@@ -2192,9 +2192,9 @@ export default function SalesActivityClient() {
 
             {txModal && canRequestRemoteVoid(txModal.data) ? (
               <div className="rounded-xl border border-amber-100 bg-amber-50/80 px-3 py-3 space-y-2">
-                <p className="text-xs font-medium text-amber-900">Remote card void</p>
+                <p className="text-xs font-medium text-amber-900">Void transaction</p>
                 {!user ? (
-                  <p className="text-xs text-amber-900">Sign in to request a void.</p>
+                  <p className="text-xs text-amber-900">Sign in to void.</p>
                 ) : (
                   <>
                     <button
@@ -2204,21 +2204,25 @@ export default function SalesActivityClient() {
                         if (!user || !txModal) return;
                         setVoidSubmitting(true);
                         setVoidSubmitErr(null);
+                        setVoidCmdStatus(null);
+                        setVoidCmdDetail(null);
                         try {
-                          const ref = await addDoc(collection(db, REMOTE_PAYMENT_COMMANDS), {
-                            type: "voidTransaction",
-                            transactionId: txModal.id,
-                            status: "pending",
-                            requestedByUid: user.uid,
-                            requestedByEmail: user.email ?? "",
-                            voidedByLabel: `Dashboard: ${user.email ?? user.uid}`,
-                            requestedAt: serverTimestamp(),
-                          });
-                          setVoidCmdId(ref.id);
+                          const region = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION;
+                          const app = getApp();
+                          const functions = region ? getFunctions(app, region) : getFunctions(app);
+                          const call = httpsCallable(functions, "processServerVoid");
+                          const res = await call({ transactionId: txModal.id });
+                          const d = res.data as Record<string, unknown>;
+                          if (d.success) {
+                            setVoidCmdStatus("completed");
+                            setVoidCmdDetail(String(d.message ?? "Voided successfully."));
+                          } else {
+                            setVoidSubmitErr(String(d.error ?? "Void failed."));
+                          }
                         } catch (err) {
-                          console.error("[SalesActivity] remote void queue", err);
+                          console.error("[SalesActivity] direct void", err);
                           setVoidSubmitErr(
-                            err instanceof Error ? err.message : "Could not queue void request"
+                            err instanceof Error ? err.message : "Could not process void"
                           );
                         } finally {
                           setVoidSubmitting(false);
@@ -2226,20 +2230,13 @@ export default function SalesActivityClient() {
                       }}
                       className="w-full py-2.5 rounded-xl bg-amber-700 text-white text-sm font-semibold hover:bg-amber-800 disabled:opacity-60"
                     >
-                      {voidSubmitting ? "Queueing…" : "Request void on POS"}
+                      {voidSubmitting ? "Processing…" : "Void"}
                     </button>
                     {voidSubmitErr ? (
                       <p className="text-xs text-red-700">{voidSubmitErr}</p>
                     ) : null}
-                    {voidCmdStatus ? (
-                      <div className="text-xs text-amber-950 space-y-0.5">
-                        <p>
-                          <span className="font-semibold">Status:</span> {voidCmdStatus}
-                        </p>
-                        {voidCmdDetail ? (
-                          <p className="text-amber-900/90 break-words">{voidCmdDetail}</p>
-                        ) : null}
-                      </div>
+                    {voidCmdStatus === "completed" && voidCmdDetail ? (
+                      <p className="text-xs text-amber-800 font-medium break-words">{voidCmdDetail}</p>
                     ) : null}
                   </>
                 )}

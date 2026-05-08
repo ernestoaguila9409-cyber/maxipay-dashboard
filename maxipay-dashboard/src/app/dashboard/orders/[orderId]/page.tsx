@@ -1134,26 +1134,28 @@ export default function OrderDetailPage() {
                     if (!user) return;
                     setVoidSubmitting(true);
                     setVoidErr(null);
+                    setVoidCmdStatus(null);
+                    setVoidCmdDetail(null);
                     try {
-                      const ref = await addDoc(
-                        collection(db, REMOTE_PAYMENT_COMMANDS),
-                        {
-                          type: "voidTransaction",
-                          transactionId: saleIdForRefund,
-                          status: "pending",
-                          requestedByUid: user.uid,
-                          requestedByEmail: user.email ?? "",
-                          voidedByLabel: `Dashboard: ${user.email ?? user.uid}`,
-                          requestedAt: serverTimestamp(),
-                        }
-                      );
-                      setVoidCmdId(ref.id);
+                      const region = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION;
+                      const app = getApp();
+                      const functions = region ? getFunctions(app, region) : getFunctions(app);
+                      const call = httpsCallable(functions, "processServerVoid");
+                      const res = await call({ transactionId: saleIdForRefund });
+                      const d = res.data as Record<string, unknown>;
+                      if (d.success) {
+                        setVoidCmdStatus("completed");
+                        setVoidCmdDetail(String(d.message ?? "Voided successfully."));
+                        setOrderRefreshNonce((n) => n + 1);
+                      } else {
+                        setVoidErr(String(d.error ?? "Void failed."));
+                      }
                     } catch (err) {
-                      console.error("[Order detail] void queue", err);
+                      console.error("[Order detail] direct void", err);
                       setVoidErr(
                         err instanceof Error
                           ? err.message
-                          : "Could not queue void request"
+                          : "Could not process void"
                       );
                     } finally {
                       setVoidSubmitting(false);
@@ -1161,23 +1163,15 @@ export default function OrderDetailPage() {
                   }}
                   className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-amber-700 text-white text-sm font-semibold hover:bg-amber-800 disabled:opacity-60"
                 >
-                  {voidSubmitting ? "Queueing…" : "Void"}
+                  {voidSubmitting ? "Processing…" : "Void"}
                 </button>
                 {voidErr ? (
                   <p className="text-xs text-red-700 break-words">{voidErr}</p>
                 ) : null}
-                {voidCmdStatus ? (
-                  <div className="text-xs text-amber-950 space-y-0.5">
-                    <p>
-                      <span className="font-semibold">Status:</span>{" "}
-                      {voidCmdStatus}
-                    </p>
-                    {voidCmdDetail ? (
-                      <p className="text-amber-900/90 break-words">
-                        {voidCmdDetail}
-                      </p>
-                    ) : null}
-                  </div>
+                {voidCmdStatus === "completed" && voidCmdDetail ? (
+                  <p className="text-xs text-amber-800 font-medium break-words">
+                    {voidCmdDetail}
+                  </p>
                 ) : null}
               </div>
             ) : null}
