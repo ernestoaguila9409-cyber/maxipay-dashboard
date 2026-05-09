@@ -63,14 +63,14 @@ export default function AdminHomePage() {
         <h2 className="text-lg font-semibold text-slate-800 mb-4">Quick Actions</h2>
         <div className="flex gap-4">
           <Link
-            href="/admin/merchants/new"
+            href="/merchants/new"
             className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 transition-colors"
           >
             <Store size={18} />
             Create Merchant
           </Link>
           <Link
-            href="/admin/merchants"
+            href="/merchants"
             className="inline-flex items-center gap-2 px-5 py-2.5 bg-white text-slate-700 text-sm font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors"
           >
             <Users size={18} />

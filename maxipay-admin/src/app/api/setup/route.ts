@@ -5,11 +5,10 @@ import { getFirebaseAdminApp, verifyIdToken } from "@/lib/firebaseAdmin";
 export const runtime = "nodejs";
 
 /**
- * POST /api/admin/setup
+ * POST /api/setup
  *
  * One-time bootstrap: promotes the calling user to super_admin.
- * Only succeeds when no super_admin exists yet in Firebase Auth,
- * so it can only be used once to create the initial administrator.
+ * Only succeeds when no super_admin exists yet in Firebase Auth.
  */
 export async function POST(req: Request) {
   try {
@@ -30,9 +29,7 @@ export async function POST(req: Request) {
       );
     }
 
-    await authAdmin.setCustomUserClaims(decoded.uid, {
-      role: "super_admin",
-    });
+    await authAdmin.setCustomUserClaims(decoded.uid, { role: "super_admin" });
 
     return NextResponse.json({
       ok: true,

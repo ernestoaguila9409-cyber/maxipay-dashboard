@@ -4,34 +4,41 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth, AuthProvider } from "@/context/AuthContext";
 import AdminSidebar from "@/components/AdminSidebar";
-import ErrorBoundary from "@/components/ErrorBoundary";
 
-function AdminShell({ children }: { children: React.ReactNode }) {
+function AuthGateInner({ children }: { children: React.ReactNode }) {
   const { user, claims, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  const isLoginPage = pathname === "/login";
+
   useEffect(() => {
     if (loading) return;
-    if (!user) {
+
+    if (!user && !isLoginPage) {
       router.replace("/login");
       return;
     }
-    if (claims.role !== "super_admin") {
-      router.replace("/dashboard");
+
+    if (user && !isLoginPage && claims.role !== "super_admin") {
+      router.replace("/login");
     }
-  }, [user, claims, loading, router]);
+  }, [user, claims, loading, router, isLoginPage]);
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100">
         <div className="flex flex-col items-center gap-4">
           <div className="w-10 h-10 border-3 border-slate-700 border-t-transparent rounded-full animate-spin" />
-          <p className="text-slate-500 text-sm">Loading admin...</p>
+          <p className="text-slate-500 text-sm">Loading...</p>
         </div>
       </div>
     );
+  }
+
+  if (isLoginPage) {
+    return <>{children}</>;
   }
 
   if (!user || claims.role !== "super_admin") return null;
@@ -47,20 +54,16 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           sidebarCollapsed ? "ml-[72px]" : "ml-[260px]"
         }`}
       >
-        <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>
+        {children}
       </main>
     </div>
   );
 }
 
-export default function AdminLayoutClient({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function AuthGate({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
-      <AdminShell>{children}</AdminShell>
+      <AuthGateInner>{children}</AuthGateInner>
     </AuthProvider>
   );
 }

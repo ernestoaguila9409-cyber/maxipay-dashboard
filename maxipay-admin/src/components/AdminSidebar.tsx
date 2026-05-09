@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -20,8 +19,8 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: "Overview", href: "/admin", icon: LayoutDashboard },
-  { label: "Merchants", href: "/admin/merchants", icon: Store },
+  { label: "Overview", href: "/", icon: LayoutDashboard },
+  { label: "Merchants", href: "/merchants", icon: Store },
 ];
 
 interface AdminSidebarProps {
@@ -64,8 +63,8 @@ export default function AdminSidebar({ collapsed, onToggle }: AdminSidebarProps)
       <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
         {navItems.map((item) => {
           const isActive =
-            item.href === "/admin"
-              ? pathname === "/admin"
+            item.href === "/"
+              ? pathname === "/"
               : pathname.startsWith(item.href);
           return (
             <Link

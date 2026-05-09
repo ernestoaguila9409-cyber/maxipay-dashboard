@@ -18,13 +18,9 @@ interface CreateMerchantBody {
   };
 }
 
-async function requireSuperAdmin(
-  req: Request
-): Promise<admin.auth.DecodedIdToken> {
+async function requireSuperAdmin(req: Request): Promise<admin.auth.DecodedIdToken> {
   const decoded = await verifyIdToken(req.headers.get("authorization"));
-  if (decoded.role !== "super_admin") {
-    throw new Error("Forbidden");
-  }
+  if (decoded.role !== "super_admin") throw new Error("Forbidden");
   return decoded;
 }
 
@@ -106,7 +102,7 @@ export async function POST(req: Request) {
     const merchantRef = dbAdmin.collection("Merchants").doc();
     const merchantId = merchantRef.id;
 
-    const merchantData = {
+    await merchantRef.set({
       businessName,
       ownerFirstName: body.ownerFirstName?.trim() || "",
       ownerLastName: body.ownerLastName?.trim() || "",
@@ -121,9 +117,7 @@ export async function POST(req: Request) {
       status: "active",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       createdBy: decoded.uid,
-    };
-
-    await merchantRef.set(merchantData);
+    });
 
     let authUser: admin.auth.UserRecord;
     let createdNewUser = false;
@@ -138,7 +132,9 @@ export async function POST(req: Request) {
         authUser = await authAdmin.createUser({
           email,
           emailVerified: false,
-          displayName: `${body.ownerFirstName?.trim() || ""} ${body.ownerLastName?.trim() || ""}`.trim() || businessName,
+          displayName:
+            `${body.ownerFirstName?.trim() || ""} ${body.ownerLastName?.trim() || ""}`.trim() ||
+            businessName,
         });
         createdNewUser = true;
       } else {
@@ -157,23 +153,14 @@ export async function POST(req: Request) {
       const continueUrl = appOrigin ? `${appOrigin}/login` : undefined;
       const settings = continueUrl ? { url: continueUrl } : undefined;
       const resetLink = await authAdmin.generatePasswordResetLink(email, settings);
-
       const sendResult = await sendWelcomeEmail(email, businessName, resetLink);
       emailSent = sendResult.ok;
-      if (!sendResult.ok) {
-        console.error("[admin/merchants] SendGrid error:", sendResult.message);
-      }
+      if (!sendResult.ok) console.error("[merchants] SendGrid:", sendResult.message);
     } catch (emailErr) {
-      console.error("[admin/merchants] Email error:", emailErr);
+      console.error("[merchants] Email error:", emailErr);
     }
 
-    return NextResponse.json({
-      ok: true,
-      merchantId,
-      authUid: authUser.uid,
-      createdNewUser,
-      emailSent,
-    });
+    return NextResponse.json({ ok: true, merchantId, authUid: authUser.uid, createdNewUser, emailSent });
   } catch (e) {
     return handleError(e);
   }
@@ -184,11 +171,7 @@ export async function POST(req: Request) {
 // ---------------------------------------------------------------------------
 
 function esc(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 async function sendWelcomeEmail(
@@ -197,14 +180,9 @@ async function sendWelcomeEmail(
   resetLink: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const apiKey = process.env.SENDGRID_API_KEY;
-  if (!apiKey) {
-    return { ok: false, message: "SENDGRID_API_KEY not configured." };
-  }
+  if (!apiKey) return { ok: false, message: "SENDGRID_API_KEY not configured." };
 
-  const fromEmail =
-    process.env.SENDGRID_AUTH_FROM_EMAIL ||
-    process.env.SENDGRID_FROM_EMAIL ||
-    "noreply@maxipaypos.com";
+  const fromEmail = process.env.SENDGRID_FROM_EMAIL || "noreply@maxipaypos.com";
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -233,11 +211,9 @@ async function sendWelcomeEmail(
             </td></tr>
           </table>
           <p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:#94a3b8;">
-            If the button doesn't work, copy and paste this link into your browser:
+            If the button doesn't work, copy and paste this link:
           </p>
-          <p style="margin:0 0 24px;font-size:13px;line-height:1.5;color:#2563eb;word-break:break-all;">
-            ${esc(resetLink)}
-          </p>
+          <p style="margin:0 0 24px;font-size:13px;line-height:1.5;color:#2563eb;word-break:break-all;">${esc(resetLink)}</p>
         </td></tr>
         <tr><td style="padding:20px 32px 28px;text-align:center;">
           <p style="margin:0;font-size:12px;color:#94a3b8;">&mdash; The MaxiPay Team</p>
@@ -250,10 +226,7 @@ async function sendWelcomeEmail(
 
   const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       personalizations: [{ to: [{ email: to }] }],
       from: { email: fromEmail, name: "MaxiPay" },
@@ -274,20 +247,11 @@ async function sendWelcomeEmail(
 function handleError(e: unknown) {
   const msg = e instanceof Error ? e.message : String(e);
   if (msg === "Unauthorized") {
-    return NextResponse.json(
-      { ok: false, error: "unauthorized", message: "Sign in first." },
-      { status: 401 }
-    );
+    return NextResponse.json({ ok: false, error: "unauthorized", message: "Sign in first." }, { status: 401 });
   }
   if (msg === "Forbidden") {
-    return NextResponse.json(
-      { ok: false, error: "forbidden", message: "Super admin access required." },
-      { status: 403 }
-    );
+    return NextResponse.json({ ok: false, error: "forbidden", message: "Super admin access required." }, { status: 403 });
   }
-  console.error("[admin/merchants]", e);
-  return NextResponse.json(
-    { ok: false, error: "server_error", message: "Something went wrong." },
-    { status: 500 }
-  );
+  console.error("[merchants]", e);
+  return NextResponse.json({ ok: false, error: "server_error", message: "Something went wrong." }, { status: 500 });
 }

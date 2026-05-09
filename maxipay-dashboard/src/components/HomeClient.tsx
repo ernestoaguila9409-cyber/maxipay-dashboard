@@ -9,14 +9,9 @@ export default function HomeClient() {
   const router = useRouter();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        const tokenResult = await user.getIdTokenResult();
-        if (tokenResult.claims.role === "super_admin") {
-          router.replace("/admin");
-        } else {
-          router.replace("/dashboard");
-        }
+        router.replace("/dashboard");
       } else {
         router.replace("/login");
       }

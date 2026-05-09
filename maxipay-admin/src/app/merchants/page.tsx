@@ -85,7 +85,7 @@ export default function MerchantsListPage() {
           </p>
         </div>
         <Link
-          href="/admin/merchants/new"
+          href="/merchants/new"
           className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 transition-colors"
         >
           <Plus size={18} />
@@ -96,10 +96,7 @@ export default function MerchantsListPage() {
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         <div className="p-4 border-b border-slate-100">
           <div className="relative">
-            <Search
-              size={18}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-            />
+            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               placeholder="Search by name, email, or owner..."
@@ -121,10 +118,7 @@ export default function MerchantsListPage() {
               {search ? "No merchants match your search." : "No merchants yet."}
             </p>
             {!search && (
-              <Link
-                href="/admin/merchants/new"
-                className="mt-3 text-sm text-blue-600 hover:underline"
-              >
+              <Link href="/merchants/new" className="mt-3 text-sm text-blue-600 hover:underline">
                 Create your first merchant
               </Link>
             )}
@@ -133,21 +127,11 @@ export default function MerchantsListPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-100">
-                <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Business
-                </th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Owner
-                </th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Email
-                </th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Created
-                </th>
+                <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Business</th>
+                <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Owner</th>
+                <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Email</th>
+                <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Created</th>
                 <th className="w-10" />
               </tr>
             </thead>
@@ -155,23 +139,16 @@ export default function MerchantsListPage() {
               {filtered.map((m) => {
                 const cfg = statusConfig[m.status] || statusConfig.pending;
                 return (
-                  <tr
-                    key={m.id}
-                    className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors"
-                  >
+                  <tr key={m.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
                     <td className="px-6 py-4">
-                      <span className="text-sm font-medium text-slate-900">
-                        {m.businessName}
-                      </span>
+                      <span className="text-sm font-medium text-slate-900">{m.businessName}</span>
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-600">
                       {m.ownerFirstName} {m.ownerLastName}
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-600">{m.email}</td>
                     <td className="px-6 py-4">
-                      <span
-                        className={`inline-block px-2.5 py-1 text-xs font-semibold rounded-full ${cfg.className}`}
-                      >
+                      <span className={`inline-block px-2.5 py-1 text-xs font-semibold rounded-full ${cfg.className}`}>
                         {cfg.label}
                       </span>
                     </td>
@@ -185,9 +162,7 @@ export default function MerchantsListPage() {
                         : "—"}
                     </td>
                     <td className="px-4 py-4">
-                      <Link href={`/admin/merchants/${m.id}`}>
-                        <ChevronRight size={18} className="text-slate-400" />
-                      </Link>
+                      <ChevronRight size={18} className="text-slate-400" />
                     </td>
                   </tr>
                 );

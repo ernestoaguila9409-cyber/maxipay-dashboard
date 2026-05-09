@@ -55,7 +55,7 @@ export default function CreateMerchantPage() {
       }
 
       const token = await user.getIdToken();
-      const res = await fetch("/api/admin/merchants", {
+      const res = await fetch("/api/merchants", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -84,9 +84,7 @@ export default function CreateMerchantPage() {
       }
 
       setSuccess(true);
-      setTimeout(() => {
-        router.push("/admin/merchants");
-      }, 2000);
+      setTimeout(() => router.push("/merchants"), 2000);
     } catch {
       setError("Something went wrong. Please try again.");
       setSubmitting(false);
@@ -106,8 +104,7 @@ export default function CreateMerchantPage() {
               <strong>{form.businessName}</strong> has been set up successfully.
             </p>
             <p className="text-sm text-slate-400">
-              A welcome email with password setup instructions has been sent to{" "}
-              <strong>{form.email}</strong>.
+              A welcome email has been sent to <strong>{form.email}</strong>.
             </p>
             <p className="text-sm text-slate-400 mt-4">Redirecting to merchants list...</p>
           </div>
@@ -120,7 +117,7 @@ export default function CreateMerchantPage() {
     <div className="p-8">
       <div className="max-w-2xl mx-auto">
         <Link
-          href="/admin/merchants"
+          href="/merchants"
           className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 mb-6"
         >
           <ArrowLeft size={16} />
@@ -145,16 +142,14 @@ export default function CreateMerchantPage() {
             <h3 className="text-sm font-semibold text-slate-800 uppercase tracking-wider mb-4">
               Business Information
             </h3>
-            <div className="space-y-4">
-              <Field
-                label="Business Name"
-                name="businessName"
-                value={form.businessName}
-                onChange={handleChange}
-                required
-                placeholder="e.g. Joe's Pizza"
-              />
-            </div>
+            <Field
+              label="Business Name"
+              name="businessName"
+              value={form.businessName}
+              onChange={handleChange}
+              required
+              placeholder="e.g. Joe's Pizza"
+            />
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 p-6 mb-6">
@@ -162,39 +157,12 @@ export default function CreateMerchantPage() {
               Owner Information
             </h3>
             <div className="grid grid-cols-2 gap-4">
-              <Field
-                label="First Name"
-                name="ownerFirstName"
-                value={form.ownerFirstName}
-                onChange={handleChange}
-                placeholder="John"
-              />
-              <Field
-                label="Last Name"
-                name="ownerLastName"
-                value={form.ownerLastName}
-                onChange={handleChange}
-                placeholder="Doe"
-              />
+              <Field label="First Name" name="ownerFirstName" value={form.ownerFirstName} onChange={handleChange} placeholder="John" />
+              <Field label="Last Name" name="ownerLastName" value={form.ownerLastName} onChange={handleChange} placeholder="Doe" />
             </div>
             <div className="grid grid-cols-2 gap-4 mt-4">
-              <Field
-                label="Email"
-                name="email"
-                type="email"
-                value={form.email}
-                onChange={handleChange}
-                required
-                placeholder="owner@business.com"
-              />
-              <Field
-                label="Phone"
-                name="phone"
-                type="tel"
-                value={form.phone}
-                onChange={handleChange}
-                placeholder="(555) 123-4567"
-              />
+              <Field label="Email" name="email" type="email" value={form.email} onChange={handleChange} required placeholder="owner@business.com" />
+              <Field label="Phone" name="phone" type="tel" value={form.phone} onChange={handleChange} placeholder="(555) 123-4567" />
             </div>
           </div>
 
@@ -202,43 +170,17 @@ export default function CreateMerchantPage() {
             <h3 className="text-sm font-semibold text-slate-800 uppercase tracking-wider mb-4">
               Address
             </h3>
-            <div className="space-y-4">
-              <Field
-                label="Street"
-                name="street"
-                value={form.street}
-                onChange={handleChange}
-                placeholder="123 Main St"
-              />
-              <div className="grid grid-cols-3 gap-4">
-                <Field
-                  label="City"
-                  name="city"
-                  value={form.city}
-                  onChange={handleChange}
-                  placeholder="New York"
-                />
-                <Field
-                  label="State"
-                  name="state"
-                  value={form.state}
-                  onChange={handleChange}
-                  placeholder="NY"
-                />
-                <Field
-                  label="ZIP"
-                  name="zip"
-                  value={form.zip}
-                  onChange={handleChange}
-                  placeholder="10001"
-                />
-              </div>
+            <Field label="Street" name="street" value={form.street} onChange={handleChange} placeholder="123 Main St" />
+            <div className="grid grid-cols-3 gap-4 mt-4">
+              <Field label="City" name="city" value={form.city} onChange={handleChange} placeholder="New York" />
+              <Field label="State" name="state" value={form.state} onChange={handleChange} placeholder="NY" />
+              <Field label="ZIP" name="zip" value={form.zip} onChange={handleChange} placeholder="10001" />
             </div>
           </div>
 
           <div className="flex items-center justify-end gap-3">
             <Link
-              href="/admin/merchants"
+              href="/merchants"
               className="px-5 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
             >
               Cancel
