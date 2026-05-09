@@ -14,21 +14,46 @@ export default function AdminLoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
+  const [setupMsg, setSetupMsg] = useState("");
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setSetupMsg("");
     setLoading(true);
 
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password);
       const tokenResult = await cred.user.getIdTokenResult();
-      if (tokenResult.claims.role !== "super_admin") {
-        setError("Access denied. This portal is for administrators only.");
-        await auth.signOut();
-        setLoading(false);
+
+      if (tokenResult.claims.role === "super_admin") {
+        router.push("/");
         return;
       }
-      router.push("/");
+
+      const token = await cred.user.getIdToken();
+      const setupRes = await fetch("/api/setup", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const setupData = await setupRes.json();
+
+      if (setupRes.ok && setupData.ok) {
+        setSetupMsg("You have been promoted to admin. Signing you in...");
+        await auth.signOut();
+        await new Promise((r) => setTimeout(r, 1000));
+        const cred2 = await signInWithEmailAndPassword(auth, email, password);
+        const tokenResult2 = await cred2.user.getIdTokenResult();
+        if (tokenResult2.claims.role === "super_admin") {
+          router.push("/");
+          return;
+        }
+        setSetupMsg("Promoted, but token not yet refreshed. Please sign in again.");
+        await auth.signOut();
+      } else {
+        setError(setupData.message || "Access denied. This portal is for administrators only.");
+        await auth.signOut();
+      }
     } catch {
       setError("Invalid email or password.");
     } finally {
@@ -61,6 +86,12 @@ export default function AdminLoginPage() {
           {error && (
             <div className="bg-red-50 text-red-600 text-sm px-4 py-3 rounded-lg border border-red-200">
               {error}
+            </div>
+          )}
+
+          {setupMsg && (
+            <div className="bg-green-50 text-green-700 text-sm px-4 py-3 rounded-lg border border-green-200">
+              {setupMsg}
             </div>
           )}
 

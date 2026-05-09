@@ -7,6 +7,7 @@ import { ArrowLeft, Store, Loader2 } from "lucide-react";
 import Link from "next/link";
 
 interface FormState {
+  merchantNumber: string;
   businessName: string;
   ownerFirstName: string;
   ownerLastName: string;
@@ -19,6 +20,7 @@ interface FormState {
 }
 
 const initialForm: FormState = {
+  merchantNumber: "",
   businessName: "",
   ownerFirstName: "",
   ownerLastName: "",
@@ -62,6 +64,7 @@ export default function CreateMerchantPage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
+          merchantNumber: form.merchantNumber,
           businessName: form.businessName,
           ownerFirstName: form.ownerFirstName,
           ownerLastName: form.ownerLastName,
@@ -142,6 +145,15 @@ export default function CreateMerchantPage() {
             <h3 className="text-sm font-semibold text-slate-800 uppercase tracking-wider mb-4">
               Business Information
             </h3>
+            <Field
+              label="Merchant #"
+              name="merchantNumber"
+              value={form.merchantNumber}
+              onChange={handleChange}
+              required
+              placeholder="e.g. 10042"
+            />
+            <div className="my-5 border-t border-slate-200" aria-hidden />
             <Field
               label="Business Name"
               name="businessName"

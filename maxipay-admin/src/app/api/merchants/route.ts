@@ -5,6 +5,7 @@ import { getFirebaseAdminApp, verifyIdToken } from "@/lib/firebaseAdmin";
 export const runtime = "nodejs";
 
 interface CreateMerchantBody {
+  merchantNumber?: string;
   businessName?: string;
   ownerFirstName?: string;
   ownerLastName?: string;
@@ -74,6 +75,14 @@ export async function POST(req: Request) {
       );
     }
 
+    const merchantNumber = body.merchantNumber?.trim();
+    if (!merchantNumber) {
+      return NextResponse.json(
+        { ok: false, error: "missing_field", message: "Merchant # is required." },
+        { status: 400 }
+      );
+    }
+
     const businessName = body.businessName?.trim();
     if (!businessName) {
       return NextResponse.json(
@@ -99,10 +108,28 @@ export async function POST(req: Request) {
       );
     }
 
+    const dupNumber = await dbAdmin
+      .collection("Merchants")
+      .where("merchantNumber", "==", merchantNumber)
+      .limit(1)
+      .get();
+
+    if (!dupNumber.empty) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "duplicate_merchant_number",
+          message: "That Merchant # is already in use. Choose a different number.",
+        },
+        { status: 409 }
+      );
+    }
+
     const merchantRef = dbAdmin.collection("Merchants").doc();
     const merchantId = merchantRef.id;
 
     await merchantRef.set({
+      merchantNumber,
       businessName,
       ownerFirstName: body.ownerFirstName?.trim() || "",
       ownerLastName: body.ownerLastName?.trim() || "",
