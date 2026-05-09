@@ -374,5 +374,4 @@
     <string name="device_activation_failed">Could not link device: %1$s</string>
     <string name="device_activation_forced_title">Device deactivated</string>
     <string name="device_activation_forced_instructions">This terminal was deactivated from the dashboard. Enter a new 6-digit activation code from Settings → Devices → Add device, then tap Link this device.</string>
-    <string name="configuration_link_device">LINK DEVICE (ACTIVATION CODE)</string>
 </resources>
