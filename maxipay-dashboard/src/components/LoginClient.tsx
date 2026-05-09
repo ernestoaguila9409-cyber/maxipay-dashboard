@@ -26,8 +26,13 @@ export default function LoginClient() {
     setLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      router.push("/dashboard");
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const tokenResult = await cred.user.getIdTokenResult();
+      if (tokenResult.claims.role === "super_admin") {
+        router.push("/admin");
+      } else {
+        router.push("/dashboard");
+      }
     } catch {
       setError("Invalid email or password. Please try again.");
     } finally {
