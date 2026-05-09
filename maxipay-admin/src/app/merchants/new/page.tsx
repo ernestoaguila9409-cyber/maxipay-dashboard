@@ -6,6 +6,16 @@ import { auth } from "@/firebase/firebaseConfig";
 import { ArrowLeft, Store, Loader2 } from "lucide-react";
 import Link from "next/link";
 
+type ProviderType = "SPIN_Z" | "SPIN_P";
+
+const PROVIDER_OPTIONS: { id: ProviderType; label: string }[] = [
+  { id: "SPIN_Z", label: "SPIn Z-series (Z8, QD3, QD4)" },
+  { id: "SPIN_P", label: "SPIn P-series (P17, P20)" },
+];
+
+const DEVICE_MODELS_Z = ["Z8", "Dejavoo QD3", "Dejavoo QD4", "Other"];
+const DEVICE_MODELS_P = ["P17", "P20", "Other"];
+
 interface FormState {
   merchantNumber: string;
   businessName: string;
@@ -17,6 +27,13 @@ interface FormState {
   city: string;
   state: string;
   zip: string;
+  payProvider: ProviderType;
+  payDeviceModel: string;
+  payTerminalName: string;
+  payTpn: string;
+  payRegisterId: string;
+  payAuthKey: string;
+  payIposTransactToken: string;
 }
 
 const initialForm: FormState = {
@@ -30,6 +47,13 @@ const initialForm: FormState = {
   city: "",
   state: "",
   zip: "",
+  payProvider: "SPIN_Z",
+  payDeviceModel: "",
+  payTerminalName: "",
+  payTpn: "",
+  payRegisterId: "",
+  payAuthKey: "",
+  payIposTransactToken: "",
 };
 
 export default function CreateMerchantPage() {
@@ -39,7 +63,7 @@ export default function CreateMerchantPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
@@ -75,6 +99,15 @@ export default function CreateMerchantPage() {
             city: form.city,
             state: form.state,
             zip: form.zip,
+          },
+          payment: {
+            provider: form.payProvider,
+            deviceModel: form.payDeviceModel,
+            terminalName: form.payTerminalName,
+            tpn: form.payTpn,
+            registerId: form.payRegisterId,
+            authKey: form.payAuthKey,
+            iposTransactAuthToken: form.payIposTransactToken,
           },
         }),
       });
@@ -190,6 +223,61 @@ export default function CreateMerchantPage() {
             </div>
           </div>
 
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 mb-6">
+            <h3 className="text-sm font-semibold text-slate-800 uppercase tracking-wider mb-4">
+              Payment Information
+            </h3>
+            <Field label="Terminal Name" name="payTerminalName" value={form.payTerminalName} onChange={handleChange} placeholder="e.g. Main Register" />
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <div>
+                <label htmlFor="payProvider" className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Provider<span className="text-red-500 ml-0.5">*</span>
+                </label>
+                <select
+                  id="payProvider"
+                  name="payProvider"
+                  value={form.payProvider}
+                  onChange={handleChange}
+                  className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                  {PROVIDER_OPTIONS.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="payDeviceModel" className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Device Model
+                </label>
+                <select
+                  id="payDeviceModel"
+                  name="payDeviceModel"
+                  value={form.payDeviceModel}
+                  onChange={handleChange}
+                  className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                  <option value="">Select model...</option>
+                  {(form.payProvider === "SPIN_P" ? DEVICE_MODELS_P : DEVICE_MODELS_Z).map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="my-5 border-t border-slate-200" aria-hidden />
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="TPN" name="payTpn" value={form.payTpn} onChange={handleChange} required placeholder="e.g. 11881706541A" />
+              <Field label="Register ID" name="payRegisterId" value={form.payRegisterId} onChange={handleChange} required placeholder="e.g. 134909005" />
+            </div>
+            <div className="mt-4">
+              <Field label="Auth Key" name="payAuthKey" value={form.payAuthKey} onChange={handleChange} required placeholder="e.g. Qt9N7CxhDs" />
+            </div>
+            {form.payProvider === "SPIN_P" && (
+              <div className="mt-4">
+                <Field label="iPOS Transact Auth Token" name="payIposTransactToken" value={form.payIposTransactToken} onChange={handleChange} placeholder="Optional — for card-not-present refunds" />
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center justify-end gap-3">
             <Link
               href="/merchants"
@@ -230,7 +318,7 @@ function Field({
   label: string;
   name: string;
   value: string;
-  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
   type?: string;
   required?: boolean;
   placeholder?: string;

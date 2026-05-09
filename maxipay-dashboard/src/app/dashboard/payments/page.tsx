@@ -18,7 +18,6 @@ import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import {
   Plus,
-  Pencil,
   Trash2,
   X,
   AlertTriangle,
@@ -112,7 +111,6 @@ export default function PaymentsPage() {
   const [loading, setLoading] = useState(true);
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<TerminalRow | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -200,7 +198,6 @@ export default function PaymentsPage() {
   }, [user, loading, terminals]);
 
   const openAdd = () => {
-    setEditing(null);
     setName("");
     setProviderId("SPIN_Z");
     setDeviceModel("");
@@ -210,16 +207,9 @@ export default function PaymentsPage() {
     setModalOpen(true);
   };
 
-  const openEdit = (t: TerminalRow) => {
-    setEditing(t);
-    setName(t.name);
-    setProviderId(t.provider);
-    setDeviceModel(t.deviceModel?.trim() ?? "");
-    setConfig({ ...t.config });
-    setShowSecrets(false);
-    setFormError(null);
-    setModalOpen(true);
-  };
+  /* Editing existing terminals is disabled for merchants — credential
+     rotation is handled by the admin portal. Merchants can add new terminals
+     or delete broken ones. */
 
   const onProviderChange = (next: PaymentProviderId) => {
     setProviderId(next);
@@ -251,31 +241,20 @@ export default function PaymentsPage() {
 
     setSaving(true);
     try {
-      const payload: Omit<PaymentTerminalDoc, "createdAt"> & {
-        createdAt?: unknown;
-        updatedAt: unknown;
-      } = {
+      await addDoc(collection(db, PAYMENTS_COLLECTION), {
         name: trimmedName,
         provider: providerId,
         deviceModel: deviceModel.trim(),
-        active: editing?.active ?? true,
+        active: true,
         baseUrl: provider.baseUrl,
         endpoints: provider.endpoints,
         capabilities: provider.capabilities,
         config: Object.fromEntries(
           Object.entries(config).map(([k, v]) => [k, String(v).trim()])
         ),
+        createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
-      };
-
-      if (editing) {
-        await updateDoc(doc(db, PAYMENTS_COLLECTION, editing.id), payload);
-      } else {
-        await addDoc(collection(db, PAYMENTS_COLLECTION), {
-          ...payload,
-          createdAt: Timestamp.now(),
-        });
-      }
+      });
       setModalOpen(false);
     } catch (err) {
       console.error("Failed to save terminal:", err);
@@ -458,9 +437,6 @@ export default function PaymentsPage() {
                   <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-32">
                     Device
                   </th>
-                  <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4">
-                    Identifier
-                  </th>
                   <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-44">
                     POS
                   </th>
@@ -475,8 +451,6 @@ export default function PaymentsPage() {
               <tbody>
                 {terminals.map((t) => {
                   const providerEntry = PAYMENT_PROVIDERS[t.provider];
-                  const identifier =
-                    t.config?.tpn || t.config?.deviceId || "—";
                   const pos = posReachabilityDisplay(
                     t.posLastSeen,
                     t.posConnectionStatus
@@ -502,9 +476,6 @@ export default function PaymentsPage() {
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-600">
                         {t.deviceModel || "—"}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-600 font-mono">
-                        {identifier}
                       </td>
                       <td className="px-6 py-4">
                         <div
@@ -540,13 +511,6 @@ export default function PaymentsPage() {
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
                           <button
-                            onClick={() => openEdit(t)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
-                            title="Edit terminal"
-                          >
-                            <Pencil size={15} />
-                          </button>
-                          <button
                             onClick={() => setDeleteTarget(t)}
                             className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
                             title="Delete terminal"
@@ -574,7 +538,7 @@ export default function PaymentsPage() {
             <div className="px-6 py-5 space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-slate-800">
-                  {editing ? "Edit Terminal" : "Add Terminal"}
+                  Add Terminal
                 </h3>
                 <button
                   onClick={() => setModalOpen(false)}
@@ -735,8 +699,6 @@ export default function PaymentsPage() {
                       <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                       Saving…
                     </>
-                  ) : editing ? (
-                    "Save Changes"
                   ) : (
                     "Add Terminal"
                   )}

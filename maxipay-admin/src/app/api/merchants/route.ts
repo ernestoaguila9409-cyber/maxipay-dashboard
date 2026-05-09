@@ -4,6 +4,16 @@ import { getFirebaseAdminApp, verifyIdToken } from "@/lib/firebaseAdmin";
 
 export const runtime = "nodejs";
 
+interface PaymentInput {
+  provider?: string;
+  deviceModel?: string;
+  terminalName?: string;
+  tpn?: string;
+  registerId?: string;
+  authKey?: string;
+  iposTransactAuthToken?: string;
+}
+
 interface CreateMerchantBody {
   merchantNumber?: string;
   businessName?: string;
@@ -17,6 +27,7 @@ interface CreateMerchantBody {
     state?: string;
     zip?: string;
   };
+  payment?: PaymentInput;
 }
 
 async function requireSuperAdmin(req: Request): Promise<admin.auth.DecodedIdToken> {
@@ -145,6 +156,58 @@ export async function POST(req: Request) {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       createdBy: decoded.uid,
     });
+
+    const pay = body.payment;
+    const hasTpn = !!pay?.tpn?.trim();
+    if (hasTpn) {
+      const provider = pay!.provider === "SPIN_P" ? "SPIN_P" : "SPIN_Z";
+      const isP = provider === "SPIN_P";
+
+      const baseUrl = "https://spinpos.net/v2";
+      const endpoints = {
+        auth: "/Payment/Auth",
+        capture: "/Payment/Capture",
+        tipAdjust: "/Payment/TipAdjust",
+        sale: "/Payment/Sale",
+        void: "/Payment/Void",
+        refund: "/Payment/Return",
+        settle: "/Payment/Settle",
+        status: "/Payment/Status",
+      };
+      const capabilities = {
+        supportsPreAuth: true,
+        supportsCapture: true,
+        supportsTipAdjust: true,
+        supportsSale: true,
+        supportsVoid: true,
+        supportsRefund: isP,
+        supportsSettle: true,
+        supportsStatusCheck: true,
+      };
+
+      const terminalConfig: Record<string, string> = {
+        tpn: pay!.tpn!.trim(),
+        registerId: pay!.registerId?.trim() || "",
+        authKey: pay!.authKey?.trim() || "",
+      };
+      if (isP && pay!.iposTransactAuthToken?.trim()) {
+        terminalConfig.iposTransactAuthToken = pay!.iposTransactAuthToken!.trim();
+      }
+
+      await dbAdmin.collection("payment_terminals").add({
+        merchantId,
+        name: pay!.terminalName?.trim() || `${businessName} Terminal`,
+        provider,
+        deviceModel: pay!.deviceModel?.trim() || "",
+        active: true,
+        baseUrl,
+        endpoints,
+        capabilities,
+        config: terminalConfig,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
 
     let authUser: admin.auth.UserRecord;
     let createdNewUser = false;
