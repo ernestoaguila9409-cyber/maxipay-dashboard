@@ -51,16 +51,6 @@
             android:parentActivityName=".ConfigurationActivity" />
 
         <activity
-            android:name=".TerminalListActivity"
-            android:exported="false"
-            android:parentActivityName=".ConfigurationActivity" />
-
-        <activity
-            android:name=".PaymentTerminalActivity"
-            android:exported="false"
-            android:parentActivityName=".TerminalListActivity" />
-
-        <activity
             android:name=".TableMappingActivity"
             android:exported="false"
             android:parentActivityName=".ConfigurationActivity" />

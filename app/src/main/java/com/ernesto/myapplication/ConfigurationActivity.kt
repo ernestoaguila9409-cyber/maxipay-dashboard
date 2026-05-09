@@ -16,10 +16,6 @@ class ConfigurationActivity : AppCompatActivity() {
             startActivity(Intent(this, TaxesAndFeesActivity::class.java))
         }
 
-        findViewById<android.view.View>(R.id.optionPaymentTerminal).setOnClickListener {
-            startActivity(Intent(this, TerminalListActivity::class.java))
-        }
-
         findViewById<android.view.View>(R.id.optionOrderTypes).setOnClickListener {
             startActivity(Intent(this, OrderConfigurationActivity::class.java))
         }

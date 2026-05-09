@@ -13,7 +13,7 @@ import java.io.IOException
 
 /**
  * SPIn `/Payment/Status` probe used for reachability (POS ↔ gateway ↔ device),
- * shared by [TerminalListActivity] patterns and [PaymentTerminalReachabilitySync].
+ * shared by [PaymentTerminalReachabilitySync] (and similar reachability flows).
  */
 object SpinTerminalConnectionProbe {
 
