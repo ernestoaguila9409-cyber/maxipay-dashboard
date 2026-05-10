@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot, type QuerySnapshot } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { Store, Users, CheckCircle, Clock, CreditCard } from "lucide-react";
 import Link from "next/link";
@@ -13,12 +13,33 @@ interface Stats {
   terminals: number;
 }
 
+function countLinkedTerminals(
+  termSnap: QuerySnapshot,
+  merchantIds: Set<string>
+): number {
+  let n = 0;
+  for (const d of termSnap.docs) {
+    const mid = d.data().merchantId;
+    if (typeof mid === "string" && mid.length > 0 && merchantIds.has(mid)) n++;
+  }
+  return n;
+}
+
 export default function AdminHomePage() {
   const [stats, setStats] = useState<Stats>({ total: 0, active: 0, pending: 0, terminals: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "Merchants"), (snap) => {
+    let merchantIds = new Set<string>();
+    let latestTerminals: QuerySnapshot | null = null;
+
+    const recomputeTerminals = () => {
+      if (!latestTerminals) return;
+      const terminals = countLinkedTerminals(latestTerminals, merchantIds);
+      setStats((prev) => ({ ...prev, terminals }));
+    };
+
+    const unsubMerchants = onSnapshot(collection(db, "Merchants"), (snap) => {
       let active = 0;
       let pending = 0;
       snap.docs.forEach((doc) => {
@@ -26,17 +47,21 @@ export default function AdminHomePage() {
         if (status === "active") active++;
         else if (status === "pending") pending++;
       });
+      merchantIds = new Set(snap.docs.map((d) => d.id));
       setStats((prev) => ({ ...prev, total: snap.size, active, pending }));
       setLoading(false);
+      recomputeTerminals();
     });
-    return () => unsub();
-  }, []);
 
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, "payment_terminals"), (snap) => {
-      setStats((prev) => ({ ...prev, terminals: snap.size }));
+    const unsubTerminals = onSnapshot(collection(db, "payment_terminals"), (snap) => {
+      latestTerminals = snap;
+      recomputeTerminals();
     });
-    return () => unsub();
+
+    return () => {
+      unsubMerchants();
+      unsubTerminals();
+    };
   }, []);
 
   return (
@@ -67,7 +92,7 @@ export default function AdminHomePage() {
         />
         <StatCard
           icon={CreditCard}
-          label="Terminals"
+          label="Linked terminals"
           value={loading ? "..." : stats.terminals}
           color="blue"
         />
