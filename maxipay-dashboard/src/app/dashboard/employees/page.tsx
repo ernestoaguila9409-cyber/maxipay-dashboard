@@ -33,6 +33,9 @@ import {
   ArrowUpDown,
 } from "lucide-react";
 
+/** Synthetic row for the merchant account owner (from `Merchants/{id}`, not `employees`). */
+const MERCHANT_OWNER_ROW_ID = "__merchant_owner__";
+
 interface Employee {
   id: string;
   name: string;
@@ -64,6 +67,7 @@ function isValidEmail(value: string): boolean {
 }
 
 function roleBadgeClass(role: string) {
+  if (role === "OWNER") return "bg-blue-100 text-blue-800";
   return role === "ADMINISTRATOR"
     ? "bg-slate-200 text-slate-800"
     : "bg-slate-100 text-slate-600";
@@ -71,9 +75,20 @@ function roleBadgeClass(role: string) {
 
 /** Lower sorts before higher when sorting ascending by role. */
 function roleSortKey(role: string): number {
-  if (role === "ADMINISTRATOR") return 0;
-  if (role === "EMPLOYEE") return 1;
-  return 2;
+  if (role === "OWNER") return 0;
+  if (role === "ADMINISTRATOR") return 1;
+  if (role === "EMPLOYEE") return 2;
+  return 3;
+}
+
+function roleLabel(role: string): string {
+  if (role === "OWNER") return "Owner";
+  if (role === "ADMINISTRATOR") return "Admin";
+  return "Employee";
+}
+
+function isMerchantOwnerRow(emp: Employee): boolean {
+  return emp.id === MERCHANT_OWNER_ROW_ID;
 }
 
 function EmployeeRowMenu({
@@ -141,6 +156,7 @@ export default function EmployeesPage() {
   const { user } = useAuth();
   const merchantId = useMerchantId();
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [ownerRow, setOwnerRow] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -209,10 +225,70 @@ export default function EmployeesPage() {
     return () => unsub();
   }, [user, merchantId]);
 
+  useEffect(() => {
+    if (!user || !merchantId) {
+      setOwnerRow(null);
+      return;
+    }
+    const ref = doc(db, "Merchants", merchantId);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setOwnerRow(null);
+          return;
+        }
+        const d = snap.data();
+        const fn =
+          typeof d.ownerFirstName === "string" ? d.ownerFirstName.trim() : "";
+        const ln =
+          typeof d.ownerLastName === "string" ? d.ownerLastName.trim() : "";
+        const biz =
+          typeof d.businessName === "string" ? d.businessName.trim() : "";
+        const name =
+          [fn, ln].filter(Boolean).join(" ").trim() || biz || "Owner";
+        const emailRaw = typeof d.email === "string" ? d.email.trim() : "";
+        const email = emailRaw ? emailRaw.toLowerCase() : "";
+        const phone = typeof d.phone === "string" ? d.phone.trim() : "";
+        setOwnerRow({
+          id: MERCHANT_OWNER_ROW_ID,
+          name,
+          role: "OWNER",
+          pin: "",
+          active: true,
+          ...(email ? { email } : {}),
+          ...(phone ? { phone } : {}),
+        });
+      },
+      (err) => {
+        console.error("[Employees] Merchants owner snapshot:", err);
+        setOwnerRow(null);
+      }
+    );
+    return () => unsub();
+  }, [user, merchantId]);
+
+  /** POS employees only — hide a row that duplicates the merchant owner email. */
+  const staffEmployees = useMemo(() => {
+    const oe = ownerRow?.email?.trim().toLowerCase();
+    if (!oe) return employees;
+    return employees.filter(
+      (e) => (e.email?.trim().toLowerCase() || "") !== oe
+    );
+  }, [employees, ownerRow]);
+
+  const rowsForSort = useMemo(() => {
+    return ownerRow ? [ownerRow, ...staffEmployees] : [...staffEmployees];
+  }, [ownerRow, staffEmployees]);
+
   const sortedEmployees = useMemo(() => {
-    const list = [...employees];
+    const list = [...rowsForSort];
     if (roleSort === null) {
-      list.sort((a, b) => a.name.localeCompare(b.name));
+      list.sort((a, b) => {
+        if (isMerchantOwnerRow(a) && !isMerchantOwnerRow(b)) return -1;
+        if (!isMerchantOwnerRow(a) && isMerchantOwnerRow(b)) return 1;
+        return a.name.localeCompare(b.name);
+      });
       return list;
     }
     list.sort((a, b) => {
@@ -221,7 +297,7 @@ export default function EmployeesPage() {
       return a.name.localeCompare(b.name);
     });
     return list;
-  }, [employees, roleSort]);
+  }, [rowsForSort, roleSort]);
 
   const cycleRoleSort = () => {
     setRoleSort((prev) =>
@@ -291,6 +367,11 @@ export default function EmployeesPage() {
       setEmailError("");
       return true;
     }
+    const ownerEmail = ownerRow?.email?.trim().toLowerCase();
+    if (ownerEmail && normalizedEmail === ownerEmail) {
+      setEmailError("This email is already used by the merchant owner.");
+      return false;
+    }
     const q = query(
       merchantCol(merchantId, "Employees"),
       where("email", "==", normalizedEmail)
@@ -354,7 +435,7 @@ export default function EmployeesPage() {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || isMerchantOwnerRow(deleteTarget)) return;
     setDeleting(true);
     try {
       await deleteDoc(merchantDoc(merchantId, "Employees", deleteTarget.id));
@@ -372,7 +453,8 @@ export default function EmployeesPage() {
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
           <p className="text-slate-500 text-sm">
-            {employees.length} employee{employees.length !== 1 ? "s" : ""}
+            {sortedEmployees.length} team member
+            {sortedEmployees.length !== 1 ? "s" : ""}
           </p>
           <button
             onClick={openAdd}
@@ -409,7 +491,7 @@ export default function EmployeesPage() {
           <div className="flex items-center justify-center py-12">
             <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin" />
           </div>
-        ) : employees.length === 0 ? (
+        ) : sortedEmployees.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-12 text-center">
             <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
               <User size={28} className="text-slate-400" />
@@ -466,22 +548,29 @@ export default function EmployeesPage() {
                 const phoneDisplay = dashIfEmpty(emp.phone);
                 const emailDisplay = dashIfEmpty(emp.email);
                 const menuOpen = openMenuId === emp.id;
+                const ownerRowUi = isMerchantOwnerRow(emp);
                 return (
                   <li key={emp.id}>
                     <div
-                      tabIndex={0}
+                      tabIndex={ownerRowUi ? -1 : 0}
                       onClick={() => {
+                        if (ownerRowUi) return;
                         setOpenMenuId(null);
                         openEdit(emp);
                       }}
                       onKeyDown={(e) => {
+                        if (ownerRowUi) return;
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           setOpenMenuId(null);
                           openEdit(emp);
                         }
                       }}
-                      className="w-full text-left cursor-pointer hover:bg-slate-50/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/30"
+                      className={`w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/30 ${
+                        ownerRowUi
+                          ? "cursor-default bg-slate-50/80"
+                          : "cursor-pointer hover:bg-slate-50/90"
+                      }`}
                     >
                       {/* Mobile: stacked scan-friendly block */}
                       <div className="md:hidden px-4 py-3 space-y-2">
@@ -500,29 +589,35 @@ export default function EmployeesPage() {
                               {emailDisplay}
                             </p>
                           </div>
-                          <EmployeeRowMenu
-                            emp={emp}
-                            menuOpen={menuOpen}
-                            onToggle={() =>
-                              setOpenMenuId(menuOpen ? null : emp.id)
-                            }
-                            onEdit={() => {
-                              setOpenMenuId(null);
-                              openEdit(emp);
-                            }}
-                            onDelete={() => {
-                              setOpenMenuId(null);
-                              setDeleteTarget(emp);
-                            }}
-                            wrapperClassName="relative flex-shrink-0"
-                          />
+                          {ownerRowUi ? (
+                            <span className="flex-shrink-0 text-xs text-slate-400 px-2">
+                              Account owner
+                            </span>
+                          ) : (
+                            <EmployeeRowMenu
+                              emp={emp}
+                              menuOpen={menuOpen}
+                              onToggle={() =>
+                                setOpenMenuId(menuOpen ? null : emp.id)
+                              }
+                              onEdit={() => {
+                                setOpenMenuId(null);
+                                openEdit(emp);
+                              }}
+                              onDelete={() => {
+                                setOpenMenuId(null);
+                                setDeleteTarget(emp);
+                              }}
+                              wrapperClassName="relative flex-shrink-0"
+                            />
+                          )}
                         </div>
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-[52px] text-sm">
                           <span className="text-slate-600">{phoneDisplay}</span>
                           <span
                             className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${roleBadgeClass(emp.role)}`}
                           >
-                            {emp.role === "ADMINISTRATOR" ? "Admin" : "Employee"}
+                            {roleLabel(emp.role)}
                           </span>
                         </div>
                       </div>
@@ -548,27 +643,31 @@ export default function EmployeesPage() {
                           <span
                             className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${roleBadgeClass(emp.role)}`}
                           >
-                            {emp.role === "ADMINISTRATOR"
-                              ? "Admin"
-                              : "Employee"}
+                            {roleLabel(emp.role)}
                           </span>
                         </span>
-                        <EmployeeRowMenu
-                          emp={emp}
-                          menuOpen={menuOpen}
-                          onToggle={() =>
-                            setOpenMenuId(menuOpen ? null : emp.id)
-                          }
-                          onEdit={() => {
-                            setOpenMenuId(null);
-                            openEdit(emp);
-                          }}
-                          onDelete={() => {
-                            setOpenMenuId(null);
-                            setDeleteTarget(emp);
-                          }}
-                          wrapperClassName="relative flex justify-end flex-shrink-0"
-                        />
+                        {ownerRowUi ? (
+                          <span className="flex justify-end text-xs text-slate-400 pr-1">
+                            —
+                          </span>
+                        ) : (
+                          <EmployeeRowMenu
+                            emp={emp}
+                            menuOpen={menuOpen}
+                            onToggle={() =>
+                              setOpenMenuId(menuOpen ? null : emp.id)
+                            }
+                            onEdit={() => {
+                              setOpenMenuId(null);
+                              openEdit(emp);
+                            }}
+                            onDelete={() => {
+                              setOpenMenuId(null);
+                              setDeleteTarget(emp);
+                            }}
+                            wrapperClassName="relative flex justify-end flex-shrink-0"
+                          />
+                        )}
                       </div>
                     </div>
                   </li>
