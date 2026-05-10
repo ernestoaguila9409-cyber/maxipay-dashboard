@@ -10,6 +10,8 @@ import {
 } from "firebase/firestore";
 import { Loader2, Printer, Monitor } from "lucide-react";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import {
   ONLINE_ORDERING_SETTINGS_DOC,
   SETTINGS_COLLECTION,
@@ -43,6 +45,7 @@ function statusDot(s: PrinterStatus) {
 }
 
 export default function OnlineKitchenRoutingManager({ settings }: Props) {
+  const merchantId = useMerchantId();
   const [printers, setPrinters] = useState<PrinterDocFields[]>([]);
   const [kdsDevices, setKdsDevices] = useState<KdsDevicePickerRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +53,7 @@ export default function OnlineKitchenRoutingManager({ settings }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!merchantId) return;
     let loadCount = 0;
     const tryDone = () => {
       loadCount++;
@@ -57,7 +61,7 @@ export default function OnlineKitchenRoutingManager({ settings }: Props) {
     };
 
     const unsubPrinters = onSnapshot(
-      collection(db, "Printers"),
+      merchantCol(merchantId, "Printers"),
       (snap) => {
         const nowMs = Date.now();
         const rows: PrinterDocFields[] = [];
@@ -79,7 +83,7 @@ export default function OnlineKitchenRoutingManager({ settings }: Props) {
     );
 
     const unsubKds = onSnapshot(
-      collection(db, KDS_DEVICES_COLLECTION),
+      merchantCol(merchantId, KDS_DEVICES_COLLECTION),
       (snap) => {
         const rows: KdsDevicePickerRow[] = [];
         snap.forEach((d) => {
@@ -101,15 +105,16 @@ export default function OnlineKitchenRoutingManager({ settings }: Props) {
       unsubPrinters();
       unsubKds();
     };
-  }, []);
+  }, [merchantId]);
 
   const persist = useCallback(
     async (patch: Partial<OnlineOrderingSettings>) => {
+      if (!merchantId) return;
       setError(null);
       setSaving(true);
       try {
         await setDoc(
-          doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
+          merchantDoc(merchantId, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
           { ...patch, updatedAt: serverTimestamp() },
           { merge: true },
         );
@@ -119,7 +124,7 @@ export default function OnlineKitchenRoutingManager({ settings }: Props) {
         setSaving(false);
       }
     },
-    [],
+    [merchantId],
   );
 
   const togglePrinter = useCallback(

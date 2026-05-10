@@ -47,17 +47,17 @@ class AssignModifierToItemActivity : AppCompatActivity() {
     private fun loadModifierGroups() {
         val iid = itemId ?: return
 
-        db.collection("MenuItems").document(iid).get()
+        MerchantFirestore.col("MenuItems").document(iid).get()
             .addOnSuccessListener { itemDoc ->
                 @Suppress("UNCHECKED_CAST")
                 val itemModGroupIds = (itemDoc.get("modifierGroupIds") as? List<String>) ?: emptyList()
                 Log.d("Inventory", "Item modifierGroupIds: $itemModGroupIds")
 
-                db.collection("ModifierGroups").get()
+                MerchantFirestore.col("ModifierGroups").get()
                     .addOnSuccessListener { groupDocs ->
                         Log.d("Inventory", "Loaded groups: ${groupDocs.size()}")
 
-                        db.collection("ItemModifierGroups")
+                        MerchantFirestore.col("ItemModifierGroups")
                             .whereEqualTo("itemId", iid)
                             .get()
                             .addOnSuccessListener { assignedDocs ->
@@ -118,7 +118,7 @@ class AssignModifierToItemActivity : AppCompatActivity() {
     private fun syncMissingLinks(itemId: String, missingGroupIds: Set<String>, allIds: List<String>) {
         val batch = db.batch()
         for (groupId in missingGroupIds) {
-            val ref = db.collection("ItemModifierGroups").document()
+            val ref = MerchantFirestore.col("ItemModifierGroups").document()
             batch.set(ref, hashMapOf(
                 "itemId" to itemId,
                 "groupId" to groupId,
@@ -131,9 +131,9 @@ class AssignModifierToItemActivity : AppCompatActivity() {
     }
 
     private fun loadModifierGroupsLegacy() {
-        db.collection("ModifierGroups").get()
+        MerchantFirestore.col("ModifierGroups").get()
             .addOnSuccessListener { groupDocs ->
-                db.collection("ItemModifierGroups")
+                MerchantFirestore.col("ItemModifierGroups")
                     .whereEqualTo("itemId", itemId)
                     .get()
                     .addOnSuccessListener { assignedDocs ->
@@ -229,7 +229,7 @@ class AssignModifierToItemActivity : AppCompatActivity() {
             "groupId" to item.groupId,
             "displayOrder" to nextOrder
         )
-        db.collection("ItemModifierGroups").add(data)
+        MerchantFirestore.col("ItemModifierGroups").add(data)
             .addOnSuccessListener { ref ->
                 item.linkId = ref.id
                 persistModifierGroupIdsOnItem()
@@ -255,7 +255,7 @@ class AssignModifierToItemActivity : AppCompatActivity() {
         item.linkId = null
 
         if (linkId != null) {
-            db.collection("ItemModifierGroups").document(linkId).delete()
+            MerchantFirestore.col("ItemModifierGroups").document(linkId).delete()
                 .addOnSuccessListener { persistModifierGroupIdsOnItem() }
                 .addOnFailureListener { deleteLinksAndPersist(iid, gid) }
         } else {
@@ -266,7 +266,7 @@ class AssignModifierToItemActivity : AppCompatActivity() {
     // ── Background Firestore sync ───────────────────────────────────
 
     private fun deleteLinksAndPersist(itemId: String, groupId: String) {
-        db.collection("ItemModifierGroups")
+        MerchantFirestore.col("ItemModifierGroups")
             .whereEqualTo("itemId", itemId)
             .whereEqualTo("groupId", groupId)
             .get()
@@ -288,7 +288,7 @@ class AssignModifierToItemActivity : AppCompatActivity() {
             .filter { it.isAssigned && !it.isHeader }
             .mapNotNull { it.groupId }
 
-        db.collection("MenuItems").document(iid)
+        MerchantFirestore.col("MenuItems").document(iid)
             .update("modifierGroupIds", ids)
             .addOnSuccessListener { Log.d("Inventory", "Synced modifierGroupIds: $ids") }
             .addOnFailureListener { Log.e("Inventory", "Failed to sync modifierGroupIds: ${it.message}") }
@@ -302,7 +302,7 @@ class AssignModifierToItemActivity : AppCompatActivity() {
         assigned.forEachIndexed { index, item ->
             item.displayOrder = index + 1
             item.linkId?.let {
-                batch.update(db.collection("ItemModifierGroups").document(it), "displayOrder", item.displayOrder)
+                batch.update(MerchantFirestore.col("ItemModifierGroups").document(it), "displayOrder", item.displayOrder)
             }
         }
         batch.commit()

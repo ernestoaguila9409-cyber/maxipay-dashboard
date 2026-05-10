@@ -15,6 +15,7 @@ import {
   arrayRemove,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -176,7 +177,7 @@ export default function MenusPage() {
       if (readyCount >= 4) setLoading(false);
     };
 
-    const unsubMenus = onSnapshot(query(collection(db, "menus"), where("merchantId", "==", merchantId)), (snap) => {
+    const unsubMenus = onSnapshot(merchantCol(merchantId, "menus"), (snap) => {
       const list: Menu[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -192,7 +193,7 @@ export default function MenusPage() {
       checkReady();
     });
 
-    const unsubSchedules = onSnapshot(query(collection(db, "menuSchedules"), where("merchantId", "==", merchantId)), (snap) => {
+    const unsubSchedules = onSnapshot(merchantCol(merchantId, "menuSchedules"), (snap) => {
       const list: Schedule[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -209,7 +210,7 @@ export default function MenusPage() {
       checkReady();
     });
 
-    const unsubItems = onSnapshot(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)), (snap) => {
+    const unsubItems = onSnapshot(merchantCol(merchantId, "MenuItems"), (snap) => {
       const list: MenuItem[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -244,7 +245,7 @@ export default function MenusPage() {
       checkReady();
     });
 
-    const unsubCats = onSnapshot(query(collection(db, "Categories"), where("merchantId", "==", merchantId)), (snap) => {
+    const unsubCats = onSnapshot(merchantCol(merchantId, "Categories"), (snap) => {
       const list: Category[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -378,13 +379,12 @@ export default function MenusPage() {
     setMenuSaving(true);
     try {
       if (menuModalEdit) {
-        await updateDoc(doc(db, "menus", menuModalEdit.id), {
+        await updateDoc(merchantDoc(merchantId, "menus", menuModalEdit.id), {
           name,
           isActive: menuIsActive,
         });
       } else {
-        await addDoc(collection(db, "menus"), {
-          merchantId,
+        await addDoc(merchantCol(merchantId, "menus"), {
           name,
           isActive: menuIsActive,
           scheduleIds: [],
@@ -403,7 +403,7 @@ export default function MenusPage() {
     setDeletingMenu(true);
     try {
       const batch = writeBatch(db);
-      batch.delete(doc(db, "menus", deleteMenuTarget.id));
+      batch.delete(merchantDoc(merchantId, "menus", deleteMenuTarget.id));
       for (const item of items) {
         const inMenuIds = item.menuIds.includes(deleteMenuTarget.id);
         const isLegacy = item.menuId === deleteMenuTarget.id;
@@ -413,7 +413,7 @@ export default function MenusPage() {
             menuIds: newMenuIds,
             menuId: newMenuIds.length > 0 ? newMenuIds[0] : "",
           };
-          batch.update(doc(db, "MenuItems", item.id), update);
+          batch.update(merchantDoc(merchantId, "MenuItems", item.id), update);
         }
       }
       await batch.commit();
@@ -472,10 +472,9 @@ export default function MenusPage() {
         endTime: scheduleEnd,
       };
       if (scheduleEdit) {
-        await updateDoc(doc(db, "menuSchedules", scheduleEdit.id), data);
+        await updateDoc(merchantDoc(merchantId, "menuSchedules", scheduleEdit.id), data);
       } else {
-        data.merchantId = merchantId;
-        const ref = await addDoc(collection(db, "menuSchedules"), data);
+        const ref = await addDoc(merchantCol(merchantId, "menuSchedules"), data);
         const newScheduleId = ref.id;
         const menuIdsToAssign = Object.entries(scheduleAssignToMenus)
           .filter(([, v]) => v)
@@ -484,7 +483,7 @@ export default function MenusPage() {
           const menu = menus.find((m) => m.id === menuId);
           const currentIds = menu?.scheduleIds ?? [];
           if (!currentIds.includes(newScheduleId)) {
-            await updateDoc(doc(db, "menus", menuId), {
+            await updateDoc(merchantDoc(merchantId, "menus", menuId), {
               scheduleIds: arrayUnion(newScheduleId),
             });
           }
@@ -503,19 +502,19 @@ export default function MenusPage() {
     setDeletingSchedule(true);
     try {
       const batch = writeBatch(db);
-      batch.delete(doc(db, "menuSchedules", deleteScheduleTarget.id));
+      batch.delete(merchantDoc(merchantId, "menuSchedules", deleteScheduleTarget.id));
       for (const item of items) {
         if (item.scheduleIds.includes(deleteScheduleTarget.id)) {
           const newIds = item.scheduleIds.filter((id) => id !== deleteScheduleTarget.id);
           const update: Record<string, unknown> = { scheduleIds: newIds };
           if (newIds.length === 0) update.isScheduled = false;
-          batch.update(doc(db, "MenuItems", item.id), update);
+          batch.update(merchantDoc(merchantId, "MenuItems", item.id), update);
         }
       }
       for (const cat of categories) {
         if (cat.scheduleIds.includes(deleteScheduleTarget.id)) {
           const newIds = cat.scheduleIds.filter((id) => id !== deleteScheduleTarget.id);
-          batch.update(doc(db, "Categories", cat.id), { scheduleIds: newIds });
+          batch.update(merchantDoc(merchantId, "Categories", cat.id), { scheduleIds: newIds });
         }
       }
       await batch.commit();
@@ -541,9 +540,9 @@ export default function MenusPage() {
         const newIds = item.scheduleIds.filter((id) => id !== activeScheduleId);
         const update: Record<string, unknown> = { scheduleIds: newIds };
         if (newIds.length === 0) update.isScheduled = false;
-        await updateDoc(doc(db, "MenuItems", item.id), update);
+        await updateDoc(merchantDoc(merchantId, "MenuItems", item.id), update);
       } else {
-        await updateDoc(doc(db, "MenuItems", item.id), {
+        await updateDoc(merchantDoc(merchantId, "MenuItems", item.id), {
           isScheduled: true,
           scheduleIds: [...item.scheduleIds, activeScheduleId],
         });
@@ -579,7 +578,7 @@ export default function MenusPage() {
       .map(([k]) => k);
     setAssignScheduleSaving(true);
     try {
-      await updateDoc(doc(db, "menus", assignScheduleMenu.id), {
+      await updateDoc(merchantDoc(merchantId, "menus", assignScheduleMenu.id), {
         scheduleIds: selectedIds,
       });
       setAssignScheduleModalOpen(false);

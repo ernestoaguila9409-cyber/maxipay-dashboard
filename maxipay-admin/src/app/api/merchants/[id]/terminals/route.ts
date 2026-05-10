@@ -73,8 +73,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
 
     const businessName = (merchantDoc.data()?.businessName as string) || "Terminal";
-    const ref = await db.collection("payment_terminals").add({
-      merchantId,
+    const ref = await db
+      .collection("Merchants")
+      .doc(merchantId)
+      .collection("payment_terminals")
+      .add({
       name: body.terminalName?.trim() || `${businessName} Terminal`,
       provider,
       deviceModel: body.deviceModel?.trim() || "",
@@ -107,9 +110,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ ok: false, error: "missing_terminal_id" }, { status: 400 });
     }
 
-    const termRef = db.collection("payment_terminals").doc(terminalId);
+    const termRef = db
+      .collection("Merchants")
+      .doc(merchantId)
+      .collection("payment_terminals")
+      .doc(terminalId);
     const termDoc = await termRef.get();
-    if (!termDoc.exists || termDoc.data()?.merchantId !== merchantId) {
+    if (!termDoc.exists) {
       return NextResponse.json({ ok: false, error: "not_found" }, { status: 404 });
     }
 
@@ -156,9 +163,13 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 
     getFirebaseAdminApp();
     const db = admin.firestore();
-    const termRef = db.collection("payment_terminals").doc(terminalId);
+    const termRef = db
+      .collection("Merchants")
+      .doc(merchantId)
+      .collection("payment_terminals")
+      .doc(terminalId);
     const termDoc = await termRef.get();
-    if (!termDoc.exists || termDoc.data()?.merchantId !== merchantId) {
+    if (!termDoc.exists) {
       return NextResponse.json({ ok: false, error: "not_found" }, { status: 404 });
     }
 

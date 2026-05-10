@@ -94,7 +94,7 @@ class AddTaxActivity : AppCompatActivity() {
         }
 
         if (taxId != null) {
-            db.collection("Taxes").document(taxId!!)
+            MerchantFirestore.doc("Taxes", taxId!!)
                 .update(data)
                 .addOnSuccessListener {
                     Toast.makeText(this, "Tax updated", Toast.LENGTH_SHORT).show()
@@ -104,7 +104,7 @@ class AddTaxActivity : AppCompatActivity() {
                     Toast.makeText(this, "Failed to update: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
         } else {
-            db.collection("Taxes")
+            MerchantFirestore.col("Taxes")
                 .add(data)
                 .addOnSuccessListener {
                     Toast.makeText(this, "Tax saved", Toast.LENGTH_SHORT).show()
@@ -122,7 +122,7 @@ class AddTaxActivity : AppCompatActivity() {
             .setTitle("Remove tax")
             .setMessage("Remove this tax or fee?")
             .setPositiveButton("Remove") { _, _ ->
-                db.collection("Taxes").document(id)
+                MerchantFirestore.doc("Taxes", id)
                     .delete()
                     .addOnSuccessListener {
                         Toast.makeText(this, "Tax removed", Toast.LENGTH_SHORT).show()

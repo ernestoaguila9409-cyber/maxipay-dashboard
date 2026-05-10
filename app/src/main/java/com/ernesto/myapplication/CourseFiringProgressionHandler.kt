@@ -74,7 +74,7 @@ object CourseFiringProgressionHandler {
     fun resumeIfNeeded(context: Context, db: FirebaseFirestore, orderId: String) {
         if (!CourseFiringCache.enabled || CourseFiringCache.courses.isEmpty()) return
 
-        val orderRef = db.collection("Orders").document(orderId)
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
         orderRef.get().addOnSuccessListener { orderDoc ->
             if (!orderDoc.exists()) return@addOnSuccessListener
             if (orderDoc.getBoolean("courseFiringActive") != true) return@addOnSuccessListener
@@ -140,7 +140,7 @@ object CourseFiringProgressionHandler {
         if (!useReadyBasedProgression()) return
         itemsListener?.remove()
         val firstCourseId = CourseFiringCache.firstCourseId()
-        val itemsRef = db.collection("Orders").document(orderId).collection("items")
+        val itemsRef = MerchantFirestore.col("Orders").document(orderId).collection("items")
         itemsListener = itemsRef.addSnapshotListener { snapshot, err ->
             if (err != null || snapshot == null) return@addSnapshotListener
             if (activeOrderId != orderId || currentCourseId != courseId) return@addSnapshotListener
@@ -195,7 +195,7 @@ object CourseFiringProgressionHandler {
         }
         Log.d(TAG, "Firing course ${nextCourse.id} for order $orderId")
 
-        val orderRef = db.collection("Orders").document(orderId)
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
         orderRef.get().addOnSuccessListener { orderDoc ->
             if (!orderDoc.exists()) { deactivate(); return@addOnSuccessListener }
 
@@ -320,7 +320,7 @@ object CourseFiringProgressionHandler {
         val updates = mutableMapOf<String, Any>("courseFiringActive" to true)
         if (fired) updates["courseFiredAt.$courseId"] = Timestamp.now()
         if (ready) updates["courseReadyAt.$courseId"] = Timestamp.now()
-        db.collection("Orders").document(orderId).update(updates)
+        MerchantFirestore.col("Orders").document(orderId).update(updates)
             .addOnFailureListener { Log.w(TAG, "writeCourseState failed", it) }
     }
 

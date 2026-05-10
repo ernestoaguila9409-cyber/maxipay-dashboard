@@ -79,7 +79,7 @@ class TipAdjustmentActivity : AppCompatActivity() {
     }
 
     private fun listenTransactions() {
-        listener = db.collection("Transactions")
+        listener = MerchantFirestore.col("Transactions")
             .whereEqualTo("settled", false)
             .whereEqualTo("voided", false)
             .orderBy("createdAt", Query.Direction.DESCENDING)
@@ -188,7 +188,7 @@ class TipAdjustmentActivity : AppCompatActivity() {
             applyTipTransactionListUi(requestId, provisional)
             return
         }
-        val tasks = batchIds.map { id -> db.collection("Batches").document(id).get() }
+        val tasks = batchIds.map { id -> MerchantFirestore.col("Batches").document(id).get() }
         Tasks.whenAllSuccess<DocumentSnapshot>(tasks)
             .addOnSuccessListener { batchDocs ->
                 if (requestId != tipListSnapshotRequestId || isFinishing) return@addOnSuccessListener
@@ -457,10 +457,10 @@ class TipAdjustmentActivity : AppCompatActivity() {
         oldTipCents: Long,
         baseAmountCents: Long
     ) {
-        val txRef = db.collection("Transactions").document(item.transactionId)
-        val orderRef = if (item.orderId.isNotBlank()) db.collection("Orders").document(item.orderId) else null
+        val txRef = MerchantFirestore.col("Transactions").document(item.transactionId)
+        val orderRef = if (item.orderId.isNotBlank()) MerchantFirestore.col("Orders").document(item.orderId) else null
         val hasBatch = item.batchId.isNotBlank()
-        val batchRef = if (hasBatch) db.collection("Batches").document(item.batchId) else null
+        val batchRef = if (hasBatch) MerchantFirestore.col("Batches").document(item.batchId) else null
         val deltaTipCents = newTipCents - oldTipCents
 
         db.runTransaction { transaction ->

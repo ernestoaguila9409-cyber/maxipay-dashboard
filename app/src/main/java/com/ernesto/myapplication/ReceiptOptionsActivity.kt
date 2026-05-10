@@ -56,7 +56,7 @@ class ReceiptOptionsActivity : AppCompatActivity() {
             // taps "Email Receipt".
             val oid = orderId
             if (!oid.isNullOrBlank()) {
-                db.collection("Orders").document(oid).get()
+                MerchantFirestore.col("Orders").document(oid).get()
                     .addOnSuccessListener { doc ->
                         val emailOnFile = doc.getString("customerEmail")
                             ?.trim()
@@ -170,7 +170,7 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         storageRef.putBytes(data)
             .addOnSuccessListener {
                 storageRef.downloadUrl.addOnSuccessListener { uri ->
-                    db.collection("Orders").document(oid)
+                    MerchantFirestore.col("Orders").document(oid)
                         .update("signatureUrl", uri.toString())
                         .addOnSuccessListener { Log.d("Signature", "Saved signature URL for order $oid") }
                         .addOnFailureListener { Log.w("Signature", "Failed to save URL", it) }
@@ -250,19 +250,19 @@ class ReceiptOptionsActivity : AppCompatActivity() {
     private fun loadAndPrint(orderId: String) {
         Toast.makeText(this, "Preparing receipt…", Toast.LENGTH_SHORT).show()
 
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 if (!orderDoc.exists()) {
                     Toast.makeText(this, "Order not found", Toast.LENGTH_SHORT).show()
                     return@addOnSuccessListener
                 }
 
-                db.collection("Orders").document(orderId)
+                MerchantFirestore.col("Orders").document(orderId)
                     .collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
                         val saleId = orderDoc.getString("saleTransactionId")
                         if (saleId != null) {
-                            db.collection("Transactions").document(saleId).get()
+                            MerchantFirestore.col("Transactions").document(saleId).get()
                                 .addOnSuccessListener { txDoc ->
                                     @Suppress("UNCHECKED_CAST")
                                     val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()

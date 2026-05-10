@@ -35,6 +35,8 @@ import {
 } from "firebase/storage";
 import { GripVertical, ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
 import { db, storage } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import { resizeImageToBlob } from "@/lib/imageUpload";
 import {
   DEFAULT_HERO_CTA,
@@ -59,6 +61,7 @@ function newSlideId(): string {
 }
 
 export default function HeroCarouselManager({ categories, items }: HeroCarouselManagerProps) {
+  const merchantId = useMerchantId();
   const [slides, setSlides] = useState<HeroSlide[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,8 +69,9 @@ export default function HeroCarouselManager({ categories, items }: HeroCarouselM
   const [adding, setAdding] = useState(false);
 
   useEffect(() => {
+    if (!merchantId) return;
     const unsub = onSnapshot(
-      collection(db, HERO_SLIDES_COLLECTION),
+      merchantCol(merchantId, HERO_SLIDES_COLLECTION),
       (snap) => {
         const list = snap.docs.map((d) =>
           parseHeroSlide(d.id, d.data() as Record<string, unknown>)
@@ -83,7 +87,7 @@ export default function HeroCarouselManager({ categories, items }: HeroCarouselM
       }
     );
     return () => unsub();
-  }, []);
+  }, [merchantId]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -103,7 +107,7 @@ export default function HeroCarouselManager({ categories, items }: HeroCarouselM
         const batch = writeBatch(db);
         next.forEach((s, i) => {
           batch.set(
-            doc(db, HERO_SLIDES_COLLECTION, s.id),
+            merchantDoc(merchantId, HERO_SLIDES_COLLECTION, s.id),
             { order: i, updatedAt: serverTimestamp() },
             { merge: true }
           );
@@ -122,7 +126,7 @@ export default function HeroCarouselManager({ categories, items }: HeroCarouselM
       setSavingId(id);
       try {
         await setDoc(
-          doc(db, HERO_SLIDES_COLLECTION, id),
+          merchantDoc(merchantId, HERO_SLIDES_COLLECTION, id),
           { ...patch, updatedAt: serverTimestamp() },
           { merge: true }
         );
@@ -148,7 +152,7 @@ export default function HeroCarouselManager({ categories, items }: HeroCarouselM
             // Object may already be gone (e.g. manual cleanup). Continue with Firestore delete.
           }
         }
-        await deleteDoc(doc(db, HERO_SLIDES_COLLECTION, s.id));
+        await deleteDoc(merchantDoc(merchantId, HERO_SLIDES_COLLECTION, s.id));
       } catch (err) {
         console.error("[hero-slides] delete", err);
         setError("Could not delete slide.");
@@ -168,7 +172,7 @@ export default function HeroCarouselManager({ categories, items }: HeroCarouselM
     setError(null);
     try {
       const id = newSlideId();
-      await setDoc(doc(db, HERO_SLIDES_COLLECTION, id), {
+      await setDoc(merchantDoc(merchantId, HERO_SLIDES_COLLECTION, id), {
         imageUrl: "",
         storagePath: "",
         title: "",

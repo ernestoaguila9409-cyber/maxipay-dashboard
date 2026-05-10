@@ -1,6 +1,7 @@
 import admin from "firebase-admin";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp } from "@/lib/firebaseAdmin";
+import { merchantDoc } from "@/lib/merchantFirestoreAdmin";
 import {
   createOnlineOrderTransaction,
   loadIposHppCredentials,
@@ -31,6 +32,7 @@ interface OrderBody {
 
 async function createHppPaymentUrl(
   db: admin.firestore.Firestore,
+  merchantId: string,
   orderId: string,
   orderNumber: number,
   totalInCents: number,
@@ -40,7 +42,7 @@ async function createHppPaymentUrl(
   slug: string,
   preloadedCreds?: IposHppCredentials,
 ): Promise<string> {
-  const creds = preloadedCreds ?? (await loadIposHppCredentials(db));
+  const creds = preloadedCreds ?? (await loadIposHppCredentials(db, merchantId));
   const { tpn, authToken } = creds;
   if (!tpn || !authToken) throw new Error("iPOSpays HPP is not configured (missing TPN or auth token).");
 
@@ -60,7 +62,7 @@ async function createHppPaymentUrl(
 
   let bizName = "MaxiPay";
   let logoUrl = "";
-  const bizSnap = await db.collection("Settings").doc("businessInfo").get();
+  const bizSnap = await merchantDoc(merchantId, "Settings", "businessInfo").get();
   if (bizSnap.exists) {
     const biz = bizSnap.data() || {};
     if (biz.businessName) bizName = String(biz.businessName);
@@ -135,7 +137,7 @@ async function createHppPaymentUrl(
     throw new Error(errMsg);
   }
 
-  await db.collection("Orders").doc(orderId).update({
+  await merchantDoc(merchantId, "Orders", orderId).update({
     hppTransactionRefId: txRefId,
     hppPaymentUrl: body.information,
     hppCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -147,9 +149,15 @@ async function createHppPaymentUrl(
 
 export async function POST(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const merchantId = searchParams.get("merchantId")?.trim();
+    if (!merchantId) {
+      return NextResponse.json({ error: "merchantId is required." }, { status: 400 });
+    }
+
     getFirebaseAdminApp();
     const db = admin.firestore();
-    const cfg = await loadPublicOnlineOrderingConfig(db);
+    const cfg = await loadPublicOnlineOrderingConfig(db, merchantId);
     if (!cfg.enabled) {
       return NextResponse.json({ error: "Online ordering is disabled." }, { status: 403 });
     }
@@ -199,7 +207,7 @@ export async function POST(request: Request) {
 
     let hppCredsValidated: IposHppCredentials | undefined;
     if (paymentChoice === "PAY_ONLINE_HPP") {
-      const hppCreds = await loadIposHppCredentials(db);
+      const hppCreds = await loadIposHppCredentials(db, merchantId);
       if (!hppCreds.tpn || !hppCreds.authToken) {
         return NextResponse.json(
           {
@@ -212,7 +220,7 @@ export async function POST(request: Request) {
       hppCredsValidated = hppCreds;
     }
 
-    const created = await createOnlineOrderTransaction(db, {
+    const created = await createOnlineOrderTransaction(db, merchantId, {
       lines,
       customerName,
       customerPhone,
@@ -224,6 +232,7 @@ export async function POST(request: Request) {
       try {
         const paymentUrl = await createHppPaymentUrl(
           db,
+          merchantId,
           created.orderId,
           created.orderNumber,
           created.totalInCents,

@@ -15,6 +15,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -92,7 +93,7 @@ async function createDeviceActivationCode(merchantId: string): Promise<{ code: s
   const ttl = DEVICE_ACTIVATION_TTL_MS;
   for (let attempt = 0; attempt < 12; attempt++) {
     const code = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
-    const ref = doc(db, DEVICE_ACTIVATIONS_COLLECTION, code);
+    const ref = merchantDoc(merchantId, DEVICE_ACTIVATIONS_COLLECTION, code);
     const existing = await getDoc(ref);
     if (existing.exists()) continue;
     const expiresAtMs = Date.now() + ttl;
@@ -101,15 +102,14 @@ async function createDeviceActivationCode(merchantId: string): Promise<{ code: s
       createdAt: serverTimestamp(),
       expiresAt: Timestamp.fromMillis(expiresAtMs),
       consumed: false,
-      merchantId,
     });
     return { code, expiresAtMs };
   }
   throw new Error("Could not generate a unique code. Try again.");
 }
 
-async function deactivatePosDevice(deviceId: string): Promise<void> {
-  const ref = doc(db, POS_DEVICES_COLLECTION, deviceId);
+async function deactivatePosDevice(merchantId: string, deviceId: string): Promise<void> {
+  const ref = merchantDoc(merchantId, POS_DEVICES_COLLECTION, deviceId);
   await updateDoc(ref, {
     deactivated: true,
     deactivatedAt: serverTimestamp(),
@@ -165,10 +165,7 @@ export default function PosDevicesSettingsPage() {
     }
 
     const unsub = onSnapshot(
-      query(
-        collection(db, POS_DEVICES_COLLECTION),
-        where("merchantId", "==", merchantId),
-      ),
+      merchantCol(merchantId, POS_DEVICES_COLLECTION),
       (snap) => {
         const rows = snap.docs
           .map((d) => parseDevice(d.id, d.data() as Record<string, unknown>))
@@ -230,7 +227,7 @@ export default function PosDevicesSettingsPage() {
   /** When the POS redeems the code, Android sets [consumed] on the same doc — close the modal. */
   useEffect(() => {
     if (!modalOpen || !modalCode) return;
-    const ref = doc(db, DEVICE_ACTIVATIONS_COLLECTION, modalCode);
+    const ref = merchantDoc(merchantId, DEVICE_ACTIVATIONS_COLLECTION, modalCode);
     const unsub = onSnapshot(
       ref,
       (snap) => {
@@ -251,7 +248,7 @@ export default function PosDevicesSettingsPage() {
     setDeactivatingId(row.id);
     setError(null);
     try {
-      await deactivatePosDevice(row.id);
+      await deactivatePosDevice(merchantId, row.id);
       setConfirmDeactivate(null);
     } catch (e) {
       console.error(e);

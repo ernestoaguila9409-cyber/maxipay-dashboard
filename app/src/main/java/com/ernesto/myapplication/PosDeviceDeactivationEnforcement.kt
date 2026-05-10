@@ -30,9 +30,7 @@ object PosDeviceDeactivationEnforcement {
 
         val appCtx = context.applicationContext
         PosDeviceIdentity.resolveInstallationDocId(context) { docId ->
-            FirebaseFirestore.getInstance()
-                .collection(COLLECTION)
-                .document(docId)
+            MerchantFirestore.doc(COLLECTION, docId)
                 .get(Source.SERVER)
                 .addOnSuccessListener { snap ->
                     if (!snap.exists()) return@addOnSuccessListener

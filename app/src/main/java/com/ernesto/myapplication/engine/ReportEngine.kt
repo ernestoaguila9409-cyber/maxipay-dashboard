@@ -1,5 +1,6 @@
 package com.ernesto.myapplication.engine
 
+import com.ernesto.myapplication.MerchantFirestore
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.QuerySnapshot
@@ -214,7 +215,7 @@ class ReportEngine(private val db: FirebaseFirestore) {
         onSuccess: (QuerySnapshot) -> Unit,
         onFailure: (Exception) -> Unit
     ) {
-        db.collection("Transactions")
+        MerchantFirestore.col("Transactions")
             .whereGreaterThanOrEqualTo("createdAt", start)
             .whereLessThan("createdAt", end)
             .get()
@@ -419,7 +420,7 @@ class ReportEngine(private val db: FirebaseFirestore) {
             onFailure = { e -> firstError = firstError ?: e; tryComplete() }
         )
 
-        db.collection("Orders")
+        MerchantFirestore.col("Orders")
             .whereGreaterThanOrEqualTo("createdAt", start)
             .whereLessThan("createdAt", end)
             .get()
@@ -482,7 +483,7 @@ class ReportEngine(private val db: FirebaseFirestore) {
                     remaining += itemQueries.size
                     tryComplete()
                     for ((orderId, status) in itemQueries) {
-                        db.collection("Orders").document(orderId)
+                        MerchantFirestore.col("Orders").document(orderId)
                             .collection("items").get()
                             .addOnSuccessListener { itemsSnap ->
                                 for (itemDoc in itemsSnap.documents) {
@@ -602,7 +603,7 @@ class ReportEngine(private val db: FirebaseFirestore) {
             onFailure = { e -> firstError = firstError ?: e; tryComplete() }
         )
 
-        db.collection("Orders")
+        MerchantFirestore.col("Orders")
             .whereGreaterThanOrEqualTo("createdAt", startOfDay)
             .whereLessThan("createdAt", endOfDay)
             .get()
@@ -690,7 +691,7 @@ class ReportEngine(private val db: FirebaseFirestore) {
         )
 
         if (employeeName != null) {
-            db.collection("Orders")
+            MerchantFirestore.col("Orders")
                 .whereGreaterThanOrEqualTo("createdAt", start)
                 .whereLessThan("createdAt", end)
                 .get()
@@ -775,7 +776,7 @@ class ReportEngine(private val db: FirebaseFirestore) {
             onSuccess(result)
         }
 
-        db.collection("Orders")
+        MerchantFirestore.col("Orders")
             .whereGreaterThanOrEqualTo("createdAt", start)
             .whereLessThan("createdAt", end)
             .get()
@@ -888,7 +889,7 @@ class ReportEngine(private val db: FirebaseFirestore) {
     ) {
         val (start, end) = dateRange(startDate, endDate)
 
-        db.collection("Orders")
+        MerchantFirestore.col("Orders")
             .whereEqualTo("status", "CLOSED")
             .whereGreaterThanOrEqualTo("createdAt", start)
             .whereLessThan("createdAt", end)

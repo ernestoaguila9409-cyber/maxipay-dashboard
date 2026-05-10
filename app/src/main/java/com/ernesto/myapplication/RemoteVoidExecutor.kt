@@ -124,7 +124,7 @@ object RemoteVoidExecutor {
         onDone: (success: Boolean, message: String) -> Unit,
     ) {
         val db = FirebaseFirestore.getInstance()
-        db.collection("Transactions").document(txDocId).get()
+        MerchantFirestore.col("Transactions").document(txDocId).get()
             .addOnSuccessListener { doc ->
                 val tx = parseTransactionForVoid(doc) ?: run {
                     onDone(false, "Transaction not found")
@@ -176,7 +176,7 @@ object RemoteVoidExecutor {
                 if (TransactionVoidReferenceResolver.anyCardLegMissingGatewayRef(enriched)) {
                     val orderId = doc.getString("orderId")?.trim().orEmpty()
                     if (orderId.isNotEmpty()) {
-                        db.collection("Orders").document(orderId).get()
+                        MerchantFirestore.col("Orders").document(orderId).get()
                             .addOnSuccessListener { orderDoc ->
                                 val final = TransactionVoidReferenceResolver.enrichPaymentsFromOrderDoc(orderDoc, enriched)
                                 voidCardPaymentsSequentially(context, db, txDocId, voidedBy, final, 0, onDone, 0)
@@ -293,7 +293,7 @@ object RemoteVoidExecutor {
         voidedBy: String,
         onComplete: (Boolean) -> Unit,
     ) {
-        val txRef = db.collection("Transactions").document(txDocId)
+        val txRef = MerchantFirestore.col("Transactions").document(txDocId)
         txRef.get()
             .addOnSuccessListener { document ->
                 if (!document.exists()) {
@@ -321,7 +321,7 @@ object RemoteVoidExecutor {
                 )
                     .addOnSuccessListener {
                         if (batchId.isNotBlank()) {
-                            db.collection("Batches").document(batchId).update(
+                            MerchantFirestore.col("Batches").document(batchId).update(
                                 mapOf(
                                     "totalSales" to FieldValue.increment(-amount),
                                     "netTotal" to FieldValue.increment(-amount),
@@ -332,7 +332,7 @@ object RemoteVoidExecutor {
                             }
                         }
                         if (orderId.isNotBlank()) {
-                            db.collection("Orders").document(orderId).update(
+                            MerchantFirestore.col("Orders").document(orderId).update(
                                 mapOf(
                                     "status" to "VOIDED",
                                     "voidedAt" to Date(),

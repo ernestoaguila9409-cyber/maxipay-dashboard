@@ -212,7 +212,7 @@ object OnlineOrderingDashboardSync {
     fun start(db: FirebaseFirestore) {
         registration?.remove()
         registration =
-            db.collection("Settings").document("onlineOrdering").addSnapshotListener { snap, err ->
+            MerchantFirestore.doc("Settings", "onlineOrdering").addSnapshotListener { snap, err ->
                 if (err != null) {
                     Log.w(TAG, "onlineOrdering listener error", err)
                     return@addSnapshotListener

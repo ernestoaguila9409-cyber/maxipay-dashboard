@@ -31,7 +31,7 @@ object MenuItemRoutingLabelCleanup {
             .filter { it.isNotEmpty() }
             .toSet()
 
-        db.collection("MenuItems").get()
+        MerchantFirestore.col("MenuItems").get()
             .addOnSuccessListener { snap ->
                 val pending = mutableListOf<Pair<com.google.firebase.firestore.DocumentReference, Map<String, Any>>>()
 
@@ -110,7 +110,7 @@ object MenuItemRoutingLabelCleanup {
             .filter { it.isNotEmpty() }
             .toSet()
 
-        db.collection("Categories").get()
+        MerchantFirestore.col("Categories").get()
             .addOnSuccessListener { catSnap ->
                 val pending = mutableListOf<Pair<DocumentReference, Map<String, Any>>>()
                 for (doc in catSnap.documents) {
@@ -120,7 +120,7 @@ object MenuItemRoutingLabelCleanup {
                         pending.add(doc.reference to mapOf("kitchenLabel" to FieldValue.delete()))
                     }
                 }
-                db.collection("subcategories").get()
+                MerchantFirestore.col("subcategories").get()
                     .addOnSuccessListener { subSnap ->
                         for (doc in subSnap.documents) {
                             val kl = doc.getString("kitchenLabel")?.trim().orEmpty()

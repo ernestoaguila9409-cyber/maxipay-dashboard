@@ -29,9 +29,8 @@ object SignatureSettings {
     }
 
     private fun saveToFirestore(mode: String) {
-        val db = FirebaseFirestore.getInstance()
         val data = hashMapOf<String, Any>("signatureMode" to mode)
-        db.collection("Settings").document("signatureSettings")
+        MerchantFirestore.doc("Settings", "signatureSettings")
             .set(data)
             .addOnSuccessListener { Log.d("SignatureSettings", "Saved to Firestore: $mode") }
             .addOnFailureListener { Log.w("SignatureSettings", "Firestore save failed", it) }

@@ -27,7 +27,7 @@ object CustomerDuplicateChecker {
             return
         }
 
-        db.collection("Customers")
+        MerchantFirestore.col("Customers")
             .get()
             .addOnSuccessListener { snap ->
                 val exists = snap.documents.any { doc ->

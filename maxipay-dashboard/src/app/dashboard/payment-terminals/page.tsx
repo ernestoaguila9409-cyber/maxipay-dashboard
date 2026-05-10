@@ -16,6 +16,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -152,12 +153,8 @@ export default function PaymentTerminalsPage() {
 
     setLoading(true);
     setSnapshotError(null);
-    const q = query(
-      collection(db, PAYMENTS_COLLECTION),
-      where("merchantId", "==", merchantId),
-    );
     const unsub = onSnapshot(
-      q,
+      merchantCol(merchantId, PAYMENTS_COLLECTION),
       (snap) => {
         const list: TerminalRow[] = [];
         snap.forEach((d) => {
@@ -213,7 +210,7 @@ export default function PaymentTerminalsPage() {
         const lid = t.legacyTerminalId?.trim();
         if (!lid) continue;
         try {
-          const legRef = doc(db, LEGACY_COLLECTION, lid);
+          const legRef = merchantDoc(merchantId, LEGACY_COLLECTION, lid);
           const legSnap = await getDoc(legRef);
           if (!legSnap.exists()) continue;
           const raw = legSnap.data()?.active;
@@ -282,7 +279,7 @@ export default function PaymentTerminalsPage() {
         setFormError("Missing merchant scope. Refresh the page or sign in again.");
         return;
       }
-      await addDoc(collection(db, PAYMENTS_COLLECTION), {
+      await addDoc(merchantCol(merchantId, PAYMENTS_COLLECTION), {
         name: trimmedName,
         provider: providerId,
         deviceModel: deviceModel.trim(),
@@ -295,7 +292,6 @@ export default function PaymentTerminalsPage() {
         ),
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
-        merchantId,
       });
       setModalOpen(false);
     } catch (err) {
@@ -309,7 +305,7 @@ export default function PaymentTerminalsPage() {
   const handleToggle = async (t: TerminalRow) => {
     try {
       const next = !t.active;
-      await updateDoc(doc(db, PAYMENTS_COLLECTION, t.id), {
+      await updateDoc(merchantDoc(merchantId, PAYMENTS_COLLECTION, t.id), {
         active: next,
         updatedAt: Timestamp.now(),
       });
@@ -318,7 +314,7 @@ export default function PaymentTerminalsPage() {
       const legacyId = t.legacyTerminalId?.trim();
       if (legacyId) {
         try {
-          await updateDoc(doc(db, LEGACY_COLLECTION, legacyId), {
+          await updateDoc(merchantDoc(merchantId, LEGACY_COLLECTION, legacyId), {
             active: next,
           });
         } catch (legacyErr) {
@@ -334,7 +330,7 @@ export default function PaymentTerminalsPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await deleteDoc(doc(db, PAYMENTS_COLLECTION, deleteTarget.id));
+      await deleteDoc(merchantDoc(merchantId, PAYMENTS_COLLECTION, deleteTarget.id));
       setDeleteTarget(null);
     } catch (err) {
       console.error("Failed to delete terminal:", err);
@@ -355,10 +351,8 @@ export default function PaymentTerminalsPage() {
         return;
       }
       const [legacySnap, newSnap] = await Promise.all([
-        getDocs(collection(db, LEGACY_COLLECTION)),
-        getDocs(
-          query(collection(db, PAYMENTS_COLLECTION), where("merchantId", "==", mid))
-        ),
+        getDocs(merchantCol(mid, LEGACY_COLLECTION)),
+        getDocs(merchantCol(mid, PAYMENTS_COLLECTION)),
       ]);
       const alreadyMigrated = new Set<string>();
       newSnap.forEach((d) => {
@@ -376,7 +370,7 @@ export default function PaymentTerminalsPage() {
       legacySnap.forEach((legacyDoc) => {
         if (alreadyMigrated.has(legacyDoc.id)) return;
         const src = legacyDoc.data() as Record<string, unknown>;
-        const newRef = doc(collection(db, PAYMENTS_COLLECTION));
+        const newRef = doc(merchantCol(mid, PAYMENTS_COLLECTION));
         const payload: PaymentTerminalDoc = {
           name:
             (src.name as string) ||
@@ -399,7 +393,6 @@ export default function PaymentTerminalsPage() {
           ...payload,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
-          merchantId,
         });
         queued++;
       });

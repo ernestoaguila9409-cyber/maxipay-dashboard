@@ -136,13 +136,13 @@ class SplitPaymentActivity : AppCompatActivity() {
             Toast.makeText(this, "No remaining balance to split", Toast.LENGTH_SHORT).show()
             return
         }
-        db.collection("Orders").document(oid).get()
+        MerchantFirestore.col("Orders").document(oid).get()
             .addOnSuccessListener { orderDoc ->
                 @Suppress("UNCHECKED_CAST")
                 guestNames = (orderDoc.get("guestNames") as? List<String>) ?: emptyList()
                 val guestCount = (orderDoc.getLong("guestCount") ?: 0L).toInt()
 
-                db.collection("Orders").document(oid).collection("items")
+                MerchantFirestore.col("Orders").document(oid).collection("items")
                     .get()
                     .addOnSuccessListener { snap ->
                         val items = snap.documents.mapNotNull { doc ->
@@ -460,9 +460,9 @@ class SplitPaymentActivity : AppCompatActivity() {
         }
 
         val oid = orderId ?: return
-        db.collection("Orders").document(oid).get()
+        MerchantFirestore.col("Orders").document(oid).get()
             .addOnSuccessListener { orderDoc ->
-                db.collection("Orders").document(oid).collection("items").get()
+                MerchantFirestore.col("Orders").document(oid).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
                         val itemDocs = itemsSnap.documents
                         val arr = JSONArray()

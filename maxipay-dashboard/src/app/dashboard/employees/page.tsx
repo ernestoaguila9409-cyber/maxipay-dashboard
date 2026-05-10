@@ -14,6 +14,7 @@ import {
   deleteField,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -181,7 +182,7 @@ export default function EmployeesPage() {
     }
 
     const unsub = onSnapshot(
-      query(collection(db, "Employees"), where("merchantId", "==", merchantId)),
+      merchantCol(merchantId, "Employees"),
       (snap) => {
         const list: Employee[] = [];
         snap.forEach((d) => {
@@ -270,7 +271,7 @@ export default function EmployeesPage() {
       setPinError("PIN must be exactly 4 digits");
       return false;
     }
-    const q = query(collection(db, "Employees"), where("merchantId", "==", merchantId), where("pin", "==", pin));
+    const q = query(merchantCol(merchantId, "Employees"), where("pin", "==", pin));
     const snap = await getDocs(q);
     const conflict = snap.docs.some((d) => d.id !== excludeId);
     if (conflict) {
@@ -291,8 +292,7 @@ export default function EmployeesPage() {
       return true;
     }
     const q = query(
-      collection(db, "Employees"),
-      where("merchantId", "==", merchantId),
+      merchantCol(merchantId, "Employees"),
       where("email", "==", normalizedEmail)
     );
     const snap = await getDocs(q);
@@ -328,7 +328,7 @@ export default function EmployeesPage() {
     setSaving(true);
     try {
       if (editTarget) {
-        await updateDoc(doc(db, "Employees", editTarget.id), {
+        await updateDoc(merchantDoc(merchantId, "Employees", editTarget.id), {
           name: trimName,
           pin: trimPin,
           role: formRole,
@@ -336,8 +336,7 @@ export default function EmployeesPage() {
           phone: trimPhone ? trimPhone : deleteField(),
         });
       } else {
-        await addDoc(collection(db, "Employees"), {
-          merchantId,
+        await addDoc(merchantCol(merchantId, "Employees"), {
           name: trimName,
           pin: trimPin,
           role: formRole,
@@ -358,7 +357,7 @@ export default function EmployeesPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await deleteDoc(doc(db, "Employees", deleteTarget.id));
+      await deleteDoc(merchantDoc(merchantId, "Employees", deleteTarget.id));
     } catch (err) {
       console.error("Failed to delete employee:", err);
     } finally {

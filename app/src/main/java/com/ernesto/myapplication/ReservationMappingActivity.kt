@@ -93,7 +93,7 @@ class ReservationMappingActivity : AppCompatActivity() {
     }
 
     private fun loadReservationAndFloor(reservationId: String) {
-        db.collection(ReservationFirestoreHelper.COLLECTION).document(reservationId)
+        MerchantFirestore.doc(ReservationFirestoreHelper.COLLECTION, reservationId)
             .get()
             .addOnSuccessListener { doc ->
                 if (!doc.exists()) {
@@ -152,7 +152,7 @@ class ReservationMappingActivity : AppCompatActivity() {
     }
 
     private fun loadSectionsThenFloor(layoutIdFromReservation: String?) {
-        db.collection("Sections").get()
+        MerchantFirestore.col("Sections").get()
             .addOnSuccessListener { snap ->
                 knownSections.clear()
                 for (d in snap.documents) {
@@ -167,7 +167,7 @@ class ReservationMappingActivity : AppCompatActivity() {
 
     private fun startFloorListener(layoutIdFromReservation: String?) {
         if (!layoutIdFromReservation.isNullOrEmpty()) {
-            db.collection("tableLayouts").document(layoutIdFromReservation).get()
+            MerchantFirestore.doc("tableLayouts", layoutIdFromReservation).get()
                 .addOnSuccessListener { layoutDoc ->
                     if (!layoutDoc.exists()) {
                         attachDefaultLayoutListener()
@@ -185,7 +185,7 @@ class ReservationMappingActivity : AppCompatActivity() {
     }
 
     private fun attachDefaultLayoutListener() {
-        db.collection("tableLayouts").get()
+        MerchantFirestore.col("tableLayouts").get()
             .addOnSuccessListener { layoutSnap ->
                 if (layoutSnap.isEmpty()) {
                     activeLayoutId = ""
@@ -205,7 +205,7 @@ class ReservationMappingActivity : AppCompatActivity() {
 
     private fun attachTablesListener(layoutId: String) {
         layoutTablesListener?.remove()
-        layoutTablesListener = db.collection("tableLayouts").document(layoutId)
+        layoutTablesListener = MerchantFirestore.doc("tableLayouts", layoutId)
             .collection("tables")
             .addSnapshotListener { snap, err ->
                 if (err != null || snap == null) return@addSnapshotListener
@@ -263,7 +263,7 @@ class ReservationMappingActivity : AppCompatActivity() {
 
     private fun loadTablesLegacy() {
         legacyTablesListener?.remove()
-        legacyTablesListener = db.collection("Tables")
+        legacyTablesListener = MerchantFirestore.col("Tables")
             .whereEqualTo("active", true)
             .addSnapshotListener { snap, err ->
                 if (err != null || snap == null) return@addSnapshotListener

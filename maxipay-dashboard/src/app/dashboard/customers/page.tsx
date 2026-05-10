@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, onSnapshot, query as firestoreQuery, where } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -57,7 +58,7 @@ export default function CustomersPage() {
     }
 
     const unsub = onSnapshot(
-      firestoreQuery(collection(db, "Customers"), where("merchantId", "==", merchantId)),
+      merchantCol(merchantId, "Customers"),
       (snap) => {
         const list: CustomerRow[] = [];
         snap.forEach((d) => {

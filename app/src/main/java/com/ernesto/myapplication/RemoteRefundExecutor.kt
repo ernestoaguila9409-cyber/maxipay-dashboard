@@ -89,7 +89,7 @@ object RemoteRefundExecutor {
         }
 
         val db = FirebaseFirestore.getInstance()
-        db.collection("Transactions").document(saleTxId).get()
+        MerchantFirestore.col("Transactions").document(saleTxId).get()
             .addOnSuccessListener { txDoc ->
                 if (!txDoc.exists()) {
                     onDone(false, "Transaction not found")
@@ -135,7 +135,7 @@ object RemoteRefundExecutor {
                     return@addOnSuccessListener
                 }
 
-                db.collection("Orders").document(effectiveOrderId).get()
+                MerchantFirestore.col("Orders").document(effectiveOrderId).get()
                     .addOnSuccessListener { orderDoc ->
                         if (!orderDoc.exists()) {
                             onDone(false, "Order not found")
@@ -245,7 +245,7 @@ object RemoteRefundExecutor {
     ) {
         val refundAmountCents = (refundAmount * 100).toLong()
 
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .whereEqualTo("closed", false)
             .limit(1)
             .get()
@@ -273,10 +273,10 @@ object RemoteRefundExecutor {
                 refundedLineKey?.takeIf { it.isNotBlank() }?.let { refundMap["refundedLineKey"] = it }
                 refundedItemName?.takeIf { it.isNotBlank() }?.let { refundMap["refundedItemName"] = it }
 
-                val refundRef = db.collection("Transactions").document()
+                val refundRef = MerchantFirestore.col("Transactions").document()
                 db.runTransaction { firestoreTxn ->
                     if (openBatchId.isNotBlank()) {
-                        val batchRef = db.collection("Batches").document(openBatchId)
+                        val batchRef = MerchantFirestore.col("Batches").document(openBatchId)
                         val batchDoc = firestoreTxn.get(batchRef)
                         val counter = batchDoc.getLong("transactionCounter") ?: 0L
                         val next = counter + 1
@@ -286,7 +286,7 @@ object RemoteRefundExecutor {
                     firestoreTxn.set(refundRef, refundMap)
                 }.addOnSuccessListener {
                     if (openBatchId.isNotBlank()) {
-                        db.collection("Batches").document(openBatchId)
+                        MerchantFirestore.col("Batches").document(openBatchId)
                             .update(
                                 mapOf(
                                     "totalRefundsInCents" to FieldValue.increment(refundAmountCents),
@@ -296,7 +296,7 @@ object RemoteRefundExecutor {
                             )
                     }
 
-                    val orderRef = db.collection("Orders").document(orderId)
+                    val orderRef = MerchantFirestore.col("Orders").document(orderId)
                     orderRef.get()
                         .addOnSuccessListener { orderDoc ->
                             if (!orderDoc.exists()) {

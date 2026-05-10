@@ -22,6 +22,7 @@ const admin = require("firebase-admin");
 const { onCall } = require("firebase-functions/v2/https");
 const { onRequest } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
+const { merchantCol, merchantDoc, merchantIdFromAuth } = require("./merchant-firestore");
 
 const SANDBOX_URL = "https://payment.ipospays.tech/api/v1/external-payment-transaction";
 const PROD_URL = "https://payment.ipospays.com/api/v1/external-payment-transaction";
@@ -91,13 +92,14 @@ function getOnlineOrderingBaseUrl() {
 
 /**
  * @param {FirebaseFirestore.Firestore} db
+ * @param {string} merchantId
  * @returns {Promise<{ tpn: string; authToken: string }>}
  */
-async function resolveHppCredentials(db) {
+async function resolveHppCredentials(db, merchantId) {
   let tpn = "";
   let authToken = "";
   try {
-    const snap = await db.collection("Settings").doc("onlineOrdering").get();
+    const snap = await merchantCol(merchantId, "Settings").doc("onlineOrdering").get();
     const d = snap.exists ? snap.data() : {};
     tpn = String(d.iposHppTpn || "").trim();
     authToken = String(d.iposHppAuthToken || "").trim();
@@ -120,14 +122,15 @@ const createHppPaymentLink = onCall(async (request) => {
     return { success: false, error: "orderId is required." };
   }
 
+  const merchantId = merchantIdFromAuth(request);
   const db = admin.firestore();
-  const { tpn, authToken } = await resolveHppCredentials(db);
+  const { tpn, authToken } = await resolveHppCredentials(db, merchantId);
   if (!tpn || !authToken) {
     logger.error("[ipos-hpp] IPOS_HPP_TPN or IPOS_HPP_AUTH_TOKEN not configured");
     return { success: false, error: "Payment service is not configured." };
   }
 
-  const orderDoc = await db.collection("Orders").doc(orderId).get();
+  const orderDoc = await merchantDoc(merchantId, "Orders", orderId).get();
   if (!orderDoc.exists) {
     return { success: false, error: "Order not found." };
   }
@@ -210,7 +213,7 @@ const createHppPaymentLink = onCall(async (request) => {
     },
   };
 
-  const bizSnap = await db.collection("Settings").doc("businessInfo").get();
+  const bizSnap = await merchantCol(merchantId, "Settings").doc("businessInfo").get();
   if (bizSnap.exists) {
     const biz = bizSnap.data() || {};
     if (biz.businessName) payload.personalization.merchantName = biz.businessName;
@@ -238,7 +241,7 @@ const createHppPaymentLink = onCall(async (request) => {
     const body = await resp.json();
 
     if (body.information && body.message) {
-      await db.collection("Orders").doc(orderId).update({
+      await merchantDoc(merchantId, "Orders", orderId).update({
         hppTransactionRefId: txRefId,
         hppPaymentUrl: body.information,
         hppCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -301,8 +304,10 @@ const iposPaymentWebhook = onRequest(async (req, res) => {
 
   const db = admin.firestore();
 
+  // Webhook has no auth context — use collectionGroup to find the order
+  // across all merchant subcollections.
   const ordersSnap = await db
-    .collection("Orders")
+    .collectionGroup("orders")
     .where("hppTransactionRefId", "==", txRefId)
     .limit(1)
     .get();
@@ -316,6 +321,7 @@ const iposPaymentWebhook = onRequest(async (req, res) => {
   const orderDoc = ordersSnap.docs[0];
   const orderId = orderDoc.id;
   const order = orderDoc.data();
+  const merchantId = orderDoc.ref.parent.parent.id;
 
   const isSuccess = responseCode === 200;
 
@@ -358,7 +364,7 @@ const iposPaymentWebhook = onRequest(async (req, res) => {
 
     const { payments, txExtra } = buildEcommerceSalePaymentAndTxRefs(hpResp, txRefId, totalInCents);
 
-    const txRef = db.collection("Transactions").doc();
+    const txRef = merchantCol(merchantId, "Transactions").doc();
     await txRef.set({
       orderId,
       orderNumber: order.orderNumber || 0,
@@ -379,7 +385,7 @@ const iposPaymentWebhook = onRequest(async (req, res) => {
     updateData.hppErrResponseMessage = hpResp.errResponseMessage || "";
   }
 
-  await db.collection("Orders").doc(orderId).update(updateData);
+  await merchantDoc(merchantId, "Orders", orderId).update(updateData);
 
   logger.info("[ipos-hpp] Order updated from webhook", {
     orderId,
@@ -401,13 +407,14 @@ const queryHppPaymentStatus = onCall(async (request) => {
     return { success: false, error: "orderId is required." };
   }
 
+  const merchantId = merchantIdFromAuth(request);
   const db = admin.firestore();
-  const { tpn, authToken } = await resolveHppCredentials(db);
+  const { tpn, authToken } = await resolveHppCredentials(db, merchantId);
   const apiKey = (process.env.IPOS_HPP_QUERY_API_KEY || "").trim() || authToken;
   if (!tpn || !apiKey) {
     return { success: false, error: "Payment service is not configured." };
   }
-  const orderDoc = await db.collection("Orders").doc(orderId).get();
+  const orderDoc = await merchantDoc(merchantId, "Orders", orderId).get();
   if (!orderDoc.exists) {
     return { success: false, error: "Order not found." };
   }
@@ -445,7 +452,7 @@ const queryHppPaymentStatus = onCall(async (request) => {
       const totalInCents = order.totalInCents || 0;
       const { payments, txExtra } = buildEcommerceSalePaymentAndTxRefs(hpResp, txRefId, totalInCents);
 
-      const txRef = db.collection("Transactions").doc();
+      const txRef = merchantCol(merchantId, "Transactions").doc();
       await txRef.set({
         orderId,
         orderNumber: order.orderNumber || 0,
@@ -460,7 +467,7 @@ const queryHppPaymentStatus = onCall(async (request) => {
         ...txExtra,
       });
 
-      await db.collection("Orders").doc(orderId).update({
+      await merchantDoc(merchantId, "Orders", orderId).update({
         hppStatus: "PAID",
         hppResponseCode: responseCode,
         hppResponseMessage: hpResp.responseMessage || "",

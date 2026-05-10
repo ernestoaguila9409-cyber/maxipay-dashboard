@@ -38,7 +38,7 @@ object CategoryKitchenLabelCascade {
             commitInChunks(db, pending, 0, onDone, onError)
         }
 
-        db.collection("subcategories").whereEqualTo("categoryId", categoryId).get()
+        MerchantFirestore.col("subcategories").whereEqualTo("categoryId", categoryId).get()
             .addOnSuccessListener { subSnap ->
                 for (subDoc in subSnap.documents) {
                     val kl = subDoc.getString("kitchenLabel")?.trim().orEmpty()
@@ -47,7 +47,7 @@ object CategoryKitchenLabelCascade {
                     }
                 }
 
-                db.collection("MenuItems").whereEqualTo("categoryId", categoryId).get()
+                MerchantFirestore.col("MenuItems").whereEqualTo("categoryId", categoryId).get()
                     .addOnSuccessListener { priSnap ->
                         val seen = mutableSetOf<String>()
                         for (doc in priSnap.documents) {
@@ -55,7 +55,7 @@ object CategoryKitchenLabelCascade {
                             collectItemMatch(doc, removedNorm, pending)
                         }
 
-                        db.collection("MenuItems").whereArrayContains("categoryIds", categoryId).get()
+                        MerchantFirestore.col("MenuItems").whereArrayContains("categoryIds", categoryId).get()
                             .addOnSuccessListener { placeSnap ->
                                 for (doc in placeSnap.documents) {
                                     if (doc.id in seen) continue

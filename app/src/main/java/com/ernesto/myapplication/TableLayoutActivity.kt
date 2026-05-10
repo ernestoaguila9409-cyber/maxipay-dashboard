@@ -152,7 +152,7 @@ class TableLayoutActivity : AppCompatActivity() {
     private fun ensureSection(section: String) {
         if (section.isNotBlank() && section !in knownSections) {
             knownSections.add(section)
-            db.collection("Sections").document(section).set(hashMapOf("name" to section))
+            MerchantFirestore.col("Sections").document(section).set(hashMapOf("name" to section))
             rebuildSectionChips()
         }
     }
@@ -198,7 +198,7 @@ class TableLayoutActivity : AppCompatActivity() {
                     Toast.makeText(this, "\"$name\" already exists", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                db.collection("Sections").document(name)
+                MerchantFirestore.col("Sections").document(name)
                     .set(hashMapOf("name" to name))
                     .addOnSuccessListener {
                         knownSections.add(name)
@@ -218,7 +218,7 @@ class TableLayoutActivity : AppCompatActivity() {
             .setTitle("Delete Section")
             .setMessage("Delete \"$section\"?\nTables in this section will still appear under \"All\".")
             .setPositiveButton("Delete") { _, _ ->
-                db.collection("Sections").document(section).delete()
+                MerchantFirestore.col("Sections").document(section).delete()
                     .addOnSuccessListener {
                         knownSections.remove(section)
                         if (selectedSection == section) selectedSection = knownSections.firstOrNull() ?: ""
@@ -234,7 +234,7 @@ class TableLayoutActivity : AppCompatActivity() {
     // ── LOAD ───────────────────────────────────────────────
 
     private fun loadSectionsAndTables() {
-        db.collection("Sections").get()
+        MerchantFirestore.col("Sections").get()
             .addOnSuccessListener { snap ->
                 knownSections.clear()
                 for (doc in snap.documents) {
@@ -256,7 +256,7 @@ class TableLayoutActivity : AppCompatActivity() {
     }
 
     private fun loadTablesPreferred() {
-        db.collection("tableLayouts").get()
+        MerchantFirestore.col("tableLayouts").get()
             .addOnSuccessListener { layoutSnap ->
                 if (layoutSnap.isEmpty) {
                     useTableLayouts = false
@@ -275,7 +275,7 @@ class TableLayoutActivity : AppCompatActivity() {
                 layoutCanvasH = layoutDoc.getDouble("canvasHeight") ?: 800.0
 
                 layoutTablesListener?.remove()
-                layoutTablesListener = db.collection("tableLayouts").document(activeLayoutId)
+                layoutTablesListener = MerchantFirestore.col("tableLayouts").document(activeLayoutId)
                     .collection("tables")
                     .addSnapshotListener { snap, err ->
                         if (err != null || snap == null) return@addSnapshotListener
@@ -313,7 +313,7 @@ class TableLayoutActivity : AppCompatActivity() {
                 tableSections[doc.id] = section
                 if (section.isNotBlank() && section !in knownSections) {
                     knownSections.add(section)
-                    db.collection("Sections").document(section)
+                    MerchantFirestore.col("Sections").document(section)
                         .set(hashMapOf("name" to section))
                     sectionsAdded = true
                 }
@@ -329,7 +329,7 @@ class TableLayoutActivity : AppCompatActivity() {
     }
 
     private fun loadTablesLegacy() {
-        db.collection("Tables")
+        MerchantFirestore.col("Tables")
             .whereEqualTo("active", true)
             .get()
             .addOnSuccessListener { snap ->
@@ -352,7 +352,7 @@ class TableLayoutActivity : AppCompatActivity() {
                     tableSections[doc.id] = section
                     if (section.isNotBlank() && section !in knownSections) {
                         knownSections.add(section)
-                        db.collection("Sections").document(section)
+                        MerchantFirestore.col("Sections").document(section)
                             .set(hashMapOf("name" to section))
                         sectionsAdded = true
                     }
@@ -468,7 +468,7 @@ class TableLayoutActivity : AppCompatActivity() {
             val ch = canvas.height.toFloat().coerceAtLeast(1f)
             val xL = x.toDouble() * layoutCanvasW / cw
             val yL = y.toDouble() * layoutCanvasH / ch
-            db.collection("tableLayouts").document(activeLayoutId)
+            MerchantFirestore.col("tableLayouts").document(activeLayoutId)
                 .collection("tables").document(tableId)
                 .update(
                     mapOf(
@@ -478,7 +478,7 @@ class TableLayoutActivity : AppCompatActivity() {
                     )
                 )
         } else {
-            db.collection("Tables").document(tableId)
+            MerchantFirestore.col("Tables").document(tableId)
                 .update("posX", x.toDouble(), "posY", y.toDouble())
         }
     }
@@ -586,7 +586,7 @@ class TableLayoutActivity : AppCompatActivity() {
                         "createdAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
-                    db.collection("tableLayouts").document(activeLayoutId)
+                    MerchantFirestore.col("tableLayouts").document(activeLayoutId)
                         .collection("tables").add(data)
                         .addOnSuccessListener { ref ->
                             tableSections[ref.id] = section
@@ -609,7 +609,7 @@ class TableLayoutActivity : AppCompatActivity() {
                         "areaType" to "DINING_TABLE",
                         "active" to true
                     )
-                    db.collection("Tables").add(data)
+                    MerchantFirestore.col("Tables").add(data)
                         .addOnSuccessListener { ref ->
                             tableSections[ref.id] = section
                             ensureSection(section)
@@ -630,10 +630,10 @@ class TableLayoutActivity : AppCompatActivity() {
 
     private fun showEditDeleteDialog(tableId: String) {
         val tableRef = if (useTableLayouts && activeLayoutId.isNotBlank()) {
-            db.collection("tableLayouts").document(activeLayoutId)
+            MerchantFirestore.col("tableLayouts").document(activeLayoutId)
                 .collection("tables").document(tableId)
         } else {
-            db.collection("Tables").document(tableId)
+            MerchantFirestore.col("Tables").document(tableId)
         }
         tableRef.get()
             .addOnSuccessListener { doc ->
@@ -705,10 +705,10 @@ class TableLayoutActivity : AppCompatActivity() {
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
                 val ref = if (useTableLayouts && activeLayoutId.isNotBlank()) {
-                    db.collection("tableLayouts").document(activeLayoutId)
+                    MerchantFirestore.col("tableLayouts").document(activeLayoutId)
                         .collection("tables").document(tableId)
                 } else {
-                    db.collection("Tables").document(tableId)
+                    MerchantFirestore.col("Tables").document(tableId)
                 }
                 ref.update(updates)
                     .addOnSuccessListener {
@@ -734,7 +734,7 @@ class TableLayoutActivity : AppCompatActivity() {
             .setMessage("Delete \"$name\"?")
             .setPositiveButton("Delete") { _, _ ->
                 val del = if (useTableLayouts && activeLayoutId.isNotBlank()) {
-                    db.collection("tableLayouts").document(activeLayoutId)
+                    MerchantFirestore.col("tableLayouts").document(activeLayoutId)
                         .collection("tables").document(tableId)
                         .update(
                             mapOf(
@@ -744,7 +744,7 @@ class TableLayoutActivity : AppCompatActivity() {
                             )
                         )
                 } else {
-                    db.collection("Tables").document(tableId).update("active", false)
+                    MerchantFirestore.col("Tables").document(tableId).update("active", false)
                 }
                 del.addOnSuccessListener {
                     tableViews[tableId]?.let { canvas.removeView(it) }

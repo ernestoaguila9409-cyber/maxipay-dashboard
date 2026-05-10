@@ -231,8 +231,11 @@ export async function POST(req: Request) {
         terminalConfig.iposTransactAuthToken = pay!.iposTransactAuthToken!.trim();
       }
 
-      await dbAdmin.collection("payment_terminals").add({
-        merchantId,
+      await dbAdmin
+        .collection("Merchants")
+        .doc(merchantId)
+        .collection("payment_terminals")
+        .add({
         name: pay!.terminalName?.trim() || `${businessName} Terminal`,
         provider,
         deviceModel: pay!.deviceModel?.trim() || "",

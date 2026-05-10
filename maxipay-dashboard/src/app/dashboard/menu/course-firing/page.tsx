@@ -11,6 +11,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -118,7 +119,7 @@ export default function CourseFiringPage() {
       setSettings(null);
       return;
     }
-    const ref = doc(db, COURSE_FIRING_COLLECTION_PATH, COURSE_FIRING_DOC);
+    const ref = merchantDoc(merchantId, COURSE_FIRING_COLLECTION_PATH, COURSE_FIRING_DOC);
     const unsub = onSnapshot(
       ref,
       (snap) => {
@@ -142,7 +143,7 @@ export default function CourseFiringPage() {
       setMenuItems([]);
       return;
     }
-    const unsub1 = onSnapshot(query(collection(db, "Categories"), where("merchantId", "==", merchantId)), (snap) => {
+    const unsub1 = onSnapshot(merchantCol(merchantId, "Categories"), (snap) => {
       const list: CategoryRow[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -151,7 +152,7 @@ export default function CourseFiringPage() {
       list.sort((a, b) => a.name.localeCompare(b.name));
       setCategories(list);
     });
-    const unsub2 = onSnapshot(query(collection(db, "subcategories"), where("merchantId", "==", merchantId)), (snap) => {
+    const unsub2 = onSnapshot(merchantCol(merchantId, "subcategories"), (snap) => {
       const list: SubcategoryRow[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -164,7 +165,7 @@ export default function CourseFiringPage() {
       list.sort((a, b) => a.name.localeCompare(b.name));
       setSubcategories(list);
     });
-    const unsub3 = onSnapshot(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)), (snap) => {
+    const unsub3 = onSnapshot(merchantCol(merchantId, "MenuItems"), (snap) => {
       const list: CourseMenuItem[] = [];
       snap.forEach((d) => {
         const row = parseCourseMenuItem(d.id, d.data() as Record<string, unknown>);
@@ -194,7 +195,7 @@ export default function CourseFiringPage() {
     try {
       const batch = writeBatch(db);
       for (const it of items) {
-        batch.update(doc(db, "MenuItems", it.id), { courseId: courseId || null });
+        batch.update(merchantDoc(merchantId, "MenuItems", it.id), { courseId: courseId || null });
       }
       await batch.commit();
     } finally {
@@ -209,7 +210,7 @@ export default function CourseFiringPage() {
     try {
       const batch = writeBatch(db);
       for (const it of items) {
-        batch.update(doc(db, "MenuItems", it.id), { courseId: courseId || null });
+        batch.update(merchantDoc(merchantId, "MenuItems", it.id), { courseId: courseId || null });
       }
       await batch.commit();
     } finally {
@@ -220,7 +221,7 @@ export default function CourseFiringPage() {
   const assignItemToCourse = async (itemId: string, courseId: string) => {
     setSavingAssign(true);
     try {
-      await setDoc(doc(db, "MenuItems", itemId), { courseId: courseId || null }, { merge: true });
+      await setDoc(merchantDoc(merchantId, "MenuItems", itemId), { courseId: courseId || null }, { merge: true });
     } finally {
       setSavingAssign(false);
     }
@@ -297,7 +298,7 @@ export default function CourseFiringPage() {
   const save = async (next: CourseFiringSettings) => {
     setSaving(true);
     try {
-      const ref = doc(db, COURSE_FIRING_COLLECTION_PATH, COURSE_FIRING_DOC);
+      const ref = merchantDoc(merchantId, COURSE_FIRING_COLLECTION_PATH, COURSE_FIRING_DOC);
       await setDoc(ref, {
         enabled: next.enabled,
         courses: next.courses.map((c, i) => ({

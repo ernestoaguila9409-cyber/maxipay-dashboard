@@ -80,7 +80,7 @@ object PrinterKitchenStyleCache {
     private fun startInternal(db: FirebaseFirestore) {
         synchronized(this) {
             if (registration != null) return
-            registration = db.collection(PrinterFirestoreSync.COLLECTION)
+            registration = MerchantFirestore.col(PrinterFirestoreSync.COLLECTION)
                 .addSnapshotListener { snap, e ->
                     if (e != null) {
                         Log.w(TAG, "listen failed: ${e.message}")

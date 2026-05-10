@@ -111,7 +111,7 @@ class TransactionActivity : AppCompatActivity() {
     // 🔥 LOAD + GROUP SALES WITH REFUNDS (CORRECT VERSION)
     private fun loadTransactions() {
 
-        db.collection("Transactions")
+        MerchantFirestore.col("Transactions")
             .addSnapshotListener { snapshots, error ->
 
                 if (error != null) {
@@ -310,7 +310,7 @@ class TransactionActivity : AppCompatActivity() {
         var remaining = uniqueOrderIds.size
 
         for (oid in uniqueOrderIds) {
-            db.collection("Orders").document(oid).get()
+            MerchantFirestore.col("Orders").document(oid).get()
                 .addOnSuccessListener { doc ->
                     val num = doc.getLong("orderNumber") ?: 0L
                     if (num > 0L) resolved[oid] = num
@@ -643,7 +643,7 @@ class TransactionActivity : AppCompatActivity() {
             showTypedEmailDialog(orderId, "sendReceiptEmail", "")
             return
         }
-        db.collection("Transactions").document(txId).get()
+        MerchantFirestore.col("Transactions").document(txId).get()
             .addOnSuccessListener { txDoc ->
                 val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
                 val splitPayloads = SplitReceiptReprintHelper.payloadsOrderedBySplitIndex(payments)
@@ -759,7 +759,7 @@ class TransactionActivity : AppCompatActivity() {
             runAfterBluetoothPermission { executePrint(transaction, ReceiptContentType.ORIGINAL) }
             return
         }
-        db.collection("Transactions").document(txId).get()
+        MerchantFirestore.col("Transactions").document(txId).get()
             .addOnSuccessListener { txDoc ->
                 val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
                 val splitPayloads = SplitReceiptReprintHelper.payloadsOrderedBySplitIndex(payments)
@@ -816,7 +816,7 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun printOriginalSplitReceipt(orderId: String, payload: SplitReceiptPayload) {
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 if (!orderDoc.exists()) {
                     Toast.makeText(this, "Order not found", Toast.LENGTH_SHORT).show()
@@ -836,19 +836,19 @@ class TransactionActivity : AppCompatActivity() {
 
     @Suppress("UNCHECKED_CAST")
     private fun printOriginalReceipt(orderId: String, saleTransactionId: String) {
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 if (!orderDoc.exists()) {
                     Toast.makeText(this, "Order not found", Toast.LENGTH_SHORT).show()
                     return@addOnSuccessListener
                 }
-                db.collection("Orders").document(orderId).collection("items").get()
+                MerchantFirestore.col("Orders").document(orderId).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
                         val rs = ReceiptSettings.load(this)
                         val signatureUrl = orderDoc.getString("signatureUrl")
                         val txId = orderDoc.getString("saleTransactionId") ?: saleTransactionId
                         if (txId.isNotBlank()) {
-                            db.collection("Transactions").document(txId).get()
+                            MerchantFirestore.col("Transactions").document(txId).get()
                                 .addOnSuccessListener { txDoc ->
                                     val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
                                     val txStatus = txDoc?.getString("status")
@@ -1061,15 +1061,15 @@ class TransactionActivity : AppCompatActivity() {
     @Suppress("UNCHECKED_CAST")
     private fun printDetailedRefundReceipt(transaction: Transaction) {
         val orderId = transaction.orderId
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 if (!orderDoc.exists()) {
                     printSimpleReceipt(transaction, "REFUND")
                     return@addOnSuccessListener
                 }
-                db.collection("Orders").document(orderId).collection("items").get()
+                MerchantFirestore.col("Orders").document(orderId).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
-                        db.collection("Transactions")
+                        MerchantFirestore.col("Transactions")
                             .whereEqualTo("type", "REFUND")
                             .whereEqualTo("originalReferenceId", transaction.referenceId)
                             .get()
@@ -1276,15 +1276,15 @@ class TransactionActivity : AppCompatActivity() {
     @Suppress("UNCHECKED_CAST")
     private fun printDetailedVoidReceipt(transaction: Transaction) {
         val orderId = transaction.orderId
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 if (!orderDoc.exists()) {
                     printSimpleReceipt(transaction, "VOID")
                     return@addOnSuccessListener
                 }
-                db.collection("Orders").document(orderId).collection("items").get()
+                MerchantFirestore.col("Orders").document(orderId).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
-                        db.collection("Orders").document(orderId).collection("transactions").get()
+                        MerchantFirestore.col("Orders").document(orderId).collection("transactions").get()
                             .addOnSuccessListener { txnsSnap ->
                                 @Suppress("UNCHECKED_CAST")
                                 val reversed = txnsSnap.documents.mapNotNull { it.data as? Map<String, Any> }
@@ -1624,9 +1624,9 @@ class TransactionActivity : AppCompatActivity() {
         val orderId = transaction.orderId
         val deltaTipCents = newTipCents - oldTipCents
 
-        val txRef = db.collection("Transactions").document(txDocId)
-        val batchRef = if (batchId.isNotBlank()) db.collection("Batches").document(batchId) else null
-        val orderRef = if (orderId.isNotBlank()) db.collection("Orders").document(orderId) else null
+        val txRef = MerchantFirestore.col("Transactions").document(txDocId)
+        val batchRef = if (batchId.isNotBlank()) MerchantFirestore.col("Batches").document(batchId) else null
+        val orderRef = if (orderId.isNotBlank()) MerchantFirestore.col("Orders").document(orderId) else null
 
         db.runTransaction { firestoreTx ->
             val txSnap = firestoreTx.get(txRef)
@@ -1682,7 +1682,7 @@ class TransactionActivity : AppCompatActivity() {
             return
         }
         val txDocId = transaction.referenceId
-        db.collection("Transactions").document(txDocId).get()
+        MerchantFirestore.col("Transactions").document(txDocId).get()
             .addOnSuccessListener { doc ->
                 if (!doc.exists()) {
                     Toast.makeText(this, "Transaction not found.", Toast.LENGTH_LONG).show()
@@ -1730,7 +1730,7 @@ class TransactionActivity : AppCompatActivity() {
                 if (TransactionVoidReferenceResolver.anyCardLegMissingGatewayRef(cardPayments)) {
                     val oid = txParsed.orderId.trim()
                     if (oid.isNotEmpty()) {
-                        db.collection("Orders").document(oid).get()
+                        MerchantFirestore.col("Orders").document(oid).get()
                             .addOnSuccessListener { od ->
                                 runAfterEnrichment(TransactionVoidReferenceResolver.enrichPaymentsFromOrderDoc(od, cardPayments))
                             }
@@ -1869,7 +1869,7 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun doFinalVoidUpdate(txDocId: String, onComplete: ((orderId: String) -> Unit)? = null) {
-        val txRef = db.collection("Transactions").document(txDocId)
+        val txRef = MerchantFirestore.col("Transactions").document(txDocId)
         txRef.get()
             .addOnSuccessListener { document ->
                 if (!document.exists()) return@addOnSuccessListener
@@ -1893,7 +1893,7 @@ class TransactionActivity : AppCompatActivity() {
                 ))
                     .addOnSuccessListener {
                         if (batchId.isNotBlank()) {
-                            db.collection("Batches").document(batchId).update(
+                            MerchantFirestore.col("Batches").document(batchId).update(
                                 mapOf(
                                     "totalSales" to FieldValue.increment(-amount),
                                     "netTotal" to FieldValue.increment(-amount),
@@ -1904,7 +1904,7 @@ class TransactionActivity : AppCompatActivity() {
                             }
                         }
                         if (orderId.isNotBlank()) {
-                            db.collection("Orders").document(orderId).update(
+                            MerchantFirestore.col("Orders").document(orderId).update(
                                 mapOf(
                                     "status" to "VOIDED",
                                     "voidedAt" to Date(),
@@ -1938,7 +1938,7 @@ class TransactionActivity : AppCompatActivity() {
     private fun createLocalRefund(original: Transaction, amount: Double) {
         val refundAmountCents = (amount * 100).toLong()
 
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .whereEqualTo("closed", false)
             .limit(1)
             .get()
@@ -1964,10 +1964,10 @@ class TransactionActivity : AppCompatActivity() {
                     "orderNumber" to original.orderNumber
                 )
 
-                val refundRef = db.collection("Transactions").document()
+                val refundRef = MerchantFirestore.col("Transactions").document()
                 db.runTransaction { firestoreTxn ->
                     if (openBatchId.isNotBlank()) {
-                        val batchRef = db.collection("Batches").document(openBatchId)
+                        val batchRef = MerchantFirestore.col("Batches").document(openBatchId)
                         val batchDoc = firestoreTxn.get(batchRef)
                         val counter = batchDoc.getLong("transactionCounter") ?: 0L
                         val next = counter + 1
@@ -1979,7 +1979,7 @@ class TransactionActivity : AppCompatActivity() {
                         CashDrawerManager.openCashDrawerForRefund(this)
 
                         if (openBatchId.isNotBlank()) {
-                            db.collection("Batches").document(openBatchId)
+                            MerchantFirestore.col("Batches").document(openBatchId)
                                 .update(mapOf(
                                     "totalRefundsInCents" to FieldValue.increment(refundAmountCents),
                                     "netTotalInCents" to FieldValue.increment(-refundAmountCents),
@@ -1987,14 +1987,14 @@ class TransactionActivity : AppCompatActivity() {
                                 ))
                         }
 
-                        db.collection("Transactions").document(original.referenceId).get()
+                        MerchantFirestore.col("Transactions").document(original.referenceId).get()
                             .addOnSuccessListener { saleDoc ->
                                 val orderId = saleDoc.getString("orderId")
                                 if (!saleDoc.exists() || orderId.isNullOrBlank()) {
                                     Toast.makeText(this, "Cash refund saved", Toast.LENGTH_LONG).show()
                                     return@addOnSuccessListener
                                 }
-                                val orderRef = db.collection("Orders").document(orderId)
+                                val orderRef = MerchantFirestore.col("Orders").document(orderId)
                                 orderRef.get()
                                     .addOnSuccessListener { orderDoc ->
                                         if (!orderDoc.exists()) {
@@ -2041,7 +2041,7 @@ class TransactionActivity : AppCompatActivity() {
      */
     private fun sendRefundRequest(transaction: Transaction, requestedAmountCents: Long, remainingCents: Long) {
         val amount = requestedAmountCents / 100.0
-        db.collection("Transactions").document(transaction.referenceId).get()
+        MerchantFirestore.col("Transactions").document(transaction.referenceId).get()
             .addOnSuccessListener { txDoc ->
                 if (!txDoc.exists()) {
                     Toast.makeText(this, "Transaction not found.", Toast.LENGTH_LONG).show()
@@ -2099,7 +2099,7 @@ class TransactionActivity : AppCompatActivity() {
                     return@addOnSuccessListener
                 }
 
-                db.collection("Batches").document(txBatchId).get()
+                MerchantFirestore.col("Batches").document(txBatchId).get()
                     .addOnSuccessListener { batchDoc ->
                         val batchIsClosed = batchDoc.getBoolean("closed") ?: true
                         val useDirectRefund = batchIsClosed || isFullRefund
@@ -2203,7 +2203,7 @@ class TransactionActivity : AppCompatActivity() {
         orderNumberFallback: Long,
         paymentType: String,
     ) {
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .whereEqualTo("closed", false)
             .limit(1)
             .get()
@@ -2213,7 +2213,7 @@ class TransactionActivity : AppCompatActivity() {
                     return@addOnSuccessListener
                 }
                 val openBatchId = batchSnap.documents.first().id
-                val orderRef = db.collection("Orders").document(orderId)
+                val orderRef = MerchantFirestore.col("Orders").document(orderId)
                 orderRef.get()
                     .addOnSuccessListener { orderDoc ->
                         if (!orderDoc.exists()) {
@@ -2221,8 +2221,8 @@ class TransactionActivity : AppCompatActivity() {
                             return@addOnSuccessListener
                         }
                         val refundedBy = resolvePosRefundedBy().ifBlank { "Unknown" }
-                        val newRefundTxRef = db.collection("Transactions").document()
-                        val batchRef = db.collection("Batches").document(openBatchId)
+                        val newRefundTxRef = MerchantFirestore.col("Transactions").document()
+                        val batchRef = MerchantFirestore.col("Batches").document(openBatchId)
                         val orderNumber = orderDoc.getLong("orderNumber") ?: orderNumberFallback
                         val refundDocData = mutableMapOf<String, Any>(
                             "orderId" to orderId,
@@ -2258,7 +2258,7 @@ class TransactionActivity : AppCompatActivity() {
                             }
                             orderRef.update(orderUpdates)
                                 .addOnSuccessListener {
-                                    db.collection("Batches").document(openBatchId)
+                                    MerchantFirestore.col("Batches").document(openBatchId)
                                         .update(
                                             mapOf(
                                                 "totalRefundsInCents" to FieldValue.increment(amountInCents),
@@ -2290,7 +2290,7 @@ class TransactionActivity : AppCompatActivity() {
     ) {
         val refundAmountCents = (refundAmount * 100).toLong()
 
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .whereEqualTo("closed", false)
             .limit(1)
             .get()
@@ -2316,10 +2316,10 @@ class TransactionActivity : AppCompatActivity() {
                     "orderNumber" to orderNumber
                 )
 
-                val refundRef = db.collection("Transactions").document()
+                val refundRef = MerchantFirestore.col("Transactions").document()
                 db.runTransaction { firestoreTxn ->
                     if (openBatchId.isNotBlank()) {
-                        val batchRef = db.collection("Batches").document(openBatchId)
+                        val batchRef = MerchantFirestore.col("Batches").document(openBatchId)
                         val batchDoc = firestoreTxn.get(batchRef)
                         val counter = batchDoc.getLong("transactionCounter") ?: 0L
                         val next = counter + 1
@@ -2329,7 +2329,7 @@ class TransactionActivity : AppCompatActivity() {
                     firestoreTxn.set(refundRef, refundMap)
                 }.addOnSuccessListener {
                     if (openBatchId.isNotBlank()) {
-                        db.collection("Batches").document(openBatchId)
+                        MerchantFirestore.col("Batches").document(openBatchId)
                             .update(mapOf(
                                 "totalRefundsInCents" to FieldValue.increment(refundAmountCents),
                                 "netTotalInCents" to FieldValue.increment(-refundAmountCents),
@@ -2337,14 +2337,14 @@ class TransactionActivity : AppCompatActivity() {
                             ))
                     }
 
-                    db.collection("Transactions").document(saleReferenceId).get()
+                    MerchantFirestore.col("Transactions").document(saleReferenceId).get()
                         .addOnSuccessListener { saleDoc ->
                             val saleOrderId = saleDoc.getString("orderId")
                             if (!saleDoc.exists() || saleOrderId.isNullOrBlank()) {
                                 Toast.makeText(this@TransactionActivity, "REFUND APPROVED", Toast.LENGTH_LONG).show()
                                 return@addOnSuccessListener
                             }
-                            val orderRef = db.collection("Orders").document(saleOrderId)
+                            val orderRef = MerchantFirestore.col("Orders").document(saleOrderId)
                             orderRef.get()
                                 .addOnSuccessListener { orderDoc ->
                                     if (!orderDoc.exists()) {
@@ -2378,7 +2378,7 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun showEmailReceiptForTransaction(transactionDocId: String) {
-        db.collection("Transactions").document(transactionDocId).get()
+        MerchantFirestore.col("Transactions").document(transactionDocId).get()
             .addOnSuccessListener { doc ->
                 val orderId = doc.getString("orderId")
                 if (orderId.isNullOrBlank()) {

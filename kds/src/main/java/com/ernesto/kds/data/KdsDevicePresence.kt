@@ -36,7 +36,7 @@ class KdsDevicePresence(
         val fromPrefs = prefs.getString(KdsDevicePrefs.KEY_DEVICE_DOC_ID, null)?.trim().orEmpty()
         val docId = fromPrefs.ifBlank { deviceDocIdHint.trim() }
         if (docId.isEmpty()) return HeartbeatOutcome.NoDeviceConfigured
-        val ref = db.collection(KDS_DEVICES_COLLECTION).document(docId)
+        val ref = MerchantFirestore.col("kds_devices").document(docId)
         return try {
             val snap = ref.get(Source.SERVER).await()
             if (!snap.exists()) {

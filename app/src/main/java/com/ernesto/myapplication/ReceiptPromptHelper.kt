@@ -85,21 +85,19 @@ object ReceiptPromptHelper {
             }
         }
         Toast.makeText(activity, "Preparing receipt\u2026", Toast.LENGTH_SHORT).show()
-        val db = FirebaseFirestore.getInstance()
-
         if (type == ReceiptType.REFUND && orderId.isNotBlank() && transactionId.isNotBlank()) {
-            db.collection("Orders").document(orderId).get()
+            MerchantFirestore.col("Orders").document(orderId).get()
                 .addOnSuccessListener { orderDoc ->
                     if (!orderDoc.exists()) { onDismiss?.invoke(); return@addOnSuccessListener }
-                    db.collection("Orders").document(orderId).collection("items").get()
+                    MerchantFirestore.col("Orders").document(orderId).collection("items").get()
                         .addOnSuccessListener { itemsSnap ->
-                            db.collection("Transactions")
+                            MerchantFirestore.col("Transactions")
                                 .whereEqualTo("type", "REFUND")
                                 .whereEqualTo("originalReferenceId", transactionId)
                                 .get()
                                 .addOnSuccessListener { refundSnap ->
                                     val rs = ReceiptSettings.load(activity)
-                                    db.collection("Transactions").document(transactionId).get()
+                                    MerchantFirestore.col("Transactions").document(transactionId).get()
                                         .addOnSuccessListener { txDoc ->
                                             @Suppress("UNCHECKED_CAST")
                                             val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
@@ -121,10 +119,10 @@ object ReceiptPromptHelper {
                 }
                 .addOnFailureListener { printSimpleLabelReceipt(activity, type.label, orderId, onDismiss) }
         } else if (type == ReceiptType.VOID && orderId.isNotBlank()) {
-            db.collection("Orders").document(orderId).get()
+            MerchantFirestore.col("Orders").document(orderId).get()
                 .addOnSuccessListener { orderDoc ->
                     if (!orderDoc.exists()) { printSimpleLabelReceipt(activity, type.label, orderId, onDismiss); return@addOnSuccessListener }
-                    db.collection("Orders").document(orderId).collection("items").get()
+                    MerchantFirestore.col("Orders").document(orderId).collection("items").get()
                         .addOnSuccessListener { itemsSnap ->
                             val rsVoid = ReceiptSettings.load(activity)
                             val fetchReversedTransactions: (List<Map<String, Any>>) -> Unit = { reversedTxns ->
@@ -132,7 +130,7 @@ object ReceiptPromptHelper {
                                 EscPosPrinter.print(activity, segs, rsVoid)
                                 onDismiss?.invoke()
                             }
-                            db.collection("Orders").document(orderId).collection("transactions").get()
+                            MerchantFirestore.col("Orders").document(orderId).collection("transactions").get()
                                 .addOnSuccessListener { txnsSnap ->
                                     @Suppress("UNCHECKED_CAST")
                                     val reversed = txnsSnap.documents.mapNotNull { it.data as? Map<String, Any> }
@@ -142,7 +140,7 @@ object ReceiptPromptHelper {
                                     }
                                     // Fallback: use original transaction payments when subcollection isn't present.
                                     if (transactionId.isNotBlank()) {
-                                        db.collection("Transactions").document(transactionId).get()
+                                        MerchantFirestore.col("Transactions").document(transactionId).get()
                                             .addOnSuccessListener { txDoc ->
                                                 @Suppress("UNCHECKED_CAST")
                                                 val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
@@ -461,8 +459,7 @@ object ReceiptPromptHelper {
     }
 
     private fun printSimpleLabelReceipt(activity: Activity, label: String, orderId: String, onDismiss: (() -> Unit)?) {
-        val db = FirebaseFirestore.getInstance()
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 val rs = ReceiptSettings.load(activity)
                 val segs = mutableListOf<EscPosPrinter.Segment>()

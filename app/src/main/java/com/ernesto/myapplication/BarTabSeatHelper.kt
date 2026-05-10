@@ -27,7 +27,7 @@ object BarTabSeatHelper {
 
     /** Clear [currentOrderId] on all seats for this order (async). */
     fun releaseSeatsForOrderId(db: FirebaseFirestore, orderId: String) {
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.doc("Orders", orderId).get()
             .addOnSuccessListener { snap ->
                 if (snap.exists()) releaseSeatsFromOrderSnapshot(db, snap)
             }
@@ -39,7 +39,7 @@ object BarTabSeatHelper {
         val batch = db.batch()
         for (tid in ids) {
             batch.update(
-                db.collection("Tables").document(tid),
+                MerchantFirestore.doc("Tables", tid),
                 mapOf("currentOrderId" to FieldValue.delete())
             )
         }
@@ -60,7 +60,7 @@ object BarTabSeatHelper {
         seatNamesByTableId: Map<String, String>,
         fallbackSeatIds: List<String>,
     ): Task<Void> {
-        val orderRef = db.collection("Orders").document(orderId)
+        val orderRef = MerchantFirestore.doc("Orders", orderId)
         return db.runTransaction { tx ->
             val snap = tx.get(orderRef)
             if (!snap.exists()) {
@@ -91,7 +91,7 @@ object BarTabSeatHelper {
                 )
             }
             seatIds.remove(tableIdToFree)
-            val tableRef = db.collection("Tables").document(tableIdToFree)
+            val tableRef = MerchantFirestore.doc("Tables", tableIdToFree)
             tx.update(tableRef, mapOf("currentOrderId" to FieldValue.delete()))
             when {
                 seatIds.isEmpty() -> tx.delete(orderRef)

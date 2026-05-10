@@ -266,7 +266,7 @@ class ReportsActivity : AppCompatActivity() {
     }
 
     private fun loadEmployeeNames() {
-        db.collection("Employees").get()
+        MerchantFirestore.col("Employees").get()
             .addOnSuccessListener { snap ->
                 val names = snap.mapNotNull { it.getString("name")?.takeIf { n -> n.isNotBlank() } }
                     .distinct().sorted()
@@ -951,7 +951,7 @@ class ReportsActivity : AppCompatActivity() {
         cardEmployee.visibility = View.GONE
         selectedEmployeeFilter = null
 
-        db.collection("Employees")
+        MerchantFirestore.col("Employees")
             .get()
             .addOnSuccessListener { empDocs ->
                 val allNames = empDocs.mapNotNull { it.getString("name")?.takeIf { n -> n.isNotBlank() } }.distinct().sorted()

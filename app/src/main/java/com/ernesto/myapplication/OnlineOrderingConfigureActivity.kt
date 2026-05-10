@@ -11,7 +11,7 @@ import com.google.firebase.firestore.SetOptions
 class OnlineOrderingConfigureActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
-    private val onlineOrderingRef = db.collection("Settings").document("onlineOrdering")
+    private val onlineOrderingRef by lazy { MerchantFirestore.doc("Settings", "onlineOrdering") }
 
     private lateinit var switchConfirmOrder: SwitchCompat
     private var suppressConfirmSwitch = false

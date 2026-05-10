@@ -119,7 +119,7 @@ class OnlineOrderingBusinessHoursActivity : AppCompatActivity() {
     }
 
     private fun loadFromFirestore() {
-        db.collection(SETTINGS).document(ONLINE_ORDERING_DOC)
+        MerchantFirestore.doc(SETTINGS, ONLINE_ORDERING_DOC)
             .get()
             .addOnSuccessListener { snap ->
                 val enforced = snap.getBoolean("businessHoursEnforced") == true
@@ -223,7 +223,7 @@ class OnlineOrderingBusinessHoursActivity : AppCompatActivity() {
             "businessHoursWeekly" to weeklyMaps,
         )
 
-        db.collection(SETTINGS).document(ONLINE_ORDERING_DOC)
+        MerchantFirestore.doc(SETTINGS, ONLINE_ORDERING_DOC)
             .set(payload, SetOptions.merge())
             .addOnSuccessListener {
                 Toast.makeText(this, "Saved — web dashboard will see the same hours.", Toast.LENGTH_SHORT).show()

@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 import { getApp } from "firebase/app";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -187,7 +188,7 @@ export default function OrdersPage() {
     const unsubscribers: (() => void)[] = [];
 
     if (ORDERS_FETCH_MODE === "debug_raw") {
-      const col = query(collection(db, "Orders"), where("merchantId", "==", merchantId));
+      const col = query(merchantCol(merchantId, "Orders"));
       console.log(
         "[Orders debug] Subscribing to collection(db, \"Orders\") — merchantId scoped"
       );
@@ -220,7 +221,7 @@ export default function OrdersPage() {
       );
       unsubscribers.push(unsub);
     } else if (ORDERS_FETCH_MODE === "step_a") {
-      const q = query(collection(db, "Orders"), where("merchantId", "==", merchantId), orderBy("createdAt", "desc"));
+      const q = query(merchantCol(merchantId, "Orders"), orderBy("createdAt", "desc"));
       console.log(
         "[Orders step_a] query: merchantId scoped + orderBy(createdAt desc)"
       );
@@ -248,14 +249,12 @@ export default function OrdersPage() {
       );
 
       const qRecent = query(
-        collection(db, "Orders"),
-        where("merchantId", "==", merchantId),
+        merchantCol(merchantId, "Orders"),
         orderBy("createdAt", "desc"),
         limit(ORDERS_LIMIT)
       );
       const qOpen = query(
-        collection(db, "Orders"),
-        where("merchantId", "==", merchantId),
+        merchantCol(merchantId, "Orders"),
         where("status", "==", "OPEN"),
         orderBy("createdAt", "desc"),
         limit(OPEN_ORDERS_LIMIT)

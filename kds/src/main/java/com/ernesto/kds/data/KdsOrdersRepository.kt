@@ -113,7 +113,7 @@ class KdsOrdersRepository(
                 emitKitchenOrders()
             }
 
-        val regPrinters = db.collection(KdsKitchenRoutingLabels.collectionPath())
+        val regPrinters = MerchantFirestore.col("Printers")
             .addSnapshotListener { snap: QuerySnapshot?, _: FirebaseFirestoreException? ->
                 synchronized(lock) {
                     kitchenLabelNorms = KdsKitchenRoutingLabels.normalizedLabelKeys(snap)
@@ -121,7 +121,7 @@ class KdsOrdersRepository(
                 emitKitchenOrders()
             }
 
-        val regOrders = db.collection(COLLECTION_ORDERS)
+        val regOrders = MerchantFirestore.col("Orders")
             .addSnapshotListener { snapshot: QuerySnapshot?, error: FirebaseFirestoreException? ->
                 if (error != null) {
                     trySend(emptyList())
@@ -142,7 +142,7 @@ class KdsOrdersRepository(
 
     /** Dashboard tile color keys (dine_in, to_go, bar) from Settings/dashboard. */
     fun observeDashboardColorKeys(): Flow<Map<String, String>> = callbackFlow {
-        val listener = db.collection("Settings").document("dashboard")
+        val listener = MerchantFirestore.col("Settings").document("dashboard")
             .addSnapshotListener { snapshot: DocumentSnapshot?, _: FirebaseFirestoreException? ->
                 val raw = snapshot?.get("modules")
                 trySend(parseDashboardColorKeys(raw))
@@ -152,7 +152,7 @@ class KdsOrdersRepository(
 
     /** KDS layout prefs from Settings/kds (web dashboard “Display settings”). */
     fun observeKdsDisplaySettings(): Flow<KdsDisplaySettings> = callbackFlow {
-        val listener = db.collection("Settings").document("kds")
+        val listener = MerchantFirestore.col("Settings").document("kds")
             .addSnapshotListener { snapshot: DocumentSnapshot?, _: FirebaseFirestoreException? ->
                 if (snapshot == null || !snapshot.exists()) {
                     trySend(KdsDisplaySettings())
@@ -184,7 +184,7 @@ class KdsOrdersRepository(
 
     /** KDS device IDs that should show all online orders regardless of menu assignment. */
     fun observeOnlineRoutingKdsDeviceIds(): Flow<Set<String>> = callbackFlow {
-        val listener = db.collection("Settings").document("onlineOrdering")
+        val listener = MerchantFirestore.col("Settings").document("onlineOrdering")
             .addSnapshotListener { snap: DocumentSnapshot?, _: FirebaseFirestoreException? ->
                 if (snap == null || !snap.exists()) {
                     trySend(emptySet())
@@ -210,7 +210,7 @@ class KdsOrdersRepository(
             awaitClose { }
             return@callbackFlow
         }
-        val listener = db.collection(KdsDevicePresence.KDS_DEVICES_COLLECTION)
+        val listener = MerchantFirestore.col("kds_devices")
             .document(deviceDocId)
             .addSnapshotListener { snap: DocumentSnapshot?, _: FirebaseFirestoreException? ->
                 fun parseIdList(field: String): Set<String> {
@@ -235,7 +235,7 @@ class KdsOrdersRepository(
      * Matches dashboard “placement” for multi-category items.
      */
     fun observeMenuItemCategoryPlacements(): Flow<Map<String, Set<String>>> = callbackFlow {
-        val listener = db.collection(COLLECTION_MENU_ITEMS)
+        val listener = MerchantFirestore.col("MenuItems")
             .addSnapshotListener { snapshot: QuerySnapshot?, _: FirebaseFirestoreException? ->
                 val map = LinkedHashMap<String, Set<String>>()
                 val documents: List<DocumentSnapshot> = snapshot?.documents ?: emptyList()
@@ -271,7 +271,7 @@ class KdsOrdersRepository(
             awaitClose { }
             return@callbackFlow
         }
-        val ref = db.collection(KdsDevicePresence.KDS_DEVICES_COLLECTION)
+        val ref = MerchantFirestore.col("kds_devices")
             .document(id)
             .collection(SUBCOLLECTION_SETTINGS)
             .document(DOCUMENT_UI_SETTINGS)
@@ -284,7 +284,7 @@ class KdsOrdersRepository(
     suspend fun saveKdsTextSettings(deviceDocId: String, settings: KdsTextSettings) {
         val id = deviceDocId.trim()
         if (id.isEmpty()) return
-        val ref = db.collection(KdsDevicePresence.KDS_DEVICES_COLLECTION)
+        val ref = MerchantFirestore.col("kds_devices")
             .document(id)
             .collection(SUBCOLLECTION_SETTINGS)
             .document(DOCUMENT_UI_SETTINGS)
@@ -303,7 +303,7 @@ class KdsOrdersRepository(
         kdsClaimCardKey: String? = null,
     ) {
         val upper = kitchenStatus.uppercase(Locale.US)
-        val orderRef = db.collection(COLLECTION_ORDERS).document(orderId)
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
         val ids = lineDocIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         if (ids.isEmpty()) return
         val claimDevice = kdsClaimDeviceId?.trim().orEmpty()

@@ -386,7 +386,7 @@ class MenuActivity : AppCompatActivity() {
             selectedGuest = 1
         }
 
-        db.collection("Settings").document("inventory").get()
+        MerchantFirestore.col("Settings").document("inventory").get()
             .addOnSuccessListener { doc ->
                 stockCountingEnabled = doc.getBoolean("stockCountingEnabled") ?: true
                 loadActiveSchedules {
@@ -554,7 +554,7 @@ class MenuActivity : AppCompatActivity() {
     /** Subscribes to line [kdsStatus] so POS reacts when any KDS taps START (split stations). */
     private fun attachOrderKitchenStatusListener(orderId: String) {
         detachOrderKitchenStatusListener()
-        orderKitchenStatusListener = db.collection("Orders").document(orderId)
+        orderKitchenStatusListener = MerchantFirestore.col("Orders").document(orderId)
             .collection("items")
             .addSnapshotListener { snap, _ ->
                 applyKitchenInProcessFromItemsSnapshot(snap)
@@ -568,7 +568,7 @@ class MenuActivity : AppCompatActivity() {
     }
 
     private fun loadAllTaxes() {
-        db.collection("Taxes")
+        MerchantFirestore.col("Taxes")
             .get()
             .addOnSuccessListener { snap ->
                 allTaxes.clear()
@@ -593,7 +593,7 @@ class MenuActivity : AppCompatActivity() {
         kitchenSentEffectiveByLineCache = emptyMap()
         webOnlineKitchenSessionBaseline = null
 
-        db.collection("Orders").document(orderId)
+        MerchantFirestore.col("Orders").document(orderId)
             .get()
             .addOnSuccessListener { orderDoc ->
 
@@ -687,7 +687,7 @@ class MenuActivity : AppCompatActivity() {
                 updateCustomerDisplay()
                 repeatSuggestion.onCustomerChanged(customerId)
 
-                db.collection("Orders")
+                MerchantFirestore.col("Orders")
                     .document(orderId)
                     .collection("items")
                     .get()
@@ -824,13 +824,13 @@ class MenuActivity : AppCompatActivity() {
                 "email" to email,
                 "createdAt" to Timestamp.now(),
             )
-            db.collection("Customers")
+            MerchantFirestore.col("Customers")
                 .add(customer)
                 .addOnSuccessListener { docRef ->
                     customerId = docRef.id
                     val oid = currentOrderId
                     if (!oid.isNullOrBlank()) {
-                        db.collection("Orders").document(oid)
+                        MerchantFirestore.col("Orders").document(oid)
                             .update("customerId", docRef.id)
                     }
                     repeatSuggestion.onCustomerChanged(customerId)
@@ -842,7 +842,7 @@ class MenuActivity : AppCompatActivity() {
     }
 
     private fun resolveCustomerId(name: String, email: String) {
-        db.collection("Customers")
+        MerchantFirestore.col("Customers")
             .whereEqualTo("name", name)
             .limit(1)
             .get()
@@ -852,7 +852,7 @@ class MenuActivity : AppCompatActivity() {
                     customerId = doc.id
                     val oid = currentOrderId
                     if (!oid.isNullOrBlank()) {
-                        db.collection("Orders").document(oid)
+                        MerchantFirestore.col("Orders").document(oid)
                             .update("customerId", doc.id)
                     }
                     repeatSuggestion.onCustomerChanged(customerId)
@@ -894,7 +894,7 @@ class MenuActivity : AppCompatActivity() {
     // ----------------------------
 
     private fun loadActiveSchedules(onComplete: () -> Unit) {
-        db.collection("menuSchedules").get()
+        MerchantFirestore.col("menuSchedules").get()
             .addOnSuccessListener { snap ->
                 val now = java.util.Calendar.getInstance()
                 val dayOfWeek = when (now.get(java.util.Calendar.DAY_OF_WEEK)) {
@@ -939,7 +939,7 @@ class MenuActivity : AppCompatActivity() {
     private val categoryAvailabilityMap = mutableMapOf<String, List<String>>()
 
     private fun loadSubcategories(onComplete: () -> Unit) {
-        db.collection("subcategories")
+        MerchantFirestore.col("subcategories")
             .get()
             .addOnSuccessListener { snap ->
                 allSubcategories = snap.documents.mapNotNull { doc ->
@@ -1078,10 +1078,10 @@ class MenuActivity : AppCompatActivity() {
         clearCategorySidebarUi()
 
         val primaryQuery = if (orderType.isNotBlank()) {
-            db.collection("Categories")
+            MerchantFirestore.col("Categories")
                 .whereArrayContains("availableOrderTypes", orderType)
         } else {
-            db.collection("Categories")
+            MerchantFirestore.col("Categories")
         }
 
         primaryQuery.get()
@@ -1090,7 +1090,7 @@ class MenuActivity : AppCompatActivity() {
                 when {
                     categoryButtons.isNotEmpty() -> finalizeCategorySidebar()
                     orderType.equals("ONLINE_PICKUP", ignoreCase = true) -> {
-                        db.collection("Categories")
+                        MerchantFirestore.col("Categories")
                             .whereArrayContains("availableOrderTypes", "TO_GO")
                             .get()
                             .addOnSuccessListener { togoSnap ->
@@ -1099,7 +1099,7 @@ class MenuActivity : AppCompatActivity() {
                                 if (categoryButtons.isNotEmpty()) {
                                     finalizeCategorySidebar()
                                 } else {
-                                    db.collection("Categories").get()
+                                    MerchantFirestore.col("Categories").get()
                                         .addOnSuccessListener { allSnap ->
                                             clearCategorySidebarUi()
                                             populateCategoryButtonsFromSnapshot(allSnap)
@@ -1112,7 +1112,7 @@ class MenuActivity : AppCompatActivity() {
                                 }
                             }
                             .addOnFailureListener {
-                                db.collection("Categories").get()
+                                MerchantFirestore.col("Categories").get()
                                     .addOnSuccessListener { allSnap ->
                                         clearCategorySidebarUi()
                                         populateCategoryButtonsFromSnapshot(allSnap)
@@ -1295,7 +1295,7 @@ class MenuActivity : AppCompatActivity() {
 
     @Suppress("UNCHECKED_CAST")
     private fun loadAllMenuItems() {
-        db.collection("MenuItems").get()
+        MerchantFirestore.col("MenuItems").get()
             .addOnSuccessListener { documents ->
                 val seen = mutableSetOf<String>()
                 val items = mutableListOf<MenuGridItem>()
@@ -1382,7 +1382,7 @@ class MenuActivity : AppCompatActivity() {
 
         buildSubcategoryChips(categoryId)
 
-        db.collection("MenuItems")
+        MerchantFirestore.col("MenuItems")
             .where(
                 Filter.or(
                     Filter.equalTo("categoryId", categoryId),
@@ -1567,7 +1567,7 @@ class MenuActivity : AppCompatActivity() {
         taxIds: List<String> = emptyList(),
         imageUrl: String? = null,
     ) {
-        db.collection("MenuItems").document(itemId).get()
+        MerchantFirestore.col("MenuItems").document(itemId).get()
             .addOnSuccessListener { itemDoc ->
                 val resolvedImage =
                     trimMenuImageUrl(imageUrl) ?: trimMenuImageUrl(itemDoc.getString("imageUrl"))
@@ -1591,7 +1591,7 @@ class MenuActivity : AppCompatActivity() {
                         imageUrl = resolvedImage,
                     )
                 } else {
-                    db.collection("ItemModifierGroups")
+                    MerchantFirestore.col("ItemModifierGroups")
                         .whereEqualTo("itemId", itemId)
                         .orderBy("displayOrder")
                         .get()
@@ -1683,7 +1683,7 @@ class MenuActivity : AppCompatActivity() {
             if (additional.isEmpty()) { callback(); return }
             var p = additional.size
             for (id in additional) {
-                db.collection("ModifierGroups").document(id).get()
+                MerchantFirestore.col("ModifierGroups").document(id).get()
                     .addOnSuccessListener { doc ->
                         val gName = doc.getString("name") ?: ""
                         val isReq = doc.getBoolean("required") ?: false
@@ -1708,7 +1708,7 @@ class MenuActivity : AppCompatActivity() {
             val chunks = ids.chunked(30)
             var remaining = chunks.size
             for (chunk in chunks) {
-                db.collection("ModifierOptions")
+                MerchantFirestore.col("ModifierOptions")
                     .whereIn("groupId", chunk)
                     .get()
                     .addOnSuccessListener { snap ->
@@ -1753,7 +1753,7 @@ class MenuActivity : AppCompatActivity() {
         }
 
         for (groupId in groupIds) {
-            db.collection("ModifierGroups").document(groupId).get()
+            MerchantFirestore.col("ModifierGroups").document(groupId).get()
                 .addOnSuccessListener { groupDoc ->
                     val gName = groupDoc.getString("name") ?: ""
                     val isReq = groupDoc.getBoolean("required") ?: false
@@ -2552,11 +2552,11 @@ class MenuActivity : AppCompatActivity() {
         } else {
             mapOf<String, Any>("kitchenNotesByLabel" to firestoreMap)
         }
-        db.collection("Orders").document(orderId).update(updates)
+        MerchantFirestore.col("Orders").document(orderId).update(updates)
     }
 
     private fun loadKitchenNotesFromFirestore(orderId: String) {
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { doc ->
                 kitchenNotesByLabel.clear()
                 @Suppress("UNCHECKED_CAST")
@@ -2673,7 +2673,7 @@ class MenuActivity : AppCompatActivity() {
             orderId = orderId,
             onSuccess = {
                 runOnUiThread {
-                    val orderRef = db.collection("Orders").document(orderId)
+                    val orderRef = MerchantFirestore.col("Orders").document(orderId)
                     fun commitKitchenSendWithMap(
                         orderSnap: DocumentSnapshot,
                         shouldPrintKitchen: Boolean,
@@ -3463,7 +3463,7 @@ class MenuActivity : AppCompatActivity() {
             updates["appliedDiscounts"] = emptyList<Map<String, Any>>()
         }
 
-        db.collection("Orders").document(oid).update(updates)
+        MerchantFirestore.col("Orders").document(oid).update(updates)
     }
 
     private fun pushOrderToCustomerDisplay() {
@@ -3971,7 +3971,7 @@ class MenuActivity : AppCompatActivity() {
             val stockMap = mutableMapOf<String, Long>()
 
             for ((_, cartItem) in cartMap) {
-                val itemRef = db.collection("MenuItems").document(cartItem.itemId)
+                val itemRef = MerchantFirestore.col("MenuItems").document(cartItem.itemId)
                 val snapshot = transaction.get(itemRef)
                 val currentStock = snapshot.getLong("stock") ?: 0L
 
@@ -3984,7 +3984,7 @@ class MenuActivity : AppCompatActivity() {
 
             // 2️⃣ THEN WRITE
             for ((_, cartItem) in cartMap) {
-                val itemRef = db.collection("MenuItems").document(cartItem.itemId)
+                val itemRef = MerchantFirestore.col("MenuItems").document(cartItem.itemId)
                 val currentStock = stockMap[cartItem.itemId] ?: 0L
                 val newStock = currentStock - cartItem.quantity
                 transaction.update(itemRef, "stock", newStock)
@@ -4000,14 +4000,14 @@ class MenuActivity : AppCompatActivity() {
 
         if (orderType == "DINE_IN") return
 
-        db.collection("Orders")
+        MerchantFirestore.col("Orders")
             .document(orderId)
             .collection("items")
             .limit(1)
             .get()
             .addOnSuccessListener { docs ->
                 if (docs.isEmpty) {
-                    db.collection("Orders")
+                    MerchantFirestore.col("Orders")
                         .document(orderId)
                         .delete()
                         .addOnSuccessListener {
@@ -4066,7 +4066,7 @@ class MenuActivity : AppCompatActivity() {
     private fun addRepeatItemsSequentially(queue: MutableList<SummaryItem>) {
         if (queue.isEmpty()) return
         val next = queue.removeAt(0)
-        db.collection("MenuItems").document(next.itemId).get()
+        MerchantFirestore.col("MenuItems").document(next.itemId).get()
             .addOnSuccessListener { itemDoc ->
                 if (!itemDoc.exists()) {
                     Toast.makeText(this, "${next.name} is no longer available", Toast.LENGTH_SHORT).show()
@@ -4178,7 +4178,7 @@ class MenuActivity : AppCompatActivity() {
     ) {
         if (queue.isEmpty()) return
         val next = queue.removeAt(0)
-        db.collection("MenuItems").document(next.itemId).get()
+        MerchantFirestore.col("MenuItems").document(next.itemId).get()
             .addOnSuccessListener { itemDoc ->
                 if (!itemDoc.exists()) {
                     Toast.makeText(this, "${next.name} is no longer available", Toast.LENGTH_SHORT).show()
@@ -4266,7 +4266,7 @@ class MenuActivity : AppCompatActivity() {
                 if (merged.isNotEmpty()) {
                     openStep(merged)
                 } else {
-                    db.collection("ItemModifierGroups")
+                    MerchantFirestore.col("ItemModifierGroups")
                         .whereEqualTo("itemId", next.itemId)
                         .orderBy("displayOrder")
                         .get()
@@ -4332,7 +4332,7 @@ class MenuActivity : AppCompatActivity() {
     }
 
     private fun fetchTotalAndCapture(orderId: String) {
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { doc ->
                 val totalInCents = doc.getLong("totalInCents") ?: 0L
                 if (totalInCents <= 0L) {
@@ -4367,7 +4367,7 @@ class MenuActivity : AppCompatActivity() {
     private fun finalizeCaptureOrder(orderId: String, totalInCents: Long, capture: CaptureResult) {
         val batchId = currentBatchId ?: ""
 
-        val orderRef = db.collection("Orders").document(orderId)
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
 
         val paymentEntry = hashMapOf<String, Any>(
             "paymentId" to UUID.randomUUID().toString(),
@@ -4401,7 +4401,7 @@ class MenuActivity : AppCompatActivity() {
         val txDocId = preAuthFirestoreDocId
         if (!txDocId.isNullOrBlank()) {
             // Update the original PRE_AUTH transaction in place → Post Auth
-            val txRef = db.collection("Transactions").document(txDocId)
+            val txRef = MerchantFirestore.col("Transactions").document(txDocId)
             orderUpdates["saleTransactionId"] = txDocId
 
             db.runBatch { batch ->
@@ -4439,7 +4439,7 @@ class MenuActivity : AppCompatActivity() {
                 Toast.makeText(this, "Capture approved but save failed: ${e.message}", Toast.LENGTH_LONG).show()
             }
         } else {
-            val txRef = db.collection("Transactions").document()
+            val txRef = MerchantFirestore.col("Transactions").document()
             orderUpdates["saleTransactionId"] = txRef.id
 
             val txData = hashMapOf<String, Any>(
@@ -4456,7 +4456,7 @@ class MenuActivity : AppCompatActivity() {
 
             db.runTransaction { firestoreTxn ->
                 if (batchId.isNotBlank()) {
-                    val batchRef = db.collection("Batches").document(batchId)
+                    val batchRef = MerchantFirestore.col("Batches").document(batchId)
                     val batchSnap = firestoreTxn.get(batchRef)
                     val counter = batchSnap.getLong("transactionCounter") ?: 0L
                     val next = counter + 1

@@ -15,6 +15,7 @@ import { FirebaseError } from "firebase/app";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import {
@@ -110,7 +111,7 @@ export default function KdsAssignItemsPage() {
     }
 
     const unsubDevice = onSnapshot(
-      doc(db, KDS_DEVICES_COLLECTION, deviceId),
+      merchantDoc(merchantId, KDS_DEVICES_COLLECTION, deviceId),
       (snap) => {
         if (!snap.exists()) {
           setLoadError("This KDS device was not found.");
@@ -131,10 +132,7 @@ export default function KdsAssignItemsPage() {
     );
 
     const unsubSchedules = onSnapshot(
-      query(
-        collection(db, MENU_SCHEDULES_COLLECTION),
-        where("merchantId", "==", merchantId),
-      ),
+      merchantCol(merchantId, MENU_SCHEDULES_COLLECTION),
       (snap) => {
         const list: { id: string; name: string }[] = [];
         snap.forEach((d) => {
@@ -151,10 +149,7 @@ export default function KdsAssignItemsPage() {
     );
 
     const unsubCats = onSnapshot(
-      query(
-        collection(db, CATEGORIES_COLLECTION),
-        where("merchantId", "==", merchantId),
-      ),
+      merchantCol(merchantId, CATEGORIES_COLLECTION),
       (snap) => {
         const list: CategoryRow[] = [];
         snap.forEach((d) => {
@@ -169,10 +164,7 @@ export default function KdsAssignItemsPage() {
     );
 
     const unsubItems = onSnapshot(
-      query(
-        collection(db, MENU_ITEMS_COLLECTION),
-        where("merchantId", "==", merchantId),
-      ),
+      merchantCol(merchantId, MENU_ITEMS_COLLECTION),
       (snap) => {
         const list: MenuItemForKds[] = [];
         snap.forEach((d) => {
@@ -192,7 +184,7 @@ export default function KdsAssignItemsPage() {
     );
 
     const unsubSubcats = onSnapshot(
-      query(collection(db, SUBCATEGORIES_COLLECTION), where("merchantId", "==", merchantId), orderBy("order", "asc")),
+      query(merchantCol(merchantId, SUBCATEGORIES_COLLECTION), orderBy("order", "asc")),
       (snap) => {
         const list: SubcategoryRow[] = [];
         snap.forEach((d) => {
@@ -461,7 +453,7 @@ export default function KdsAssignItemsPage() {
     try {
       const { assignedCategoryIds: cats, assignedItemIds: items } =
         normalizeAssignmentForSave(selectedItemIds, menuItems, categories);
-      await updateDoc(doc(db, KDS_DEVICES_COLLECTION, deviceId), {
+      await updateDoc(merchantDoc(merchantId, KDS_DEVICES_COLLECTION, deviceId), {
         assignedCategoryIds: cats,
         assignedItemIds: items,
         updatedAt: serverTimestamp(),

@@ -121,7 +121,7 @@ object ReservationFirestoreHelper {
         val fromRes = resSnap.getString("tableLayoutId")?.trim().orEmpty()
         val lid = fromRes.ifEmpty { fallbackLayoutId?.trim().orEmpty() }
         if (lid.isEmpty()) return 0L
-        val layoutSnap = tx.get(db.collection(TABLE_LAYOUTS_COLLECTION).document(lid))
+        val layoutSnap = tx.get(MerchantFirestore.doc(TABLE_LAYOUTS_COLLECTION, lid))
         return graceAfterSlotMsFromLayoutSnapshot(layoutSnap)
     }
 
@@ -270,7 +270,7 @@ object ReservationFirestoreHelper {
         if (st != "RESERVED") return ""
 
         val rid = tableSnap.getString("reservationId")?.trim().orEmpty()
-        val resRef = if (rid.isNotEmpty()) db.collection(COLLECTION).document(rid) else null
+        val resRef = if (rid.isNotEmpty()) MerchantFirestore.doc(COLLECTION, rid) else null
         val resSnap = resRef?.let { tx.get(it) }
 
         var graceMs = 0L
@@ -357,7 +357,7 @@ object ReservationFirestoreHelper {
             snap.getString("reservationId")?.trim().orEmpty().takeIf { it.isNotEmpty() }
         }.distinct()
 
-        val resSnapByRid = rids.associateWith { rid -> tx.get(db.collection(COLLECTION).document(rid)) }
+        val resSnapByRid = rids.associateWith { rid -> tx.get(MerchantFirestore.doc(COLLECTION, rid)) }
 
         val layoutIdSet = mutableSetOf<String>()
         for (rid in rids) {
@@ -371,7 +371,7 @@ object ReservationFirestoreHelper {
         if (layoutForSweep != null) layoutIdSet.add(layoutForSweep)
 
         val layoutSnapById = layoutIdSet.associateWith { lid ->
-            tx.get(db.collection(TABLE_LAYOUTS_COLLECTION).document(lid))
+            tx.get(MerchantFirestore.doc(TABLE_LAYOUTS_COLLECTION, lid))
         }
 
         fun graceMsForReservation(rs: DocumentSnapshot): Long {
@@ -419,7 +419,7 @@ object ReservationFirestoreHelper {
                 }
             }
             tx.update(
-                db.collection(COLLECTION).document(rid),
+                MerchantFirestore.doc(COLLECTION, rid),
                 mapOf(
                     "status" to "EXPIRED",
                     "updatedAt" to now,
@@ -492,7 +492,7 @@ object ReservationFirestoreHelper {
         val rid = reservationId.trim()
         if (rid.isEmpty()) return
         db.runTransaction { tx ->
-            val resRef = db.collection(COLLECTION).document(rid)
+            val resRef = MerchantFirestore.doc(COLLECTION, rid)
             val resSnap = tx.get(resRef)
             if (!resSnap.exists()) return@runTransaction null
 
@@ -558,7 +558,7 @@ object ReservationFirestoreHelper {
         val extras = joinedTableIdsForReservation.map { it.trim() }.filter { it.isNotEmpty() && it != tid }
         val allTableIds = (listOf(tid) + extras).distinct().sorted()
         val openTasks = allTableIds.map { tableLoopId ->
-            db.collection("Orders")
+            MerchantFirestore.col("Orders")
                 .whereEqualTo("tableId", tableLoopId)
                 .whereEqualTo("status", "OPEN")
                 .whereEqualTo("orderType", "DINE_IN")
@@ -578,7 +578,7 @@ object ReservationFirestoreHelper {
                         return@addOnSuccessListener
                     }
                 }
-                val resRef = db.collection(COLLECTION).document()
+                val resRef = MerchantFirestore.col(COLLECTION).document()
                 db.runTransaction { tx ->
                     sweepExpiredHoldsAndAssertTablesFreeForCreate(tx, db, allTableIds, tableLayoutId)
                     val cid = customerId.trim()
@@ -652,7 +652,7 @@ object ReservationFirestoreHelper {
             return
         }
         db.runTransaction { tx ->
-            val resRef = db.collection(COLLECTION).document(rid)
+            val resRef = MerchantFirestore.doc(COLLECTION, rid)
             val resSnap = tx.get(resRef)
             if (!resSnap.exists()) {
                 throw FirebaseFirestoreException(
@@ -669,7 +669,6 @@ object ReservationFirestoreHelper {
             }
             val primary = resSnap.getString("tableId")?.trim().orEmpty()
             val layoutId = resSnap.getString("tableLayoutId")
-            // Firestore: all reads before any writes — read every table doc first, then update.
             val tableReads = mutableListOf<Pair<DocumentReference, DocumentSnapshot>>()
             if (primary.isNotEmpty()) {
                 for (tid in TableJoinGroupFirestore.parseJoinedIds(resSnap, primary)) {
@@ -739,7 +738,7 @@ object ReservationFirestoreHelper {
             onFailure(IllegalArgumentException("Invalid reservation"))
             return
         }
-        val resRef = db.collection(COLLECTION).document(rid)
+        val resRef = MerchantFirestore.doc(COLLECTION, rid)
         resRef.get()
             .addOnSuccessListener { resSnap ->
                 if (!resSnap.exists()) {
@@ -758,7 +757,7 @@ object ReservationFirestoreHelper {
                 }
                 val layoutId = resSnap.getString("tableLayoutId")?.trim().orEmpty()
                 val openTasks = tableIds.map { tid ->
-                    db.collection("Orders")
+                    MerchantFirestore.col("Orders")
                         .whereEqualTo("tableId", tid)
                         .whereEqualTo("status", "OPEN")
                         .whereEqualTo("orderType", "DINE_IN")
@@ -823,11 +822,11 @@ object ReservationFirestoreHelper {
                                     )
                                 }
                             }
-                            val counterRef = db.collection("Counters").document("orderNumber")
+                            val counterRef = MerchantFirestore.doc("Counters", "orderNumber")
                             val cSnap = tx.get(counterRef)
                             val nextNum = (cSnap.getLong("current") ?: 0L) + 1L
                             tx.set(counterRef, hashMapOf("current" to nextNum))
-                            val orderRef = db.collection("Orders").document()
+                            val orderRef = MerchantFirestore.col("Orders").document()
                             val orderId = orderRef.id
                             val now = Date()
                             val party = reservationPartySize(resLive)
@@ -911,7 +910,7 @@ object ReservationFirestoreHelper {
             return
         }
         db.runTransaction { tx ->
-            val resRef = db.collection(COLLECTION).document(rid)
+            val resRef = MerchantFirestore.doc(COLLECTION, rid)
             val resSnap = tx.get(resRef)
             if (!resSnap.exists()) {
                 throw FirebaseFirestoreException(

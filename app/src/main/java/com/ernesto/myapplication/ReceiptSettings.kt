@@ -156,7 +156,7 @@ data class ReceiptSettings(
             stopBusinessInfoSync()
             val db = FirebaseFirestore.getInstance()
 
-            businessInfoListener = db.collection("Settings").document("businessInfo")
+            businessInfoListener = MerchantFirestore.doc("Settings", "businessInfo")
                 .addSnapshotListener { snap, err ->
                     if (err != null) {
                         Log.w("ReceiptSettings", "Business info sync error", err)
@@ -192,7 +192,7 @@ data class ReceiptSettings(
                     }
                 }
 
-            receiptSettingsListener = db.collection("Settings").document("receiptSettings")
+            receiptSettingsListener = MerchantFirestore.doc("Settings", "receiptSettings")
                 .addSnapshotListener { snap, err ->
                     if (err != null) {
                         Log.w("ReceiptSettings", "Receipt settings sync error", err)
@@ -260,7 +260,7 @@ data class ReceiptSettings(
                 "fontSizeGrandTotal" to s.fontSizeGrandTotal,
                 "fontSizeFooter" to s.fontSizeFooter
             )
-            db.collection("Settings").document("receiptSettings")
+            MerchantFirestore.doc("Settings", "receiptSettings")
                 .set(receiptData)
                 .addOnSuccessListener { Log.d("ReceiptSettings", "Receipt settings saved to Firestore") }
                 .addOnFailureListener { Log.w("ReceiptSettings", "Receipt settings Firestore save failed", it) }
@@ -276,7 +276,7 @@ data class ReceiptSettings(
                 "email" to s.email,
                 "logoUrl" to s.logoUrl
             )
-            db.collection("Settings").document("businessInfo")
+            MerchantFirestore.doc("Settings", "businessInfo")
                 .set(bizData, com.google.firebase.firestore.SetOptions.merge())
                 .addOnSuccessListener { Log.d("ReceiptSettings", "Business info saved to Firestore") }
                 .addOnFailureListener { Log.w("ReceiptSettings", "Business info Firestore save failed", it) }

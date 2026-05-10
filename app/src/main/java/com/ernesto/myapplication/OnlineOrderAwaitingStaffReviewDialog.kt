@@ -28,7 +28,7 @@ object OnlineOrderAwaitingStaffReviewDialog {
         employeeName: String,
     ) {
         if (activity.isFinishing || activity.isDestroyed) return
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.doc("Orders", orderId).get()
             .addOnSuccessListener { doc ->
                 if (activity.isFinishing || activity.isDestroyed) return@addOnSuccessListener
                 if (!doc.exists()) {
@@ -137,7 +137,7 @@ object OnlineOrderAwaitingStaffReviewDialog {
     }
 
     private fun acceptOrder(db: FirebaseFirestore, orderId: String, employeeName: String, activity: AppCompatActivity) {
-        db.collection("Orders").document(orderId).update(
+        MerchantFirestore.doc("Orders", orderId).update(
             mapOf(
                 OnlineOrderStaffConfirm.FIELD_AWAITING to false,
                 "staffConfirmedOrderAt" to Timestamp.now(),
@@ -154,7 +154,7 @@ object OnlineOrderAwaitingStaffReviewDialog {
     }
 
     private fun sendToKitchenAfterAccept(activity: AppCompatActivity, db: FirebaseFirestore, orderId: String) {
-        val orderRef = db.collection("Orders").document(orderId)
+        val orderRef = MerchantFirestore.doc("Orders", orderId)
         orderRef.get().addOnSuccessListener { orderDoc ->
             if (!orderDoc.exists()) return@addOnSuccessListener
             if (orderDoc.getTimestamp(PrintingSettingsFirestore.FIELD_KITCHEN_CHITS_PRINTED_AT) != null) {
@@ -228,7 +228,7 @@ object OnlineOrderAwaitingStaffReviewDialog {
             ).show()
             return
         }
-        db.collection("Orders").document(orderId).update(
+        MerchantFirestore.doc("Orders", orderId).update(
             mapOf(
                 "status" to "VOIDED",
                 "voided" to true,

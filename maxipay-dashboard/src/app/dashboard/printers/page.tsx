@@ -9,6 +9,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import Header from "@/components/Header";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
@@ -54,13 +55,13 @@ function statusLabel(s: PrinterStatus) {
 
 /* ─── Command set selector (inline per-row) ─── */
 
-function CommandSetSelect({ row }: { row: PrinterViewRow }) {
+function CommandSetSelect({ row, merchantId }: { row: PrinterViewRow; merchantId: string }) {
   const [saving, setSaving] = useState(false);
   const handleChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value as PrinterCommandSet;
     setSaving(true);
     try {
-      await updateDoc(doc(db, "Printers", row.id), {
+      await updateDoc(merchantDoc(merchantId, "Printers", row.id), {
         commandSet: value,
         updatedAt: serverTimestamp(),
       });
@@ -371,6 +372,7 @@ function StatusBadge({ status }: { status: PrinterStatus }) {
 
 const PrinterTableRow = memo(function PrinterTableRow({
   row,
+  merchantId,
   onTest,
   onEdit,
   onDelete,
@@ -378,6 +380,7 @@ const PrinterTableRow = memo(function PrinterTableRow({
   testing,
 }: {
   row: PrinterViewRow;
+  merchantId: string;
   onTest: (id: string) => void;
   onEdit: (row: PrinterViewRow) => void;
   onDelete: (row: PrinterViewRow) => void;
@@ -397,7 +400,7 @@ const PrinterTableRow = memo(function PrinterTableRow({
         </div>
       </td>
       <td className="px-4 py-3.5">
-        <CommandSetSelect row={row} />
+        <CommandSetSelect row={row} merchantId={merchantId} />
       </td>
       <td className="px-4 py-3.5 text-sm text-slate-500">{row.lastSeenAgo}</td>
       <td className="px-4 py-3.5">
@@ -448,6 +451,7 @@ const PrinterTableRow = memo(function PrinterTableRow({
 
 function PrinterCard({
   row,
+  merchantId,
   onTest,
   onEdit,
   onDelete,
@@ -455,6 +459,7 @@ function PrinterCard({
   testing,
 }: {
   row: PrinterViewRow;
+  merchantId: string;
   onTest: (id: string) => void;
   onEdit: (row: PrinterViewRow) => void;
   onDelete: (row: PrinterViewRow) => void;
@@ -486,7 +491,7 @@ function PrinterCard({
         </div>
         <div className="flex justify-between items-center gap-2">
           <dt className="text-slate-500">Command set</dt>
-          <dd><CommandSetSelect row={row} /></dd>
+          <dd><CommandSetSelect row={row} merchantId={merchantId} /></dd>
         </div>
         <div className="flex justify-between gap-2">
           <dt className="text-slate-500">Last seen</dt>
@@ -577,14 +582,13 @@ export default function PrintersPage() {
       };
 
       if (editId) {
-        await updateDoc(doc(db, "Printers", editId), payload);
+        await updateDoc(merchantDoc(merchantId, "Printers", editId), payload);
       } else {
-        await addDoc(collection(db, "Printers"), {
+        await addDoc(merchantCol(merchantId, "Printers"), {
           ...payload,
           status: "UNKNOWN",
           lastSeen: null,
           createdAt: serverTimestamp(),
-          merchantId,
         });
       }
     },
@@ -594,7 +598,7 @@ export default function PrintersPage() {
   const handleTest = useCallback(async (printerId: string) => {
     setTestingId(printerId);
     try {
-      await addDoc(collection(db, "Printers", printerId, "commands"), {
+      await addDoc(collection(merchantDoc(merchantId, "Printers", printerId), "commands"), {
         type: "testConnection",
         requestedAt: serverTimestamp(),
       });
@@ -607,7 +611,7 @@ export default function PrintersPage() {
 
   const handleDelete = useCallback(async () => {
     if (!deleteTarget) return;
-    await deleteDoc(doc(db, "Printers", deleteTarget.id));
+    await deleteDoc(merchantDoc(merchantId, "Printers", deleteTarget.id));
     setDeleteTarget(null);
   }, [deleteTarget]);
 
@@ -720,6 +724,7 @@ export default function PrintersPage() {
                       <PrinterTableRow
                         key={row.id}
                         row={row}
+                        merchantId={merchantId}
                         onTest={handleTest}
                         onEdit={openEdit}
                         onDelete={setDeleteTarget}
@@ -738,6 +743,7 @@ export default function PrintersPage() {
                 <PrinterCard
                   key={row.id}
                   row={row}
+                  merchantId={merchantId}
                   onTest={handleTest}
                   onEdit={openEdit}
                   onDelete={setDeleteTarget}

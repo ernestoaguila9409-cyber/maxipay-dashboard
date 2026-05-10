@@ -14,6 +14,7 @@ import {
 import { getApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import { Layers, Loader2 } from "lucide-react";
@@ -149,8 +150,7 @@ export default function SalesActivityBatchesSection() {
       return;
     }
     const qPay = query(
-      collection(db, PAYMENT_TERMINALS),
-      where("merchantId", "==", merchantId),
+      merchantCol(merchantId, PAYMENT_TERMINALS),
       where("active", "==", true)
     );
     const unsubPay = onSnapshot(
@@ -177,8 +177,7 @@ export default function SalesActivityBatchesSection() {
     }
 
     const qUnsettled = query(
-      collection(db, "Transactions"),
-      where("merchantId", "==", merchantId),
+      merchantCol(merchantId, "Transactions"),
       where("settled", "==", false),
       where("voided", "==", false)
     );
@@ -220,8 +219,7 @@ export default function SalesActivityBatchesSection() {
     );
 
     const qOpenBatch = query(
-      collection(db, "Batches"),
-      where("merchantId", "==", merchantId),
+      merchantCol(merchantId, "Batches"),
       where("closed", "==", false),
       limit(1)
     );
@@ -235,8 +233,7 @@ export default function SalesActivityBatchesSection() {
     );
 
     const qBatches = query(
-      collection(db, "Batches"),
-      where("merchantId", "==", merchantId),
+      merchantCol(merchantId, "Batches"),
       orderBy("createdAt", "desc"),
       limit(120)
     );

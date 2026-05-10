@@ -34,18 +34,12 @@ export async function syncSettingsBusinessInfoFromMerchant(
   const email = stringFromFirestore(merchantData.email);
   const address = formatMerchantAddressForSettings(merchantData.address);
 
-  const ref = db.collection("Settings").doc("businessInfo");
+  const ref = db
+    .collection("Merchants")
+    .doc(merchantId)
+    .collection("settings")
+    .doc("businessInfo");
   const snap = await ref.get();
-  if (snap.exists) {
-    const mid = snap.data()?.merchantId;
-    if (mid != null && String(mid) !== "" && String(mid) !== String(merchantId)) {
-      console.warn(
-        "[syncBusinessInfo] Settings/businessInfo belongs to another merchant; skip",
-        { existingMerchantId: mid, merchantId }
-      );
-      return;
-    }
-  }
 
   const logoRaw = snap.exists ? snap.data()?.logoUrl : "";
   const logoUrl = typeof logoRaw === "string" ? logoRaw : "";
@@ -57,7 +51,6 @@ export async function syncSettingsBusinessInfoFromMerchant(
       phone,
       email,
       logoUrl,
-      merchantId,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true }

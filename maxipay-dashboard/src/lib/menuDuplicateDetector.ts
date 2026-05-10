@@ -1,5 +1,5 @@
-import { collection, getDocs, query, where } from "firebase/firestore";
-import { db } from "@/firebase/firebaseConfig";
+import { getDocs } from "firebase/firestore";
+import { merchantCol } from "@/lib/merchantFirestore";
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@ export function similarityScore(a: string, b: string): number {
 // ─── Firestore loader ───────────────────────────────────────────────────
 
 export async function fetchExistingMenuItems(merchantId: string): Promise<ExistingMenuItem[]> {
-  const snap = await getDocs(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)));
+  const snap = await getDocs(merchantCol(merchantId, "MenuItems"));
   const items: ExistingMenuItem[] = [];
 
   for (const d of snap.docs) {

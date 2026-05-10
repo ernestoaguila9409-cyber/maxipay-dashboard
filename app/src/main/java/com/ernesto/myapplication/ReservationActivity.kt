@@ -294,7 +294,7 @@ class ReservationActivity : AppCompatActivity() {
         }
         for (id in want) {
             if (reservationLayoutGraceListeners.containsKey(id)) continue
-            reservationLayoutGraceListeners[id] = db.collection("tableLayouts").document(id)
+            reservationLayoutGraceListeners[id] = MerchantFirestore.doc("tableLayouts", id)
                 .addSnapshotListener { _, _ ->
                     lastReservationsSnapshot?.documents?.forEach { doc ->
                         if (ReservationFirestoreHelper.mightTriggerExpiredReservationRelease(doc)) {
@@ -309,7 +309,7 @@ class ReservationActivity : AppCompatActivity() {
         reservationsListener?.remove()
         clearReservationLayoutGraceListeners()
         lastReservationsSnapshot = null
-        reservationsListener = db.collection(ReservationFirestoreHelper.COLLECTION)
+        reservationsListener = MerchantFirestore.col(ReservationFirestoreHelper.COLLECTION)
             .addSnapshotListener { snap, err ->
                 if (err != null) {
                     Toast.makeText(this, "Failed to load reservations: ${err.message}", Toast.LENGTH_LONG).show()

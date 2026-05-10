@@ -258,8 +258,7 @@ object CashDrawerManager {
 
         val displayLabel = if (type == "CASH_ADD") "PAID_IN" else "PAID_OUT"
 
-        FirebaseFirestore.getInstance()
-            .collection("Transactions")
+        MerchantFirestore.col("Transactions")
             .add(record)
             .addOnSuccessListener {
                 Log.d(TAG, "Drawer opened by $employeeName ($displayLabel \$${String.format("%.2f", amount)})")

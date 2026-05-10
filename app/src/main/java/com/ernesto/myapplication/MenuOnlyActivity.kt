@@ -141,7 +141,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     }
 
     private fun loadStockSetting() {
-        db.collection("Settings").document("inventory").get()
+        MerchantFirestore.col("Settings").document("inventory").get()
             .addOnSuccessListener { doc ->
                 stockCountingEnabled = doc.getBoolean("stockCountingEnabled") ?: true
                 loadActiveSchedules { loadCategories() }
@@ -153,7 +153,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     }
 
     private fun loadActiveSchedules(onComplete: () -> Unit) {
-        db.collection("menuSchedules").get()
+        MerchantFirestore.col("menuSchedules").get()
             .addOnSuccessListener { snap ->
                 val now = Calendar.getInstance()
                 val dayOfWeek = when (now.get(Calendar.DAY_OF_WEEK)) {
@@ -196,7 +196,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     // =========================================================
 
     private fun loadSubcategories(onComplete: () -> Unit) {
-        db.collection("subcategories")
+        MerchantFirestore.col("subcategories")
             .get()
             .addOnSuccessListener { snap ->
                 allSubcategories = snap.documents.mapNotNull { doc ->
@@ -229,7 +229,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     private fun loadCategories(syncOrphanKitchenLabels: Boolean = true) {
         fun bindCategoriesFromFirestore() {
             loadSubcategories {
-                db.collection("Categories")
+                MerchantFirestore.col("Categories")
                     .get()
                     .addOnSuccessListener { documents ->
                         val categoryList = mutableListOf<CategoryModel>()
@@ -422,7 +422,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                 } else {
                     mapOf("kitchenLabel" to label)
                 }
-                db.collection("subcategories").document(sub.id).update(updates)
+                MerchantFirestore.col("subcategories").document(sub.id).update(updates)
                     .addOnSuccessListener {
                         Toast.makeText(this,
                             if (label.isEmpty()) "Kitchen label removed" else "Label set to \"$label\"",
@@ -442,7 +442,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     // =========================================================
 
     private fun loadAllItemsForSearch(query: String) {
-        db.collection("MenuItems")
+        MerchantFirestore.col("MenuItems")
             .get()
             .addOnSuccessListener { documents ->
                 val itemList = mutableListOf<ItemModel>()
@@ -544,7 +544,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     }
 
     private fun loadItems(categoryId: String) {
-        db.collection("MenuItems")
+        MerchantFirestore.col("MenuItems")
             .where(
                 Filter.or(
                     Filter.equalTo("categoryId", categoryId),
@@ -733,7 +733,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     private fun checkCategoryExists(name: String, callback: (Boolean) -> Unit) {
         val wanted = CategoryNameUtils.normalizeCategoryName(name)
 
-        db.collection("Categories")
+        MerchantFirestore.col("Categories")
             .get()
             .addOnSuccessListener { documents ->
                 var exists = false
@@ -754,7 +754,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     private fun saveCategory(name: String, availableOrderTypes: List<String>) {
         val wanted = CategoryNameUtils.normalizeCategoryName(name)
 
-        db.collection("Categories")
+        MerchantFirestore.col("Categories")
             .get()
             .addOnSuccessListener { documents ->
                 var exists = false
@@ -778,7 +778,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                         "availableOrderTypes" to availableOrderTypes
                     )
 
-                    db.collection("Categories")
+                    MerchantFirestore.col("Categories")
                         .add(category)
                         .addOnSuccessListener {
                             loadCategories()
@@ -1092,7 +1092,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                     item["availableOrderTypes"] = selectedTypes
                 }
 
-                db.collection("MenuItems")
+                MerchantFirestore.col("MenuItems")
                     .add(item)
                     .addOnSuccessListener { docRef ->
                         val categoryId = selectedCategoryId!!
@@ -1133,7 +1133,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                         if (pendingModifierIds.isNotEmpty()) {
                             val batch = db.batch()
                             pendingModifierIds.forEachIndexed { index, groupId ->
-                                val linkRef = db.collection("ItemModifierGroups").document()
+                                val linkRef = MerchantFirestore.col("ItemModifierGroups").document()
                                 batch.set(linkRef, hashMapOf(
                                     "itemId" to docRef.id,
                                     "groupId" to groupId,

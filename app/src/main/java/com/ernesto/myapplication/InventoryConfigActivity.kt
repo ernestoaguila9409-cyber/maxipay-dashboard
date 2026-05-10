@@ -32,7 +32,7 @@ class InventoryConfigActivity : AppCompatActivity() {
     }
 
     private fun loadSetting() {
-        db.collection("Settings").document("inventory")
+        MerchantFirestore.doc("Settings", "inventory")
             .get()
             .addOnSuccessListener { doc ->
                 val enabled = doc.getBoolean("stockCountingEnabled") ?: true
@@ -53,7 +53,7 @@ class InventoryConfigActivity : AppCompatActivity() {
     }
 
     private fun saveSetting(enabled: Boolean) {
-        db.collection("Settings").document("inventory")
+        MerchantFirestore.doc("Settings", "inventory")
             .set(mapOf("stockCountingEnabled" to enabled))
             .addOnSuccessListener {
                 val label = if (enabled) "enabled" else "disabled"

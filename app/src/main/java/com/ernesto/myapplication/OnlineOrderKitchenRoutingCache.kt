@@ -22,7 +22,7 @@ object OnlineOrderKitchenRoutingCache {
 
     fun start(db: FirebaseFirestore = FirebaseFirestore.getInstance()) {
         registration?.remove()
-        registration = db.collection("Settings").document("onlineOrdering")
+        registration = MerchantFirestore.doc("Settings", "onlineOrdering")
             .addSnapshotListener { snap, err ->
                 if (err != null) {
                     Log.w(TAG, "listener error", err)

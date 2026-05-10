@@ -65,7 +65,7 @@ object KdsActiveCache {
     @Synchronized
     fun start(db: FirebaseFirestore = FirebaseFirestore.getInstance()) {
         if (registration != null) return
-        registration = db.collection(COLLECTION)
+        registration = MerchantFirestore.col(COLLECTION)
             .addSnapshotListener { snapshot, _ ->
                 applySnapshot(snapshot)
             }

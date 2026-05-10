@@ -16,6 +16,7 @@ import {
   arrayRemove,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -111,7 +112,7 @@ export default function ModifiersPage() {
       setLoading(false);
       return;
     }
-    const unsub = onSnapshot(query(collection(db, "ModifierGroups"), where("merchantId", "==", merchantId)), (snap) => {
+    const unsub = onSnapshot(merchantCol(merchantId, "ModifierGroups"), (snap) => {
       const list: ModifierGroup[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -196,7 +197,7 @@ export default function ModifiersPage() {
         else delete next.imageUrl;
         return next;
       });
-      await updateDoc(doc(db, "ModifierGroups", selectedGroup.id), { options: updatedOptions });
+      await updateDoc(merchantDoc(merchantId, "ModifierGroups", selectedGroup.id), { options: updatedOptions });
       const nextG = { ...selectedGroup, options: updatedOptions };
       setSelectedGroup(nextG);
       setGroups((prev) => prev.map((g) => (g.id === nextG.id ? nextG : g)));
@@ -236,7 +237,7 @@ export default function ModifiersPage() {
     setGroupSaving(true);
     try {
       if (editingGroup) {
-        await updateDoc(doc(db, "ModifierGroups", editingGroup.id), {
+        await updateDoc(merchantDoc(merchantId, "ModifierGroups", editingGroup.id), {
           name,
           required: groupRequired,
           minSelection,
@@ -244,8 +245,7 @@ export default function ModifiersPage() {
           groupType,
         });
       } else {
-        await addDoc(collection(db, "ModifierGroups"), {
-          merchantId,
+        await addDoc(merchantCol(merchantId, "ModifierGroups"), {
           name,
           required: groupRequired,
           minSelection,
@@ -267,17 +267,15 @@ export default function ModifiersPage() {
     setDeleting(true);
     try {
       const batch = writeBatch(db);
-      batch.delete(doc(db, "ModifierGroups", deleteGroupTarget.id));
+      batch.delete(merchantDoc(merchantId, "ModifierGroups", deleteGroupTarget.id));
 
-      // Clean up legacy ItemModifierGroups links
       const linkSnap = await getDocs(
-        query(collection(db, "ItemModifierGroups"), where("groupId", "==", deleteGroupTarget.id))
+        query(merchantCol(merchantId, "ItemModifierGroups"), where("groupId", "==", deleteGroupTarget.id))
       );
       linkSnap.forEach((d) => batch.delete(d.ref));
 
-      // Clean up legacy ModifierOptions docs
       const optSnap = await getDocs(
-        query(collection(db, "ModifierOptions"), where("groupId", "==", deleteGroupTarget.id))
+        query(merchantCol(merchantId, "ModifierOptions"), where("groupId", "==", deleteGroupTarget.id))
       );
       optSnap.forEach((d) => batch.delete(d.ref));
 
@@ -352,7 +350,7 @@ export default function ModifiersPage() {
           else delete next.imageUrl;
           return next;
         });
-        await updateDoc(doc(db, "ModifierGroups", selectedGroup.id), {
+        await updateDoc(merchantDoc(merchantId, "ModifierGroups", selectedGroup.id), {
           options: updatedOptions,
         });
       } else {
@@ -364,7 +362,7 @@ export default function ModifiersPage() {
           triggersModifierGroupIds,
         };
         if (img) newOption.imageUrl = img;
-        await updateDoc(doc(db, "ModifierGroups", selectedGroup.id), {
+        await updateDoc(merchantDoc(merchantId, "ModifierGroups", selectedGroup.id), {
           options: arrayUnion(newOption),
         });
       }
@@ -383,7 +381,7 @@ export default function ModifiersPage() {
       const updatedOptions = selectedGroup.options.filter(
         (o) => o.id !== deleteOptionTarget.id
       );
-      await updateDoc(doc(db, "ModifierGroups", selectedGroup.id), {
+      await updateDoc(merchantDoc(merchantId, "ModifierGroups", selectedGroup.id), {
         options: updatedOptions,
       });
     } catch (err) {
@@ -423,7 +421,7 @@ export default function ModifiersPage() {
       const remaining = selectedGroup.options.filter(
         (o) => !selectedOptionIds.has(o.id)
       );
-      await updateDoc(doc(db, "ModifierGroups", selectedGroup.id), {
+      await updateDoc(merchantDoc(merchantId, "ModifierGroups", selectedGroup.id), {
         options: remaining,
       });
       exitOptionSelectMode();
@@ -466,15 +464,15 @@ export default function ModifiersPage() {
       const batch = writeBatch(db);
 
       for (const gId of selectedGroupIds) {
-        batch.delete(doc(db, "ModifierGroups", gId));
+        batch.delete(merchantDoc(merchantId, "ModifierGroups", gId));
 
         const linkSnap = await getDocs(
-          query(collection(db, "ItemModifierGroups"), where("groupId", "==", gId))
+          query(merchantCol(merchantId, "ItemModifierGroups"), where("groupId", "==", gId))
         );
         linkSnap.forEach((d) => batch.delete(d.ref));
 
         const optSnap = await getDocs(
-          query(collection(db, "ModifierOptions"), where("groupId", "==", gId))
+          query(merchantCol(merchantId, "ModifierOptions"), where("groupId", "==", gId))
         );
         optSnap.forEach((d) => batch.delete(d.ref));
       }
@@ -527,9 +525,8 @@ export default function ModifiersPage() {
           newOptions = [];
         }
 
-        const newGroupRef = doc(collection(db, "ModifierGroups"));
+        const newGroupRef = doc(merchantCol(merchantId, "ModifierGroups"));
         batch.set(newGroupRef, {
-          merchantId,
           name: newGroupName,
           required: true,
           minSelection: 1,
@@ -539,7 +536,7 @@ export default function ModifiersPage() {
         });
 
         const remaining = group.options.filter((o) => o.id !== option.id);
-        batch.update(doc(db, "ModifierGroups", group.id), { options: remaining });
+        batch.update(merchantDoc(merchantId, "ModifierGroups", group.id), { options: remaining });
       }
 
       await batch.commit();

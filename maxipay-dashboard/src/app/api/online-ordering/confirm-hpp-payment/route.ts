@@ -1,6 +1,7 @@
 import admin from "firebase-admin";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp } from "@/lib/firebaseAdmin";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestoreAdmin";
 import { loadIposHppCredentials } from "@/lib/onlineOrderingServer";
 
 export const runtime = "nodejs";
@@ -21,12 +22,13 @@ function queryBaseUrl(hppBaseUrl: string): string {
  */
 async function createEcommerceTransaction(
   db: admin.firestore.Firestore,
+  merchantId: string,
   orderId: string,
   order: admin.firestore.DocumentData,
   hpResp: Record<string, unknown>,
 ): Promise<string> {
   const totalInCents = (order.totalInCents as number) || 0;
-  const txRef = db.collection("Transactions").doc();
+  const txRef = merchantCol(merchantId, "Transactions").doc();
 
   const payments = [
     {
@@ -58,6 +60,12 @@ async function createEcommerceTransaction(
 
 export async function POST(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const merchantId = searchParams.get("merchantId")?.trim();
+    if (!merchantId) {
+      return NextResponse.json({ error: "merchantId is required." }, { status: 400 });
+    }
+
     getFirebaseAdminApp();
     const db = admin.firestore();
 
@@ -71,10 +79,10 @@ export async function POST(request: Request) {
     }
     const iposRedirect = body.iposRedirect ?? null;
 
-    const creds = await loadIposHppCredentials(db);
+    const creds = await loadIposHppCredentials(db, merchantId);
     const { tpn, queryApiKey: apiKey } = creds;
 
-    const orderDoc = await db.collection("Orders").doc(orderId).get();
+    const orderDoc = await merchantDoc(merchantId, "Orders", orderId).get();
     if (!orderDoc.exists) {
       return NextResponse.json({ error: "Order not found." }, { status: 404 });
     }
@@ -111,7 +119,7 @@ export async function POST(request: Request) {
     }
 
     // Webhook may have closed the order while we queried.
-    const orderAfterQuery = await db.collection("Orders").doc(orderId).get();
+    const orderAfterQuery = await merchantDoc(merchantId, "Orders", orderId).get();
     const fresh = orderAfterQuery.data() || order;
     if (fresh.status === "CLOSED" || fresh.status === "PAID") {
       return NextResponse.json({ status: "PAID", message: "Already confirmed." });
@@ -137,9 +145,9 @@ export async function POST(request: Request) {
     }
 
     if (apiSuccess && fresh.status !== "CLOSED" && fresh.status !== "PAID") {
-      const saleTransactionId = await createEcommerceTransaction(db, orderId, fresh, hpResp);
+      const saleTransactionId = await createEcommerceTransaction(db, merchantId, orderId, fresh, hpResp);
 
-      await db.collection("Orders").doc(orderId).update({
+      await merchantDoc(merchantId, "Orders", orderId).update({
         hppStatus: "PAID",
         hppResponseCode: Number(hpResp.responseCode) || 200,
         hppResponseMessage: hpResp.responseMessage || "",

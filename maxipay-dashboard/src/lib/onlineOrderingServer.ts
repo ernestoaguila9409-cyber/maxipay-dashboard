@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import { Timestamp, type DocumentData } from "firebase-admin/firestore";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestoreAdmin";
 import {
   BUSINESS_INFO_DOC,
   ONLINE_ORDERING_SETTINGS_DOC,
@@ -200,6 +201,7 @@ function chunkIds<T>(arr: T[], size: number): T[][] {
  */
 async function loadModifierGroupsTransitive(
   db: Firestore,
+  merchantId: string,
   seedIds: Iterable<string>
 ): Promise<OnlineModifierGroup[]> {
   const pending = new Set<string>();
@@ -218,7 +220,7 @@ async function loadModifierGroupsTransitive(
     for (const part of chunkIds(toRequest, MODIFIER_GROUP_GETALL_CHUNK)) {
       if (part.length === 0) continue;
       const snaps = await db.getAll(
-        ...part.map((id) => db.collection("ModifierGroups").doc(id))
+        ...part.map((id) => merchantDoc(merchantId, "ModifierGroups", id))
       );
       for (const s of snaps) {
         if (!s.exists) continue;
@@ -248,11 +250,8 @@ export interface IposHppCredentials {
  * Loads TPN + auth for HPP POST and queryPaymentStatus.
  * Firestore fields `iposHppTpn` / `iposHppAuthToken` on `Settings/onlineOrdering` override env when set.
  */
-export async function loadIposHppCredentials(db: Firestore): Promise<IposHppCredentials> {
-  const ooSnap = await db
-    .collection(SETTINGS_COLLECTION)
-    .doc(ONLINE_ORDERING_SETTINGS_DOC)
-    .get();
+export async function loadIposHppCredentials(db: Firestore, merchantId: string): Promise<IposHppCredentials> {
+  const ooSnap = await merchantDoc(merchantId, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC).get();
   const oo = parseOnlineOrderingSettings(
     ooSnap.data() as Record<string, unknown> | undefined
   );
@@ -271,11 +270,12 @@ export async function loadIposHppCredentials(db: Firestore): Promise<IposHppCred
 }
 
 export async function loadPublicOnlineOrderingConfig(
-  db: Firestore
+  db: Firestore,
+  merchantId: string,
 ): Promise<PublicOnlineOrderingConfig> {
   const [bizSnap, ooSnap] = await Promise.all([
-    db.collection(SETTINGS_COLLECTION).doc(BUSINESS_INFO_DOC).get(),
-    db.collection(SETTINGS_COLLECTION).doc(ONLINE_ORDERING_SETTINGS_DOC).get(),
+    merchantDoc(merchantId, SETTINGS_COLLECTION, BUSINESS_INFO_DOC).get(),
+    merchantDoc(merchantId, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC).get(),
   ]);
   const bizName =
     (bizSnap.exists ? bizSnap.get("businessName") : null)?.toString().trim() ||
@@ -300,8 +300,8 @@ export async function loadPublicOnlineOrderingConfig(
 }
 
 /** Lists hero slides ordered by `order ASC`, capped to [HERO_SLIDES_MAX]. */
-export async function loadHeroSlides(db: Firestore): Promise<HeroSlide[]> {
-  const snap = await db.collection(HERO_SLIDES_COLLECTION).get();
+export async function loadHeroSlides(db: Firestore, merchantId: string): Promise<HeroSlide[]> {
+  const snap = await merchantCol(merchantId, HERO_SLIDES_COLLECTION).get();
   const slides = snap.docs.map((d) => parseHeroSlide(d.id, d.data() as Record<string, unknown>));
   slides.sort((a, b) => a.order - b.order);
   return slides.slice(0, HERO_SLIDES_MAX);
@@ -311,15 +311,12 @@ export async function loadHeroSlides(db: Firestore): Promise<HeroSlide[]> {
  * Single round-trip data the customer page needs for its hero, header, featured row
  * and payment options. Hides items the menu loader would also hide.
  */
-export async function loadPublicStorefront(db: Firestore): Promise<PublicStorefront> {
+export async function loadPublicStorefront(db: Firestore, merchantId: string): Promise<PublicStorefront> {
   const [cfg, slides] = await Promise.all([
-    loadPublicOnlineOrderingConfig(db),
-    loadHeroSlides(db),
+    loadPublicOnlineOrderingConfig(db, merchantId),
+    loadHeroSlides(db, merchantId),
   ]);
-  const ooSnap = await db
-    .collection(SETTINGS_COLLECTION)
-    .doc(ONLINE_ORDERING_SETTINGS_DOC)
-    .get();
+  const ooSnap = await merchantDoc(merchantId, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC).get();
   const oo = parseOnlineOrderingSettings(
     ooSnap.data() as Record<string, unknown> | undefined
   );
@@ -339,7 +336,8 @@ export async function loadPublicStorefront(db: Firestore): Promise<PublicStorefr
 }
 
 export async function loadOnlineMenu(
-  db: Firestore
+  db: Firestore,
+  merchantId: string,
 ): Promise<{
   categories: OnlineMenuCategory[];
   items: OnlineMenuItem[];
@@ -347,10 +345,10 @@ export async function loadOnlineMenu(
   taxes: OnlineTaxRule[];
 }> {
   const [catSnap, itemSnap, ooSnap, taxSnap] = await Promise.all([
-    db.collection("Categories").get(),
-    db.collection("MenuItems").get(),
-    db.collection(SETTINGS_COLLECTION).doc(ONLINE_ORDERING_SETTINGS_DOC).get(),
-    db.collection("Taxes").get(),
+    merchantCol(merchantId, "Categories").get(),
+    merchantCol(merchantId, "MenuItems").get(),
+    merchantDoc(merchantId, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC).get(),
+    merchantCol(merchantId, "Taxes").get(),
   ]);
   const oo = parseOnlineOrderingSettings(
     ooSnap.data() as Record<string, unknown> | undefined
@@ -403,7 +401,7 @@ export async function loadOnlineMenu(
     });
   }
 
-  const modifierGroups = await loadModifierGroupsTransitive(db, modifierGroupIdSet);
+  const modifierGroups = await loadModifierGroupsTransitive(db, merchantId, modifierGroupIdSet);
 
   const catIdsUsed = new Set<string>();
   for (const it of items) {
@@ -578,6 +576,7 @@ function buildValidatedModifiersForLine(
  */
 export async function createOnlineOrderTransaction(
   db: Firestore,
+  merchantId: string,
   params: {
     lines: CartLineInput[];
     customerName: string;
@@ -591,10 +590,7 @@ export async function createOnlineOrderTransaction(
     throw new OnlineOrderValidationError("Cart is empty.");
   }
 
-  const ooSnap = await db
-    .collection(SETTINGS_COLLECTION)
-    .doc(ONLINE_ORDERING_SETTINGS_DOC)
-    .get();
+  const ooSnap = await merchantDoc(merchantId, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC).get();
   const oo = parseOnlineOrderingSettings(
     ooSnap.data() as Record<string, unknown> | undefined
   );
@@ -606,7 +602,7 @@ export async function createOnlineOrderTransaction(
   }
 
   const itemIds = [...new Set(lines.map((l) => l.itemId))];
-  const refs = itemIds.map((id) => db.collection("MenuItems").doc(id));
+  const refs = itemIds.map((id) => merchantDoc(merchantId, "MenuItems", id));
   const snaps = await db.getAll(...refs);
 
   const byId = new Map<string, DocumentData>();
@@ -623,8 +619,8 @@ export async function createOnlineOrderTransaction(
       if (sel.groupId) modifierGroupIdSet.add(sel.groupId);
     }
   }
-  const groupRefs = [...modifierGroupIdSet].map((id) => db.collection("ModifierGroups").doc(id));
-  const taxSnapPromise = db.collection("Taxes").get();
+  const groupRefs = [...modifierGroupIdSet].map((id) => merchantDoc(merchantId, "ModifierGroups", id));
+  const taxSnapPromise = merchantCol(merchantId, "Taxes").get();
   const groupSnaps = groupRefs.length > 0 ? await db.getAll(...groupRefs) : [];
   const taxSnap = await taxSnapPromise;
   const groupById = new Map<string, OnlineModifierGroup>();
@@ -708,13 +704,13 @@ export async function createOnlineOrderTransaction(
   const customerEmail = params.customerEmail.trim();
 
   const out = await db.runTransaction(async (t) => {
-    const cRef = db.collection("Counters").doc("orderNumber");
+    const cRef = merchantDoc(merchantId, "Counters", "orderNumber");
     const cSnap = await t.get(cRef);
     const cur = (cSnap.data()?.current as number | undefined) ?? 0;
     const orderNumber = cur + 1;
     t.set(cRef, { current: orderNumber }, { merge: true });
 
-    const orderRef = db.collection("Orders").doc();
+    const orderRef = merchantCol(merchantId, "Orders").doc();
     const orderId = orderRef.id;
 
     const orderFields: Record<string, unknown> = {

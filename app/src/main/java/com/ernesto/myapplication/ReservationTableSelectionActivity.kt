@@ -339,7 +339,7 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
         layoutParentMetaListener?.remove()
         layoutParentMetaListener = null
         if (!useTableLayouts || activeLayoutId.isBlank()) return
-        layoutParentMetaListener = db.collection("tableLayouts").document(activeLayoutId)
+        layoutParentMetaListener = MerchantFirestore.doc("tableLayouts", activeLayoutId)
             .addSnapshotListener { snap, _ ->
                 if (snap != null && snap.exists()) {
                     layoutGraceAfterSlotMs =
@@ -356,7 +356,7 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
         reservationsForLayoutListener = null
         reservationsSnapshot = null
         if (!useTableLayouts || activeLayoutId.isBlank()) return
-        reservationsForLayoutListener = db.collection(ReservationFirestoreHelper.COLLECTION)
+        reservationsForLayoutListener = MerchantFirestore.col(ReservationFirestoreHelper.COLLECTION)
             .whereEqualTo("tableLayoutId", activeLayoutId)
             .addSnapshotListener { snap, err ->
                 if (err != null || snap == null) return@addSnapshotListener
@@ -968,7 +968,7 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
     // ── DATA LOADING ───────────────────────────────────────────
 
     private fun loadSectionsAndTables() {
-        db.collection("Sections").get()
+        MerchantFirestore.col("Sections").get()
             .addOnSuccessListener { snap ->
                 knownSections.clear()
                 for (doc in snap.documents) {
@@ -996,7 +996,7 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
     }
 
     private fun loadTablesPreferred() {
-        db.collection("tableLayouts").get()
+        MerchantFirestore.col("tableLayouts").get()
             .addOnSuccessListener { layoutSnap ->
                 if (layoutSnap.isEmpty) {
                     useTableLayouts = false
@@ -1018,7 +1018,7 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
                     ReservationFirestoreHelper.holdStartsBeforeSlotMsFromLayoutSnapshot(layoutDoc)
 
                 layoutTablesListener?.remove()
-                layoutTablesListener = db.collection("tableLayouts").document(activeLayoutId)
+                layoutTablesListener = MerchantFirestore.doc("tableLayouts", activeLayoutId)
                     .collection("tables")
                     .addSnapshotListener { snap, err ->
                         if (err != null || snap == null) return@addSnapshotListener
@@ -1042,7 +1042,7 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
     private fun loadTablesLegacy() {
         detachReservationHoldUi()
         legacyTablesListener?.remove()
-        legacyTablesListener = db.collection("Tables")
+        legacyTablesListener = MerchantFirestore.col("Tables")
             .whereEqualTo("active", true)
             .addSnapshotListener { snap, err ->
                 if (err != null || snap == null) return@addSnapshotListener

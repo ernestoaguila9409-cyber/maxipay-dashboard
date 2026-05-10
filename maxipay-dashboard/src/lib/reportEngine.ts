@@ -7,7 +7,7 @@ import {
   type DocumentData,
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
-import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { orderRevenueCentsForMetrics } from "@/lib/dashboardFinance";
 
 export interface DailySalesSummary {
@@ -135,8 +135,7 @@ async function fetchTransactions(
   end: Date
 ): Promise<TxDoc[]> {
   const q = query(
-    collection(db, "Transactions"),
-    where("merchantId", "==", merchantId),
+    merchantCol(merchantId, "Transactions"),
     where("createdAt", ">=", Timestamp.fromDate(start)),
     where("createdAt", "<", Timestamp.fromDate(end))
   );
@@ -150,8 +149,7 @@ async function fetchOrders(
   end: Date
 ): Promise<OrderDoc[]> {
   const q = query(
-    collection(db, "Orders"),
-    where("merchantId", "==", merchantId),
+    merchantCol(merchantId, "Orders"),
     where("createdAt", ">=", Timestamp.fromDate(start)),
     where("createdAt", "<", Timestamp.fromDate(end))
   );
@@ -160,9 +158,10 @@ async function fetchOrders(
 }
 
 async function fetchOrderItems(
+  merchantId: string,
   orderId: string
 ): Promise<Array<Record<string, unknown>>> {
-  const snap = await getDocs(collection(db, "Orders", orderId, "items"));
+  const snap = await getDocs(collection(merchantDoc(merchantId, "Orders", orderId), "items"));
   return snap.docs.map((d) => d.data() as Record<string, unknown>);
 }
 
@@ -234,7 +233,7 @@ export async function getDailySalesSummary(
       const orderId = doc.id;
       const orderStatus = status;
       itemPromises.push(
-        fetchOrderItems(orderId).then((items) => {
+        fetchOrderItems(merchantId, orderId).then((items) => {
           for (const item of items) {
             const qty = Math.round(Number(item.quantity ?? 1));
             if (orderStatus === "VOIDED") {
@@ -308,8 +307,7 @@ export async function getHourlySales(
   end: Date
 ): Promise<HourlySale[]> {
   const q = query(
-    collection(db, "Orders"),
-    where("merchantId", "==", merchantId),
+    merchantCol(merchantId, "Orders"),
     where("status", "==", "CLOSED"),
     where("createdAt", ">=", Timestamp.fromDate(start)),
     where("createdAt", "<", Timestamp.fromDate(end))

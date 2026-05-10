@@ -89,13 +89,13 @@ class ItemSelectorActivity : AppCompatActivity() {
     }
 
     private fun loadData() {
-        db.collection("Categories").get()
+        MerchantFirestore.col("Categories").get()
             .addOnSuccessListener { catSnap ->
                 catSnap.documents.forEach { doc ->
                     val name = doc.getString("name") ?: return@forEach
                     categories[doc.id] = name
                 }
-                db.collection("subcategories").get()
+                MerchantFirestore.col("subcategories").get()
                     .addOnSuccessListener { subSnap ->
                         subSnap.documents.forEach { doc ->
                             val name = doc.getString("name") ?: return@forEach
@@ -111,7 +111,7 @@ class ItemSelectorActivity : AppCompatActivity() {
     }
 
     private fun loadItems() {
-        db.collection("MenuItems").get()
+        MerchantFirestore.col("MenuItems").get()
             .addOnSuccessListener { snap ->
                 allItems.clear()
                 snap.documents.forEach { doc ->

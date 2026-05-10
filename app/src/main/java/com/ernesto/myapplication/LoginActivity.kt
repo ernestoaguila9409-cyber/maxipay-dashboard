@@ -121,30 +121,36 @@ class LoginActivity : AppCompatActivity() {
      */
     private fun scheduleDeviceGateAndContinue(onReady: () -> Unit) {
         fun readDeviceFromServer() {
-            PosDeviceIdentity.resolveInstallationDocId(this) { docId ->
-                FirebaseFirestore.getInstance()
-                    .collection("PosDevices")
-                    .document(docId)
-                    .get(Source.SERVER)
-                    .addOnSuccessListener { snap ->
-                        if (snap.exists() && snap.getBoolean(PosDeviceDeactivationWatch.FIELD_DEACTIVATED) == true) {
-                            DeviceActivationActivity.launchForceLock(this)
-                            finish()
-                            return@addOnSuccessListener
+            resolveMerchantIdAndContinue {
+                if (!MerchantFirestore.isInitialized) {
+                    Log.w(TAG, "device gate: no merchant resolved, showing PIN anyway")
+                    runOnUiThread { onReady() }
+                    return@resolveMerchantIdAndContinue
+                }
+                PosDeviceIdentity.resolveInstallationDocId(this) { docId ->
+                    MerchantFirestore.col("PosDevices")
+                        .document(docId)
+                        .get(Source.SERVER)
+                        .addOnSuccessListener { snap ->
+                            if (snap.exists() && snap.getBoolean(PosDeviceDeactivationWatch.FIELD_DEACTIVATED) == true) {
+                                DeviceActivationActivity.launchForceLock(this)
+                                finish()
+                                return@addOnSuccessListener
+                            }
+                            val enrolled = snap.exists() &&
+                                snap.getBoolean(PosDeviceActivation.FIELD_ENROLLED_FROM_DASHBOARD) == true
+                            if (!enrolled) {
+                                DeviceActivationActivity.launchEnrollmentRequired(this)
+                                finish()
+                                return@addOnSuccessListener
+                            }
+                            runOnUiThread { onReady() }
                         }
-                        val enrolled = snap.exists() &&
-                            snap.getBoolean(PosDeviceActivation.FIELD_ENROLLED_FROM_DASHBOARD) == true
-                        if (!enrolled) {
-                            DeviceActivationActivity.launchEnrollmentRequired(this)
-                            finish()
-                            return@addOnSuccessListener
+                        .addOnFailureListener { e ->
+                            Log.w(TAG, "device gate: PosDevices server read failed, showing PIN anyway", e)
+                            runOnUiThread { onReady() }
                         }
-                        runOnUiThread { onReady() }
-                    }
-                    .addOnFailureListener { e ->
-                        Log.w(TAG, "device gate: PosDevices server read failed, showing PIN anyway", e)
-                        runOnUiThread { onReady() }
-                    }
+                }
             }
         }
         if (auth.currentUser != null) {
@@ -241,15 +247,17 @@ class LoginActivity : AppCompatActivity() {
                 val role = response["role"] as? String ?: ""
 
                 fun openMainAfterAuth() {
-                    isLoggingIn = false
-                    TerminalPrefs.initFromFirestore()
-                    SessionEmployee.setEmployee(this, name, role)
+                    resolveMerchantIdAndContinue {
+                        isLoggingIn = false
+                        TerminalPrefs.initFromFirestore()
+                        SessionEmployee.setEmployee(this, name, role)
 
-                    val intent = Intent(this, MainActivity::class.java)
-                    intent.putExtra("employeeName", name)
-                    intent.putExtra("employeeRole", role)
-                    startActivity(intent)
-                    finish()
+                        val intent = Intent(this, MainActivity::class.java)
+                        intent.putExtra("employeeName", name)
+                        intent.putExtra("employeeRole", role)
+                        startActivity(intent)
+                        finish()
+                    }
                 }
 
                 if (auth.currentUser != null) {
@@ -264,6 +272,35 @@ class LoginActivity : AppCompatActivity() {
             }
             .addOnFailureListener {
                 onLoginFailed("Login failed")
+            }
+    }
+
+    /**
+     * Query Merchants collection. If exactly one merchant doc exists, initialize
+     * [MerchantFirestore] with its id. For multi-tenant the POS would use a
+     * merchantId from the device activation record or JWT instead.
+     */
+    private fun resolveMerchantIdAndContinue(onReady: () -> Unit) {
+        if (MerchantFirestore.isInitialized) {
+            onReady()
+            return
+        }
+        FirebaseFirestore.getInstance()
+            .collection("Merchants")
+            .limit(2)
+            .get()
+            .addOnSuccessListener { snap ->
+                if (snap.size() == 1) {
+                    MerchantFirestore.init(snap.documents[0].id)
+                    Log.d(TAG, "MerchantFirestore initialized: ${snap.documents[0].id}")
+                } else {
+                    Log.w(TAG, "Expected 1 merchant, found ${snap.size()}")
+                }
+                onReady()
+            }
+            .addOnFailureListener { e ->
+                Log.w(TAG, "Failed to resolve merchantId, continuing anyway", e)
+                onReady()
             }
     }
 

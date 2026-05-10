@@ -21,6 +21,8 @@ import { AutoImageSearchButton } from "@/components/menu-item-image/AutoImageSea
 import { ImageSearchModal } from "@/components/menu-item-image/ImageSearchModal";
 import { useAuth } from "@/context/AuthContext";
 import { db, storage } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import { resizeImageToBlob } from "@/lib/imageUpload";
 import {
   DEFAULT_HERO_CTA,
@@ -40,6 +42,7 @@ function newSlideId(): string {
  */
 export default function StorefrontPictureManager({ businessName }: { businessName: string }) {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [slides, setSlides] = useState<HeroSlide[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,8 +58,9 @@ export default function StorefrontPictureManager({ businessName }: { businessNam
   }, [user]);
 
   useEffect(() => {
+    if (!merchantId) return;
     const unsub = onSnapshot(
-      collection(db, HERO_SLIDES_COLLECTION),
+      merchantCol(merchantId, HERO_SLIDES_COLLECTION),
       (snap) => {
         const list = snap.docs.map((d) =>
           parseHeroSlide(d.id, d.data() as Record<string, unknown>)
@@ -72,7 +76,7 @@ export default function StorefrontPictureManager({ businessName }: { businessNam
       }
     );
     return () => unsub();
-  }, []);
+  }, [merchantId]);
 
   const primary = useMemo(() => (slides.length === 0 ? null : slides[0]), [slides]);
   const extraCount = slides.length > 1 ? slides.length - 1 : 0;
@@ -90,7 +94,7 @@ export default function StorefrontPictureManager({ businessName }: { businessNam
     async (targetId: string, imageUrl: string, storagePath: string) => {
       const batch = writeBatch(db);
       batch.set(
-        doc(db, HERO_SLIDES_COLLECTION, targetId),
+        merchantDoc(merchantId, HERO_SLIDES_COLLECTION, targetId),
         {
           imageUrl,
           storagePath,
@@ -108,7 +112,7 @@ export default function StorefrontPictureManager({ businessName }: { businessNam
 
       for (const s of slides) {
         if (s.id !== targetId) {
-          batch.delete(doc(db, HERO_SLIDES_COLLECTION, s.id));
+          batch.delete(merchantDoc(merchantId, HERO_SLIDES_COLLECTION, s.id));
         }
       }
       await batch.commit();
@@ -129,10 +133,10 @@ export default function StorefrontPictureManager({ businessName }: { businessNam
     setError(null);
     try {
       await deleteSlideStorage(primary);
-      await deleteDoc(doc(db, HERO_SLIDES_COLLECTION, primary.id));
+      await deleteDoc(merchantDoc(merchantId, HERO_SLIDES_COLLECTION, primary.id));
       for (const s of slides.slice(1)) {
         await deleteSlideStorage(s);
-        await deleteDoc(doc(db, HERO_SLIDES_COLLECTION, s.id));
+        await deleteDoc(merchantDoc(merchantId, HERO_SLIDES_COLLECTION, s.id));
       }
     } catch (e) {
       console.error("[storefront-picture] remove", e);
@@ -198,10 +202,10 @@ export default function StorefrontPictureManager({ businessName }: { businessNam
       const keep = slides[0];
       const batch = writeBatch(db);
       for (const s of slides.slice(1)) {
-        batch.delete(doc(db, HERO_SLIDES_COLLECTION, s.id));
+        batch.delete(merchantDoc(merchantId, HERO_SLIDES_COLLECTION, s.id));
       }
       batch.set(
-        doc(db, HERO_SLIDES_COLLECTION, keep.id),
+        merchantDoc(merchantId, HERO_SLIDES_COLLECTION, keep.id),
         { order: 0, updatedAt: serverTimestamp() },
         { merge: true }
       );

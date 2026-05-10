@@ -137,7 +137,7 @@ class TipConfigActivity : AppCompatActivity() {
             "tipPresentation" to TipConfig.getTipPresentation(this),
             "presets" to presets
         )
-        FirebaseFirestore.getInstance().collection("Settings").document("tipConfig")
+        MerchantFirestore.doc("Settings", "tipConfig")
             .set(data, SetOptions.merge())
     }
 

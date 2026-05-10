@@ -5,6 +5,7 @@ const { onCall } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions");
 const { Vonage } = require("@vonage/server-sdk");
 const logger = require("firebase-functions/logger");
+const { merchantCol, merchantDoc, merchantIdFromAuth } = require("./merchant-firestore");
 
 /**
  * Receipt emails use the Resend HTTP API. Set on the deployed function:
@@ -101,8 +102,8 @@ const ORDER_TYPE_COLORS = {
 // Business info from Firestore
 // ---------------------------------------------------------------------------
 
-async function fetchBusinessInfo(db) {
-  const snap = await db.collection("Settings").doc("businessInfo").get();
+async function fetchBusinessInfo(db, merchantId) {
+  const snap = await merchantCol(merchantId, "Settings").doc("businessInfo").get();
   if (!snap.exists) return {};
   return snap.data();
 }
@@ -159,13 +160,13 @@ function parseTimestamp(raw) {
  * (same firstName+lastName vs name rules as POS). Used so email receipts show the customer for
  * Bar Tab and other flows that only stored customerId.
  */
-async function resolveCustomerDisplayNameForReceipt(db, order) {
+async function resolveCustomerDisplayNameForReceipt(db, merchantId, order) {
   const existing = order?.customerName != null ? String(order.customerName).trim() : "";
   if (existing) return existing;
   const cid = order?.customerId != null ? String(order.customerId).trim() : "";
   if (!cid) return "";
   try {
-    const snap = await db.collection("Customers").doc(cid).get();
+    const snap = await merchantDoc(merchantId, "Customers", cid).get();
     if (!snap.exists) return "";
     const d = snap.data() || {};
     const first = String(d.firstName ?? "").trim();
@@ -671,9 +672,8 @@ function parseTax(taxBreakdown) {
   return taxInCents;
 }
 
-async function fetchSalePayments(db, orderId) {
-  const snap = await db
-    .collection("Transactions")
+async function fetchSalePayments(db, merchantId, orderId) {
+  const snap = await merchantCol(merchantId, "Transactions")
     .where("orderId", "==", orderId)
     .where("type", "==", "SALE")
     .limit(1)
@@ -686,22 +686,20 @@ async function fetchSalePayments(db, orderId) {
 }
 
 /** Full sale/capture transaction doc for status, payments, void flag (matches thermal receipt). */
-async function fetchSaleTransactionForOrder(db, orderId, orderData) {
+async function fetchSaleTransactionForOrder(db, merchantId, orderId, orderData) {
   const o = orderData || {};
   const sid = o.saleTransactionId;
   if (sid) {
-    const doc = await db.collection("Transactions").doc(String(sid)).get();
+    const doc = await merchantDoc(merchantId, "Transactions", String(sid)).get();
     if (doc.exists) return doc;
   }
-  let snap = await db
-    .collection("Transactions")
+  let snap = await merchantCol(merchantId, "Transactions")
     .where("orderId", "==", orderId)
     .where("type", "==", "SALE")
     .limit(1)
     .get();
   if (!snap.empty) return snap.docs[0];
-  snap = await db
-    .collection("Transactions")
+  snap = await merchantCol(merchantId, "Transactions")
     .where("orderId", "==", orderId)
     .where("type", "==", "CAPTURE")
     .limit(1)
@@ -729,8 +727,8 @@ function mergeOrderTotalsWithSaleTx(order, saleTxSnap) {
 }
 
 /** Synced from app (Settings/tipConfig); mirrors Android TipConfig defaults when missing. */
-async function fetchTipConfig(db) {
-  const snap = await db.collection("Settings").doc("tipConfig").get();
+async function fetchTipConfig(db, merchantId) {
+  const snap = await merchantCol(merchantId, "Settings").doc("tipConfig").get();
   if (!snap.exists) {
     return {
       tipsEnabled: true,
@@ -802,8 +800,8 @@ function parseAmountToCents(rawAmount, rawAmountInCents) {
   return Number.isFinite(n) ? Math.round(n * 100) : 0;
 }
 
-async function fetchOrderReversedTransactions(db, orderId) {
-  const snap = await db.collection("Orders").doc(orderId).collection("transactions").get();
+async function fetchOrderReversedTransactions(db, merchantId, orderId) {
+  const snap = await merchantDoc(merchantId, "Orders", orderId).collection("transactions").get();
   if (snap.empty) return [];
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
 }
@@ -863,9 +861,9 @@ function receiptTitleHtml(title) {
 }
 
 /** Same HTML document as standard (non-split) email receipt — used by sendReceiptEmail and getReceiptEmailPreview. */
-async function composeStandardReceiptWrappedHtml(db, orderId) {
-  const biz = await fetchBusinessInfo(db);
-  const orderRef = db.collection("Orders").doc(orderId);
+async function composeStandardReceiptWrappedHtml(db, merchantId, orderId) {
+  const biz = await fetchBusinessInfo(db, merchantId);
+  const orderRef = merchantDoc(merchantId, "Orders", orderId);
   const orderDoc = await orderRef.get();
   if (!orderDoc.exists) {
     const e = new Error("Order not found.");
@@ -873,7 +871,7 @@ async function composeStandardReceiptWrappedHtml(db, orderId) {
     throw e;
   }
   const order = orderDoc.data();
-  const resolvedCustomerName = await resolveCustomerDisplayNameForReceipt(db, order);
+  const resolvedCustomerName = await resolveCustomerDisplayNameForReceipt(db, merchantId, order);
   const orderWithCustomer = {
     ...order,
     customerName: resolvedCustomerName || (order.customerName != null ? String(order.customerName).trim() : "") || "",
@@ -886,15 +884,15 @@ async function composeStandardReceiptWrappedHtml(db, orderId) {
   const itemsSnap = await orderRef.collection("items").get();
   const { items, subtotalInCents } = parseItems(itemsSnap);
   const taxInCents = parseTax(taxBreakdown);
-  const tipConfig = await fetchTipConfig(db);
-  const saleTxSnap = await fetchSaleTransactionForOrder(db, orderId, order);
+  const tipConfig = await fetchTipConfig(db, merchantId);
+  const saleTxSnap = await fetchSaleTransactionForOrder(db, merchantId, orderId, order);
   const merged = mergeOrderTotalsWithSaleTx(order, saleTxSnap);
   const totalInCents = merged.totalInCents;
   const tipAmountInCents = merged.tipAmountInCents;
   const txData = saleTxSnap ? saleTxSnap.data() : null;
   const payments = txData && txData.payments && txData.payments.length > 0
     ? txData.payments
-    : await fetchSalePayments(db, orderId);
+    : await fetchSalePayments(db, merchantId, orderId);
 
   const subtotal = subtotalInCents / 100;
   const tax = taxInCents / 100;
@@ -925,16 +923,16 @@ async function composeStandardReceiptWrappedHtml(db, orderId) {
 }
 
 /** Same HTML as void email receipt. */
-async function composeVoidReceiptWrappedHtml(db, orderId) {
-  const biz = await fetchBusinessInfo(db);
-  const orderDoc = await db.collection("Orders").doc(orderId).get();
+async function composeVoidReceiptWrappedHtml(db, merchantId, orderId) {
+  const biz = await fetchBusinessInfo(db, merchantId);
+  const orderDoc = await merchantDoc(merchantId, "Orders", orderId).get();
   if (!orderDoc.exists) {
     const e = new Error("Order not found.");
     e.code = "NOT_FOUND";
     throw e;
   }
   const order = orderDoc.data();
-  const resolvedCustomerName = await resolveCustomerDisplayNameForReceipt(db, order);
+  const resolvedCustomerName = await resolveCustomerDisplayNameForReceipt(db, merchantId, order);
   const orderWithCustomer = {
     ...order,
     customerName: resolvedCustomerName || (order.customerName != null ? String(order.customerName).trim() : "") || "",
@@ -943,7 +941,7 @@ async function composeVoidReceiptWrappedHtml(db, orderId) {
   const discountInCents = order.discountInCents ?? 0;
   const appliedDiscounts = order.appliedDiscounts ?? [];
 
-  const saleTxSnapV = await fetchSaleTransactionForOrder(db, orderId, order);
+  const saleTxSnapV = await fetchSaleTransactionForOrder(db, merchantId, orderId, order);
   const mergedV = mergeOrderTotalsWithSaleTx(order, saleTxSnapV);
   const totalInCents = mergedV.totalInCents;
   const tipAmountInCents = mergedV.tipAmountInCents;
@@ -953,16 +951,16 @@ async function composeVoidReceiptWrappedHtml(db, orderId) {
   const voidedAt = parseTimestamp(order.voidedAt);
   const voidedAtStr = voidedAt ? voidedAt.toLocaleString("en-US", { timeZone: BUSINESS_TIMEZONE }) : "";
 
-  const itemsSnap = await db.collection("Orders").doc(orderId).collection("items").get();
+  const itemsSnap = await merchantDoc(merchantId, "Orders", orderId).collection("items").get();
   const { items, subtotalInCents } = parseItems(itemsSnap);
   const taxInCents = parseTax(taxBreakdown);
-  const tipConfig = await fetchTipConfig(db);
-  const reversedTxns = await fetchOrderReversedTransactions(db, orderId);
+  const tipConfig = await fetchTipConfig(db, merchantId);
+  const reversedTxns = await fetchOrderReversedTransactions(db, merchantId, orderId);
   const saleTxSnap = saleTxSnapV;
   const txData = saleTxSnap ? saleTxSnap.data() : null;
   const fallbackPayments = txData && txData.payments && txData.payments.length > 0
     ? txData.payments
-    : await fetchSalePayments(db, orderId);
+    : await fetchSalePayments(db, merchantId, orderId);
 
   const subtotal = subtotalInCents / 100;
   const tax = taxInCents / 100;
@@ -1006,9 +1004,9 @@ async function composeVoidReceiptWrappedHtml(db, orderId) {
  * Same HTML as refund email receipt.
  * @param {string} [transactionId] Original sale transaction id (REFUND docs use originalReferenceId).
  */
-async function composeRefundReceiptWrappedHtml(db, orderId, transactionId) {
-  const biz = await fetchBusinessInfo(db);
-  const orderDoc = await db.collection("Orders").doc(orderId).get();
+async function composeRefundReceiptWrappedHtml(db, merchantId, orderId, transactionId) {
+  const biz = await fetchBusinessInfo(db, merchantId);
+  const orderDoc = await merchantDoc(merchantId, "Orders", orderId).get();
   if (!orderDoc.exists) {
     const e = new Error("Order not found.");
     e.code = "NOT_FOUND";
@@ -1020,7 +1018,7 @@ async function composeRefundReceiptWrappedHtml(db, orderId, transactionId) {
   const totalRefundedInCents = order.totalRefundedInCents ?? 0;
   const taxBreakdown = order.taxBreakdown ?? [];
 
-  const itemsSnap = await db.collection("Orders").doc(orderId).collection("items").get();
+  const itemsSnap = await merchantDoc(merchantId, "Orders", orderId).collection("items").get();
   const { items, subtotalInCents } = parseItems(itemsSnap);
 
   let refundAmountCents = 0;
@@ -1028,8 +1026,7 @@ async function composeRefundReceiptWrappedHtml(db, orderId, transactionId) {
   let allRefundDocs = [];
 
   if (transactionId) {
-    const refundSnap = await db
-      .collection("Transactions")
+    const refundSnap = await merchantCol(merchantId, "Transactions")
       .where("type", "==", "REFUND")
       .where("originalReferenceId", "==", transactionId)
       .get();
@@ -1088,7 +1085,7 @@ async function composeRefundReceiptWrappedHtml(db, orderId, transactionId) {
   let refundSubtotalCents = 0;
   refundedItems.forEach((ri) => { refundSubtotalCents += ri.baseCents; });
 
-  const saleTxSnapRf = await fetchSaleTransactionForOrder(db, orderId, order);
+  const saleTxSnapRf = await fetchSaleTransactionForOrder(db, merchantId, orderId, order);
   let salePaymentsRf = saleTxSnapRf ? (saleTxSnapRf.data().payments || []) : [];
   if (salePaymentsRf.length === 0 && allRefundDocs.length > 0) {
     const latestRefund = [...allRefundDocs].sort((a, b) => {
@@ -1227,9 +1224,10 @@ exports.sendReceiptEmail = onCall(async (request) => {
     };
   }
 
+  const merchantId = merchantIdFromAuth(request);
   const db = admin.firestore();
-  const biz = await fetchBusinessInfo(db);
-  const orderRef = db.collection("Orders").doc(orderId);
+  const biz = await fetchBusinessInfo(db, merchantId);
+  const orderRef = merchantDoc(merchantId, "Orders", orderId);
   const orderDoc = await orderRef.get();
 
   if (!orderDoc.exists) {
@@ -1237,7 +1235,7 @@ exports.sendReceiptEmail = onCall(async (request) => {
   }
 
   const order = orderDoc.data();
-  const resolvedCustomerName = await resolveCustomerDisplayNameForReceipt(db, order);
+  const resolvedCustomerName = await resolveCustomerDisplayNameForReceipt(db, merchantId, order);
   const orderWithCustomer = {
     ...order,
     customerName: resolvedCustomerName || (order.customerName != null ? String(order.customerName).trim() : "") || "",
@@ -1245,7 +1243,7 @@ exports.sendReceiptEmail = onCall(async (request) => {
 
   /** Per-guest split receipt: HTML email (no client share sheet). */
   if (validateSplitReceiptPayload(splitReceipt)) {
-    const tipConfig = await fetchTipConfig(db);
+    const tipConfig = await fetchTipConfig(db, merchantId);
     const body =
       brandedHeader(biz) +
       receiptTitleHtml("RECEIPT (SPLIT)") +
@@ -1272,7 +1270,7 @@ exports.sendReceiptEmail = onCall(async (request) => {
 
   let html;
   try {
-    html = await composeStandardReceiptWrappedHtml(db, orderId);
+    html = await composeStandardReceiptWrappedHtml(db, merchantId, orderId);
   } catch (e) {
     if (e.code === "NOT_FOUND") {
       return { success: false, error: "Order not found." };
@@ -1316,8 +1314,9 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
     };
   }
 
+  const merchantId = merchantIdFromAuth(request);
   const db = admin.firestore();
-  const orderDoc = await db.collection("Orders").doc(orderId).get();
+  const orderDoc = await merchantDoc(merchantId, "Orders", orderId).get();
   if (!orderDoc.exists) {
     return { success: false, error: "Order not found." };
   }
@@ -1325,7 +1324,7 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
 
   let html;
   try {
-    html = await composeVoidReceiptWrappedHtml(db, orderId);
+    html = await composeVoidReceiptWrappedHtml(db, merchantId, orderId);
   } catch (e) {
     if (e.code === "NOT_FOUND") {
       return { success: false, error: "Order not found." };
@@ -1370,8 +1369,9 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
       };
     }
 
+    const merchantId = merchantIdFromAuth(request);
     const db = admin.firestore();
-    const orderDoc = await db.collection("Orders").doc(orderId).get();
+    const orderDoc = await merchantDoc(merchantId, "Orders", orderId).get();
 
     if (!orderDoc.exists) {
       return { success: false, error: "Order not found." };
@@ -1381,7 +1381,7 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
 
     let html;
     try {
-      html = await composeRefundReceiptWrappedHtml(db, orderId, transactionId);
+      html = await composeRefundReceiptWrappedHtml(db, merchantId, orderId, transactionId);
     } catch (e) {
       if (e.code === "NOT_FOUND") {
         return { success: false, error: "Order not found." };
@@ -1424,18 +1424,19 @@ exports.getReceiptEmailPreview = onCall(async (request) => {
     return { success: false, error: "orderId is required." };
   }
   const kind = String(receiptKind || "standard").toLowerCase();
+  const merchantId = merchantIdFromAuth(request);
   const db = admin.firestore();
 
   try {
     if (kind === "void") {
-      const html = await composeVoidReceiptWrappedHtml(db, orderId);
+      const html = await composeVoidReceiptWrappedHtml(db, merchantId, orderId);
       return { success: true, html };
     }
     if (kind === "refund") {
-      const html = await composeRefundReceiptWrappedHtml(db, orderId, saleTransactionId || "");
+      const html = await composeRefundReceiptWrappedHtml(db, merchantId, orderId, saleTransactionId || "");
       return { success: true, html };
     }
-    const html = await composeStandardReceiptWrappedHtml(db, orderId);
+    const html = await composeStandardReceiptWrappedHtml(db, merchantId, orderId);
     return { success: true, html };
   } catch (e) {
     if (e.code === "NOT_FOUND") {
@@ -1450,6 +1451,12 @@ exports.getReceiptEmailPreview = onCall(async (request) => {
 // 4. PIN Verification (returns a custom auth token)
 // ---------------------------------------------------------------------------
 
+// TODO: Multi-tenant — verifyPin is called from the POS before the user is
+// authenticated, so request.auth.token.merchantId is not available. Options:
+//   1. Use a collectionGroup query on "employees" (requires composite index).
+//   2. Pass merchantId from the POS device config in request.data.
+//   3. Query Merchants to find which one has an employee with this PIN.
+// For now, the flat root-level Employees collection is kept as a fallback.
 exports.verifyPin = onCall(async (request) => {
   const { pin } = request.data || {};
 
@@ -1521,13 +1528,14 @@ exports.sendReceiptSms = onCall(async (request) => {
     return { success: false, error: "Invalid phone number. Must be E.164 format (+1XXXXXXXXXX)." };
   }
 
+  const merchantId = merchantIdFromAuth(request);
   const db = admin.firestore();
 
   try {
     // Step 1: Firestore read
     logger.info("sendReceiptSms step 1: fetching order from Firestore", { orderId });
-    const biz = await fetchBusinessInfo(db);
-    const orderDoc = await db.collection("Orders").doc(orderId).get();
+    const biz = await fetchBusinessInfo(db, merchantId);
+    const orderDoc = await merchantDoc(merchantId, "Orders", orderId).get();
 
     if (!orderDoc.exists) {
       logger.warn("sendReceiptSms order not found in Firestore", { orderId });
@@ -1630,7 +1638,7 @@ exports.sendReceiptSms = onCall(async (request) => {
 
     // Step 6: Update order document with SMS status
     logger.info("sendReceiptSms step 6: updating order with SMS status", { orderId });
-    await db.collection("Orders").doc(orderId).update({
+    await merchantDoc(merchantId, "Orders", orderId).update({
       smsStatus: "sent",
       smsPhone: cleaned,
       smsSentAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1783,13 +1791,13 @@ const IPOS_TRANSACT_SANDBOX = "https://payment.ipospays.tech/api/v1/iposTransact
  *   3. Fallback auth token: env IPOS_HPP_AUTH_TOKEN
  *   4. Fallback TPN: Settings/onlineOrdering iposHppTpn → env IPOS_HPP_TPN
  */
-async function resolveIposTransactCredentials(db) {
+async function resolveIposTransactCredentials(db, merchantId) {
   let terminalTpn = "";
   let authToken = "";
   let useSandbox = false;
 
   // 1. Terminal config (TPN + optional iPOS Transact auth token from P-series)
-  const termSnap = await db.collection("payment_terminals").where("active", "==", true).limit(1).get();
+  const termSnap = await merchantCol(merchantId, "payment_terminals").where("active", "==", true).limit(1).get();
   if (!termSnap.empty) {
     const cfg = termSnap.docs[0].data().config || {};
     terminalTpn = String(cfg.tpn || "").trim();
@@ -1799,7 +1807,7 @@ async function resolveIposTransactCredentials(db) {
   // 2. Fallback auth token: Settings/onlineOrdering → env
   if (!authToken) {
     try {
-      const snap = await db.collection("Settings").doc("onlineOrdering").get();
+      const snap = await merchantCol(merchantId, "Settings").doc("onlineOrdering").get();
       const d = snap.exists ? snap.data() : {};
       authToken = String(d.iposTransactAuthToken || d.iposHppAuthToken || "").trim();
       if (d.iposTransactSandbox === true || d.iposHppSandbox === true) useSandbox = true;
@@ -1812,7 +1820,7 @@ async function resolveIposTransactCredentials(db) {
   // 3. Fallback TPN: Settings/onlineOrdering → env
   if (!terminalTpn) {
     try {
-      const snap = await db.collection("Settings").doc("onlineOrdering").get();
+      const snap = await merchantCol(merchantId, "Settings").doc("onlineOrdering").get();
       const d = snap.exists ? snap.data() : {};
       terminalTpn = String(d.iposHppTpn || "").trim();
     } catch (_) { /* */ }
@@ -1846,10 +1854,11 @@ exports.processServerRefund = onCall(async (request) => {
     return { success: false, error: "amountInCents must be a positive integer." };
   }
 
+  const merchantId = merchantIdFromAuth(request);
   const db = admin.firestore();
 
   // --- 1. Load + validate the sale transaction ---
-  const txDoc = await db.collection("Transactions").doc(transactionId).get();
+  const txDoc = await merchantDoc(merchantId, "Transactions", transactionId).get();
   if (!txDoc.exists) {
     return { success: false, error: "Transaction not found." };
   }
@@ -1887,7 +1896,7 @@ exports.processServerRefund = onCall(async (request) => {
   const rrn = String(cardLeg.pnReferenceId || cardLeg.PNReferenceId || "").trim();
 
   // --- 2. Validate against the order ---
-  const orderDoc = await db.collection("Orders").doc(orderId).get();
+  const orderDoc = await merchantDoc(merchantId, "Orders", orderId).get();
   if (!orderDoc.exists) {
     return { success: false, error: "Order not found." };
   }
@@ -1905,7 +1914,7 @@ exports.processServerRefund = onCall(async (request) => {
   }
 
   // --- 3. Resolve iPOS Transact credentials ---
-  const creds = await resolveIposTransactCredentials(db);
+  const creds = await resolveIposTransactCredentials(db, merchantId);
   if (!creds.tpn || !creds.authToken) {
     return {
       success: false,
@@ -2017,15 +2026,14 @@ exports.processServerRefund = onCall(async (request) => {
       : `Dashboard: ${request.auth.token?.email || request.auth.uid}`;
   const refundAmountCents = cappedAmount;
 
-  let batchSnap = await db
-    .collection("Batches")
+  let batchSnap = await merchantCol(merchantId, "Batches")
     .where("closed", "==", false)
     .limit(1)
     .get();
   let openBatchId = batchSnap.empty ? "" : batchSnap.docs[0].id;
   if (!openBatchId) {
     const newBatchId = `BATCH_${Date.now()}`;
-    await db.collection("Batches").doc(newBatchId).set({
+    await merchantDoc(merchantId, "Batches", newBatchId).set({
       batchId: newBatchId,
       total: 0,
       count: 0,
@@ -2068,13 +2076,13 @@ exports.processServerRefund = onCall(async (request) => {
   try {
     await db.runTransaction(async (firestoreTxn) => {
       if (openBatchId) {
-        const batchRef = db.collection("Batches").doc(openBatchId);
+        const batchRef = merchantDoc(merchantId, "Batches", openBatchId);
         const batchDoc = await firestoreTxn.get(batchRef);
         const counter = Number(batchDoc.data()?.transactionCounter ?? 0);
         firestoreTxn.update(batchRef, { transactionCounter: counter + 1 });
         refundMap.appTransactionNumber = counter + 1;
       }
-      const refundRef = db.collection("Transactions").doc();
+      const refundRef = merchantCol(merchantId, "Transactions").doc();
       firestoreTxn.set(refundRef, refundMap);
     });
   } catch (err) {
@@ -2088,9 +2096,7 @@ exports.processServerRefund = onCall(async (request) => {
   }
 
   if (openBatchId) {
-    await db
-      .collection("Batches")
-      .doc(openBatchId)
+    await merchantDoc(merchantId, "Batches", openBatchId)
       .update({
         totalRefundsInCents: admin.firestore.FieldValue.increment(refundAmountCents),
         netTotalInCents: admin.firestore.FieldValue.increment(-refundAmountCents),
@@ -2110,9 +2116,7 @@ exports.processServerRefund = onCall(async (request) => {
   if (newTotalRefunded >= orderTotalInCents) {
     orderUpdates.status = "REFUNDED";
   }
-  await db
-    .collection("Orders")
-    .doc(orderId)
+  await merchantDoc(merchantId, "Orders", orderId)
     .update(orderUpdates)
     .catch((e) =>
       logger.warn("[processServerRefund] order update", e.message)
@@ -2150,9 +2154,10 @@ exports.processTipAdjust = onCall(async (request) => {
     return { success: false, error: "tipAmountInCents must be a non-negative integer." };
   }
 
+  const merchantId = merchantIdFromAuth(request);
   const db = admin.firestore();
 
-  const txDoc = await db.collection("Transactions").doc(transactionId).get();
+  const txDoc = await merchantDoc(merchantId, "Transactions", transactionId).get();
   if (!txDoc.exists) {
     return { success: false, error: "Transaction not found." };
   }
@@ -2185,7 +2190,7 @@ exports.processTipAdjust = onCall(async (request) => {
   }
   const rrn = String(creditLeg.pnReferenceId || creditLeg.PNReferenceId || "").trim();
 
-  const orderDoc = await db.collection("Orders").doc(orderId).get();
+  const orderDoc = await merchantDoc(merchantId, "Orders", orderId).get();
   if (!orderDoc.exists) {
     return { success: false, error: "Order not found." };
   }
@@ -2194,7 +2199,7 @@ exports.processTipAdjust = onCall(async (request) => {
   if (!batchId) {
     return { success: false, error: "No batch associated with this transaction." };
   }
-  const batchDoc = await db.collection("Batches").doc(batchId).get();
+  const batchDoc = await merchantDoc(merchantId, "Batches", batchId).get();
   if (!batchDoc.exists) {
     return { success: false, error: "Batch not found." };
   }
@@ -2202,7 +2207,7 @@ exports.processTipAdjust = onCall(async (request) => {
     return { success: false, error: "Batch is already closed. Tips cannot be adjusted after settlement." };
   }
 
-  const creds = await resolveIposTransactCredentials(db);
+  const creds = await resolveIposTransactCredentials(db, merchantId);
   if (!creds.tpn || !creds.authToken) {
     return {
       success: false,
@@ -2300,9 +2305,9 @@ exports.processTipAdjust = onCall(async (request) => {
 
   try {
     await db.runTransaction(async (firestoreTxn) => {
-      const freshTx = await firestoreTxn.get(db.collection("Transactions").doc(transactionId));
-      const freshOrder = await firestoreTxn.get(db.collection("Orders").doc(orderId));
-      const freshBatch = await firestoreTxn.get(db.collection("Batches").doc(batchId));
+      const freshTx = await firestoreTxn.get(merchantDoc(merchantId, "Transactions", transactionId));
+      const freshOrder = await firestoreTxn.get(merchantDoc(merchantId, "Orders", orderId));
+      const freshBatch = await firestoreTxn.get(merchantDoc(merchantId, "Batches", batchId));
 
       if (freshTx.data()?.tipAdjusted === true) {
         throw new Error("Tip was already adjusted (concurrent update).");
@@ -2311,7 +2316,7 @@ exports.processTipAdjust = onCall(async (request) => {
         throw new Error("Batch closed during tip adjustment.");
       }
 
-      firestoreTxn.update(db.collection("Transactions").doc(transactionId), {
+      firestoreTxn.update(merchantDoc(merchantId, "Transactions", transactionId), {
         tipAmountInCents: tipAmountInCents,
         totalPaidInCents: newTotalPaidCents,
         tipAdjusted: true,
@@ -2322,14 +2327,14 @@ exports.processTipAdjust = onCall(async (request) => {
       const orderTotalCents = Number(freshOrder.data()?.totalInCents ?? 0);
       const orderTipCents = Number(freshOrder.data()?.tipAmountInCents ?? 0);
       const newOrderTotalCents = orderTotalCents - orderTipCents + tipAmountInCents;
-      firestoreTxn.update(db.collection("Orders").doc(orderId), {
+      firestoreTxn.update(merchantDoc(merchantId, "Orders", orderId), {
         tipAmountInCents: tipAmountInCents,
         totalInCents: newOrderTotalCents,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
       const currentBatchTips = Number(freshBatch.data()?.totalTipsInCents ?? 0);
-      firestoreTxn.update(db.collection("Batches").doc(batchId), {
+      firestoreTxn.update(merchantDoc(merchantId, "Batches", batchId), {
         totalTipsInCents: currentBatchTips + deltaTipCents,
         netTotalInCents: admin.firestore.FieldValue.increment(deltaTipCents),
       });
@@ -2372,9 +2377,10 @@ exports.processServerVoid = onCall(async (request) => {
     return { success: false, error: "transactionId is required." };
   }
 
+  const merchantId = merchantIdFromAuth(request);
   const db = admin.firestore();
 
-  const txDoc = await db.collection("Transactions").doc(transactionId).get();
+  const txDoc = await merchantDoc(merchantId, "Transactions", transactionId).get();
   if (!txDoc.exists) {
     return { success: false, error: "Transaction not found." };
   }
@@ -2414,7 +2420,7 @@ exports.processServerVoid = onCall(async (request) => {
   const totalPaidCents = Number(tx.totalPaidInCents ?? 0) ||
     Math.round((Number(tx.totalPaid ?? 0) || Number(tx.amount ?? 0)) * 100);
 
-  const creds = await resolveIposTransactCredentials(db);
+  const creds = await resolveIposTransactCredentials(db, merchantId);
   if (!creds.tpn || !creds.authToken) {
     return {
       success: false,
@@ -2511,7 +2517,7 @@ exports.processServerVoid = onCall(async (request) => {
   const updatedPayments = payments.map((p) => ({ ...p, status: "VOIDED" }));
 
   try {
-    const txRef = db.collection("Transactions").doc(transactionId);
+    const txRef = merchantDoc(merchantId, "Transactions", transactionId);
     await txRef.update({
       voided: true,
       voidedBy: voidedByLabel,
@@ -2520,7 +2526,7 @@ exports.processServerVoid = onCall(async (request) => {
     });
 
     if (batchId) {
-      await db.collection("Batches").doc(batchId).update({
+      await merchantDoc(merchantId, "Batches", batchId).update({
         totalSales: admin.firestore.FieldValue.increment(-amountDollars),
         netTotal: admin.firestore.FieldValue.increment(-amountDollars),
         transactionCount: admin.firestore.FieldValue.increment(-1),
@@ -2528,7 +2534,7 @@ exports.processServerVoid = onCall(async (request) => {
     }
 
     if (orderId) {
-      await db.collection("Orders").doc(orderId).update({
+      await merchantDoc(merchantId, "Orders", orderId).update({
         status: "VOIDED",
         voidedAt: admin.firestore.FieldValue.serverTimestamp(),
         voidedBy: voidedByLabel,
@@ -2558,11 +2564,10 @@ exports.processServerVoid = onCall(async (request) => {
  * Only SPIN_P terminals support dashboard-initiated settlement;
  * credentials come from `payment_terminals` (Payments page).
  */
-async function resolveSpinSettleCredentials(db) {
+async function resolveSpinSettleCredentials(db, merchantId) {
   const SPIN_DEFAULT_BASE = "https://spinpos.net/v2";
 
-  const ptSnap = await db
-    .collection("payment_terminals")
+  const ptSnap = await merchantCol(merchantId, "payment_terminals")
     .where("active", "==", true)
     .get();
 
@@ -2627,11 +2632,11 @@ exports.closeOpenBatchFromDashboard = onCall(
         ? String(expectedBatchId).trim()
         : null;
 
+    const merchantId = merchantIdFromAuth(request);
     const db = admin.firestore();
     const closedBy = String(request.auth.token?.email || request.auth.uid);
 
-    let batchSnap = await db
-      .collection("Batches")
+    let batchSnap = await merchantCol(merchantId, "Batches")
       .where("closed", "==", false)
       .limit(1)
       .get();
@@ -2639,9 +2644,7 @@ exports.closeOpenBatchFromDashboard = onCall(
     let batchId;
     if (batchSnap.empty) {
       batchId = `BATCH_${Date.now()}`;
-      await db
-        .collection("Batches")
-        .doc(batchId)
+      await merchantDoc(merchantId, "Batches", batchId)
         .set({
           batchId,
           total: 0,
@@ -2666,8 +2669,7 @@ exports.closeOpenBatchFromDashboard = onCall(
       };
     }
 
-    const txSnap = await db
-      .collection("Transactions")
+    const txSnap = await merchantCol(merchantId, "Transactions")
       .where("settled", "==", false)
       .where("voided", "==", false)
       .get();
@@ -2694,7 +2696,7 @@ exports.closeOpenBatchFromDashboard = onCall(
       };
     }
 
-    const batchRef = db.collection("Batches").doc(batchId);
+    const batchRef = merchantDoc(merchantId, "Batches", batchId);
     const batchFresh = await batchRef.get();
     if (!batchFresh.exists || batchFresh.data()?.closed === true) {
       return {
@@ -2704,7 +2706,7 @@ exports.closeOpenBatchFromDashboard = onCall(
     }
 
     // --- Call SPIn settle (only SPIN_P terminals; device label from payment_terminals) ---
-    const spinCreds = await resolveSpinSettleCredentials(db);
+    const spinCreds = await resolveSpinSettleCredentials(db, merchantId);
     if (!spinCreds.found) {
       return {
         success: false,
@@ -2839,7 +2841,7 @@ exports.closeOpenBatchFromDashboard = onCall(
       closedFromDashboardBy: closedBy,
       closedFromDashboardUid: request.auth.uid,
     });
-    finalWb.set(db.collection("Batches").doc(newBatchId), {
+    finalWb.set(merchantDoc(merchantId, "Batches", newBatchId), {
       batchId: newBatchId,
       total: 0,
       count: 0,

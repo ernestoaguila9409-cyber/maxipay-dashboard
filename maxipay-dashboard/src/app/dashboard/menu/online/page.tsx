@@ -11,6 +11,7 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -104,7 +105,7 @@ export default function OnlineMenuPage() {
     }
     const unsubs = [
       onSnapshot(
-        query(collection(db, "Categories"), where("merchantId", "==", merchantId)),
+        merchantCol(merchantId, "Categories"),
         (snap) => {
           const rows: CategoryRow[] = [];
           snap.forEach((d) => {
@@ -120,7 +121,7 @@ export default function OnlineMenuPage() {
         },
         () => setCategories([])
       ),
-      onSnapshot(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)), (snap) => {
+      onSnapshot(merchantCol(merchantId, "MenuItems"), (snap) => {
         const rows: ItemRow[] = [];
         snap.forEach((d) => rows.push(parseItem(d.id, d.data() as Record<string, unknown>)));
         rows.sort((a, b) => a.name.localeCompare(b.name));
@@ -128,7 +129,7 @@ export default function OnlineMenuPage() {
         setLoading(false);
       }),
       onSnapshot(
-        doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
+        merchantDoc(merchantId, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
         (snap) => {
           const parsed = parseOnlineOrderingSettings(
             snap.data() as Record<string, unknown> | undefined
@@ -240,9 +241,8 @@ export default function OnlineMenuPage() {
     setSaving(true);
     try {
       await setDoc(
-        doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
+        merchantDoc(merchantId, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
         {
-          merchantId,
           onlineMenuCurationEnabled: true,
           onlineMenuCategoryIds: categoryIds,
           onlineMenuItemIds: itemIds,
@@ -269,9 +269,8 @@ export default function OnlineMenuPage() {
     setSaveErr(null);
     try {
       await setDoc(
-        doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
+        merchantDoc(merchantId, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
         {
-          merchantId,
           onlineMenuCurationEnabled: false,
           onlineMenuCategoryIds: [],
           onlineMenuItemIds: [],

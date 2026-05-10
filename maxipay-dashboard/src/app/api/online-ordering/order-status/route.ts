@@ -2,6 +2,7 @@ import admin from "firebase-admin";
 import type { DocumentData, QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp } from "@/lib/firebaseAdmin";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestoreAdmin";
 import { placementCategoryIds } from "@/lib/kdsMenuAssignment";
 
 export const runtime = "nodejs";
@@ -62,11 +63,12 @@ function parseStringArray(val: unknown): string[] {
  */
 async function anyItemRoutedToKds(
   db: admin.firestore.Firestore,
+  merchantId: string,
   orderItemIds: string[],
 ): Promise<boolean> {
   if (orderItemIds.length === 0) return false;
 
-  const kdsSnap = await db.collection("kds_devices").get();
+  const kdsSnap = await merchantCol(merchantId, "kds_devices").get();
   if (kdsSnap.empty) return false;
 
   const activeDevices = kdsSnap.docs.filter((doc: admin.firestore.QueryDocumentSnapshot) => {
@@ -78,7 +80,7 @@ async function anyItemRoutedToKds(
   if (activeDevices.length === 0) return false;
 
   const menuItemIds = Array.from(new Set(orderItemIds));
-  const menuRefs = menuItemIds.map((id) => db.collection("MenuItems").doc(id));
+  const menuRefs = menuItemIds.map((id) => merchantDoc(merchantId, "MenuItems", id));
   const menuSnaps = await db.getAll(...menuRefs);
 
   const itemPlacements = new Map<string, string[]>();
@@ -116,6 +118,10 @@ export async function GET(request: Request) {
   try {
     getFirebaseAdminApp();
     const { searchParams } = new URL(request.url);
+    const merchantId = searchParams.get("merchantId")?.trim();
+    if (!merchantId) {
+      return NextResponse.json({ error: "merchantId is required." }, { status: 400 });
+    }
     const orderId = searchParams.get("orderId")?.trim();
     const orderNumRaw = searchParams.get("orderNumber")?.trim();
     if (!orderId || !orderNumRaw) {
@@ -127,7 +133,7 @@ export async function GET(request: Request) {
     }
 
     const db = admin.firestore();
-    const snap = await db.collection("Orders").doc(orderId).get();
+    const snap = await merchantDoc(merchantId, "Orders", orderId).get();
     if (!snap.exists) {
       return NextResponse.json({ error: "Order not found." }, { status: 404 });
     }
@@ -148,17 +154,17 @@ export async function GET(request: Request) {
           ? "PAY_AT_STORE"
           : "";
 
-    const itemsSnap = await db.collection("Orders").doc(orderId).collection("items").get();
+    const itemsSnap = await merchantDoc(merchantId, "Orders", orderId).collection("items").get();
     const kdsPhase = aggregateKdsPhase(itemsSnap.docs);
 
-    const ooSnap = await db.collection("Settings").doc("onlineOrdering").get();
+    const ooSnap = await merchantDoc(merchantId, "Settings", "onlineOrdering").get();
     const ooData = ooSnap.exists ? (ooSnap.data() ?? {}) : {};
     const requireStaffConfirmOrder = ooData.requireStaffConfirmOrder === true;
 
     const orderItemIds = itemsSnap.docs
       .map((doc: admin.firestore.QueryDocumentSnapshot) => String(doc.data().itemId ?? "").trim())
       .filter((id: string) => id.length > 0);
-    const kdsTrackingEligible = await anyItemRoutedToKds(db, orderItemIds);
+    const kdsTrackingEligible = await anyItemRoutedToKds(db, merchantId, orderItemIds);
 
     return NextResponse.json({
       ok: true,

@@ -2,6 +2,7 @@ package com.ernesto.myapplication.payments
 
 import android.content.Context
 import android.util.Log
+import com.ernesto.myapplication.MerchantFirestore
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -37,7 +38,7 @@ object PaymentTerminalRepository {
 
     fun start() {
         stop()
-        terminalsListener = db.collection(COLLECTION_PAYMENT_TERMINALS)
+        terminalsListener = MerchantFirestore.col(COLLECTION_PAYMENT_TERMINALS)
             .addSnapshotListener { snap, err ->
                 if (err != null) {
                     Log.w(TAG, "payment_terminals listener error: ${err.message}")
@@ -51,7 +52,7 @@ object PaymentTerminalRepository {
                 loaded = true
             }
 
-        legacyListener = db.collection(COLLECTION_LEGACY_TERMINALS)
+        legacyListener = MerchantFirestore.col(COLLECTION_LEGACY_TERMINALS)
             .addSnapshotListener { snap, err ->
                 if (err != null) {
                     Log.w(TAG, "Terminals (legacy) listener error: ${err.message}")

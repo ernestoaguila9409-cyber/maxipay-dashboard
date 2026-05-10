@@ -38,7 +38,7 @@ object KdsMenuItemStationPicker {
         val id = itemId.trim()
         if (id.isEmpty()) return
 
-        db.collection(KdsStationRouting.COLLECTION).get()
+        MerchantFirestore.col(KdsStationRouting.COLLECTION).get()
             .addOnSuccessListener { snap ->
                 val all = snap.documents.mapNotNull { doc ->
                     if (!KdsStationRouting.isDeviceSelectable(doc)) return@mapNotNull null
@@ -122,7 +122,7 @@ object KdsMenuItemStationPicker {
         onSelected: (Set<String>) -> Unit,
         onCancelled: () -> Unit = {},
     ) {
-        db.collection(KdsStationRouting.COLLECTION).get()
+        MerchantFirestore.col(KdsStationRouting.COLLECTION).get()
             .addOnSuccessListener { snap ->
                 val all = snap.documents.mapNotNull { doc ->
                     if (!KdsStationRouting.isDeviceSelectable(doc)) return@mapNotNull null
@@ -216,7 +216,7 @@ object KdsMenuItemStationPicker {
         }
         val batch = db.batch()
         for (deviceId in devices) {
-            val ref = db.collection(KdsStationRouting.COLLECTION).document(deviceId)
+            val ref = MerchantFirestore.doc(KdsStationRouting.COLLECTION, deviceId)
             batch.update(ref, "assignedItemIds", FieldValue.arrayUnion(id))
         }
         batch.commit()
@@ -239,7 +239,7 @@ object KdsMenuItemStationPicker {
             val want = wantIds.contains(dev.id)
             val had = baselineHadIds.contains(dev.id)
             if (want == had) continue
-            val ref = db.collection(KdsStationRouting.COLLECTION).document(dev.id)
+            val ref = MerchantFirestore.doc(KdsStationRouting.COLLECTION, dev.id)
             if (want) {
                 batch.update(ref, "assignedItemIds", FieldValue.arrayUnion(itemId))
             } else {

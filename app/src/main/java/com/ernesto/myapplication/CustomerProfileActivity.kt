@@ -176,7 +176,7 @@ class CustomerProfileActivity : AppCompatActivity() {
     }
 
     private fun loadCustomerInfo() {
-        db.collection("Customers").document(customerId)
+        MerchantFirestore.doc("Customers", customerId)
             .get()
             .addOnSuccessListener { doc ->
                 if (!doc.exists()) return@addOnSuccessListener
@@ -207,7 +207,7 @@ class CustomerProfileActivity : AppCompatActivity() {
     }
 
     private fun loadOrderHistory() {
-        db.collection("Orders")
+        MerchantFirestore.col("Orders")
             .whereEqualTo("customerId", customerId)
             .orderBy("createdAt", Query.Direction.DESCENDING)
             .get()

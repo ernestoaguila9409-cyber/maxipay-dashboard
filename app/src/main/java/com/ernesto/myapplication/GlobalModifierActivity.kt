@@ -71,7 +71,7 @@ class GlobalModifierActivity : AppCompatActivity() {
     }
 
     private fun loadGroups() {
-        db.collection("ModifierGroups")
+        MerchantFirestore.col("ModifierGroups")
             .get()
             .addOnSuccessListener { documents ->
                 val list = mutableListOf<ModifierGroupModel>()
@@ -151,7 +151,7 @@ class GlobalModifierActivity : AppCompatActivity() {
 
         val isRemove = selected.groupType == "REMOVE"
 
-        db.collection("ModifierGroups").document(groupId).get()
+        MerchantFirestore.col("ModifierGroups").document(groupId).get()
             .addOnSuccessListener { groupDoc ->
                 if (selectedGroup?.id != groupId) return@addOnSuccessListener
 
@@ -196,7 +196,7 @@ class GlobalModifierActivity : AppCompatActivity() {
                     return@addOnSuccessListener
                 }
 
-                db.collection("ModifierOptions")
+                MerchantFirestore.col("ModifierOptions")
                     .whereEqualTo("groupId", groupId)
                     .get()
                     .addOnSuccessListener { documents ->
@@ -286,7 +286,7 @@ class GlobalModifierActivity : AppCompatActivity() {
                         "groupType" to groupType
                     )
 
-                    db.collection("ModifierGroups")
+                    MerchantFirestore.col("ModifierGroups")
                         .add(group)
                         .addOnSuccessListener {
                             loadGroups()
@@ -300,7 +300,7 @@ class GlobalModifierActivity : AppCompatActivity() {
 
     private fun showAddOptionDialog() {
         val group = selectedGroup ?: return
-        db.collection("ModifierGroups").get()
+        MerchantFirestore.col("ModifierGroups").get()
             .addOnSuccessListener { snap ->
                 val otherGroups = snap.documents.mapNotNull { doc ->
                     val gName = doc.getString("name") ?: return@mapNotNull null
@@ -385,7 +385,7 @@ class GlobalModifierActivity : AppCompatActivity() {
                     option["triggersModifierGroupIds"] = selectedTriggers
                 }
 
-                db.collection("ModifierGroups")
+                MerchantFirestore.col("ModifierGroups")
                     .document(group.id)
                     .update("options", FieldValue.arrayUnion(option))
                     .addOnSuccessListener {

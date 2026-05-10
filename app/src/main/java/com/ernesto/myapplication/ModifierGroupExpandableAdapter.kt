@@ -154,7 +154,7 @@ class ModifierGroupExpandableAdapter(
                         "groupType" to newGroupType
                     )
 
-                    db.collection("ModifierGroups")
+                    MerchantFirestore.col("ModifierGroups")
                         .document(group.id)
                         .update(updates)
                         .addOnSuccessListener {
@@ -173,7 +173,7 @@ class ModifierGroupExpandableAdapter(
 
     private fun deleteGroup(group: ModifierGroupModel) {
 
-        db.collection("ModifierGroups")
+        MerchantFirestore.col("ModifierGroups")
             .document(group.id)
             .delete()
             .addOnSuccessListener {
@@ -186,7 +186,7 @@ class ModifierGroupExpandableAdapter(
     // LOAD OPTIONS
     // =====================================================
     private fun loadOptions(group: ModifierGroupModel, holder: GroupViewHolder) {
-        db.collection("ModifierGroups").document(group.id).get()
+        MerchantFirestore.col("ModifierGroups").document(group.id).get()
             .addOnSuccessListener { groupDoc ->
                 @Suppress("UNCHECKED_CAST")
                 val embedded = groupDoc.get("options") as? List<Map<String, Any>> ?: emptyList()
@@ -220,7 +220,7 @@ class ModifierGroupExpandableAdapter(
                     return@addOnSuccessListener
                 }
 
-                db.collection("ModifierOptions")
+                MerchantFirestore.col("ModifierOptions")
                     .whereEqualTo("groupId", group.id)
                     .get()
                     .addOnSuccessListener { documents ->
@@ -305,13 +305,13 @@ class ModifierGroupExpandableAdapter(
                         "price" to price,
                         "action" to action,
                     )
-                    db.collection("ModifierGroups")
+                    MerchantFirestore.col("ModifierGroups")
                         .document(group.id)
                         .update("options", FieldValue.arrayUnion(option))
                         .addOnSuccessListener { notifyDataSetChanged() }
                         .addOnFailureListener {
                             option["groupId"] = group.id
-                            db.collection("ModifierOptions")
+                            MerchantFirestore.col("ModifierOptions")
                                 .add(option)
                                 .addOnSuccessListener { notifyDataSetChanged() }
                         }
@@ -362,7 +362,7 @@ class ModifierGroupExpandableAdapter(
                         "price" to newPrice
                     )
 
-                    db.collection("ModifierOptions")
+                    MerchantFirestore.col("ModifierOptions")
                         .document(optionId)
                         .update(updates)
                         .addOnSuccessListener {
@@ -373,7 +373,7 @@ class ModifierGroupExpandableAdapter(
             .setNegativeButton("Cancel", null)
             .setNeutralButton("Delete") { _, _ ->
 
-                db.collection("ModifierOptions")
+                MerchantFirestore.col("ModifierOptions")
                     .document(optionId)
                     .delete()
                     .addOnSuccessListener {

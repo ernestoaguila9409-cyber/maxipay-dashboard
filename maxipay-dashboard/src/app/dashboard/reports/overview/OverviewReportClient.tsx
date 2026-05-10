@@ -2,7 +2,8 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { collection, getDocs, query, Timestamp, where } from "firebase/firestore";
+import { getDocs, query, Timestamp, where } from "firebase/firestore";
+import { merchantCol } from "@/lib/merchantFirestore";
 import {
   Bar,
   BarChart,
@@ -445,8 +446,7 @@ export default function OverviewReportClient() {
         try {
           const snap = await getDocs(
             query(
-              collection(db, "Orders"),
-              where("merchantId", "==", merchantId),
+              merchantCol(merchantId, "Orders"),
               where("createdAt", ">=", Timestamp.fromDate(start)),
               where("createdAt", "<", Timestamp.fromDate(end))
             )

@@ -13,6 +13,7 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -63,7 +64,7 @@ export default function TaxesPage() {
       return;
     }
     const unsub = onSnapshot(
-      query(collection(db, "Taxes"), where("merchantId", "==", merchantId)),
+      merchantCol(merchantId, "Taxes"),
       (snap) => {
         const list: TaxEntry[] = [];
         snap.forEach((d) => {
@@ -114,14 +115,13 @@ export default function TaxesPage() {
     setSaving(true);
     try {
       if (editing) {
-        await updateDoc(doc(db, "Taxes", editing.id), {
+        await updateDoc(merchantDoc(merchantId, "Taxes", editing.id), {
           name,
           type: taxType,
           amount,
         });
       } else {
-        await addDoc(collection(db, "Taxes"), {
-          merchantId,
+        await addDoc(merchantCol(merchantId, "Taxes"), {
           name,
           type: taxType,
           amount,
@@ -140,7 +140,7 @@ export default function TaxesPage() {
 
   const handleToggle = async (t: TaxEntry) => {
     try {
-      await updateDoc(doc(db, "Taxes", t.id), { enabled: !t.enabled });
+      await updateDoc(merchantDoc(merchantId, "Taxes", t.id), { enabled: !t.enabled });
     } catch (err) {
       console.error("Failed to toggle tax:", err);
     }
@@ -148,7 +148,7 @@ export default function TaxesPage() {
 
   const handleToggleOnline = async (t: TaxEntry) => {
     try {
-      await updateDoc(doc(db, "Taxes", t.id), { enabledOnline: !t.enabledOnline });
+      await updateDoc(merchantDoc(merchantId, "Taxes", t.id), { enabledOnline: !t.enabledOnline });
     } catch (err) {
       console.error("Failed to toggle online tax:", err);
     }
@@ -158,7 +158,7 @@ export default function TaxesPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await deleteDoc(doc(db, "Taxes", deleteTarget.id));
+      await deleteDoc(merchantDoc(merchantId, "Taxes", deleteTarget.id));
     } catch (err) {
       console.error("Failed to delete tax:", err);
     } finally {

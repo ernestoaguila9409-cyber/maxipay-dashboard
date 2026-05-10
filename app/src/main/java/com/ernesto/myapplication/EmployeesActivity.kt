@@ -44,7 +44,7 @@ class EmployeesActivity : AppCompatActivity() {
 
         container.removeAllViews()
 
-        db.collection("Employees")
+        MerchantFirestore.col("Employees")
             .get()
             .addOnSuccessListener { snap ->
 
@@ -111,7 +111,7 @@ class EmployeesActivity : AppCompatActivity() {
 
                 if (pin.length == 4) {
 
-                    db.collection("Employees")
+                    MerchantFirestore.col("Employees")
                         .whereEqualTo("pin", pin)
                         .get()
                         .addOnSuccessListener { documents ->
@@ -163,7 +163,7 @@ class EmployeesActivity : AppCompatActivity() {
                 if (email.isNotEmpty()) employee["email"] = email
                 if (phone.isNotEmpty()) employee["phone"] = phone
 
-                db.collection("Employees")
+                MerchantFirestore.col("Employees")
                     .add(employee)
                     .addOnSuccessListener {
                         Toast.makeText(this, "Employee Added", Toast.LENGTH_SHORT).show()
@@ -217,7 +217,7 @@ class EmployeesActivity : AppCompatActivity() {
             override fun afterTextChanged(s: android.text.Editable?) {
                 val pin = s.toString()
                 if (pin.length == 4) {
-                    db.collection("Employees")
+                    MerchantFirestore.col("Employees")
                         .whereEqualTo("pin", pin)
                         .get()
                         .addOnSuccessListener { documents ->
@@ -264,8 +264,7 @@ class EmployeesActivity : AppCompatActivity() {
                     "phone" to if (newPhone.isNotEmpty()) newPhone else FieldValue.delete(),
                 )
 
-                db.collection("Employees")
-                    .document(employeeId)
+                MerchantFirestore.doc("Employees", employeeId)
                     .update(updates)
                     .addOnSuccessListener {
                         Toast.makeText(this, "Employee Updated", Toast.LENGTH_SHORT).show()
@@ -274,8 +273,7 @@ class EmployeesActivity : AppCompatActivity() {
             }
             .setNeutralButton("Delete") { _, _ ->
 
-                db.collection("Employees")
-                    .document(employeeId)
+                MerchantFirestore.doc("Employees", employeeId)
                     .delete()
                     .addOnSuccessListener {
                         Toast.makeText(this, "Employee Deleted", Toast.LENGTH_SHORT).show()

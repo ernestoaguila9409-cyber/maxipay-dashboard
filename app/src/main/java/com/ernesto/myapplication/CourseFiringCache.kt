@@ -34,7 +34,7 @@ object CourseFiringCache {
     @Synchronized
     fun start(db: FirebaseFirestore = FirebaseFirestore.getInstance()) {
         if (registration != null) return
-        registration = db.collection(COLLECTION).document(DOCUMENT)
+        registration = MerchantFirestore.col(COLLECTION).document(DOCUMENT)
             .addSnapshotListener { snap, err ->
                 if (err != null) {
                     Log.w(TAG, "listener error", err)

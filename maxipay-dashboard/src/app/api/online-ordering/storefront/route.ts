@@ -9,11 +9,17 @@ export const runtime = "nodejs";
  * Public storefront snapshot: hero slides + store header (logo, name, prep time, open status)
  * + featured item ids + payment paths. One round-trip for the customer page top-of-fold.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const merchantId = searchParams.get("merchantId")?.trim();
+    if (!merchantId) {
+      return NextResponse.json({ error: "merchantId is required." }, { status: 400 });
+    }
+
     getFirebaseAdminApp();
     const db = admin.firestore();
-    const data = await loadPublicStorefront(db);
+    const data = await loadPublicStorefront(db, merchantId);
     return NextResponse.json(data, {
       headers: { "Cache-Control": "no-store" },
     });

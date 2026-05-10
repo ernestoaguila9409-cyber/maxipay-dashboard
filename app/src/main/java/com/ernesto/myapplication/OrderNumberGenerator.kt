@@ -9,9 +9,7 @@ import com.google.firebase.firestore.FirebaseFirestore
  */
 object OrderNumberGenerator {
 
-    private val counterRef = FirebaseFirestore.getInstance()
-        .collection("Counters")
-        .document("orderNumber")
+    private val counterRef get() = MerchantFirestore.doc("Counters", "orderNumber")
 
     fun nextOrderNumber(
         onSuccess: (Long) -> Unit,

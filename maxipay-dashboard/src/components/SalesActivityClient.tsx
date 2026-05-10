@@ -20,6 +20,7 @@ import {
 import { getApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import { useActiveTerminalCapabilities } from "@/hooks/useActiveTerminalCapabilities";
@@ -731,7 +732,7 @@ export default function SalesActivityClient() {
     let cancelled = false;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, "Orders", oid));
+        const snap = await getDoc(merchantDoc(merchantId, "Orders", oid));
         if (cancelled || !snap.exists()) return;
         const d = snap.data() as Record<string, unknown>;
         const totalInCents = Number(d.totalInCents ?? 0);
@@ -755,7 +756,7 @@ export default function SalesActivityClient() {
       setVoidCmdDetail(null);
       return;
     }
-    const ref = doc(db, REMOTE_PAYMENT_COMMANDS, voidCmdId);
+    const ref = merchantDoc(merchantId, REMOTE_PAYMENT_COMMANDS, voidCmdId);
     const unsub = onSnapshot(
       ref,
       (snap) => {
@@ -773,7 +774,7 @@ export default function SalesActivityClient() {
       (e) => console.error("[SalesActivity] void command", e)
     );
     return () => unsub();
-  }, [voidCmdId]);
+  }, [voidCmdId, merchantId]);
 
   useEffect(() => {
     if (!refundCmdId || !db) {
@@ -781,7 +782,7 @@ export default function SalesActivityClient() {
       setRefundCmdDetail(null);
       return;
     }
-    const ref = doc(db, REMOTE_PAYMENT_COMMANDS, refundCmdId);
+    const ref = merchantDoc(merchantId, REMOTE_PAYMENT_COMMANDS, refundCmdId);
     const unsub = onSnapshot(
       ref,
       (snap) => {
@@ -799,7 +800,7 @@ export default function SalesActivityClient() {
         if (st === "completed" && db) {
           const oid = String(d?.orderId ?? "").trim();
           if (oid) {
-            void getDoc(doc(db, "Orders", oid)).then((ord) => {
+            void getDoc(merchantDoc(merchantId, "Orders", oid)).then((ord) => {
               if (!ord.exists()) return;
               const od = ord.data() as Record<string, unknown>;
               const totalInCents = Number(od.totalInCents ?? 0);
@@ -815,7 +816,7 @@ export default function SalesActivityClient() {
       (e) => console.error("[SalesActivity] refund command", e)
     );
     return () => unsub();
-  }, [refundCmdId]);
+  }, [refundCmdId, merchantId]);
 
   // Auto-close the transaction modal a beat after a remote void/refund finishes successfully.
   useEffect(() => {
@@ -843,7 +844,7 @@ export default function SalesActivityClient() {
       setEmployeeNames([]);
       return;
     }
-    getDocs(query(collection(db, "Employees"), where("merchantId", "==", merchantId), limit(400)))
+    getDocs(query(merchantCol(merchantId, "Employees"), limit(400)))
       .then((snap) => {
         const names: string[] = [];
         snap.forEach((d) => {
@@ -873,7 +874,7 @@ export default function SalesActivityClient() {
     }
     const unsubs: Array<() => void> = [];
 
-    const bq = query(collection(db, "Batches"), where("merchantId", "==", merchantId), orderBy("createdAt", "desc"), limit(100));
+    const bq = query(merchantCol(merchantId, "Batches"), orderBy("createdAt", "desc"), limit(100));
     unsubs.push(
       onSnapshot(
         bq,
@@ -901,14 +902,12 @@ export default function SalesActivityClient() {
     // doesn't require a (batchId, createdAt) composite index. Results are sorted client-side.
     const ordersQ = queryBatchId
       ? query(
-          collection(db, "Orders"),
-          where("merchantId", "==", merchantId),
+          merchantCol(merchantId, "Orders"),
           where("batchId", "==", queryBatchId),
           limit(400)
         )
       : query(
-          collection(db, "Orders"),
-          where("merchantId", "==", merchantId),
+          merchantCol(merchantId, "Orders"),
           where("createdAt", ">=", tsStart),
           where("createdAt", "<", tsEnd),
           orderBy("createdAt", "desc"),
@@ -917,14 +916,12 @@ export default function SalesActivityClient() {
 
     const txQ = queryBatchId
       ? query(
-          collection(db, "Transactions"),
-          where("merchantId", "==", merchantId),
+          merchantCol(merchantId, "Transactions"),
           where("batchId", "==", queryBatchId),
           limit(900)
         )
       : query(
-          collection(db, "Transactions"),
-          where("merchantId", "==", merchantId),
+          merchantCol(merchantId, "Transactions"),
           where("createdAt", ">=", tsStart),
           where("createdAt", "<", tsEnd),
           orderBy("createdAt", "desc"),
@@ -963,8 +960,7 @@ export default function SalesActivityClient() {
       // This keeps dashboard Sales Activity aligned with POS behavior (voids show on the day they occur).
       if (!queryBatchId) {
         const voidedOrdersQ = query(
-          collection(db, "Orders"),
-          where("merchantId", "==", merchantId),
+          merchantCol(merchantId, "Orders"),
           where("status", "==", "VOIDED"),
           where("voidedAt", ">=", tsStart),
           where("voidedAt", "<", tsEnd),
@@ -1017,8 +1013,7 @@ export default function SalesActivityClient() {
       // Include transactions voided *within* the selected date range even if the sale/capture was created earlier.
       if (!queryBatchId) {
         const voidedTxQ = query(
-          collection(db, "Transactions"),
-          where("merchantId", "==", merchantId),
+          merchantCol(merchantId, "Transactions"),
           where("voided", "==", true),
           where("voidedAt", ">=", tsStart),
           where("voidedAt", "<", tsEnd),
@@ -1052,14 +1047,12 @@ export default function SalesActivityClient() {
 
       const cashQ = queryBatchId
         ? query(
-            collection(db, "cashLogs"),
-            where("merchantId", "==", merchantId),
+            merchantCol(merchantId, "cashLogs"),
             where("batchId", "==", queryBatchId),
             limit(400)
           )
         : query(
-            collection(db, "cashLogs"),
-            where("merchantId", "==", merchantId),
+            merchantCol(merchantId, "cashLogs"),
             where("createdAt", ">=", tsStart),
             where("createdAt", "<", tsEnd),
             orderBy("createdAt", "desc"),
@@ -1388,8 +1381,7 @@ export default function SalesActivityClient() {
     if (!cashModal || !v || v <= 0 || !db) return;
     setCashSaving(true);
     try {
-      await addDoc(collection(db, "cashLogs"), {
-        merchantId,
+      await addDoc(merchantCol(merchantId, "cashLogs"), {
         type: cashModal,
         amountInCents: Math.round(v * 100),
         reason: cashReason.trim(),
@@ -2119,8 +2111,7 @@ export default function SalesActivityClient() {
                         setRefundSubmitting(true);
                         setRefundSubmitErr(null);
                         try {
-                          const ref = await addDoc(collection(db, REMOTE_PAYMENT_COMMANDS), {
-                            merchantId,
+                          const ref = await addDoc(merchantCol(merchantId, REMOTE_PAYMENT_COMMANDS), {
                             type: "refundTransaction",
                             transactionId: txModal.id,
                             orderId: oid,
@@ -2499,7 +2490,7 @@ export default function SalesActivityClient() {
                       setDirectRefundModalOpen(false);
                       setDirectRefundModalAmount("");
                       try {
-                        const ordSnap = await getDoc(doc(db, "Orders", oid));
+                        const ordSnap = await getDoc(merchantDoc(merchantId, "Orders", oid));
                         if (ordSnap.exists()) {
                           const od = ordSnap.data() as Record<string, unknown>;
                           const totalInCents = Number(od.totalInCents ?? 0);

@@ -209,7 +209,7 @@ class BarTabsActivity : AppCompatActivity() {
     }
 
     private fun loadBarSeats() {
-        db.collection("Tables")
+        MerchantFirestore.col("Tables")
             .whereEqualTo("active", true)
             .whereEqualTo("areaType", "BAR_SEAT")
             .get()
@@ -247,7 +247,7 @@ class BarTabsActivity : AppCompatActivity() {
     private fun startListeningToOrders() {
         orderListener?.remove()
 
-        orderListener = db.collection("Orders")
+        orderListener = MerchantFirestore.col("Orders")
             .whereEqualTo("orderType", "BAR_TAB")
             .whereEqualTo("status", "OPEN")
             .addSnapshotListener { snap, err ->
@@ -414,7 +414,7 @@ class BarTabsActivity : AppCompatActivity() {
             etCustomerName.requestFocus()
         }
 
-        db.collection("Customers")
+        MerchantFirestore.col("Customers")
             .get()
             .addOnSuccessListener { snap ->
                 allCustomers.clear()
@@ -557,7 +557,7 @@ class BarTabsActivity : AppCompatActivity() {
         customerEmail: String,
         usePreauth: Boolean
     ) {
-        db.collection("Customers")
+        MerchantFirestore.col("Customers")
             .whereEqualTo("name", customerName)
             .limit(1)
             .get()
@@ -566,7 +566,7 @@ class BarTabsActivity : AppCompatActivity() {
                 if (resolvedId != null) {
                     buildAndSaveBarTabOrder(seats, resolvedId, customerName, customerPhone, customerEmail, usePreauth)
                 } else {
-                    db.collection("Customers")
+                    MerchantFirestore.col("Customers")
                         .get()
                         .addOnSuccessListener { allSnap ->
                             var foundId: String? = null
@@ -625,7 +625,7 @@ class BarTabsActivity : AppCompatActivity() {
             OrderNumberGenerator.nextOrderNumber(
                 onSuccess = { orderNumber ->
                     runOnUiThread {
-                        val orderRef = db.collection("Orders").document()
+                        val orderRef = MerchantFirestore.col("Orders").document()
                         val orderMap = hashMapOf<String, Any>(
                             "orderNumber" to orderNumber,
                             "employeeName" to employeeName,
@@ -661,7 +661,7 @@ class BarTabsActivity : AppCompatActivity() {
                             t.set(orderRef, orderMap)
                             for (tid in seatIds) {
                                 t.update(
-                                    db.collection("Tables").document(tid),
+                                    MerchantFirestore.doc("Tables", tid),
                                     mapOf("currentOrderId" to orderRef.id)
                                 )
                             }
@@ -698,7 +698,7 @@ class BarTabsActivity : AppCompatActivity() {
 
         val cid = customerId?.trim().orEmpty()
         if (cid.isNotEmpty() && customerName.isBlank()) {
-            db.collection("Customers").document(cid)
+            MerchantFirestore.doc("Customers", cid)
                 .get()
                 .addOnSuccessListener { doc ->
                     runOnUiThread {
@@ -727,7 +727,7 @@ class BarTabsActivity : AppCompatActivity() {
             amount = preAuthAmount,
             referenceId = referenceId,
             onSuccess = { result ->
-                val txRef = db.collection("Transactions").document()
+                val txRef = MerchantFirestore.col("Transactions").document()
                 val txData = hashMapOf<String, Any>(
                     "orderId" to orderId,
                     "type" to "PRE_AUTH",
@@ -767,7 +767,7 @@ class BarTabsActivity : AppCompatActivity() {
                 val batchIdForTxn = currentBatchId
                 db.runTransaction { firestoreTxn ->
                     if (batchIdForTxn.isNotBlank()) {
-                        val batchRef = db.collection("Batches").document(batchIdForTxn)
+                        val batchRef = MerchantFirestore.doc("Batches", batchIdForTxn)
                         val batchSnap = firestoreTxn.get(batchRef)
                         val counter = batchSnap.getLong("transactionCounter") ?: 0L
                         val next = counter + 1
@@ -775,7 +775,7 @@ class BarTabsActivity : AppCompatActivity() {
                         txData["appTransactionNumber"] = next
                     }
                     firestoreTxn.set(txRef, txData)
-                    firestoreTxn.update(db.collection("Orders").document(orderId), orderUpdates)
+                    firestoreTxn.update(MerchantFirestore.doc("Orders", orderId), orderUpdates)
                 }.addOnSuccessListener {
                     runOnUiThread {
                         hidePreAuthLoading()
@@ -810,7 +810,7 @@ class BarTabsActivity : AppCompatActivity() {
                 runPreAuth(orderId, seatName)
             }
             .setNeutralButton("Continue") { _, _ ->
-                db.collection("Orders").document(orderId)
+                MerchantFirestore.doc("Orders", orderId)
                     .update(
                         mapOf(
                             "paymentMethod" to "CASH",
@@ -822,13 +822,13 @@ class BarTabsActivity : AppCompatActivity() {
                     .addOnFailureListener { openBarOrder(orderId, seatName) }
             }
             .setNegativeButton("Cancel") { _, _ ->
-                val orderRef = db.collection("Orders").document(orderId)
+                val orderRef = MerchantFirestore.doc("Orders", orderId)
                 orderRef.get().addOnSuccessListener { snap ->
                     val batch = db.batch()
                     batch.delete(orderRef)
                     for (tid in BarTabSeatHelper.seatTableIdsFromOrder(snap)) {
                         batch.update(
-                            db.collection("Tables").document(tid),
+                            MerchantFirestore.doc("Tables", tid),
                             mapOf("currentOrderId" to FieldValue.delete())
                         )
                     }

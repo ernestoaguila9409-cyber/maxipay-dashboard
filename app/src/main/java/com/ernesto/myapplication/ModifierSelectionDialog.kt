@@ -15,7 +15,7 @@ class ModifierSelectionDialog(
 
     fun show(itemId: String) {
 
-        db.collection("ModifierGroups")
+        MerchantFirestore.col("ModifierGroups")
             .whereEqualTo("itemId", itemId)
             .get()
             .addOnSuccessListener { groupDocs ->
@@ -45,7 +45,7 @@ class ModifierSelectionDialog(
                     val groupSelections =
                         mutableListOf<SelectedModifierOption>()
 
-                    db.collection("ModifierOptions")
+                    MerchantFirestore.col("ModifierOptions")
                         .whereEqualTo("groupId", groupId)
                         .get()
                         .addOnSuccessListener { optionDocs ->

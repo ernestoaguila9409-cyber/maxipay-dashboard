@@ -113,9 +113,7 @@ object PosDevicePresenceSync {
             "updatedAt" to FieldValue.serverTimestamp(),
         )
 
-        FirebaseFirestore.getInstance()
-            .collection(COLLECTION)
-            .document(docId)
+        MerchantFirestore.doc(COLLECTION, docId)
             .set(data, SetOptions.merge())
             .addOnFailureListener { e ->
                 Log.w(TAG, "Heartbeat failed: ${e.message}")

@@ -50,7 +50,7 @@ object KitchenPrintHelper {
         if (trigger == PrintingSettingsFirestore.ON_SEND) return
 
         val db = FirebaseFirestore.getInstance()
-        val orderRef = db.collection("Orders").document(orderId)
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
         orderRef.get().addOnSuccessListener { orderDoc ->
             if (!orderDoc.exists()) return@addOnSuccessListener
             if (orderDoc.getTimestamp(PrintingSettingsFirestore.FIELD_KITCHEN_CHITS_PRINTED_AT) != null) {
@@ -214,8 +214,7 @@ object KitchenPrintHelper {
             return
         }
 
-        FirebaseFirestore.getInstance()
-            .collection("Orders")
+        MerchantFirestore.col("Orders")
             .document(orderId)
             .get()
             .addOnSuccessListener { doc ->

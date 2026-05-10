@@ -1,5 +1,6 @@
 package com.ernesto.myapplication.engine
 
+import com.ernesto.myapplication.MerchantFirestore
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Calendar
 import java.util.Date
@@ -53,7 +54,7 @@ class MenuPerformanceEngine(private val db: FirebaseFirestore) {
     ) {
         val (start, end) = dateRange(startDate, endDate)
 
-        db.collection("Orders")
+        MerchantFirestore.col("Orders")
             .whereEqualTo("status", "CLOSED")
             .whereGreaterThanOrEqualTo("createdAt", start)
             .whereLessThan("createdAt", end)
@@ -72,7 +73,7 @@ class MenuPerformanceEngine(private val db: FirebaseFirestore) {
 
                 val lock = Any()
                 for (orderDoc in filteredDocs) {
-                    db.collection("Orders").document(orderDoc.id).collection("items").get()
+                    MerchantFirestore.col("Orders").document(orderDoc.id).collection("items").get()
                         .addOnSuccessListener { itemsSnap ->
                             for (itemDoc in itemsSnap.documents) {
                                 val name = itemDoc.getString("name") ?: itemDoc.getString("itemName") ?: "Unknown"
@@ -113,7 +114,7 @@ class MenuPerformanceEngine(private val db: FirebaseFirestore) {
     ) {
         val (start, end) = dateRange(startDate, endDate)
 
-        db.collection("Orders")
+        MerchantFirestore.col("Orders")
             .whereEqualTo("status", "CLOSED")
             .whereGreaterThanOrEqualTo("createdAt", start)
             .whereLessThan("createdAt", end)
@@ -127,12 +128,12 @@ class MenuPerformanceEngine(private val db: FirebaseFirestore) {
                 val itemToCategory = mutableMapOf<String, String>()
 
                 fun loadCategoriesAndItems(callback: () -> Unit) {
-                    db.collection("Categories").get()
+                    MerchantFirestore.col("Categories").get()
                         .addOnSuccessListener { catSnap ->
                             for (doc in catSnap.documents) {
                                 categoryNames[doc.id] = doc.getString("name") ?: doc.id
                             }
-                            db.collection("MenuItems").get()
+                            MerchantFirestore.col("MenuItems").get()
                                 .addOnSuccessListener { itemSnap ->
                                     for (doc in itemSnap.documents) {
                                         val catId = doc.getString("categoryId") ?: continue
@@ -155,7 +156,7 @@ class MenuPerformanceEngine(private val db: FirebaseFirestore) {
 
                 val catLock = Any()
                 for (orderDoc in filteredDocs) {
-                    db.collection("Orders").document(orderDoc.id).collection("items").get()
+                    MerchantFirestore.col("Orders").document(orderDoc.id).collection("items").get()
                         .addOnSuccessListener { itemsSnap ->
                             for (itemDoc in itemsSnap.documents) {
                                 val itemId = itemDoc.getString("itemId") ?: continue
@@ -196,7 +197,7 @@ class MenuPerformanceEngine(private val db: FirebaseFirestore) {
     ) {
         val (start, end) = dateRange(startDate, endDate)
 
-        db.collection("Orders")
+        MerchantFirestore.col("Orders")
             .whereEqualTo("status", "CLOSED")
             .whereGreaterThanOrEqualTo("createdAt", start)
             .whereLessThan("createdAt", end)
@@ -214,7 +215,7 @@ class MenuPerformanceEngine(private val db: FirebaseFirestore) {
                 }
 
                 for (orderDoc in filteredDocs) {
-                    db.collection("Orders").document(orderDoc.id).collection("items").get()
+                    MerchantFirestore.col("Orders").document(orderDoc.id).collection("items").get()
                         .addOnSuccessListener { itemsSnap ->
                             for (itemDoc in itemsSnap.documents) {
                                 @Suppress("UNCHECKED_CAST")

@@ -15,6 +15,7 @@ import {
 } from "firebase/firestore";
 import { FirebaseError } from "firebase/app";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -237,10 +238,7 @@ export default function KdsSettingsPage() {
       return;
     }
     const unsub = onSnapshot(
-      query(
-        collection(db, KDS_DEVICES_COLLECTION),
-        where("merchantId", "==", merchantId),
-      ),
+      merchantCol(merchantId, KDS_DEVICES_COLLECTION),
       (snap) => {
         const list: KdsDevice[] = [];
         snap.forEach((d) => {
@@ -271,7 +269,7 @@ export default function KdsSettingsPage() {
       return;
     }
     const unsub = onSnapshot(
-      collection(db, MENU_ITEMS_COLLECTION),
+      merchantCol(merchantId, MENU_ITEMS_COLLECTION),
       (snap) => {
         const list: MenuItemForKds[] = [];
         snap.forEach((d) => {
@@ -292,7 +290,7 @@ export default function KdsSettingsPage() {
   useEffect(() => {
     if (!user) return;
     const unsub = onSnapshot(
-      doc(db, SETTINGS_COLLECTION, "dashboard"),
+      merchantDoc(merchantId, SETTINGS_COLLECTION, "dashboard"),
       (snap) => {
         const raw = snap.data()?.modules;
         setDashboardColorKeys(parseDashboardModuleColorKeys(raw));
@@ -305,7 +303,7 @@ export default function KdsSettingsPage() {
   useEffect(() => {
     if (!user) return;
     const unsub = onSnapshot(
-      doc(db, SETTINGS_COLLECTION, KDS_SETTINGS_DOC),
+      merchantDoc(merchantId, SETTINGS_COLLECTION, KDS_SETTINGS_DOC),
       (snap) => {
         if (!snap.exists()) {
           setDisplaySettings(defaultDisplaySettings);
@@ -373,7 +371,7 @@ export default function KdsSettingsPage() {
     setSaving(true);
     try {
       if (editing) {
-        await updateDoc(doc(db, KDS_DEVICES_COLLECTION, editing.id), {
+        await updateDoc(merchantDoc(merchantId, KDS_DEVICES_COLLECTION, editing.id), {
           name: trimmed,
           registeredFromWeb: true,
           updatedAt: serverTimestamp(),
@@ -381,7 +379,7 @@ export default function KdsSettingsPage() {
         setModalOpen(false);
       } else {
         const pairingCode = generatePairingCode();
-        const colRef = collection(db, KDS_DEVICES_COLLECTION);
+        const colRef = merchantCol(merchantId, KDS_DEVICES_COLLECTION);
         const docRef = doc(colRef);
         await setDoc(docRef, {
           id: docRef.id,
@@ -394,7 +392,6 @@ export default function KdsSettingsPage() {
           assignedCategoryIds: [],
           assignedItemIds: [],
           createdAt: serverTimestamp(),
-          merchantId,
         });
         setModalOpen(false);
         setPairingCreated({ code: pairingCode, deviceName: trimmed });
@@ -419,7 +416,7 @@ export default function KdsSettingsPage() {
     setDeleting(true);
     setDeleteError(null);
     try {
-      await deleteDoc(doc(db, KDS_DEVICES_COLLECTION, deleteTarget.id));
+      await deleteDoc(merchantDoc(merchantId, KDS_DEVICES_COLLECTION, deleteTarget.id));
       setDeleteTarget(null);
     } catch (err) {
       console.error("[KDS] delete device failed:", err);
@@ -437,7 +434,7 @@ export default function KdsSettingsPage() {
       setSavingDisplay(true);
       try {
         await setDoc(
-          doc(db, SETTINGS_COLLECTION, KDS_SETTINGS_DOC),
+          merchantDoc(merchantId, SETTINGS_COLLECTION, KDS_SETTINGS_DOC),
           {
             orderTypeColorsEnabled: next.orderTypeColorsEnabled,
             gridColumns: next.gridColumns,
@@ -445,7 +442,6 @@ export default function KdsSettingsPage() {
             ticketYellowAfterMinutes: next.ticketYellowAfterMinutes,
             ticketRedAfterMinutes: next.ticketRedAfterMinutes,
             updatedAt: serverTimestamp(),
-            merchantId,
           },
           { merge: true }
         );

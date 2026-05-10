@@ -50,7 +50,7 @@ class TaxesAndFeesActivity : AppCompatActivity() {
     }
 
     private fun loadTaxes() {
-        db.collection("Taxes")
+        MerchantFirestore.col("Taxes")
             .get()
             .addOnSuccessListener { snap ->
                 val list = snap.documents.mapNotNull { doc ->
@@ -72,7 +72,7 @@ class TaxesAndFeesActivity : AppCompatActivity() {
     }
 
     private fun setTaxEnabled(item: TaxItem, enabled: Boolean) {
-        db.collection("Taxes").document(item.id)
+        MerchantFirestore.doc("Taxes", item.id)
             .update("enabled", enabled)
             .addOnSuccessListener { loadTaxes() }
     }

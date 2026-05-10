@@ -12,251 +12,190 @@ service cloud.firestore {
     function myMerchantId() {
       return request.auth.token.merchantId;
     }
-    function docBelongsToMe() {
-      return resource.data.merchantId == myMerchantId();
-    }
-    function newDocBelongsToMe() {
-      return request.resource.data.merchantId == myMerchantId();
+    function isMerchantOwner(merchantId) {
+      return isSignedIn() && myMerchantId() == merchantId;
     }
 
     // ── Merchants collection (admin-only write, owner can read own) ─
     match /Merchants/{merchantId} {
       allow read, write: if isSuperAdmin();
-      allow read: if isSignedIn() && myMerchantId() == merchantId;
-    }
+      allow read: if isMerchantOwner(merchantId);
 
-    // ── Settings singleton docs ─────────────────────────────────
-    // Settings/{docName} — merchant owners read/write their own,
-    // super_admin can access all.
-    match /Settings/{docName} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      // Legacy: allow read if doc has no merchantId yet (migration)
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
+      // ── All merchant-scoped subcollections ────────────────────
+      // Path-based ownership: the merchantId segment IS the access check.
 
-    // ── settings (lowercase) — printing prefs ───────────────────
-    match /settings/{docName} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    // ── Merchant-scoped collections (flat with merchantId field) ─
-    // Pattern: owner can CRUD docs that match their merchantId,
-    // super_admin can access everything.
-    match /Orders/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-
-      match /items/{itemId} {
+      match /settings/{docName} {
         allow read, write: if isSuperAdmin();
-        allow read, write: if isSignedIn();
+        allow read, write: if isMerchantOwner(merchantId);
       }
-      match /transactions/{txId} {
+
+      match /orders/{docId} {
         allow read, write: if isSuperAdmin();
-        allow read, write: if isSignedIn();
+        allow read, write: if isMerchantOwner(merchantId);
+
+        match /items/{itemId} {
+          allow read, write: if isSuperAdmin();
+          allow read, write: if isMerchantOwner(merchantId);
+        }
+        match /transactions/{txId} {
+          allow read, write: if isSuperAdmin();
+          allow read, write: if isMerchantOwner(merchantId);
+        }
+      }
+
+      match /transactions/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /batches/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /cashLogs/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /categories/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /subcategories/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /menuItems/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /modifierGroups/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /modifierOptions/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /itemModifierGroups/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /menus/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /menuSchedules/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /discounts/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /employees/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /customers/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /taxes/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /payment_terminals/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /printers/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+
+        match /commands/{cmdId} {
+          allow read, write: if isMerchantOwner(merchantId);
+        }
+      }
+
+      match /posDevices/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /deviceActivations/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /kds_devices/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+
+        match /settings/{settingId} {
+          allow read, write: if isMerchantOwner(merchantId);
+        }
+      }
+
+      match /sections/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /tableLayouts/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+
+        match /tables/{tableId} {
+          allow read, write: if isMerchantOwner(merchantId);
+        }
+      }
+
+      match /tables/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /reservations/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /counters/{docId} {
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /onlineHeroSlides/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /remotePaymentCommands/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
+      }
+
+      match /onlineTerminalPaymentRequests/{docId} {
+        allow read, write: if isSuperAdmin();
+        allow read, write: if isMerchantOwner(merchantId);
       }
     }
 
-    match /Transactions/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /Batches/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /cashLogs/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-    }
-
-    match /Categories/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /subcategories/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /MenuItems/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /ModifierGroups/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /ModifierOptions/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /ItemModifierGroups/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /menus/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-    }
-
-    match /menuSchedules/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-    }
-
-    match /discounts/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-    }
-
-    match /Employees/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /Customers/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /Taxes/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /payment_terminals/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-    }
-
-    match /Printers/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-
-      match /commands/{cmdId} {
-        allow read, write: if isSignedIn();
-      }
-    }
-
-    match /PosDevices/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /DeviceActivations/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /kds_devices/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-
-      match /settings/{settingId} {
-        allow read, write: if isSignedIn();
-      }
-    }
-
-    match /Sections/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /tableLayouts/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-
-      match /tables/{tableId} {
-        allow read, write: if isSignedIn();
-      }
-    }
-
-    match /Tables/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /Reservations/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-      allow read: if isSignedIn() && !('merchantId' in resource.data);
-    }
-
-    match /Counters/{docId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /OnlineHeroSlides/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-    }
-
-    match /RemotePaymentCommands/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-    }
-
-    match /OnlineTerminalPaymentRequests/{docId} {
-      allow read, write: if isSuperAdmin();
-      allow read, write: if isSignedIn() && docBelongsToMe();
-      allow create: if isSignedIn() && newDocBelongsToMe();
-    }
-
+    // ── Global collections (not merchant-scoped) ─────────────────
     match /Terminals/{docId} {
       allow read, write: if isSignedIn();
     }

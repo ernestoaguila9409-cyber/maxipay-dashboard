@@ -242,7 +242,7 @@ class CashFlowActivity : AppCompatActivity() {
 
     private fun showBatchPicker() {
         progressBar.visibility = View.VISIBLE
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .orderBy("createdAt", Query.Direction.DESCENDING)
             .get()
             .addOnSuccessListener { snap ->
@@ -359,7 +359,7 @@ class CashFlowActivity : AppCompatActivity() {
     }
 
     private fun saveStartingCash(batchId: String, amount: Double) {
-        db.collection("Batches").document(batchId)
+        MerchantFirestore.col("Batches").document(batchId)
             .update("startingCash", amount)
             .addOnSuccessListener {
                 startingCash = amount
@@ -382,7 +382,7 @@ class CashFlowActivity : AppCompatActivity() {
             bannerBatchClosed.visibility = View.VISIBLE
         }
 
-        db.collection("Batches").document(batchId).get()
+        MerchantFirestore.col("Batches").document(batchId).get()
             .addOnSuccessListener { doc ->
                 if (doc.exists()) {
                     currentBatchId = doc.id
@@ -419,7 +419,7 @@ class CashFlowActivity : AppCompatActivity() {
     private fun loadOpenBatchAndStart() {
         progressBar.visibility = View.VISIBLE
 
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .whereEqualTo("closed", false)
             .limit(1)
             .get()
@@ -493,7 +493,7 @@ class CashFlowActivity : AppCompatActivity() {
     }
 
     private fun loadStartingCashForDate(dayStart: Date) {
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .whereLessThanOrEqualTo("createdAt", dayStart)
             .orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(1)
@@ -508,7 +508,7 @@ class CashFlowActivity : AppCompatActivity() {
     // ── Listen by batch ────────────────────────────────────────────────
 
     private fun listenByBatch(batchId: String) {
-        transactionListener = db.collection("Transactions")
+        transactionListener = MerchantFirestore.col("Transactions")
             .whereEqualTo("batchId", batchId)
             .addSnapshotListener { snapshots, error ->
                 if (error != null) {
@@ -524,7 +524,7 @@ class CashFlowActivity : AppCompatActivity() {
     // ── Listen by date range ───────────────────────────────────────────
 
     private fun listenByDateRange(start: Date, end: Date) {
-        transactionListener = db.collection("Transactions")
+        transactionListener = MerchantFirestore.col("Transactions")
             .whereGreaterThanOrEqualTo("createdAt", start)
             .whereLessThan("createdAt", end)
             .addSnapshotListener { snapshots, error ->
@@ -644,7 +644,7 @@ class CashFlowActivity : AppCompatActivity() {
         }
 
         val lookupTasks = refundsWithOrigId.map { refundDoc ->
-            db.collection("Transactions").document(refundDoc.getString("originalReferenceId")!!).get()
+            MerchantFirestore.col("Transactions").document(refundDoc.getString("originalReferenceId")!!).get()
         }
 
         Tasks.whenAllSuccess<DocumentSnapshot>(lookupTasks)

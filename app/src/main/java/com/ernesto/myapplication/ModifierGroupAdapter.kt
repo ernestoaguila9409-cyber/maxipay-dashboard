@@ -104,7 +104,7 @@ class ModifierGroupAdapter(
     }
 
     private fun deleteGroup(group: ModifierGroupModel) {
-        db.collection("ModifierGroups")
+        MerchantFirestore.col("ModifierGroups")
             .document(group.id)
             .delete()
             .addOnSuccessListener {
@@ -150,7 +150,7 @@ class ModifierGroupAdapter(
                 val newMax = maxSelectionInput.text.toString().toIntOrNull() ?: 1
 
                 if (newName.isNotEmpty()) {
-                    db.collection("ModifierGroups")
+                    MerchantFirestore.col("ModifierGroups")
                         .document(group.id)
                         .update(
                             mapOf(

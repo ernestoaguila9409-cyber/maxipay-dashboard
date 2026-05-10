@@ -35,7 +35,7 @@ object RemoteVoidCommandListener {
         if (registration != null) return
         val app = context.applicationContext
         val db = FirebaseFirestore.getInstance()
-        registration = db.collection(COLLECTION)
+        registration = MerchantFirestore.col(COLLECTION)
             .whereEqualTo("status", "pending")
             .addSnapshotListener { snap, e ->
                 if (e != null) {

@@ -55,7 +55,7 @@ object PosDeviceDeactivationWatch {
 
         PosDeviceIdentity.resolveInstallationDocId(application) { docId ->
             if (app == null) return@resolveInstallationDocId
-            val ref = FirebaseFirestore.getInstance().collection(COLLECTION).document(docId)
+            val ref = MerchantFirestore.doc(COLLECTION, docId)
             registration = ref.addSnapshotListener { snap, e ->
                 if (e != null) {
                     Log.w(TAG, "listen: ${e.message}")

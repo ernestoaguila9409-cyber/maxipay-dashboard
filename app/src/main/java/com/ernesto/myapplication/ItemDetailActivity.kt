@@ -134,7 +134,7 @@ class ItemDetailActivity : AppCompatActivity() {
     // ── Stock (Settings / inventory + MenuItems.stock) ──────────────
 
     private fun loadStockSetting() {
-        db.collection("Settings").document("inventory").get()
+        MerchantFirestore.col("Settings").document("inventory").get()
             .addOnSuccessListener { doc ->
                 stockCountingEnabled = doc.getBoolean("stockCountingEnabled") ?: true
                 applyStockSectionVisibility()
@@ -206,7 +206,7 @@ class ItemDetailActivity : AppCompatActivity() {
                     return@setOnClickListener
                 }
                 dialog.dismiss()
-                db.collection("MenuItems").document(itemId)
+                MerchantFirestore.col("MenuItems").document(itemId)
                     .update("stock", newStock)
                     .addOnSuccessListener {
                         itemStock = newStock
@@ -221,7 +221,7 @@ class ItemDetailActivity : AppCompatActivity() {
     // ── Load ──────────────────────────────────────────────────────────
 
     private fun loadItem() {
-        db.collection("MenuItems").document(itemId).get()
+        MerchantFirestore.col("MenuItems").document(itemId).get()
             .addOnSuccessListener { doc ->
                 if (!doc.exists()) {
                     Toast.makeText(this, R.string.item_detail_not_found, Toast.LENGTH_SHORT).show()
@@ -304,7 +304,7 @@ class ItemDetailActivity : AppCompatActivity() {
             itemId,
             itemName,
         ) { firebaseUrl ->
-            db.collection("MenuItems").document(itemId)
+            MerchantFirestore.col("MenuItems").document(itemId)
                 .update("imageUrl", firebaseUrl)
                 .addOnSuccessListener {
                     itemImageUrl = firebaseUrl
@@ -322,7 +322,7 @@ class ItemDetailActivity : AppCompatActivity() {
             .setTitle(R.string.item_detail_remove_image)
             .setMessage(R.string.item_detail_remove_image_confirm)
             .setPositiveButton(R.string.item_detail_remove_image_action) { _, _ ->
-                db.collection("MenuItems").document(itemId)
+                MerchantFirestore.col("MenuItems").document(itemId)
                     .update(mapOf("imageUrl" to FieldValue.delete()))
                     .addOnSuccessListener {
                         itemImageUrl = null
@@ -354,7 +354,7 @@ class ItemDetailActivity : AppCompatActivity() {
             categoryKitchenLabelRaw = ""
             onMetaReady()
         } else {
-            db.collection("Categories").document(itemCategoryId).get()
+            MerchantFirestore.col("Categories").document(itemCategoryId).get()
                 .addOnCompleteListener { task ->
                     if (task.isSuccessful) {
                         val cdoc = task.result
@@ -379,7 +379,7 @@ class ItemDetailActivity : AppCompatActivity() {
             subcategoryKitchenLabelRaw = ""
             onMetaReady()
         } else {
-            db.collection("subcategories").document(itemSubcategoryId).get()
+            MerchantFirestore.col("subcategories").document(itemSubcategoryId).get()
                 .addOnCompleteListener { task ->
                     subcategoryKitchenLabelRaw =
                         if (task.isSuccessful) {
@@ -445,7 +445,7 @@ class ItemDetailActivity : AppCompatActivity() {
                     return@setOnClickListener
                 }
                 dialog.dismiss()
-                db.collection("MenuItems").document(itemId)
+                MerchantFirestore.col("MenuItems").document(itemId)
                     .update("name", newName)
                     .addOnSuccessListener {
                         itemName = newName
@@ -495,7 +495,7 @@ class ItemDetailActivity : AppCompatActivity() {
                     return@setOnClickListener
                 }
                 dialog.dismiss()
-                db.collection("MenuItems").document(itemId)
+                MerchantFirestore.col("MenuItems").document(itemId)
                     .update("price", newPrice)
                     .addOnSuccessListener {
                         itemPrice = newPrice
@@ -520,7 +520,7 @@ class ItemDetailActivity : AppCompatActivity() {
         }
         txtTaxesEmpty.visibility = View.GONE
 
-        db.collection("Taxes").get()
+        MerchantFirestore.col("Taxes").get()
             .addOnSuccessListener { snap ->
                 val taxMap = snap.documents.associate { doc ->
                     doc.id to TaxRow(
@@ -570,7 +570,7 @@ class ItemDetailActivity : AppCompatActivity() {
     }
 
     private fun showAddTaxDialog() {
-        db.collection("Taxes").get()
+        MerchantFirestore.col("Taxes").get()
             .addOnSuccessListener { snap ->
                 val allTaxes = snap.documents.mapNotNull { doc ->
                     val name = doc.getString("name") ?: return@mapNotNull null
@@ -614,7 +614,7 @@ class ItemDetailActivity : AppCompatActivity() {
         } else {
             mapOf("assignedTaxIds" to ids)
         }
-        db.collection("MenuItems").document(itemId).update(updates)
+        MerchantFirestore.col("MenuItems").document(itemId).update(updates)
             .addOnSuccessListener {
                 assignedTaxIds = ids
                 loadAssignedTaxes()
@@ -637,7 +637,7 @@ class ItemDetailActivity : AppCompatActivity() {
         }
         txtModifiersEmpty.visibility = View.GONE
 
-        db.collection("ModifierGroups").get()
+        MerchantFirestore.col("ModifierGroups").get()
             .addOnSuccessListener { snap ->
                 val groupMap = mutableMapOf<String, ModGroupRow>()
                 for (doc in snap.documents) {
@@ -695,7 +695,7 @@ class ItemDetailActivity : AppCompatActivity() {
     }
 
     private fun showAddModifierDialog() {
-        db.collection("ModifierGroups").get()
+        MerchantFirestore.col("ModifierGroups").get()
             .addOnSuccessListener { snap ->
                 val allGroups = snap.documents.mapNotNull { doc ->
                     val name = doc.getString("name") ?: return@mapNotNull null
@@ -738,7 +738,7 @@ class ItemDetailActivity : AppCompatActivity() {
         } else {
             mapOf("assignedModifierGroupIds" to ids)
         }
-        db.collection("MenuItems").document(itemId).update(updates)
+        MerchantFirestore.col("MenuItems").document(itemId).update(updates)
             .addOnSuccessListener {
                 assignedModifierGroupIds = ids
                 loadAssignedModifiers()
@@ -868,7 +868,7 @@ class ItemDetailActivity : AppCompatActivity() {
             updates["printerLabel"] = trimmed.first()
             KitchenRoutingLabelsFirestore.mergeLabelsIntoFirestore(db, trimmed)
         }
-        db.collection("MenuItems").document(itemId).update(updates)
+        MerchantFirestore.col("MenuItems").document(itemId).update(updates)
             .addOnSuccessListener {
                 labels = trimmed
                 bindLabels()
@@ -889,7 +889,7 @@ class ItemDetailActivity : AppCompatActivity() {
     // ── KDS stations (kds_devices: assignedItemIds, assignedCategoryIds, or empty = all) ──
 
     private fun loadKdsAssignments() {
-        db.collection(KdsStationRouting.COLLECTION).get()
+        MerchantFirestore.col(KdsStationRouting.COLLECTION).get()
             .addOnSuccessListener { snap ->
                 val rows = snap.documents
                     .filter {
@@ -952,7 +952,7 @@ class ItemDetailActivity : AppCompatActivity() {
             .setMessage(R.string.item_detail_delete_message)
             .setPositiveButton(R.string.item_detail_delete_action) { _, _ ->
                 removeItemFromKdsDeviceAssignments {
-                    db.collection("MenuItems").document(itemId).delete()
+                    MerchantFirestore.col("MenuItems").document(itemId).delete()
                         .addOnSuccessListener {
                             Toast.makeText(this, R.string.item_detail_deleted, Toast.LENGTH_SHORT).show()
                             finish()
@@ -968,7 +968,7 @@ class ItemDetailActivity : AppCompatActivity() {
 
     /** Clears this menu item id from every KDS device filter list (Firestore does not cascade). */
     private fun removeItemFromKdsDeviceAssignments(done: () -> Unit) {
-        db.collection(KdsStationRouting.COLLECTION)
+        MerchantFirestore.col(KdsStationRouting.COLLECTION)
             .whereArrayContains("assignedItemIds", itemId)
             .get()
             .addOnCompleteListener { task ->

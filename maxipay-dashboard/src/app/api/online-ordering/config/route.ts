@@ -9,11 +9,17 @@ export const runtime = "nodejs";
  * Public read: whether online ordering is on, business name (Settings/businessInfo),
  * and which payment paths are enabled.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const merchantId = searchParams.get("merchantId")?.trim();
+    if (!merchantId) {
+      return NextResponse.json({ error: "merchantId is required." }, { status: 400 });
+    }
+
     getFirebaseAdminApp();
     const db = admin.firestore();
-    const cfg = await loadPublicOnlineOrderingConfig(db);
+    const cfg = await loadPublicOnlineOrderingConfig(db, merchantId);
     return NextResponse.json(cfg, {
       headers: { "Cache-Control": "no-store" },
     });

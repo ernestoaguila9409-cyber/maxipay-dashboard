@@ -10,16 +10,22 @@ import {
 export const runtime = "nodejs";
 
 /** Public menu: items with `channels.online === true` and categories for grouping. */
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const merchantId = searchParams.get("merchantId")?.trim();
+    if (!merchantId) {
+      return NextResponse.json({ error: "merchantId is required." }, { status: 400 });
+    }
+
     getFirebaseAdminApp();
     const db = admin.firestore();
-    const cfg = await loadPublicOnlineOrderingConfig(db);
+    const cfg = await loadPublicOnlineOrderingConfig(db, merchantId);
     if (!cfg.enabled) {
       return NextResponse.json({ error: "Online ordering is disabled." }, { status: 403 });
     }
     const [menu, bestSellerItemIds] = await Promise.all([
-      loadOnlineMenu(db),
+      loadOnlineMenu(db, merchantId),
       loadBestSellerItemIds(db, 5),
     ]);
     return NextResponse.json({ ...menu, bestSellerItemIds }, {

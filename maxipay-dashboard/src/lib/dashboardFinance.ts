@@ -1,5 +1,4 @@
 import {
-  collection,
   documentId,
   getDocs,
   query,
@@ -10,7 +9,7 @@ import {
 
 import type { HourlySalesPoint } from "@/components/SalesChart";
 import type { PaymentBreakdownTotals } from "@/components/PaymentBreakdown";
-import { db } from "@/firebase/firebaseConfig";
+import { merchantCol } from "@/lib/merchantFirestore";
 
 /**
  * Revenue from an Order document for dashboard-style KPIs.
@@ -236,7 +235,7 @@ export async function aggregatePaymentBreakdownFromTransactionIds(
   for (let i = 0; i < unique.length; i += 10) {
     const chunk = unique.slice(i, i + 10);
     const q = query(
-      collection(db, "Transactions"),
+      merchantCol(merchantId, "Transactions"),
       where(documentId(), "in", chunk)
     );
     try {

@@ -88,7 +88,7 @@ class SelectTaxesActivity : AppCompatActivity() {
 
         setContentView(root)
 
-        db.collection("Taxes").get()
+        MerchantFirestore.col("Taxes").get()
             .addOnSuccessListener { snap ->
                 val taxes = snap.documents.mapNotNull { doc ->
                     val name = doc.getString("name") ?: return@mapNotNull null

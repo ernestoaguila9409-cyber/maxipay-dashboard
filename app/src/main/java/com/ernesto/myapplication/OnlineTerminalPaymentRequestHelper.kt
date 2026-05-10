@@ -14,7 +14,7 @@ object OnlineTerminalPaymentRequestHelper {
     fun markCompletedIfPresent(db: FirebaseFirestore, orderId: String?) {
         val oid = orderId?.trim().orEmpty()
         if (oid.isEmpty()) return
-        db.collection(COLLECTION).document(oid).get()
+        MerchantFirestore.doc(COLLECTION, oid).get()
             .addOnSuccessListener { snap ->
                 if (!snap.exists()) return@addOnSuccessListener
                 snap.reference.update(

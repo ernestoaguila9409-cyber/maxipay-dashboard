@@ -32,7 +32,7 @@ object PrinterFirestoreDeletionSync {
         if (registration != null) return
         val app = context.applicationContext
         val db = FirebaseFirestore.getInstance()
-        registration = db.collection(PrinterFirestoreSync.COLLECTION)
+        registration = MerchantFirestore.col(PrinterFirestoreSync.COLLECTION)
             .addSnapshotListener { snap, err ->
                 if (err != null) {
                     Log.w(TAG, "Printers listener: ${err.message}")

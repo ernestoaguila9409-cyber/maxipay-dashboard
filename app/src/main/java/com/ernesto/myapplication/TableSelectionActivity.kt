@@ -151,7 +151,7 @@ class TableSelectionActivity : AppCompatActivity() {
 
             if (section.isNotBlank() && section !in knownSections) {
                 knownSections.add(section)
-                db.collection("Sections").document(section).set(hashMapOf("name" to section))
+                MerchantFirestore.col("Sections").document(section).set(hashMapOf("name" to section))
                 sectionsAdded = true
             }
 
@@ -380,7 +380,7 @@ class TableSelectionActivity : AppCompatActivity() {
         lastDineInReservationsSnapshot = null
         dineInReservationPreviewTableIds.clear()
         if (!useTableLayouts || activeLayoutId.isBlank()) return
-        dineInReservationsListener = db.collection(ReservationFirestoreHelper.COLLECTION)
+        dineInReservationsListener = MerchantFirestore.col(ReservationFirestoreHelper.COLLECTION)
             .whereEqualTo("tableLayoutId", activeLayoutId)
             .addSnapshotListener { snap, err ->
                 if (err != null || snap == null) return@addSnapshotListener
@@ -451,7 +451,7 @@ class TableSelectionActivity : AppCompatActivity() {
     // ── DATA LOADING ───────────────────────────────────────
 
     private fun loadSectionsAndTables() {
-        db.collection("Sections").get()
+        MerchantFirestore.col("Sections").get()
             .addOnSuccessListener { snap ->
                 knownSections.clear()
                 for (doc in snap.documents) {
@@ -486,7 +486,7 @@ class TableSelectionActivity : AppCompatActivity() {
     }
 
     private fun loadTablesPreferred() {
-        db.collection("tableLayouts").get()
+        MerchantFirestore.col("tableLayouts").get()
             .addOnSuccessListener { layoutSnap ->
                 if (layoutSnap.isEmpty) {
                     useTableLayouts = false
@@ -512,7 +512,7 @@ class TableSelectionActivity : AppCompatActivity() {
                     ReservationFirestoreHelper.holdStartsBeforeSlotMsFromLayoutSnapshot(layoutDoc)
 
                 layoutTablesListener?.remove()
-                layoutTablesListener = db.collection("tableLayouts").document(activeLayoutId)
+                layoutTablesListener = MerchantFirestore.col("tableLayouts").document(activeLayoutId)
                     .collection("tables")
                     .addSnapshotListener { snap, err ->
                         if (err != null || snap == null) return@addSnapshotListener
@@ -534,7 +534,7 @@ class TableSelectionActivity : AppCompatActivity() {
     private fun attachLayoutParentMetaListener() {
         layoutParentMetaListener?.remove(); layoutParentMetaListener = null
         if (!useTableLayouts || activeLayoutId.isBlank()) return
-        layoutParentMetaListener = db.collection("tableLayouts").document(activeLayoutId)
+        layoutParentMetaListener = MerchantFirestore.col("tableLayouts").document(activeLayoutId)
             .addSnapshotListener { layoutSnap, _ ->
                 if (layoutSnap != null && layoutSnap.exists()) {
                     layoutGraceAfterSlotMs =
@@ -609,7 +609,7 @@ class TableSelectionActivity : AppCompatActivity() {
         layoutParentMetaListener?.remove(); layoutParentMetaListener = null
         detachDineInReservationPreview()
         legacyTablesListener?.remove()
-        legacyTablesListener = db.collection("Tables")
+        legacyTablesListener = MerchantFirestore.col("Tables")
             .whereEqualTo("active", true)
             .addSnapshotListener { snap, err ->
                 if (err != null) {
@@ -718,7 +718,7 @@ class TableSelectionActivity : AppCompatActivity() {
     // ── OCCUPIED STATE ─────────────────────────────────────
 
     private fun listenForOccupiedTables() {
-        occupiedListener = db.collection("Orders")
+        occupiedListener = MerchantFirestore.col("Orders")
             .whereEqualTo("status", "OPEN")
             .whereEqualTo("orderType", "DINE_IN")
             .addSnapshotListener { snap, _ ->
@@ -852,7 +852,7 @@ class TableSelectionActivity : AppCompatActivity() {
             onMissing()
             return
         }
-        db.collection(ReservationFirestoreHelper.COLLECTION).document(rid).get()
+        MerchantFirestore.col(ReservationFirestoreHelper.COLLECTION).document(rid).get()
             .addOnSuccessListener { snap ->
                 if (snap.exists()) onLoaded(snap) else onMissing()
             }
@@ -1192,7 +1192,7 @@ class TableSelectionActivity : AppCompatActivity() {
     }
 
     private fun deleteOrderAndFreeTable(orderId: String) {
-        val orderRef = db.collection("Orders").document(orderId)
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
         orderRef.get().addOnSuccessListener { orderSnap ->
             val tid = orderSnap.getString("tableId")?.trim().orEmpty()
             val layoutId = orderSnap.getString("tableLayoutId")

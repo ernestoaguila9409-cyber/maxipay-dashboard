@@ -83,7 +83,7 @@ class BatchManagementActivity : AppCompatActivity() {
 
     // 🔹 LOAD OPEN TRANSACTIONS (UNSETTLED, NOT VOIDED)
     private fun loadOpenBatch() {
-        db.collection("Transactions")
+        MerchantFirestore.col("Transactions")
             .whereEqualTo("settled", false)
             .whereEqualTo("voided", false)
             .get()
@@ -120,7 +120,7 @@ class BatchManagementActivity : AppCompatActivity() {
     // 🔹 LOAD CLOSED BATCHES
     private fun loadClosedBatches() {
 
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .whereEqualTo("closed", true)
             .get()
             .addOnSuccessListener { documents ->
@@ -180,7 +180,7 @@ class BatchManagementActivity : AppCompatActivity() {
 
         // Receipt tip mode: warn if card sales have not had tips finalized (Add Tip / confirm $0.00).
         if (TipConfig.isTipsEnabled(this) && !TipConfig.isTipOnCustomerScreen(this)) {
-            db.collection("Transactions")
+            MerchantFirestore.col("Transactions")
                 .whereEqualTo("settled", false)
                 .whereEqualTo("voided", false)
                 .get()
@@ -393,7 +393,7 @@ class BatchManagementActivity : AppCompatActivity() {
     // 🔹 CLOSE BATCH IN FIREBASE AFTER PROCESSOR SETTLE CONFIRMS
     private fun closeBatchInFirebase() {
 
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .whereEqualTo("closed", false)
             .limit(1)
             .get()
@@ -410,7 +410,7 @@ class BatchManagementActivity : AppCompatActivity() {
                         "type" to "OPEN",
                         "transactionCounter" to 0
                     )
-                    db.collection("Batches").document(newBatchId).set(batchData)
+                    MerchantFirestore.col("Batches").document(newBatchId).set(batchData)
                         .addOnSuccessListener { settleOpenBatch(newBatchId) }
                         .addOnFailureListener {
                             Toast.makeText(this, "Failed to create batch: ${it.message}", Toast.LENGTH_SHORT).show()
@@ -426,10 +426,10 @@ class BatchManagementActivity : AppCompatActivity() {
     private fun settleOpenBatch(batchId: String) {
         scope.launch {
             try {
-                val batchRef = db.collection("Batches").document(batchId)
+                val batchRef = MerchantFirestore.col("Batches").document(batchId)
 
                 val transactions = withContext(Dispatchers.IO) {
-                    db.collection("Transactions")
+                    MerchantFirestore.col("Transactions")
                         .whereEqualTo("settled", false)
                         .whereEqualTo("voided", false)
                         .get()
@@ -489,7 +489,7 @@ class BatchManagementActivity : AppCompatActivity() {
                     "transactionCounter" to 0
                 )
                 withContext(Dispatchers.IO) {
-                    db.collection("Batches").document(newBatchId).set(newBatchData).await()
+                    MerchantFirestore.col("Batches").document(newBatchId).set(newBatchData).await()
                 }
 
                 setSettlingState(false)

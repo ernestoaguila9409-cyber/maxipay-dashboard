@@ -80,7 +80,7 @@ class CustomersActivity : AppCompatActivity() {
     }
 
     private fun loadCustomers() {
-        db.collection("Customers")
+        MerchantFirestore.col("Customers")
             .get()
             .addOnSuccessListener { documents ->
                 val items = documents.map { doc ->
@@ -157,7 +157,7 @@ class CustomersActivity : AppCompatActivity() {
                         "createdAt" to Timestamp.now(),
                     )
 
-                    db.collection("Customers")
+                    MerchantFirestore.col("Customers")
                         .add(customer)
                         .addOnSuccessListener {
                             dialog.dismiss()
@@ -192,7 +192,7 @@ class CustomersActivity : AppCompatActivity() {
         exitSelectionMode()
         val batch = db.batch()
         for (id in selectedIds) {
-            batch.delete(db.collection("Customers").document(id))
+            batch.delete(MerchantFirestore.doc("Customers", id))
         }
         batch.commit()
             .addOnSuccessListener {

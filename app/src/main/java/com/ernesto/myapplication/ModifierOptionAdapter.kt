@@ -111,12 +111,12 @@ class ModifierOptionAdapter(
 
     private fun deleteOption(option: ModifierOptionDisplay) {
         if (useEmbeddedOptions && groupId != null) {
-            db.collection("ModifierGroups").document(groupId).get()
+            MerchantFirestore.col("ModifierGroups").document(groupId).get()
                 .addOnSuccessListener { doc ->
                     @Suppress("UNCHECKED_CAST")
                     val rawOptions = doc.get("options") as? List<Map<String, Any>> ?: emptyList()
                     val updated = rawOptions.filter { (it["id"] as? String) != option.id }
-                    db.collection("ModifierGroups").document(groupId)
+                    MerchantFirestore.col("ModifierGroups").document(groupId)
                         .update("options", updated)
                         .addOnSuccessListener {
                             Toast.makeText(context, "Deleted", Toast.LENGTH_SHORT).show()
@@ -124,7 +124,7 @@ class ModifierOptionAdapter(
                         }
                 }
         } else {
-            db.collection("ModifierOptions")
+            MerchantFirestore.col("ModifierOptions")
                 .document(option.id)
                 .delete()
                 .addOnSuccessListener {
@@ -135,7 +135,7 @@ class ModifierOptionAdapter(
     }
 
     private fun showEditOptionDialog(option: ModifierOptionDisplay) {
-        db.collection("ModifierGroups").get()
+        MerchantFirestore.col("ModifierGroups").get()
             .addOnSuccessListener { snap ->
                 val otherGroups = snap.documents.mapNotNull { doc ->
                     val gName = doc.getString("name") ?: return@mapNotNull null
@@ -216,7 +216,7 @@ class ModifierOptionAdapter(
                 val selectedTriggers = form.triggers.selectedTriggerGroupIds()
 
                 if (useEmbeddedOptions && groupId != null) {
-                    db.collection("ModifierGroups").document(groupId).get()
+                    MerchantFirestore.col("ModifierGroups").document(groupId).get()
                         .addOnSuccessListener { doc ->
                             @Suppress("UNCHECKED_CAST")
                             val rawOptions = doc.get("options") as? List<Map<String, Any>> ?: emptyList()
@@ -234,7 +234,7 @@ class ModifierOptionAdapter(
                                     opt
                                 }
                             }
-                            db.collection("ModifierGroups").document(groupId)
+                            MerchantFirestore.col("ModifierGroups").document(groupId)
                                 .update("options", updated)
                                 .addOnSuccessListener {
                                     dialog.dismiss()
@@ -249,7 +249,7 @@ class ModifierOptionAdapter(
                         "triggersModifierGroupIds" to selectedTriggers,
                         "action" to newAction,
                     )
-                    db.collection("ModifierOptions")
+                    MerchantFirestore.col("ModifierOptions")
                         .document(option.id)
                         .update(updates)
                         .addOnSuccessListener {

@@ -178,7 +178,7 @@ class CategoryAdapter(
         val categoryId = category.id.trim()
         if (categoryId.isEmpty()) return
 
-        db.collection(KdsStationRouting.COLLECTION).get()
+        MerchantFirestore.col(KdsStationRouting.COLLECTION).get()
             .addOnSuccessListener { snap ->
                 val all = snap.documents.mapNotNull { doc ->
                     if (!KdsStationRouting.isDeviceSelectable(doc)) return@mapNotNull null
@@ -250,7 +250,7 @@ class CategoryAdapter(
             val want = wantIds.contains(dev.id)
             val had = baselineHadIds.contains(dev.id)
             if (want == had) continue
-            val ref = db.collection(KdsStationRouting.COLLECTION).document(dev.id)
+            val ref = MerchantFirestore.col(KdsStationRouting.COLLECTION).document(dev.id)
             if (want) {
                 batch.update(ref, "assignedCategoryIds", FieldValue.arrayUnion(categoryId))
             } else {
@@ -316,7 +316,7 @@ class CategoryAdapter(
                 val newName = editText.text.toString().trim()
                 if (newName.isNotEmpty()) {
                     val selectedTypes = checkBoxes.filter { it.value.isChecked }.keys.toList()
-                    db.collection("Categories")
+                    MerchantFirestore.col("Categories")
                         .document(category.id)
                         .update(
                             mapOf(
@@ -379,7 +379,7 @@ class CategoryAdapter(
                 } else {
                     mapOf("kitchenLabel" to label)
                 }
-                db.collection("Categories").document(category.id).update(updates)
+                MerchantFirestore.col("Categories").document(category.id).update(updates)
                     .addOnSuccessListener {
                         if (label.isEmpty() && previousLabel.isNotEmpty()) {
                             CategoryKitchenLabelCascade.afterCategoryKitchenLabelRemoved(
@@ -421,7 +421,7 @@ class CategoryAdapter(
     }
 
     private fun deleteCategory(categoryId: String) {
-        db.collection("Categories")
+        MerchantFirestore.col("Categories")
             .document(categoryId)
             .delete()
             .addOnSuccessListener {

@@ -1,6 +1,7 @@
 import admin from "firebase-admin";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp } from "@/lib/firebaseAdmin";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestoreAdmin";
 import { sendEmailViaResend, getResendFromAddress } from "@/lib/resendEmail";
 
 export const runtime = "nodejs";
@@ -47,9 +48,10 @@ function sleep(ms: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function fetchBusinessInfo(
-  db: admin.firestore.Firestore
+  db: admin.firestore.Firestore,
+  merchantId: string,
 ): Promise<Record<string, unknown>> {
-  const snap = await db.collection("Settings").doc("businessInfo").get();
+  const snap = await merchantDoc(merchantId, "Settings", "businessInfo").get();
   if (!snap.exists) return {};
   return (snap.data() as Record<string, unknown>) ?? {};
 }
@@ -211,6 +213,15 @@ export async function POST(req: Request) {
   }
 
   try {
+    const { searchParams } = new URL(req.url);
+    const merchantId = searchParams.get("merchantId")?.trim();
+    if (!merchantId) {
+      return NextResponse.json(
+        { ok: false, error: "missing_merchant", message: "merchantId is required." },
+        { status: 400 }
+      );
+    }
+
     const body = (await req.json().catch(() => ({}))) as { email?: string };
     const normalized = normalizeEmail(body.email);
     if (!normalized) {
@@ -222,8 +233,7 @@ export async function POST(req: Request) {
 
     getFirebaseAdminApp();
     const db = admin.firestore();
-    const snap = await db
-      .collection("Employees")
+    const snap = await merchantCol(merchantId, "Employees")
       .where("email", "==", normalized)
       .limit(2)
       .get();
@@ -295,7 +305,7 @@ export async function POST(req: Request) {
     }
 
     // Fetch business branding from Firestore
-    const biz = await fetchBusinessInfo(db);
+    const biz = await fetchBusinessInfo(db, merchantId);
     const businessName =
       (typeof biz.businessName === "string" && biz.businessName.trim()) || "MaxiPay";
     const logoUrl = resolveLogoUrl(biz);

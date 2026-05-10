@@ -41,7 +41,7 @@ class TodaySalesActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnCurrentOrder).setOnClickListener {
-            db.collection("Batches")
+            MerchantFirestore.col("Batches")
                 .whereEqualTo("closed", false)
                 .limit(1)
                 .get()
@@ -85,7 +85,7 @@ class TodaySalesActivity : AppCompatActivity() {
 
     private fun attachCurrentSalesListener() {
         currentSalesListener?.remove()
-        currentSalesListener = db.collection("Transactions")
+        currentSalesListener = MerchantFirestore.col("Transactions")
             .whereEqualTo("settled", false)
             .addSnapshotListener { snapshots, error ->
                 if (error != null) {

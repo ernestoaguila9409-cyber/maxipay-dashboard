@@ -4,6 +4,7 @@ import com.ernesto.myapplication.KitchenPrintHelper
 import com.ernesto.myapplication.OrderLineKdsStatus
 import com.ernesto.myapplication.OrderModifier
 import com.ernesto.myapplication.OrderNumberGenerator
+import com.ernesto.myapplication.MerchantFirestore
 import com.ernesto.myapplication.PrintingSettingsFirestore
 import com.ernesto.myapplication.TableFirestoreHelper
 import com.google.firebase.firestore.FieldValue
@@ -92,7 +93,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
                 if (!customerPhone.isNullOrBlank()) orderMap["customerPhone"] = customerPhone
                 if (!customerEmail.isNullOrBlank()) orderMap["customerEmail"] = customerEmail
 
-                db.collection("Orders")
+                MerchantFirestore.col("Orders")
                     .add(orderMap)
                     .addOnSuccessListener { doc ->
                         if (orderType == "DINE_IN" && !tableId.isNullOrBlank()) {
@@ -133,7 +134,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
             "updatedAt" to Date()
         )
         if (!customerId.isNullOrBlank()) updates["customerId"] = customerId
-        db.collection("Orders").document(orderId)
+        MerchantFirestore.col("Orders").document(orderId)
             .update(updates)
             .addOnSuccessListener { onSuccess() }
             .addOnFailureListener { e -> onFailure(e) }
@@ -199,7 +200,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
         val cid = input.courseId?.trim()
         if (!cid.isNullOrEmpty()) itemMap["courseId"] = cid
 
-        val orderRef = db.collection("Orders").document(orderId)
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
         val lineRef = orderRef.collection("items").document(lineKey)
 
         if (!isNewLine) {
@@ -291,7 +292,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
         onSuccess: () -> Unit,
         onFailure: (Exception) -> Unit
     ) {
-        val orderRef = db.collection("Orders").document(orderId)
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
 
         orderRef.update("itemsCount", FieldValue.increment(-1))
 
@@ -337,7 +338,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
         onSuccess: () -> Unit,
         onFailure: (Exception) -> Unit
     ) {
-        val orderRef = db.collection("Orders").document(orderId)
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
 
         var itemsResult: QuerySnapshot? = null
         var taxesResult: QuerySnapshot? = null
@@ -362,7 +363,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
             .addOnSuccessListener { snap -> synchronized(lock) { itemsResult = snap }; onParallelDone() }
             .addOnFailureListener { e -> synchronized(lock) { parallelError = parallelError ?: e }; onParallelDone() }
 
-        db.collection("Taxes").get()
+        MerchantFirestore.col("Taxes").get()
             .addOnSuccessListener { snap -> synchronized(lock) { taxesResult = snap }; onParallelDone() }
             .addOnFailureListener { e -> synchronized(lock) { parallelError = parallelError ?: e }; onParallelDone() }
     }

@@ -12,7 +12,8 @@ import {
   slugify,
   type OnlineOrderingSettings,
 } from "@/lib/onlineOrderingShared";
-import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
+import { onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
+import { merchantDoc } from "@/lib/merchantFirestore";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import {
   ShoppingBag,
@@ -51,8 +52,8 @@ export default function OnlineOrderingSettingsPage() {
   }, []);
 
   useEffect(() => {
-    const ooRef = doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC);
-    const bizRef = doc(db, SETTINGS_COLLECTION, "businessInfo");
+    const ooRef = merchantDoc(merchantId, "Settings", ONLINE_ORDERING_SETTINGS_DOC);
+    const bizRef = merchantDoc(merchantId, "Settings", "businessInfo");
     const unsubs = [
       onSnapshot(ooRef, (snap) => {
         const parsed = parseOnlineOrderingSettings(snap.data() as Record<string, unknown> | undefined);
@@ -85,14 +86,13 @@ export default function OnlineOrderingSettingsPage() {
       const payload: Record<string, unknown> = {
         ...flags,
         updatedAt: serverTimestamp(),
-        merchantId,
       };
       if (credentials) {
         payload.iposHppTpn = credentials.tpn;
         payload.iposHppAuthToken = credentials.authToken;
       }
       await setDoc(
-        doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
+        merchantDoc(merchantId, "Settings", ONLINE_ORDERING_SETTINGS_DOC),
         payload,
         { merge: true }
       );
@@ -115,12 +115,11 @@ export default function OnlineOrderingSettingsPage() {
     setHppCredsSaveState("saving");
     try {
       await setDoc(
-        doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
+        merchantDoc(merchantId, "Settings", ONLINE_ORDERING_SETTINGS_DOC),
         {
           iposHppTpn: tpn,
           iposHppAuthToken: authToken,
           updatedAt: serverTimestamp(),
-          merchantId,
         },
         { merge: true }
       );
@@ -138,8 +137,8 @@ export default function OnlineOrderingSettingsPage() {
     setSlugSaving(true);
     try {
       await setDoc(
-        doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
-        { onlineOrderingSlug: cleaned, updatedAt: serverTimestamp(), merchantId },
+        merchantDoc(merchantId, "Settings", ONLINE_ORDERING_SETTINGS_DOC),
+        { onlineOrderingSlug: cleaned, updatedAt: serverTimestamp() },
         { merge: true }
       );
     } catch (e) {

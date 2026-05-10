@@ -12,6 +12,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { orderTypeBadgeStyle, parseCreatedAt } from "@/lib/orderDisplayUtils";
 import {
   partitionReservationRows,
@@ -128,7 +129,7 @@ export default function CustomerDetailModal({
     setError(null);
     setReservationsEmpty(false);
     try {
-      const custSnap = await getDoc(doc(db, "Customers", cid));
+      const custSnap = await getDoc(merchantDoc(merchantId, "Customers", cid));
       if (custSnap.exists()) {
         const d = custSnap.data() as Record<string, unknown>;
         const full = displayNameFromDoc(d);
@@ -144,8 +145,7 @@ export default function CustomerDetailModal({
       }
 
       const ordersQ = query(
-        collection(db, "Orders"),
-        where("merchantId", "==", merchantId),
+        merchantCol(merchantId, "Orders"),
         where("customerId", "==", cid),
         orderBy("createdAt", "desc")
       );
@@ -190,8 +190,7 @@ export default function CustomerDetailModal({
       setLastVisitStr(latest ? formatOrderHistoryDate(latest) : "—");
 
       const resQ = query(
-        collection(db, RESERVATIONS_COLLECTION),
-        where("merchantId", "==", merchantId),
+        merchantCol(merchantId, RESERVATIONS_COLLECTION),
         where("customerId", "==", cid)
       );
       const resSnap = await getDocs(resQ);

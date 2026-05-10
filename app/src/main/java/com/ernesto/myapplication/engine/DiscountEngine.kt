@@ -3,6 +3,7 @@ package com.ernesto.myapplication.engine
 import com.ernesto.myapplication.CartItem
 import com.ernesto.myapplication.DiscountItem
 import com.ernesto.myapplication.DiscountSchedule
+import com.ernesto.myapplication.MerchantFirestore
 import com.google.firebase.firestore.FirebaseFirestore
 
 data class AppliedDiscount(
@@ -20,7 +21,7 @@ class DiscountEngine(private val db: FirebaseFirestore) {
     private var cachedDiscounts: List<DiscountItem> = emptyList()
 
     fun loadDiscounts(onComplete: () -> Unit) {
-        db.collection("discounts")
+        MerchantFirestore.col("discounts")
             .get()
             .addOnSuccessListener { snap ->
                 cachedDiscounts = snap.documents.mapNotNull { doc ->

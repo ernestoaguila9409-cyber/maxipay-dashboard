@@ -315,7 +315,7 @@ class AddDiscountActivity : AppCompatActivity() {
         }
 
         if (discountId != null) {
-            db.collection("discounts").document(discountId!!)
+            MerchantFirestore.doc("discounts", discountId!!)
                 .update(data as Map<String, Any>)
                 .addOnSuccessListener {
                     Toast.makeText(this, "Discount updated", Toast.LENGTH_SHORT).show()
@@ -325,7 +325,7 @@ class AddDiscountActivity : AppCompatActivity() {
                     Toast.makeText(this, "Failed to update: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
         } else {
-            db.collection("discounts")
+            MerchantFirestore.col("discounts")
                 .add(data)
                 .addOnSuccessListener {
                     Toast.makeText(this, "Discount saved", Toast.LENGTH_SHORT).show()
@@ -343,7 +343,7 @@ class AddDiscountActivity : AppCompatActivity() {
             .setTitle("Remove discount")
             .setMessage("Remove this discount?")
             .setPositiveButton("Remove") { _, _ ->
-                db.collection("discounts").document(id)
+                MerchantFirestore.doc("discounts", id)
                     .delete()
                     .addOnSuccessListener {
                         Toast.makeText(this, "Discount removed", Toast.LENGTH_SHORT).show()

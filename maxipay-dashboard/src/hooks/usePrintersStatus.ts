@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, query, where, type Unsubscribe } from "firebase/firestore";
+import { onSnapshot, type Unsubscribe } from "firebase/firestore";
 
-import { db } from "@/firebase/firebaseConfig";
+import { merchantCol } from "@/lib/merchantFirestore";
 import {
   PRINTER_STATUS_TICK_MS,
   formatLastSeenAgo,
@@ -59,10 +59,7 @@ export function usePrintersStatus(enabled: boolean, merchantId: string): UsePrin
     }
 
     setLoading(true);
-    const col = query(
-      collection(db, "Printers"),
-      where("merchantId", "==", merchantId),
-    );
+    const col = merchantCol(merchantId, "Printers");
     let unsub: Unsubscribe | undefined;
 
     try {

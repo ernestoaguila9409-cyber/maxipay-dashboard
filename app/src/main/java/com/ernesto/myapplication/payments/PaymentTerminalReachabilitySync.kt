@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.ernesto.myapplication.MerchantFirestore
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import okhttp3.OkHttpClient
@@ -114,7 +115,7 @@ object PaymentTerminalReachabilitySync {
                 LEGACY_FIELD_LAST_SEEN to ts,
             )
         }
-        val docRef = db.collection(collection).document(cfg.id)
+        val docRef = MerchantFirestore.doc(collection, cfg.id)
         docRef.update(data)
             .addOnSuccessListener {
                 if (collection != COLLECTION_PAYMENT) {
@@ -144,7 +145,7 @@ object PaymentTerminalReachabilitySync {
             }
             m
         }
-        db.collection(collection).document(cfg.id).update(data)
+        MerchantFirestore.doc(collection, cfg.id).update(data)
             .addOnSuccessListener {
                 if (collection != COLLECTION_PAYMENT) {
                     mirrorPosFieldsToPaymentTerminalDashboard(cfg.id, cfg, posFields)
@@ -162,7 +163,7 @@ object PaymentTerminalReachabilitySync {
         cfg: PaymentTerminalConfig,
         posFields: Map<String, Any>,
     ) {
-        db.collection(COLLECTION_PAYMENT)
+        MerchantFirestore.col(COLLECTION_PAYMENT)
             .whereEqualTo("legacyTerminalId", legacyDocId)
             .limit(10)
             .get()
@@ -178,7 +179,7 @@ object PaymentTerminalReachabilitySync {
                 }
                 val tpn = cfg.credential(PaymentTerminalConfig.Companion.ConfigKey.TPN).trim()
                 if (tpn.isEmpty()) return@addOnSuccessListener
-                db.collection(COLLECTION_PAYMENT)
+                MerchantFirestore.col(COLLECTION_PAYMENT)
                     .whereEqualTo("config.tpn", tpn)
                     .limit(5)
                     .get()

@@ -36,8 +36,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
 
     const termSnap = await db
+      .collection("Merchants")
+      .doc(id)
       .collection("payment_terminals")
-      .where("merchantId", "==", id)
       .get();
 
     const terminals = termSnap.docs.map((d) => ({ id: d.id, ...d.data() }));

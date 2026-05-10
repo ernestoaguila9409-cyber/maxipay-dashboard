@@ -15,7 +15,7 @@ import {
   orderRevenueCentsForMetrics,
 } from "@/lib/dashboardFinance";
 import { parseCreatedAt } from "@/lib/orderDisplayUtils";
-import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { formatCategoryDisplayName } from "@/lib/categoryNameUtils";
 import {
   getDailySalesSummary,
@@ -156,8 +156,8 @@ async function loadCategoryAndMenuMaps(merchantId: string): Promise<{
   itemMetaById: Map<string, { categoryId: string; name: string }>;
 }> {
   const [catSnap, itemSnap] = await Promise.all([
-    getDocs(query(collection(db, "Categories"), where("merchantId", "==", merchantId))),
-    getDocs(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId))),
+    getDocs(merchantCol(merchantId, "Categories")),
+    getDocs(merchantCol(merchantId, "MenuItems")),
   ]);
   const categoryNameById = new Map<string, string>();
   catSnap.forEach((d) => {
@@ -178,8 +178,7 @@ async function fetchRefundCount(merchantId: string, start: Date, endExclusive: D
   try {
     const snap = await getDocs(
       query(
-        collection(db, "Transactions"),
-        where("merchantId", "==", merchantId),
+        merchantCol(merchantId, "Transactions"),
         where("createdAt", ">=", Timestamp.fromDate(start)),
         where("createdAt", "<", Timestamp.fromDate(endExclusive))
       )
@@ -216,6 +215,7 @@ function resolveCategoryName(
 }
 
 async function aggregateItemRows(
+  merchantId: string,
   orderIds: string[],
   orderDiscountById: Map<string, number>,
   categoryNameById: Map<string, string>,
@@ -232,7 +232,7 @@ async function aggregateItemRows(
         const lines: Array<{ itemId: string; name: string; qty: number; lineTotal: number }> =
           [];
         try {
-          const snap = await getDocs(collection(db, "Orders", orderId, "items"));
+          const snap = await getDocs(collection(merchantDoc(merchantId, "Orders", orderId), "items"));
           snap.forEach((d) => {
             const x = d.data();
             const name = String(x.name ?? "Item").trim() || "Item";
@@ -304,8 +304,7 @@ export async function loadSalesReportData(
   try {
     ordersSnap = await getDocs(
       query(
-        collection(db, "Orders"),
-        where("merchantId", "==", merchantId),
+        merchantCol(merchantId, "Orders"),
         where("createdAt", ">=", Timestamp.fromDate(start)),
         where("createdAt", "<", Timestamp.fromDate(endExclusive)),
         orderBy("createdAt", "desc"),
@@ -314,7 +313,7 @@ export async function loadSalesReportData(
     );
   } catch {
     ordersSnap = await getDocs(
-      query(collection(db, "Orders"), where("merchantId", "==", merchantId), orderBy("createdAt", "desc"), limit(800))
+      query(merchantCol(merchantId, "Orders"), orderBy("createdAt", "desc"), limit(800))
     );
   }
 
@@ -336,6 +335,7 @@ export async function loadSalesReportData(
   });
 
   const itemMap = await aggregateItemRows(
+    merchantId,
     closedOrderIds,
     orderDiscountById,
     categoryNameById,

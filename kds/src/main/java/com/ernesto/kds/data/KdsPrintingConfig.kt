@@ -33,7 +33,7 @@ data class KdsPrintingConfig(
         private const val FIELD_PRINT_ITEM_FILTER_MODE = "printItemFilterMode"
 
         fun printingDocument(db: FirebaseFirestore) =
-            db.collection(COLLECTION).document(DOCUMENT_ID)
+            MerchantFirestore.col("settings").document(DOCUMENT_ID)
 
         fun fromSnapshot(snap: DocumentSnapshot?): KdsPrintingConfig {
             if (snap == null || !snap.exists()) return DEFAULT

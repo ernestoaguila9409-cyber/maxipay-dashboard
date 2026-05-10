@@ -337,7 +337,7 @@ object CustomerDialogHelper {
         allCustomers: MutableList<SavedCustomer>,
         onLoaded: () -> Unit,
     ) {
-        FirebaseFirestore.getInstance().collection("Customers")
+        MerchantFirestore.col("Customers")
             .get()
             .addOnSuccessListener { snap ->
                 data class Row(val id: String, val name: String, val phone: String, val email: String)

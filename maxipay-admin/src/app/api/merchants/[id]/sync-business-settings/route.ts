@@ -20,7 +20,7 @@ function handleError(e: unknown) {
   return NextResponse.json({ ok: false, error: "server_error" }, { status: 500 });
 }
 
-/** Pushes Merchants/{id} into Settings/businessInfo for POS + web dashboard (no body). */
+/** Pushes Merchants/{id} into Merchants/{id}/settings/businessInfo for POS + web dashboard (no body). */
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     await requireSuperAdmin(_req);

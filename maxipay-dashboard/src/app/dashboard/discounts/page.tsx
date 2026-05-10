@@ -14,6 +14,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -115,7 +116,7 @@ export default function DiscountsPage() {
     if (!user || !merchantId) {
       return;
     }
-    getDocs(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)))
+    getDocs(query(merchantCol(merchantId, "MenuItems")))
       .then((snap) => {
         const items: MenuItem[] = [];
         snap.forEach((d) => {
@@ -133,7 +134,7 @@ export default function DiscountsPage() {
       })
       .catch((err) => console.error("Failed to load menu items:", err));
 
-    getDocs(query(collection(db, "Categories"), where("merchantId", "==", merchantId)))
+    getDocs(query(merchantCol(merchantId, "Categories")))
       .then((snap) => {
         const cats: Category[] = [];
         snap.forEach((d) => {
@@ -155,7 +156,7 @@ export default function DiscountsPage() {
       setLoading(false);
       return;
     }
-    const unsub = onSnapshot(query(collection(db, "discounts"), where("merchantId", "==", merchantId)), (snap) => {
+    const unsub = onSnapshot(merchantCol(merchantId, "discounts"), (snap) => {
       const list: Discount[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -248,11 +249,10 @@ export default function DiscountsPage() {
 
       if (editing) {
         data.updatedAt = serverTimestamp();
-        await updateDoc(doc(db, "discounts", editing.id), data);
+        await updateDoc(merchantDoc(merchantId, "discounts", editing.id), data);
       } else {
-        data.merchantId = merchantId;
         data.createdAt = serverTimestamp();
-        await addDoc(collection(db, "discounts"), data);
+        await addDoc(merchantCol(merchantId, "discounts"), data);
       }
       setModalOpen(false);
     } catch (err) {
@@ -264,7 +264,7 @@ export default function DiscountsPage() {
 
   const handleToggleActive = async (d: Discount) => {
     try {
-      await updateDoc(doc(db, "discounts", d.id), { active: !d.active });
+      await updateDoc(merchantDoc(merchantId, "discounts", d.id), { active: !d.active });
     } catch (err) {
       console.error("Failed to toggle discount:", err);
     }
@@ -274,7 +274,7 @@ export default function DiscountsPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await deleteDoc(doc(db, "discounts", deleteTarget.id));
+      await deleteDoc(merchantDoc(merchantId, "discounts", deleteTarget.id));
     } catch (err) {
       console.error("Failed to delete discount:", err);
     } finally {

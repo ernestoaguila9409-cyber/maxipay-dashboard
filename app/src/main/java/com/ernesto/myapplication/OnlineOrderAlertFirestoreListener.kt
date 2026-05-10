@@ -41,7 +41,7 @@ class OnlineOrderAlertFirestoreListener(
     private fun attach() {
         if (registration != null) return
         skipFirstSnapshot = true
-        registration = firestore.collection(ordersCollectionPath)
+        registration = MerchantFirestore.col(ordersCollectionPath)
             .whereEqualTo(sourceField, sourceValue)
             .whereEqualTo(statusField, statusValue)
             .addSnapshotListener { snapshot, error ->

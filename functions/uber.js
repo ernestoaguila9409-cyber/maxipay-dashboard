@@ -3,6 +3,7 @@ const admin = require("firebase-admin");
 const { onRequest } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const uberApi = require("./uber-api");
+const { merchantCol, merchantDoc } = require("./merchant-firestore");
 
 // ---------------------------------------------------------------------------
 // Safe body parsing — handles object, string, and Buffer forms
@@ -80,11 +81,43 @@ function validateUberSignature(req) {
 }
 
 // ---------------------------------------------------------------------------
+// Merchant ID resolution for inbound webhooks (no Firebase Auth context)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve merchantId from an inbound Uber webhook payload.
+ *
+ * TODO: Multi-tenant — implement a proper Uber storeId → merchantId mapping.
+ * For now, tries to match by uberStoreId on the Merchants collection, then
+ * falls back to the sole merchant when only one exists.
+ */
+async function resolveWebhookMerchantId(db, payload) {
+  const order = payload.order || payload || {};
+  const storeId =
+    order.store?.store_id || order.store?.id || payload.meta?.store_id || null;
+
+  if (storeId) {
+    const snap = await db
+      .collection("Merchants")
+      .where("uberStoreId", "==", storeId)
+      .limit(1)
+      .get();
+    if (!snap.empty) return snap.docs[0].id;
+  }
+
+  const allMerchants = await db.collection("Merchants").limit(2).get();
+  if (allMerchants.size === 1) return allMerchants.docs[0].id;
+
+  logger.error("[uber] Could not resolve merchantId from webhook payload", { storeId });
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Order number generator — mirrors Counters/orderNumber transaction in Android
 // ---------------------------------------------------------------------------
 
-async function nextOrderNumber(db) {
-  const ref = db.collection("Counters").doc("orderNumber");
+async function nextOrderNumber(db, merchantId) {
+  const ref = merchantCol(merchantId, "Counters").doc("orderNumber");
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const current = snap.exists ? (snap.data().current ?? 0) : 0;
@@ -182,9 +215,9 @@ async function logWebhookEvent(db, { eventType, eventId, uberOrderId, status, er
 // Handlers for each event type
 // ---------------------------------------------------------------------------
 
-async function handleOrderCreated(db, payload, rawPayload) {
+async function handleOrderCreated(db, merchantId, payload, rawPayload) {
   const t0 = Date.now();
-  logger.info("[uber] handleOrderCreated — start");
+  logger.info("[uber] handleOrderCreated — start", { merchantId });
 
   const { uberOrderId, customerName, totalInCents, items } =
     parseUberOrder(payload);
@@ -195,7 +228,7 @@ async function handleOrderCreated(db, payload, rawPayload) {
   }
   logger.info("[uber] handleOrderCreated — orderId:", uberOrderId);
 
-  const orderRef = db.collection("Orders").doc(uberOrderId);
+  const orderRef = merchantDoc(merchantId, "Orders", uberOrderId);
 
   const t1 = Date.now();
   const existing = await orderRef.get();
@@ -206,7 +239,7 @@ async function handleOrderCreated(db, payload, rawPayload) {
   }
 
   const t2 = Date.now();
-  const orderNumber = await nextOrderNumber(db);
+  const orderNumber = await nextOrderNumber(db, merchantId);
   logger.info("[uber] timing: nextOrderNumber()", { ms: Date.now() - t2, orderNumber });
 
   const now = admin.firestore.FieldValue.serverTimestamp();
@@ -251,8 +284,8 @@ async function handleOrderCreated(db, payload, rawPayload) {
   // return 200 OK to Uber within the required time window.
 }
 
-async function handleOrderUpdated(db, payload) {
-  logger.info("[uber] handleOrderUpdated — start");
+async function handleOrderUpdated(db, merchantId, payload) {
+  logger.info("[uber] handleOrderUpdated — start", { merchantId });
 
   const order = payload.order || payload || {};
   const uberOrderId =
@@ -265,7 +298,7 @@ async function handleOrderUpdated(db, payload) {
     return;
   }
 
-  const orderRef = db.collection("Orders").doc(uberOrderId);
+  const orderRef = merchantDoc(merchantId, "Orders", uberOrderId);
   const existing = await orderRef.get();
   if (!existing.exists) {
     logger.warn("[uber] handleOrderUpdated — order not found:", uberOrderId);
@@ -289,8 +322,8 @@ async function handleOrderUpdated(db, payload) {
   logger.info("[uber] Order updated:", uberOrderId, "uberStatus:", status);
 }
 
-async function handleOrderCancelled(db, payload) {
-  logger.info("[uber] handleOrderCancelled — start");
+async function handleOrderCancelled(db, merchantId, payload) {
+  logger.info("[uber] handleOrderCancelled — start", { merchantId });
 
   const order = payload.order || payload || {};
   const uberOrderId =
@@ -303,7 +336,7 @@ async function handleOrderCancelled(db, payload) {
     return;
   }
 
-  const orderRef = db.collection("Orders").doc(uberOrderId);
+  const orderRef = merchantDoc(merchantId, "Orders", uberOrderId);
   const existing = await orderRef.get();
   if (!existing.exists) {
     logger.warn("[uber] handleOrderCancelled — order not found:", uberOrderId);
@@ -328,9 +361,9 @@ async function handleOrderCancelled(db, payload) {
  * it with `scheduled: true` and the requested fulfillment time so the POS
  * can choose when to show / accept it.
  */
-async function handleOrderScheduled(db, payload, rawPayload) {
-  logger.info("[uber] handleOrderScheduled — start");
-  await handleOrderCreated(db, payload, rawPayload);
+async function handleOrderScheduled(db, merchantId, payload, rawPayload) {
+  logger.info("[uber] handleOrderScheduled — start", { merchantId });
+  await handleOrderCreated(db, merchantId, payload, rawPayload);
 
   const order = payload.order || payload || {};
   const uberOrderId =
@@ -346,7 +379,7 @@ async function handleOrderScheduled(db, payload, rawPayload) {
     order.placed_at ||
     null;
 
-  await db.collection("Orders").doc(uberOrderId).update({
+  await merchantDoc(merchantId, "Orders", uberOrderId).update({
     scheduled: true,
     scheduledFor: fulfillAt,
     uberStatus: "SCHEDULED",
@@ -361,8 +394,8 @@ async function handleOrderScheduled(db, payload, rawPayload) {
  * so the POS can surface it; actual response (if any) goes through the
  * `resolveFulfillmentIssue` callable.
  */
-async function handleFulfillmentIssueResolution(db, payload) {
-  logger.info("[uber] handleFulfillmentIssueResolution — start");
+async function handleFulfillmentIssueResolution(db, merchantId, payload) {
+  logger.info("[uber] handleFulfillmentIssueResolution — start", { merchantId });
 
   const order = payload.order || payload || {};
   const uberOrderId =
@@ -375,7 +408,7 @@ async function handleFulfillmentIssueResolution(db, payload) {
     return;
   }
 
-  const orderRef = db.collection("Orders").doc(uberOrderId);
+  const orderRef = merchantDoc(merchantId, "Orders", uberOrderId);
   const existing = await orderRef.get();
   if (!existing.exists) {
     logger.warn("[uber] handleFulfillmentIssueResolution — order not found:",
@@ -395,7 +428,7 @@ async function handleFulfillmentIssueResolution(db, payload) {
  * cancel/release call. We log it on the order so the POS UI can show
  * an error and let the cashier retry.
  */
-async function handleNegativeAck(db, payload, kind) {
+async function handleNegativeAck(db, merchantId, payload, kind) {
   const order = payload.order || payload || {};
   const uberOrderId =
     safeString(order.id, null) ||
@@ -407,7 +440,7 @@ async function handleNegativeAck(db, payload, kind) {
     return;
   }
 
-  const orderRef = db.collection("Orders").doc(uberOrderId);
+  const orderRef = merchantDoc(merchantId, "Orders", uberOrderId);
   const existing = await orderRef.get();
   if (!existing.exists) return;
 
@@ -444,42 +477,51 @@ async function processWebhookAsync(body) {
 
   const db = admin.firestore();
 
+  const merchantId = await resolveWebhookMerchantId(db, body);
+  if (!merchantId) {
+    logger.error("[uber] Aborting — could not resolve merchantId", { eventType, orderId });
+    await logWebhookEvent(db, {
+      eventType, eventId, uberOrderId: orderId, status: "error_no_merchant",
+    });
+    return;
+  }
+
   try {
     switch (eventType) {
       case "orders.notification":
       case "orders.created":
       case "order.created":
-        await handleOrderCreated(db, body, body);
+        await handleOrderCreated(db, merchantId, body, body);
         break;
 
       case "orders.scheduled.notification":
       case "orders.scheduled":
-        await handleOrderScheduled(db, body, body);
+        await handleOrderScheduled(db, merchantId, body, body);
         break;
 
       case "orders.updated":
       case "order.updated":
-        await handleOrderUpdated(db, body);
+        await handleOrderUpdated(db, merchantId, body);
         break;
 
       case "orders.cancel":
       case "orders.cancelled":
       case "order.cancelled":
       case "orders.cancel.notification":
-        await handleOrderCancelled(db, body);
+        await handleOrderCancelled(db, merchantId, body);
         break;
 
       case "orders.cancel.failure":
-        await handleNegativeAck(db, body, "cancel.failure");
+        await handleNegativeAck(db, merchantId, body, "cancel.failure");
         break;
 
       case "orders.release.failure":
-        await handleNegativeAck(db, body, "release.failure");
+        await handleNegativeAck(db, merchantId, body, "release.failure");
         break;
 
       case "orders.fulfillment_issue.resolution":
       case "orders.fulfillment_issue":
-        await handleFulfillmentIssueResolution(db, body);
+        await handleFulfillmentIssueResolution(db, merchantId, body);
         break;
 
       default:

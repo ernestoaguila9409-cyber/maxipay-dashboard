@@ -14,6 +14,7 @@ import {
   type QuerySnapshot,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
@@ -165,8 +166,7 @@ export default function DashboardPage() {
         try {
           snapshotRecent = await getDocs(
             query(
-              collection(db, "Orders"),
-              where("merchantId", "==", merchantId),
+              merchantCol(merchantId, "Orders"),
               where("createdAt", ">=", Timestamp.fromDate(fetchStart)),
               where("createdAt", "<=", Timestamp.fromDate(fetchEnd)),
               orderBy("createdAt", "desc"),
@@ -180,8 +180,7 @@ export default function DashboardPage() {
           );
           snapshotRecent = await getDocs(
             query(
-              collection(db, "Orders"),
-              where("merchantId", "==", merchantId),
+              merchantCol(merchantId, "Orders"),
               orderBy("createdAt", "desc"),
               limit(800)
             )
@@ -257,8 +256,7 @@ export default function DashboardPage() {
           ),
           getDocs(
             query(
-              collection(db, "Batches"),
-              where("merchantId", "==", merchantId),
+              merchantCol(merchantId, "Batches"),
               where("closed", "==", false),
               limit(1)
             )

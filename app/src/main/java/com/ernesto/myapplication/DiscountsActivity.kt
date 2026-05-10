@@ -64,7 +64,7 @@ class DiscountsActivity : AppCompatActivity() {
 
     @Suppress("UNCHECKED_CAST")
     private fun loadDiscounts() {
-        db.collection("discounts")
+        MerchantFirestore.col("discounts")
             .get()
             .addOnSuccessListener { snap ->
                 val list = snap.documents.mapNotNull { doc ->
@@ -115,7 +115,7 @@ class DiscountsActivity : AppCompatActivity() {
             onLoaded(emptyList())
             return
         }
-        db.collection("discounts").document(item.id).get()
+        MerchantFirestore.doc("discounts", item.id).get()
             .addOnSuccessListener { doc ->
                 @Suppress("UNCHECKED_CAST")
                 val names = (doc.get("itemNames") as? List<String>) ?: emptyList()
@@ -125,7 +125,7 @@ class DiscountsActivity : AppCompatActivity() {
     }
 
     private fun setDiscountActive(item: DiscountItem, active: Boolean) {
-        db.collection("discounts").document(item.id)
+        MerchantFirestore.doc("discounts", item.id)
             .update("active", active)
             .addOnSuccessListener { loadDiscounts() }
     }

@@ -88,7 +88,7 @@ class SelectModifiersActivity : AppCompatActivity() {
 
         setContentView(root)
 
-        db.collection("ModifierGroups").get()
+        MerchantFirestore.col("ModifierGroups").get()
             .addOnSuccessListener { snap ->
                 val groups = snap.documents.mapNotNull { doc ->
                     val name = doc.getString("name") ?: return@mapNotNull null

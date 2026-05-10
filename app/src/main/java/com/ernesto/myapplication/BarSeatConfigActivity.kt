@@ -59,7 +59,7 @@ class BarSeatConfigActivity : AppCompatActivity() {
     }
 
     private fun loadSeats() {
-        db.collection("Tables")
+        MerchantFirestore.col("Tables")
             .whereEqualTo("active", true)
             .whereEqualTo("areaType", "BAR_SEAT")
             .get()
@@ -139,7 +139,7 @@ class BarSeatConfigActivity : AppCompatActivity() {
                     "active" to true
                 )
 
-                db.collection("Tables").add(data)
+                MerchantFirestore.col("Tables").add(data)
                     .addOnSuccessListener { ref ->
                         seats.add(SeatItem(ref.id, name))
                         seats.sortBy {
@@ -184,7 +184,7 @@ class BarSeatConfigActivity : AppCompatActivity() {
                     return@setPositiveButton
                 }
 
-                db.collection("Tables").document(seat.docId)
+                MerchantFirestore.doc("Tables", seat.docId)
                     .update("name", name, "seats", 1)
                     .addOnSuccessListener {
                         val idx = seats.indexOfFirst { it.docId == seat.docId }
@@ -207,7 +207,7 @@ class BarSeatConfigActivity : AppCompatActivity() {
             .setTitle("Delete Seat")
             .setMessage("Delete \"${seat.name}\"?")
             .setPositiveButton("Delete") { _, _ ->
-                db.collection("Tables").document(seat.docId)
+                MerchantFirestore.doc("Tables", seat.docId)
                     .update("active", false)
                     .addOnSuccessListener {
                         val idx = seats.indexOfFirst { it.docId == seat.docId }
@@ -238,7 +238,7 @@ class BarSeatConfigActivity : AppCompatActivity() {
         for ((index, seat) in seats.withIndex()) {
             val newName = "Bar Seat ${index + 1}"
             if (seat.name != newName) {
-                db.collection("Tables").document(seat.docId)
+                MerchantFirestore.doc("Tables", seat.docId)
                     .update("name", newName)
                     .addOnSuccessListener {
                         val idx = seats.indexOfFirst { it.docId == seat.docId }
@@ -252,7 +252,7 @@ class BarSeatConfigActivity : AppCompatActivity() {
     }
 
     private fun ensureBarSection() {
-        db.collection("Sections").document("Bar")
+        MerchantFirestore.doc("Sections", "Bar")
             .set(hashMapOf("name" to "Bar"))
     }
 

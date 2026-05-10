@@ -14,9 +14,9 @@ object TableFirestoreHelper {
     fun tableRef(db: FirebaseFirestore, tableId: String, tableLayoutId: String?): DocumentReference {
         val lid = tableLayoutId?.trim().orEmpty()
         return if (lid.isNotEmpty()) {
-            db.collection("tableLayouts").document(lid).collection("tables").document(tableId)
+            MerchantFirestore.col("tableLayouts").document(lid).collection("tables").document(tableId)
         } else {
-            db.collection("Tables").document(tableId)
+            MerchantFirestore.col("Tables").document(tableId)
         }
     }
 

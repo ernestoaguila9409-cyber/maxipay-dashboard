@@ -98,12 +98,12 @@ function normalizeShape(raw: string | undefined): TableShape {
   return "SQUARE";
 }
 
-export function layoutDocRef(db: Firestore, layoutId: string) {
-  return doc(db, TABLE_LAYOUTS_COLLECTION, layoutId);
+export function layoutDocRef(db: Firestore, merchantId: string, layoutId: string) {
+  return doc(db, "Merchants", merchantId, "tableLayouts", layoutId);
 }
 
-export function tablesCollectionRef(db: Firestore, layoutId: string) {
-  return collection(db, TABLE_LAYOUTS_COLLECTION, layoutId, TABLES_SUBCOLLECTION);
+export function tablesCollectionRef(db: Firestore, merchantId: string, layoutId: string) {
+  return collection(db, "Merchants", merchantId, "tableLayouts", layoutId, TABLES_SUBCOLLECTION);
 }
 
 export function subscribeTableLayouts(
@@ -113,7 +113,7 @@ export function subscribeTableLayouts(
   onError?: (e: Error) => void
 ): Unsubscribe {
   return onSnapshot(
-    query(collection(db, TABLE_LAYOUTS_COLLECTION), where("merchantId", "==", merchantId)),
+    query(collection(db, "Merchants", merchantId, "tableLayouts")),
     (snap) => {
       const list = snap.docs
         .map((d) => ({
@@ -133,12 +133,13 @@ export function subscribeTableLayouts(
 
 export function subscribeLayoutTables(
   db: Firestore,
+  merchantId: string,
   layoutId: string,
   onData: (tables: Array<{ id: string; data: TableLayoutTableDocument }>) => void,
   onError?: (e: Error) => void
 ): Unsubscribe {
   return onSnapshot(
-    tablesCollectionRef(db, layoutId),
+    tablesCollectionRef(db, merchantId, layoutId),
     (snap) => {
       const list = snap.docs
         .map((d) => ({
@@ -230,11 +231,10 @@ export async function createTableLayout(
   merchantId: string,
   partial: Partial<TableLayoutDocument> & Pick<TableLayoutDocument, "name">
 ): Promise<string> {
-  const ref = doc(collection(db, TABLE_LAYOUTS_COLLECTION));
-  const snap = await getDocs(query(collection(db, TABLE_LAYOUTS_COLLECTION), where("merchantId", "==", merchantId)));
+  const ref = doc(collection(db, "Merchants", merchantId, "tableLayouts"));
+  const snap = await getDocs(query(collection(db, "Merchants", merchantId, "tableLayouts")));
   const sortOrder = snap.size;
   await setDoc(ref, {
-    merchantId,
     name: partial.name,
     isDefault: partial.isDefault ?? snap.empty,
     canvasWidth: partial.canvasWidth ?? DEFAULT_CANVAS.width,
@@ -271,6 +271,7 @@ export async function createTableLayout(
 
 export async function updateTableLayoutMeta(
   db: Firestore,
+  merchantId: string,
   layoutId: string,
   patch: Partial<
     Pick<
@@ -303,12 +304,12 @@ export async function updateTableLayoutMeta(
       Math.min(Number.isFinite(b) ? b : 0, MAX_RESERVATION_GRACE_AFTER_SLOT_MINUTES)
     );
   }
-  await updateDoc(layoutDocRef(db, layoutId), payload);
+  await updateDoc(layoutDocRef(db, merchantId, layoutId), payload);
 }
 
 /** Ensures exactly one default layout (best-effort batch). */
 export async function setDefaultTableLayout(db: Firestore, merchantId: string, layoutId: string): Promise<void> {
-  const snap = await getDocs(query(collection(db, TABLE_LAYOUTS_COLLECTION), where("merchantId", "==", merchantId)));
+  const snap = await getDocs(query(collection(db, "Merchants", merchantId, "tableLayouts")));
   const batch = writeBatch(db);
   snap.docs.forEach((d) => {
     batch.update(d.ref, {
@@ -320,7 +321,7 @@ export async function setDefaultTableLayout(db: Firestore, merchantId: string, l
 }
 
 export async function deleteTableLayout(db: Firestore, merchantId: string, layoutId: string): Promise<void> {
-  const tablesSnap = await getDocs(tablesCollectionRef(db, layoutId));
+  const tablesSnap = await getDocs(tablesCollectionRef(db, merchantId, layoutId));
   let batch = writeBatch(db);
   let n = 0;
   for (const d of tablesSnap.docs) {
@@ -333,8 +334,8 @@ export async function deleteTableLayout(db: Firestore, merchantId: string, layou
     }
   }
   if (n > 0) await batch.commit();
-  await deleteDoc(layoutDocRef(db, layoutId));
-  const remaining = await getDocs(query(collection(db, TABLE_LAYOUTS_COLLECTION), where("merchantId", "==", merchantId)));
+  await deleteDoc(layoutDocRef(db, merchantId, layoutId));
+  const remaining = await getDocs(query(collection(db, "Merchants", merchantId, "tableLayouts")));
   if (!remaining.empty && !remaining.docs.some((d) => d.data().isDefault === true)) {
     await updateDoc(remaining.docs[0].ref, {
       isDefault: true,
@@ -345,11 +346,12 @@ export async function deleteTableLayout(db: Firestore, merchantId: string, layou
 
 export async function upsertLayoutTable(
   db: Firestore,
+  merchantId: string,
   layoutId: string,
   tableId: string | null,
   data: TableLayoutTableDocument
 ): Promise<string> {
-  const col = tablesCollectionRef(db, layoutId);
+  const col = tablesCollectionRef(db, merchantId, layoutId);
   const ref = tableId ? doc(col, tableId) : doc(col);
   const payload = {
     name: data.name.trim() || "Table",
@@ -373,13 +375,14 @@ export async function upsertLayoutTable(
   return ref.id;
 }
 
-export async function deleteLayoutTable(db: Firestore, layoutId: string, tableId: string): Promise<void> {
-  await deleteDoc(doc(tablesCollectionRef(db, layoutId), tableId));
+export async function deleteLayoutTable(db: Firestore, merchantId: string, layoutId: string, tableId: string): Promise<void> {
+  await deleteDoc(doc(tablesCollectionRef(db, merchantId, layoutId), tableId));
 }
 
 /** Batch-save table positions/sizes after drag (chunks of 400). */
 export async function batchUpdateLayoutTables(
   db: Firestore,
+  merchantId: string,
   layoutId: string,
   updates: Array<{ id: string; data: Partial<TableLayoutTableDocument> }>
 ): Promise<void> {
@@ -387,7 +390,7 @@ export async function batchUpdateLayoutTables(
     const slice = updates.slice(i, i + 400);
     const batch = writeBatch(db);
     for (const u of slice) {
-      const ref = doc(tablesCollectionRef(db, layoutId), u.id);
+      const ref = doc(tablesCollectionRef(db, merchantId, layoutId), u.id);
       const p: Record<string, unknown> = { updatedAt: serverTimestamp() };
       if (u.data.x !== undefined) p.x = u.data.x;
       if (u.data.y !== undefined) p.y = u.data.y;
@@ -398,7 +401,7 @@ export async function batchUpdateLayoutTables(
     }
     await batch.commit();
   }
-  await updateDoc(layoutDocRef(db, layoutId), { updatedAt: serverTimestamp() });
+  await updateDoc(layoutDocRef(db, merchantId, layoutId), { updatedAt: serverTimestamp() });
 }
 
 /** Copy legacy `Tables` docs into a new layout (one-time migration). */
@@ -408,7 +411,7 @@ export async function importLegacyTablesLayout(
   layoutName: string
 ): Promise<string> {
   const legacy = await getDocs(
-    query(collection(db, "Tables"), where("merchantId", "==", merchantId), where("active", "==", true), limit(500))
+    query(collection(db, "Merchants", merchantId, "tables"), where("active", "==", true), limit(500))
   );
   const layoutId = await createTableLayout(db, merchantId, { name: layoutName, isDefault: true });
   let order = 0;
@@ -429,7 +432,7 @@ export async function importLegacyTablesLayout(
       sortOrder: order++,
       areaType: "DINING_TABLE",
     };
-    await upsertLayoutTable(db, layoutId, null, data);
+    await upsertLayoutTable(db, merchantId, layoutId, null, data);
   }
   return layoutId;
 }
@@ -450,14 +453,14 @@ export async function upsertFirestoreSection(db: Firestore, merchantId: string, 
   const docId = sanitizeSectionDocumentId(name);
   if (!docId) throw new Error("Section name is required");
   await setDoc(
-    doc(db, SECTIONS_COLLECTION, docId),
-    { merchantId, name, updatedAt: serverTimestamp() },
+    doc(db, "Merchants", merchantId, "sections", docId),
+    { name, updatedAt: serverTimestamp() },
     { merge: true }
   );
 }
 
-export async function deleteFirestoreSectionDoc(db: Firestore, sectionDocId: string): Promise<void> {
-  await deleteDoc(doc(db, SECTIONS_COLLECTION, sectionDocId));
+export async function deleteFirestoreSectionDoc(db: Firestore, merchantId: string, sectionDocId: string): Promise<void> {
+  await deleteDoc(doc(db, "Merchants", merchantId, "sections", sectionDocId));
 }
 
 export function emptyTable(

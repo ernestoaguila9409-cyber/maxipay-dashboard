@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, query, where, limit, onSnapshot } from "firebase/firestore";
-import { db } from "@/firebase/firebaseConfig";
+import { query, where, limit, onSnapshot } from "firebase/firestore";
+import { merchantCol } from "@/lib/merchantFirestore";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import type { PaymentCapabilities, PaymentProviderId } from "@/lib/paymentProviders";
 
@@ -36,8 +36,7 @@ export function useActiveTerminalCapabilities(): ActiveTerminalInfo {
   useEffect(() => {
     if (!merchantId) return;
     const q = query(
-      collection(db, PAYMENTS_COLLECTION),
-      where("merchantId", "==", merchantId),
+      merchantCol(merchantId, PAYMENTS_COLLECTION),
       where("active", "==", true),
       limit(1),
     );

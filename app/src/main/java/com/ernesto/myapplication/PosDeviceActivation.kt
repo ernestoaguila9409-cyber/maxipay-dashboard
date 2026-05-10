@@ -47,8 +47,8 @@ object PosDeviceActivation {
 
         PosDeviceIdentity.resolveInstallationDocId(context) { installationDocId ->
             val db = FirebaseFirestore.getInstance()
-            val actRef = db.collection(ACTIVATIONS_COLLECTION).document(code)
-            val devRef = db.collection(DEVICES_COLLECTION).document(installationDocId)
+            val actRef = MerchantFirestore.doc(ACTIVATIONS_COLLECTION, code)
+            val devRef = MerchantFirestore.doc(DEVICES_COLLECTION, installationDocId)
 
             val pm = context.packageManager
             val pkg = context.packageName

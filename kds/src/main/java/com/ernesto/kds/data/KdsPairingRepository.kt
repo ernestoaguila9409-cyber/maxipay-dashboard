@@ -25,7 +25,7 @@ class KdsPairingRepository(
             return Result.failure(IllegalArgumentException("Enter all 6 digits"))
         }
         return runCatching {
-            val snapshot = db.collection(KdsDevicePresence.KDS_DEVICES_COLLECTION)
+            val snapshot = MerchantFirestore.col("kds_devices")
                 .whereEqualTo("pairingCode", digits)
                 .limit(1)
                 .get()

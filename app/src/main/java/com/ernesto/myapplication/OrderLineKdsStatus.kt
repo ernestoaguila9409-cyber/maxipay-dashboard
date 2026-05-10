@@ -89,7 +89,7 @@ object OrderLineKdsStatus {
      */
     fun markSentOnKitchenAfterSend(db: FirebaseFirestore, orderId: String) {
         if (orderId.isBlank()) return
-        db.collection("Orders").document(orderId).collection("items")
+        MerchantFirestore.col("Orders").document(orderId).collection("items")
             .get()
             .addOnSuccessListener { snap ->
                 if (snap.isEmpty) return@addOnSuccessListener
@@ -115,7 +115,7 @@ object OrderLineKdsStatus {
                     pending++
                 }
                 if (pending == 0) return@addOnSuccessListener
-                val orderRef = db.collection("Orders").document(orderId)
+                val orderRef = MerchantFirestore.col("Orders").document(orderId)
                 batch.update(orderRef, mapOf("updatedAt" to java.util.Date()))
                 batch.commit()
                     .addOnFailureListener { e ->

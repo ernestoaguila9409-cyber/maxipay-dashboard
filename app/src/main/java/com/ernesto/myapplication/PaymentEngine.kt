@@ -1,6 +1,7 @@
 package com.ernesto.myapplication.engine
 
 import com.ernesto.myapplication.BarTabSeatHelper
+import com.ernesto.myapplication.MerchantFirestore
 import com.ernesto.myapplication.TableFirestoreHelper
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FieldValue
@@ -43,8 +44,8 @@ class PaymentEngine(private val db: FirebaseFirestore) {
         onFailure: (Exception) -> Unit
     ) {
 
-        val orderRef = db.collection("Orders").document(orderId)
-        val transactionsRef = db.collection("Transactions")
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
+        val transactionsRef = MerchantFirestore.col("Transactions")
 
         fun isCardPayment(pt: String): Boolean =
             pt.equals("Credit", ignoreCase = true) || pt.equals("Debit", ignoreCase = true)
@@ -98,7 +99,7 @@ class PaymentEngine(private val db: FirebaseFirestore) {
 
                 var appTxnNumber = 0L
                 if (batchId.isNotBlank()) {
-                    val batchRef = db.collection("Batches").document(batchId)
+                    val batchRef = MerchantFirestore.col("Batches").document(batchId)
                     val batchSnap = transaction.get(batchRef)
                     val currentCounter = batchSnap.getLong("transactionCounter") ?: 0L
                     appTxnNumber = currentCounter + 1
@@ -161,7 +162,7 @@ class PaymentEngine(private val db: FirebaseFirestore) {
             if (newStatus == "CLOSED" && orderSnap.getString("orderType") == "BAR_TAB") {
                 for (tid in BarTabSeatHelper.seatTableIdsFromOrder(orderSnap)) {
                     transaction.update(
-                        db.collection("Tables").document(tid),
+                        MerchantFirestore.col("Tables").document(tid),
                         mapOf("currentOrderId" to FieldValue.delete())
                     )
                 }

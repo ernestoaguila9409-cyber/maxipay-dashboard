@@ -158,7 +158,7 @@ class SelectPrinterLabelActivity : AppCompatActivity() {
                 updates["printerLabel"] = selected.trim()
                 KitchenRoutingLabelsFirestore.mergeLabelsIntoFirestore(db, listOf(selected.trim()))
             }
-            db.collection("MenuItems").document(itemId)
+            MerchantFirestore.col("MenuItems").document(itemId)
                 .update(updates)
                 .addOnSuccessListener {
                     Toast.makeText(this, R.string.assign_printer_label_saved, Toast.LENGTH_SHORT).show()

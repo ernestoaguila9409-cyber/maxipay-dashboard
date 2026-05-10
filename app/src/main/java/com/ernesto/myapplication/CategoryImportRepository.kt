@@ -18,7 +18,7 @@ object CategoryImportRepository {
   suspend fun loadNormalizedCategoryIdMap(
     db: FirebaseFirestore
   ): MutableMap<String, String> {
-    val snap = db.collection(COLLECTION).get().await()
+    val snap = MerchantFirestore.col(COLLECTION).get().await()
     val map = LinkedHashMap<String, String>()
     for (doc in snap.documents) {
       val name = doc.getString("name")

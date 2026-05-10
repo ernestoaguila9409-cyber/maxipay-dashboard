@@ -283,7 +283,7 @@ class OrderDetailActivity : AppCompatActivity() {
         btnDenyUber.isEnabled = true
         btnDenyUber.text = getString(R.string.order_detail_deny)
 
-        db.collection("Orders").document(orderId)
+        MerchantFirestore.col("Orders").document(orderId)
             .get()
             .addOnSuccessListener { doc ->
 
@@ -473,7 +473,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun acceptUberOrder() {
         btnAcceptUber.isEnabled = false
         btnDenyUber.isEnabled = false
-        db.collection("Orders").document(orderId)
+        MerchantFirestore.col("Orders").document(orderId)
             .update(
                 mapOf(
                     "status" to "ACCEPTED",
@@ -505,7 +505,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun denyUberOrder() {
         btnAcceptUber.isEnabled = false
         btnDenyUber.isEnabled = false
-        db.collection("Orders").document(orderId)
+        MerchantFirestore.col("Orders").document(orderId)
             .update(
                 mapOf(
                     "status" to "DENIED",
@@ -535,7 +535,7 @@ class OrderDetailActivity : AppCompatActivity() {
      * the food is actually ready.
      */
     private fun confirmMarkUberOrderReady() {
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { doc ->
                 val acceptedAt = doc.getTimestamp("acceptedAt")
                 val elapsedSeconds = if (acceptedAt != null) {
@@ -584,7 +584,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun markUberOrderReady() {
         btnAcceptUber.isEnabled = false
         btnDenyUber.isEnabled = false
-        db.collection("Orders").document(orderId)
+        MerchantFirestore.col("Orders").document(orderId)
             .update(
                 mapOf(
                     "status" to "READY",
@@ -637,7 +637,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun cancelUberOrder(reason: String) {
         btnAcceptUber.isEnabled = false
         btnDenyUber.isEnabled = false
-        db.collection("Orders").document(orderId)
+        MerchantFirestore.col("Orders").document(orderId)
             .update(
                 mapOf(
                     "status" to "CANCELLED",
@@ -670,7 +670,7 @@ class OrderDetailActivity : AppCompatActivity() {
                 updates["customerId"] = info.id
             }
 
-            db.collection("Orders").document(orderId)
+            MerchantFirestore.col("Orders").document(orderId)
                 .update(updates)
                 .addOnSuccessListener {
                     txtHeaderCustomer.text = getString(R.string.order_detail_customer, info.name)
@@ -698,10 +698,10 @@ class OrderDetailActivity : AppCompatActivity() {
                     "email" to info.email,
                     "createdAt" to Timestamp.now(),
                 )
-                db.collection("Customers")
+                MerchantFirestore.col("Customers")
                     .add(customer)
                     .addOnSuccessListener { docRef ->
-                        db.collection("Orders").document(orderId)
+                        MerchantFirestore.col("Orders").document(orderId)
                             .update("customerId", docRef.id)
                     }
             }
@@ -709,14 +709,14 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun resolveCustomerId(name: String) {
-        db.collection("Customers")
+        MerchantFirestore.col("Customers")
             .whereEqualTo("name", name)
             .limit(1)
             .get()
             .addOnSuccessListener { snap ->
                 val doc = snap.documents.firstOrNull()
                 if (doc != null) {
-                    db.collection("Orders").document(orderId)
+                    MerchantFirestore.col("Orders").document(orderId)
                         .update("customerId", doc.id)
                 }
             }
@@ -788,7 +788,7 @@ class OrderDetailActivity : AppCompatActivity() {
         orderEngine.recomputeOrderTotals(
             orderId = orderId,
             onSuccess = {
-                db.collection("Orders").document(orderId).get()
+                MerchantFirestore.col("Orders").document(orderId).get()
                     .addOnSuccessListener { doc ->
                         if (doc.exists()) {
                             val totalInCents = doc.getLong("totalInCents") ?: 0L
@@ -1031,7 +1031,7 @@ class OrderDetailActivity : AppCompatActivity() {
             btnVoid.visibility = View.GONE
             return
         }
-        db.collection("Transactions").document(saleTransactionId).get()
+        MerchantFirestore.col("Transactions").document(saleTransactionId).get()
             .addOnSuccessListener { txDoc ->
                 if (isTransactionEcommerce(txDoc)) {
                     btnVoid.visibility = View.VISIBLE
@@ -1066,7 +1066,7 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun loadBatchAndUpdateVoidButton(batchId: String) {
-        db.collection("Batches").document(batchId).get()
+        MerchantFirestore.col("Batches").document(batchId).get()
             .addOnSuccessListener { batchDoc ->
                 val batchClosed = batchDoc.getBoolean("closed") ?: true
                 if (!batchClosed) {
@@ -1088,7 +1088,7 @@ class OrderDetailActivity : AppCompatActivity() {
             btnTipAdjust.visibility = View.GONE
             return
         }
-        db.collection("Transactions").document(saleTransactionId).get()
+        MerchantFirestore.col("Transactions").document(saleTransactionId).get()
             .addOnSuccessListener { txDoc ->
                 if (!txDoc.exists()) { btnTipAdjust.visibility = View.GONE; return@addOnSuccessListener }
                 if (isTransactionAllCash(txDoc)) { btnTipAdjust.visibility = View.GONE; return@addOnSuccessListener }
@@ -1100,7 +1100,7 @@ class OrderDetailActivity : AppCompatActivity() {
                     ?: currentBatchId?.takeIf { it.isNotBlank() }
                 if (batchId.isNullOrBlank()) { btnTipAdjust.visibility = View.GONE; return@addOnSuccessListener }
 
-                db.collection("Batches").document(batchId).get()
+                MerchantFirestore.col("Batches").document(batchId).get()
                     .addOnSuccessListener { batchDoc ->
                         val batchClosed = batchDoc.getBoolean("closed") ?: true
                         if (batchClosed) {
@@ -1203,9 +1203,9 @@ class OrderDetailActivity : AppCompatActivity() {
         oldTipCents: Long,
         baseAmountCents: Long
     ) {
-        val txRef = db.collection("Transactions").document(saleTransactionId)
-        val batchRef = db.collection("Batches").document(batchId)
-        val orderRef = db.collection("Orders").document(orderId)
+        val txRef = MerchantFirestore.col("Transactions").document(saleTransactionId)
+        val batchRef = MerchantFirestore.col("Batches").document(batchId)
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
         val deltaTipCents = newTipCents - oldTipCents
 
         db.runTransaction { transaction ->
@@ -1277,7 +1277,7 @@ class OrderDetailActivity : AppCompatActivity() {
             return
         }
         val dateFormat = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US)
-        db.collection("Transactions")
+        MerchantFirestore.col("Transactions")
             .whereEqualTo("type", "REFUND")
             .whereEqualTo("originalReferenceId", saleTransactionId)
             .get()
@@ -1357,7 +1357,7 @@ class OrderDetailActivity : AppCompatActivity() {
             txtSplitBanner.visibility = View.GONE
             return
         }
-        db.collection("Transactions").document(transactionId).get()
+        MerchantFirestore.col("Transactions").document(transactionId).get()
             .addOnSuccessListener { tx ->
                 if (!tx.exists()) {
                     txtSplitBanner.visibility = View.GONE
@@ -1468,7 +1468,7 @@ class OrderDetailActivity : AppCompatActivity() {
         if (guestCount > 0) updates["guestCount"] = guestCount
         if (guestNames.isNotEmpty()) updates["guestNames"] = guestNames
 
-        db.collection("Orders").document(orderId)
+        MerchantFirestore.col("Orders").document(orderId)
             .update(updates)
             .addOnSuccessListener {
                 orderType = "DINE_IN"
@@ -1493,7 +1493,7 @@ class OrderDetailActivity : AppCompatActivity() {
             "updatedAt" to Date()
         )
 
-        db.collection("Orders").document(orderId)
+        MerchantFirestore.col("Orders").document(orderId)
             .update(updates)
             .addOnSuccessListener {
                 orderType = "TO_GO"
@@ -1537,7 +1537,7 @@ class OrderDetailActivity : AppCompatActivity() {
     /** Real-time line items (modifiers, per-line `kdsStatus`, payments on line, etc.). */
     private fun attachOrderItemsRealtimeListener() {
         orderItemsListener?.remove()
-        val orderRef = db.collection("Orders").document(orderId)
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
         val itemsRef = orderRef.collection("items")
         orderItemsListener = itemsRef.addSnapshotListener { snapshot, error ->
             if (error != null) {
@@ -1605,7 +1605,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun confirmVoid() {
         val txId = saleTransactionId
         if (txId != null) {
-            db.collection("Transactions").document(txId).get()
+            MerchantFirestore.col("Transactions").document(txId).get()
                 .addOnSuccessListener { txDoc ->
                     if (isTransactionEcommerce(txDoc)) {
                         AlertDialog.Builder(this)
@@ -1630,7 +1630,7 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun confirmVoidWithBatchCheck() {
         val batchId = currentBatchId ?: return
 
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .document(batchId)
             .get()
             .addOnSuccessListener { batchDoc ->
@@ -1661,8 +1661,8 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun finalizeVoidFirestoreOnly(transactionId: String) {
-        val txRef = db.collection("Transactions").document(transactionId)
-        val orderRef = db.collection("Orders").document(orderId)
+        val txRef = MerchantFirestore.col("Transactions").document(transactionId)
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
         val voidedBy = intent.getStringExtra("employeeName")?.takeIf { it.isNotBlank() }
             ?: SessionEmployee.getEmployeeName(this@OrderDetailActivity)
 
@@ -1712,7 +1712,7 @@ class OrderDetailActivity : AppCompatActivity() {
             onReady(step1)
             return
         }
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { od ->
                 onReady(TransactionVoidReferenceResolver.enrichPaymentsFromOrderDoc(od, step1))
             }
@@ -1721,7 +1721,7 @@ class OrderDetailActivity : AppCompatActivity() {
 
     /** Loads [Transactions] doc and runs SPIn void leg(s), then [finalizeVoid]. */
     private fun startGatewayVoidSequenceForTransaction(transactionId: String) {
-        db.collection("Transactions")
+        MerchantFirestore.col("Transactions")
             .document(transactionId)
             .get()
             .addOnSuccessListener { txDoc ->
@@ -1802,7 +1802,7 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun executeVoid() {
-        db.collection("Orders")
+        MerchantFirestore.col("Orders")
             .document(orderId)
             .get()
             .addOnSuccessListener { orderDoc ->
@@ -1813,7 +1813,7 @@ class OrderDetailActivity : AppCompatActivity() {
                         return@addOnSuccessListener
                     }
 
-                db.collection("Transactions")
+                MerchantFirestore.col("Transactions")
                     .document(transactionId)
                     .get()
                     .addOnSuccessListener { txDoc ->
@@ -2008,13 +2008,13 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun finalizeVoid(transactionId: String) {
-        db.collection("Orders")
+        MerchantFirestore.col("Orders")
             .document(orderId)
             .get()
             .addOnSuccessListener { orderDoc ->
                 var batchId = orderDoc.getString("batchId")?.takeIf { it.isNotBlank() }
                 if (batchId.isNullOrBlank()) {
-                    db.collection("Transactions").document(transactionId).get()
+                    MerchantFirestore.col("Transactions").document(transactionId).get()
                         .addOnSuccessListener { txDoc ->
                             batchId = txDoc.getString("batchId")?.takeIf { it.isNotBlank() }
                             if (!batchId.isNullOrBlank()) {
@@ -2035,7 +2035,7 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun runFinalizeVoidBatch(transactionId: String, batchId: String) {
-        val txRef = db.collection("Transactions").document(transactionId)
+        val txRef = MerchantFirestore.col("Transactions").document(transactionId)
         txRef.get()
             .addOnSuccessListener { txDoc ->
                 if (!txDoc.exists()) return@addOnSuccessListener
@@ -2050,8 +2050,8 @@ class OrderDetailActivity : AppCompatActivity() {
                 }
 
                 db.runBatch { batch ->
-                    val orderRef = db.collection("Orders").document(orderId)
-                    val batchRef = db.collection("Batches").document(batchId)
+                    val orderRef = MerchantFirestore.col("Orders").document(orderId)
+                    val batchRef = MerchantFirestore.col("Batches").document(batchId)
 
                     val voidedBy = intent.getStringExtra("employeeName")?.takeIf { it.isNotBlank() }
                         ?: SessionEmployee.getEmployeeName(this@OrderDetailActivity)
@@ -2081,7 +2081,7 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun confirmRefund() {
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 if (!orderDoc.exists()) return@addOnSuccessListener
                 val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
@@ -2099,7 +2099,7 @@ class OrderDetailActivity : AppCompatActivity() {
 
     private fun onOrderItemClick(itemDoc: DocumentSnapshot) {
         val lineKey = itemDoc.id
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 if (!orderDoc.exists()) return@addOnSuccessListener
                 val status = orderDoc.getString("status") ?: ""
@@ -2114,7 +2114,7 @@ class OrderDetailActivity : AppCompatActivity() {
                 }
                 val saleTransactionId = orderDoc.getString("saleTransactionId") ?: orderDoc.getString("transactionId")
                 if (!saleTransactionId.isNullOrBlank()) {
-                    db.collection("Transactions")
+                    MerchantFirestore.col("Transactions")
                         .whereEqualTo("type", "REFUND")
                         .whereEqualTo("originalReferenceId", saleTransactionId)
                         .get()
@@ -2227,7 +2227,7 @@ class OrderDetailActivity : AppCompatActivity() {
     @Suppress("UNCHECKED_CAST")
     private fun executeRefundForAmount(amountInCents: Long?, finishAfter: Boolean, refundedItemName: String? = null, refundedLineKey: String? = null) {
 
-        db.collection("Orders")
+        MerchantFirestore.col("Orders")
             .document(orderId)
             .get()
             .addOnSuccessListener { orderDoc ->
@@ -2255,7 +2255,7 @@ class OrderDetailActivity : AppCompatActivity() {
                     return@addOnSuccessListener
                 }
 
-                db.collection("Transactions")
+                MerchantFirestore.col("Transactions")
                     .document(transactionId)
                     .get()
                     .addOnSuccessListener { txDoc ->
@@ -2288,7 +2288,7 @@ class OrderDetailActivity : AppCompatActivity() {
                             ?: currentBatchId?.takeIf { it.isNotBlank() }
 
                         if (txBatchId != null) {
-                            db.collection("Batches").document(txBatchId).get()
+                            MerchantFirestore.col("Batches").document(txBatchId).get()
                                 .addOnSuccessListener batchCheck@{ batchDoc ->
                                     val batchIsClosed = batchDoc.getBoolean("closed") ?: true
                                     val useServerRefund = batchIsClosed || !isPerItemRefund
@@ -2429,7 +2429,7 @@ class OrderDetailActivity : AppCompatActivity() {
     // ===============================
 
     private fun showOrderReceiptFlow() {
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { doc ->
                 if (!doc.exists()) return@addOnSuccessListener
                 val status = doc.getString("status") ?: ""
@@ -2497,7 +2497,7 @@ class OrderDetailActivity : AppCompatActivity() {
             showTypedEmailDialog(orderId, "sendReceiptEmail", "")
             return
         }
-        db.collection("Transactions").document(txId).get()
+        MerchantFirestore.col("Transactions").document(txId).get()
             .addOnSuccessListener { txDoc ->
                 val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
                 val splitPayloads = SplitReceiptReprintHelper.payloadsOrderedBySplitIndex(payments)
@@ -2607,7 +2607,7 @@ class OrderDetailActivity : AppCompatActivity() {
             runAfterBluetoothPermission { executePrint(ReceiptContentType.ORIGINAL) }
             return
         }
-        db.collection("Transactions").document(txId).get()
+        MerchantFirestore.col("Transactions").document(txId).get()
             .addOnSuccessListener { txDoc ->
                 val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
                 val splitPayloads = SplitReceiptReprintHelper.payloadsOrderedBySplitIndex(payments)
@@ -2662,7 +2662,7 @@ class OrderDetailActivity : AppCompatActivity() {
     }
 
     private fun printOriginalSplitReceipt(payload: SplitReceiptPayload) {
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 if (!orderDoc.exists()) {
                     Toast.makeText(this, "Order not found", Toast.LENGTH_SHORT).show()
@@ -2682,19 +2682,19 @@ class OrderDetailActivity : AppCompatActivity() {
 
     @Suppress("UNCHECKED_CAST")
     private fun printOriginalReceipt() {
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 if (!orderDoc.exists()) {
                     Toast.makeText(this, "Order not found", Toast.LENGTH_SHORT).show()
                     return@addOnSuccessListener
                 }
-                db.collection("Orders").document(orderId).collection("items").get()
+                MerchantFirestore.col("Orders").document(orderId).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
                         val txId = saleTransactionId ?: ""
                         val rs = ReceiptSettings.load(this)
                         val signatureUrl = orderDoc.getString("signatureUrl")
                         if (txId.isNotBlank()) {
-                            db.collection("Transactions").document(txId).get()
+                            MerchantFirestore.col("Transactions").document(txId).get()
                                 .addOnSuccessListener { txDoc ->
                                     val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
                                     val txStatus = txDoc?.getString("status")
@@ -2894,21 +2894,21 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun printRefundReceipt() {
         val txId = saleTransactionId ?: ""
         val rs = ReceiptSettings.load(this)
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 if (!orderDoc.exists()) return@addOnSuccessListener
-                db.collection("Orders").document(orderId).collection("items").get()
+                MerchantFirestore.col("Orders").document(orderId).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
                         if (txId.isBlank()) {
                             EscPosPrinter.print(this, buildSimpleRefundSegments(orderDoc), rs)
                             return@addOnSuccessListener
                         }
-                        db.collection("Transactions")
+                        MerchantFirestore.col("Transactions")
                             .whereEqualTo("type", "REFUND")
                             .whereEqualTo("originalReferenceId", txId)
                             .get()
                             .addOnSuccessListener { refundSnap ->
-                                db.collection("Transactions").document(txId).get()
+                                MerchantFirestore.col("Transactions").document(txId).get()
                                     .addOnSuccessListener { txDoc ->
                                         val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
                                         val segments = buildDetailedRefundSegments(orderDoc, itemsSnap.documents, refundSnap.documents, payments)
@@ -3130,12 +3130,12 @@ class OrderDetailActivity : AppCompatActivity() {
     @Suppress("UNCHECKED_CAST")
     private fun printVoidReceipt() {
         val rs = ReceiptSettings.load(this)
-        db.collection("Orders").document(orderId).get()
+        MerchantFirestore.col("Orders").document(orderId).get()
             .addOnSuccessListener { orderDoc ->
                 if (!orderDoc.exists()) return@addOnSuccessListener
-                db.collection("Orders").document(orderId).collection("items").get()
+                MerchantFirestore.col("Orders").document(orderId).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
-                        db.collection("Orders").document(orderId).collection("transactions").get()
+                        MerchantFirestore.col("Orders").document(orderId).collection("transactions").get()
                             .addOnSuccessListener { txnsSnap ->
                                 @Suppress("UNCHECKED_CAST")
                                 val reversed = txnsSnap.documents.mapNotNull { it.data as? Map<String, Any> }
@@ -3148,7 +3148,7 @@ class OrderDetailActivity : AppCompatActivity() {
                                 // Fallback: older orders may not have Orders/{orderId}/transactions yet.
                                 val txId = saleTransactionId ?: ""
                                 if (txId.isNotBlank()) {
-                                    db.collection("Transactions").document(txId).get()
+                                    MerchantFirestore.col("Transactions").document(txId).get()
                                         .addOnSuccessListener { txDoc ->
                                             @Suppress("UNCHECKED_CAST")
                                             val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
@@ -3331,7 +3331,7 @@ class OrderDetailActivity : AppCompatActivity() {
     ) {
 
         // 1️⃣ Find open batch
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .whereEqualTo("closed", false)
             .limit(1)
             .get()
@@ -3345,15 +3345,15 @@ class OrderDetailActivity : AppCompatActivity() {
                 val openBatch = batchSnap.documents.first()
                 val openBatchId = openBatch.id
 
-                val orderRef = db.collection("Orders").document(orderId)
+                val orderRef = MerchantFirestore.col("Orders").document(orderId)
                 orderRef.get()
                     .addOnSuccessListener { orderDoc ->
                         if (!orderDoc.exists()) return@addOnSuccessListener
                         val employeeName = resolveRefundActorDisplayName()
                             .ifBlank { "Unknown" }
 
-                        val newRefundTxRef = db.collection("Transactions").document()
-                        val batchRef = db.collection("Batches").document(openBatchId)
+                        val newRefundTxRef = MerchantFirestore.col("Transactions").document()
+                        val batchRef = MerchantFirestore.col("Batches").document(openBatchId)
 
                         val orderNumber = orderDoc.getLong("orderNumber") ?: 0L
                         val refundDocData = mutableMapOf<String, Any>(
@@ -3393,7 +3393,7 @@ class OrderDetailActivity : AppCompatActivity() {
                                 }
                                 orderRef.update(orderUpdates)
                                     .addOnSuccessListener {
-                                        db.collection("Batches").document(openBatchId)
+                                        MerchantFirestore.col("Batches").document(openBatchId)
                                             .update(mapOf(
                                                 "totalRefundsInCents" to FieldValue.increment(amountInCents),
                                                 "netTotalInCents" to FieldValue.increment(-amountInCents),

@@ -22,6 +22,7 @@ import {
 } from "firebase/firestore";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import { useActiveTerminalCapabilities } from "@/hooks/useActiveTerminalCapabilities";
@@ -373,7 +374,7 @@ export default function OrderDetailPage() {
       setVoidCmdDetail(null);
       return;
     }
-    const ref = doc(db, REMOTE_PAYMENT_COMMANDS, voidCmdId);
+    const ref = merchantDoc(merchantId, REMOTE_PAYMENT_COMMANDS, voidCmdId);
     const unsub = onSnapshot(
       ref,
       (snap) => {
@@ -408,7 +409,7 @@ export default function OrderDetailPage() {
 
     (async () => {
       try {
-        const ref = doc(db, "Orders", orderId);
+        const ref = merchantDoc(merchantId, "Orders", orderId);
         const snap = await getDoc(ref);
         if (cancelled) return;
         if (!snap.exists()) {
@@ -424,7 +425,7 @@ export default function OrderDetailPage() {
         const orderBatchId = String(data.batchId ?? "").trim();
         if (orderBatchId) {
           try {
-            const batchSnap = await getDoc(doc(db, "Batches", orderBatchId));
+            const batchSnap = await getDoc(merchantDoc(merchantId, "Batches", orderBatchId));
             if (!cancelled) {
               setBatchClosed(
                 batchSnap.exists()
@@ -448,7 +449,7 @@ export default function OrderDetailPage() {
 
         if (saleId) {
           try {
-            const txSnap = await getDoc(doc(db, "Transactions", saleId));
+            const txSnap = await getDoc(merchantDoc(merchantId, "Transactions", saleId));
             if (!cancelled && txSnap.exists()) {
               setSaleTransactionData(txSnap.data() as Record<string, unknown>);
             }
@@ -465,8 +466,7 @@ export default function OrderDetailPage() {
           if (mayHaveRefunds) {
             try {
               const refundQ = query(
-                collection(db, "Transactions"),
-                where("merchantId", "==", merchantId),
+                merchantCol(merchantId, "Transactions"),
                 where("type", "==", "REFUND"),
                 where("originalReferenceId", "==", saleId)
               );

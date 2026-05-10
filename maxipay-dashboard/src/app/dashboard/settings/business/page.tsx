@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Header from "@/components/Header";
 import { db, storage } from "@/firebase/firebaseConfig";
+import { merchantDoc } from "@/lib/merchantFirestore";
 import {
   collection,
   doc,
@@ -336,7 +337,7 @@ export default function BusinessInformationPage() {
         if (!merchantId) return;
         setScopedMerchantId(merchantId);
 
-        const biRef = doc(db, DOC_REF, DOC_ID);
+        const biRef = merchantDoc(merchantId, DOC_REF, DOC_ID);
         const biSnap = await getDoc(biRef);
         if (cancelled) return;
         if (biSnap.exists()) {
@@ -384,7 +385,7 @@ export default function BusinessInformationPage() {
 
   useEffect(() => {
     const unsub = onSnapshot(
-      doc(db, DOC_REF, DOC_ID),
+      merchantDoc(scopedMerchantId!, DOC_REF, DOC_ID),
       (snap) => {
         if (snap.exists()) {
           const d = snap.data();
@@ -416,7 +417,7 @@ export default function BusinessInformationPage() {
 
   useEffect(() => {
     const unsub = onSnapshot(
-      doc(db, DOC_REF, "receiptSettings"),
+      merchantDoc(scopedMerchantId!, DOC_REF, "receiptSettings"),
       (snap) => {
         if (snap.exists() && !psDirty) {
           const d = snap.data();
@@ -461,12 +462,7 @@ export default function BusinessInformationPage() {
     setSaveStatus("saving");
     setSaveError(null);
     try {
-      let mid = scopedMerchantId || merchantIdFromClaims;
-      if (!mid && claims.role === "super_admin") {
-        const biSnap = await getDoc(doc(db, DOC_REF, DOC_ID));
-        const raw = biSnap.exists() ? biSnap.get("merchantId") : null;
-        mid = typeof raw === "string" ? raw.trim() : "";
-      }
+      const mid = scopedMerchantId || merchantIdFromClaims;
       if (!mid) {
         setSaveStatus("error");
         setSaveError(
@@ -477,7 +473,7 @@ export default function BusinessInformationPage() {
       }
 
       await setDoc(
-        doc(db, DOC_REF, DOC_ID),
+        merchantDoc(mid, DOC_REF, DOC_ID),
         {
           businessName: data.businessName.trim(),
           address: data.address.trim(),
@@ -485,18 +481,17 @@ export default function BusinessInformationPage() {
           email: data.email.trim(),
           logoUrl: data.logoUrl.trim(),
           updatedAt: serverTimestamp(),
-          merchantId: mid,
         },
         { merge: true }
       );
 
-      const ooRef = doc(db, DOC_REF, ONLINE_ORDERING_SETTINGS_DOC);
+      const ooRef = merchantDoc(mid, DOC_REF, ONLINE_ORDERING_SETTINGS_DOC);
       const ooSnap = await getDoc(ooRef);
       const existingSlug = ooSnap.exists() ? ooSnap.get("onlineOrderingSlug") : null;
       if (!existingSlug || typeof existingSlug !== "string" || !existingSlug.trim()) {
         const generated = slugify(data.businessName.trim());
         if (generated) {
-          await setDoc(ooRef, { onlineOrderingSlug: generated, updatedAt: serverTimestamp(), merchantId: mid }, { merge: true });
+          await setDoc(ooRef, { onlineOrderingSlug: generated, updatedAt: serverTimestamp() }, { merge: true });
         }
       }
 
@@ -574,7 +569,7 @@ export default function BusinessInformationPage() {
       try {
         const midNow = merchantScopeRef.current;
         if (!midNow) return;
-        await setDoc(doc(db, DOC_REF, "receiptSettings"), { ...updated, merchantId: midNow }, { merge: true });
+        await setDoc(merchantDoc(midNow, DOC_REF, "receiptSettings"), { ...updated }, { merge: true });
         setPsDirty(false);
       } catch (e) {
         console.error("[PrintSettings] save error:", e);

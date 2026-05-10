@@ -60,7 +60,7 @@ class BatchDetailsActivity : AppCompatActivity() {
 
     private fun loadBatchTransactions() {
 
-        db.collection("Transactions")
+        MerchantFirestore.col("Transactions")
             .whereEqualTo("settled", true)
             .whereEqualTo("voided", false)
             .get()
@@ -242,7 +242,7 @@ class BatchDetailsActivity : AppCompatActivity() {
         }
 
         for ((orderId, amount) in orderAmounts) {
-            db.collection("Orders").document(orderId).get()
+            MerchantFirestore.col("Orders").document(orderId).get()
                 .addOnSuccessListener { snap ->
                     val orderType = snap.getString("orderType") ?: "OTHER"
                     typeTotals[orderType] = (typeTotals[orderType] ?: 0.0) + amount
@@ -299,7 +299,7 @@ class BatchDetailsActivity : AppCompatActivity() {
         }
 
         for (oid in orderIds) {
-            db.collection("Orders").document(oid).get()
+            MerchantFirestore.col("Orders").document(oid).get()
                 .addOnSuccessListener { snap ->
                     val breakdown = snap.get("taxBreakdown") as? List<*>
                     if (breakdown != null) {
@@ -364,7 +364,7 @@ class BatchDetailsActivity : AppCompatActivity() {
         }
 
         for (oid in orderIds) {
-            db.collection("Orders").document(oid).get()
+            MerchantFirestore.col("Orders").document(oid).get()
                 .addOnSuccessListener { snap ->
                     val tipCents = snap.getLong("tipAmountInCents") ?: 0L
                     if (tipCents > 0L) {

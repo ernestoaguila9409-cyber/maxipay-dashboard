@@ -14,7 +14,7 @@ object KitchenRoutingLabelsFirestore {
     const val FIELD_LABELS = "labels"
 
     fun documentRef(db: FirebaseFirestore) =
-        db.collection(COLLECTION).document(DOCUMENT_ID)
+        MerchantFirestore.col(COLLECTION).document(DOCUMENT_ID)
 
     /**
      * Merges trimmed labels into the shared list (deduped by [PrinterLabelKey.normalize]).

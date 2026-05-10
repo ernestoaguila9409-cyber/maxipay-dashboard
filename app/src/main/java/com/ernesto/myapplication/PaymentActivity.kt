@@ -266,7 +266,7 @@ class PaymentActivity : AppCompatActivity() {
             loadRemainingBalance()
             return
         }
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .whereEqualTo("closed", false)
             .limit(1)
             .get()
@@ -304,7 +304,7 @@ class PaymentActivity : AppCompatActivity() {
     private fun loadRemainingBalance() {
         val oid = orderId ?: return
 
-        db.collection("Orders").document(oid).get()
+        MerchantFirestore.col("Orders").document(oid).get()
             .addOnSuccessListener { snap ->
                 applyOrderSnapshot(snap)
             }
@@ -393,7 +393,7 @@ class PaymentActivity : AppCompatActivity() {
         }
         val subtotalCents = totalInCents + discountInCents - taxTotalCents - tipAmountInCents
 
-        db.collection("Orders").document(oid)
+        MerchantFirestore.col("Orders").document(oid)
             .collection("items").get()
             .addOnSuccessListener { itemsSnap ->
                 container.removeAllViews()
@@ -1403,9 +1403,9 @@ class PaymentActivity : AppCompatActivity() {
             )
             return
         }
-        db.collection("Orders").document(oid).get()
+        MerchantFirestore.col("Orders").document(oid).get()
             .addOnSuccessListener { orderDoc ->
-                db.collection("Orders").document(oid).collection("items").get()
+                MerchantFirestore.col("Orders").document(oid).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
                         val payload = buildSplitReceiptOrNull(
                             orderDoc,
@@ -1654,7 +1654,7 @@ class PaymentActivity : AppCompatActivity() {
                     reopenSplitReceiptOffer(oid, payload, remainingInCents)
                     return@setPositiveButton
                 }
-                db.collection("Orders").document(oid).get()
+                MerchantFirestore.col("Orders").document(oid).get()
                     .addOnSuccessListener { orderDoc ->
                         val body = SplitReceiptRenderer.buildPlainTextBody(this, orderDoc, payload)
                         launchSplitReceiptSmsIntent(raw, body)
@@ -1699,7 +1699,7 @@ class PaymentActivity : AppCompatActivity() {
         if (remainingInCents > 0L) {
             scheduleNextSplitDialogIfNeeded()
             orderId?.let { oid ->
-                db.collection("Orders").document(oid).get()
+                MerchantFirestore.col("Orders").document(oid).get()
                     .addOnSuccessListener { snap -> bindOrderSummary(snap) }
             }
         } else {
@@ -1735,7 +1735,7 @@ class PaymentActivity : AppCompatActivity() {
         remainingInCents: Long
     ) {
         Toast.makeText(this, "Preparing receipt…", Toast.LENGTH_SHORT).show()
-        db.collection("Orders").document(oid).get()
+        MerchantFirestore.col("Orders").document(oid).get()
             .addOnSuccessListener { orderDoc ->
                 val segs = SplitReceiptRenderer.buildEscPosSegments(this, orderDoc, payload)
                 EscPosPrinter.print(this, segs, ReceiptSettings.load(this))
@@ -2346,7 +2346,7 @@ class PaymentActivity : AppCompatActivity() {
         }
         selectedManualDiscountId = discount.id
 
-        db.collection("Orders").document(oid).get()
+        MerchantFirestore.col("Orders").document(oid).get()
             .addOnSuccessListener { doc ->
                 val currentTotal = doc.getLong("totalInCents") ?: 0L
                 val currentDiscount = doc.getLong("discountInCents") ?: 0L
@@ -2374,7 +2374,7 @@ class PaymentActivity : AppCompatActivity() {
                     )
                 )
 
-                db.collection("Orders").document(oid).update(
+                MerchantFirestore.col("Orders").document(oid).update(
                     mapOf(
                         "totalInCents" to newTotal,
                         "remainingInCents" to newRemaining,
@@ -2409,7 +2409,7 @@ class PaymentActivity : AppCompatActivity() {
         val oid = orderId ?: return
         val discountId = selectedManualDiscountId ?: return
 
-        db.collection("Orders").document(oid).get()
+        MerchantFirestore.col("Orders").document(oid).get()
             .addOnSuccessListener { doc ->
                 val currentTotal = doc.getLong("totalInCents") ?: 0L
                 val currentDiscount = doc.getLong("discountInCents") ?: 0L
@@ -2417,7 +2417,7 @@ class PaymentActivity : AppCompatActivity() {
                 val totalPaid = doc.getLong("totalPaidInCents") ?: 0L
                 val newRemaining = (restoredTotal - totalPaid).coerceAtLeast(0L)
 
-                db.collection("Orders").document(oid).update(
+                MerchantFirestore.col("Orders").document(oid).update(
                     mapOf(
                         "totalInCents" to restoredTotal,
                         "remainingInCents" to newRemaining,

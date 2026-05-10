@@ -7,6 +7,10 @@ const SANDBOX_TOKEN_URL = "https://sandbox-login.uber.com/oauth/v2/token";
 const PROD_TOKEN_URL = "https://auth.uber.com/oauth/v2/token";
 
 const PROVISIONING_SCOPES = "eats.pos_provisioning";
+// TODO: Multi-tenant — Settings/uberOAuth should move to
+// Merchants/{merchantId}/settings/uberOAuth. This module currently has no
+// merchantId context; the OAuth flow and token storage need to be refactored
+// to accept a merchantId parameter so each merchant stores their own tokens.
 const FIRESTORE_DOC = "Settings/uberOAuth";
 const REFRESH_BUFFER_MS = 60 * 60 * 1000;
 

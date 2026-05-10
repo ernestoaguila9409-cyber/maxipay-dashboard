@@ -44,7 +44,7 @@ object PrinterFirestoreSync {
             onComplete(null)
             return
         }
-        val col = db.collection(COLLECTION)
+        val col = MerchantFirestore.col(COLLECTION)
         val primaryId = documentIdForLanIp(trimmed)
         if (!isValidLanDocId(primaryId)) {
             onComplete(null)
@@ -84,7 +84,7 @@ object PrinterFirestoreSync {
         if (!isValidLanDocId(docId)) return
         val data = buildRegistrationData(type, display, ip, model, manufacturer, includeLabels, includeCommandSet)
 
-        val col = db.collection(COLLECTION)
+        val col = MerchantFirestore.col(COLLECTION)
         col.whereEqualTo("ipAddress", ip).get()
             .addOnSuccessListener { snap ->
                 val dupes = snap.documents.filter { it.id != docId }
@@ -186,7 +186,7 @@ object PrinterFirestoreSync {
                 ((nowMs % 1000) * 1_000_000).toInt(),
             )
         }
-        db.collection(COLLECTION).document(docId).set(data, SetOptions.merge())
+        MerchantFirestore.col(COLLECTION).document(docId).set(data, SetOptions.merge())
             .addOnFailureListener { e ->
                 Log.w(TAG, "updateReachability failed for $docId: ${e.message}")
             }

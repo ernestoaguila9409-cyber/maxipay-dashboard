@@ -21,6 +21,7 @@ import {
   type DocumentReference,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import { collectActivePrinterRoutingLabels } from "@/lib/printerStatusUtils";
@@ -346,18 +347,18 @@ const FIRESTORE_BATCH_LIMIT = 450;
  * primary category. Items in `categoryIds` are updated to drop this category or deleted if
  * it was their only placement. Commits in chunks under Firestore's batch limit.
  */
-async function purgeCategoryFromFirestore(categoryId: string): Promise<void> {
+async function purgeCategoryFromFirestore(merchantId: string, categoryId: string): Promise<void> {
   const subSnap = await getDocs(
-    query(collection(db, "subcategories"), where("categoryId", "==", categoryId))
+    query(merchantCol(merchantId, "subcategories"), where("categoryId", "==", categoryId))
   );
   const deletedSubIds = new Set<string>();
   subSnap.forEach((d) => deletedSubIds.add(d.id));
 
   const itemPrimarySnap = await getDocs(
-    query(collection(db, "MenuItems"), where("categoryId", "==", categoryId))
+    query(merchantCol(merchantId, "MenuItems"), where("categoryId", "==", categoryId))
   );
   const itemMultiSnap = await getDocs(
-    query(collection(db, "MenuItems"), where("categoryIds", "array-contains", categoryId))
+    query(merchantCol(merchantId, "MenuItems"), where("categoryIds", "array-contains", categoryId))
   );
 
   const primaryDeleteIds = new Set(itemPrimarySnap.docs.map((d) => d.id));
@@ -405,7 +406,7 @@ async function purgeCategoryFromFirestore(categoryId: string): Promise<void> {
   });
 
   subSnap.forEach((d) => ops.push({ k: "del", ref: d.ref }));
-  ops.push({ k: "del", ref: doc(db, "Categories", categoryId) });
+  ops.push({ k: "del", ref: merchantDoc(merchantId, "Categories", categoryId) });
 
   let batch = writeBatch(db);
   let count = 0;
@@ -620,7 +621,7 @@ export default function MenuPage() {
     console.log("[Menu] Subscribing to Firestore collections. User UID:", user.uid);
 
     const unsubCats = onSnapshot(
-      query(collection(db, "Categories"), where("merchantId", "==", merchantId)),
+      merchantCol(merchantId, "Categories"),
       (snap) => {
         console.log("[Menu] Categories snapshot → docs:", snap.size);
         catSnap.current.clear();
@@ -649,7 +650,7 @@ export default function MenuPage() {
     );
 
     const unsubSchedules = onSnapshot(
-      query(collection(db, "menuSchedules"), where("merchantId", "==", merchantId)),
+      merchantCol(merchantId, "menuSchedules"),
       (snap) => {
         console.log("[Menu] menuSchedules snapshot → docs:", snap.size);
         const list: Schedule[] = [];
@@ -664,7 +665,7 @@ export default function MenuPage() {
     );
 
     const unsubItems = onSnapshot(
-      query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)),
+      merchantCol(merchantId, "MenuItems"),
       (snap) => {
         console.log("[Menu] MenuItems snapshot → docs:", snap.size);
         const list: MenuItemSnapRow[] = [];
@@ -765,7 +766,7 @@ export default function MenuPage() {
     );
 
     const unsubSettings = onSnapshot(
-      doc(db, "Settings", "inventory"),
+      merchantDoc(merchantId, "Settings", "inventory"),
       (snap) => {
         console.log("[Menu] Settings/inventory snapshot → exists:", snap.exists());
         const data = snap.data();
@@ -775,7 +776,7 @@ export default function MenuPage() {
     );
 
     const unsubModGroups = onSnapshot(
-      query(collection(db, "ModifierGroups"), where("merchantId", "==", merchantId)),
+      merchantCol(merchantId, "ModifierGroups"),
       (snap) => {
         console.log("[Menu] ModifierGroups snapshot → docs:", snap.size);
         const list: ModifierGroup[] = [];
@@ -807,7 +808,7 @@ export default function MenuPage() {
     );
 
     const unsubTaxes = onSnapshot(
-      query(collection(db, "Taxes"), where("merchantId", "==", merchantId)),
+      merchantCol(merchantId, "Taxes"),
       (snap) => {
         console.log("[Menu] Taxes snapshot → docs:", snap.size);
         const list: TaxEntry[] = [];
@@ -831,7 +832,7 @@ export default function MenuPage() {
     );
 
     const unsubMenuEntities = onSnapshot(
-      query(collection(db, "menus"), where("merchantId", "==", merchantId)),
+      merchantCol(merchantId, "menus"),
       (snap) => {
         console.log("[Menu] menus snapshot → docs:", snap.size);
         const list: MenuEntity[] = [];
@@ -853,7 +854,7 @@ export default function MenuPage() {
     );
 
     const unsubSubcategories = onSnapshot(
-      query(collection(db, "subcategories"), where("merchantId", "==", merchantId), orderBy("order", "asc")),
+      query(merchantCol(merchantId, "subcategories"), orderBy("order", "asc")),
       (snap) => {
         const list: SubcategoryEntry[] = [];
         snap.forEach((d) => {
@@ -880,7 +881,7 @@ export default function MenuPage() {
     );
 
     const unsubPrintersForLabels = onSnapshot(
-      query(collection(db, "Printers"), where("merchantId", "==", merchantId)),
+      merchantCol(merchantId, "Printers"),
       (snap) => {
         const rows: Record<string, unknown>[] = [];
         snap.forEach((d) => rows.push(d.data() as Record<string, unknown>));
@@ -891,7 +892,7 @@ export default function MenuPage() {
     );
 
     const unsubKdsPicker = onSnapshot(
-      query(collection(db, KDS_DEVICES_COLLECTION), where("merchantId", "==", merchantId)),
+      merchantCol(merchantId, KDS_DEVICES_COLLECTION),
       (snap) => {
         const rows: KdsDevicePickerRow[] = [];
         snap.forEach((d) => {
@@ -1135,7 +1136,7 @@ export default function MenuPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await deleteDoc(doc(db, "MenuItems", deleteTarget.id));
+      await deleteDoc(merchantDoc(merchantId, "MenuItems", deleteTarget.id));
     } catch (err) {
       console.error("Failed to delete item:", err);
     } finally {
@@ -1366,8 +1367,7 @@ export default function MenuPage() {
         const itemsInSource = items.filter((i) => i.categoryId === sourceCatId);
         const oldSubs = allSubcategories.filter((s) => s.categoryId === sourceCatId);
 
-        const newSubRef = await addDoc(collection(db, "subcategories"), {
-          merchantId,
+        const newSubRef = await addDoc(merchantCol(merchantId, "subcategories"), {
           name: sourceCat.name,
           categoryId: transferCategoryId,
           order: orderOffset,
@@ -1385,7 +1385,7 @@ export default function MenuPage() {
         for (let i = 0; i < itemsInSource.length; i += CHUNK) {
           const batch = writeBatch(db);
           for (const it of itemsInSource.slice(i, i + CHUNK)) {
-            batch.update(doc(db, "MenuItems", it.id), itemPayload);
+            batch.update(merchantDoc(merchantId, "MenuItems", it.id), itemPayload);
           }
           await batch.commit();
         }
@@ -1393,12 +1393,12 @@ export default function MenuPage() {
         for (let i = 0; i < oldSubs.length; i += CHUNK) {
           const batch = writeBatch(db);
           for (const sub of oldSubs.slice(i, i + CHUNK)) {
-            batch.delete(doc(db, "subcategories", sub.id));
+            batch.delete(merchantDoc(merchantId, "subcategories", sub.id));
           }
           await batch.commit();
         }
 
-        await deleteDoc(doc(db, "Categories", sourceCatId));
+        await deleteDoc(merchantDoc(merchantId, "Categories", sourceCatId));
         if (activeCategory === sourceCatId) setActiveCategory(null);
         if (oldSubs.some((s) => s.id === activeSubcategory)) setActiveSubcategory(null);
       }
@@ -1423,8 +1423,7 @@ export default function MenuPage() {
           parent && parent.availableOrderTypes.length > 0 ? parent.availableOrderTypes : [...ALL_ORDER_TYPES];
 
         const catName = pickUniqueCategoryName(sub.name);
-        const newCatRef = await addDoc(collection(db, "Categories"), {
-          merchantId,
+        const newCatRef = await addDoc(merchantCol(merchantId, "Categories"), {
           name: catName,
           availableOrderTypes: availTypes,
           scheduleIds: promoteScheduleFields.scheduleIds,
@@ -1440,12 +1439,12 @@ export default function MenuPage() {
         for (let i = 0; i < itemsInSub.length; i += CHUNK) {
           const batch = writeBatch(db);
           for (const it of itemsInSub.slice(i, i + CHUNK)) {
-            batch.update(doc(db, "MenuItems", it.id), itemPayload);
+            batch.update(merchantDoc(merchantId, "MenuItems", it.id), itemPayload);
           }
           await batch.commit();
         }
 
-        await deleteDoc(doc(db, "subcategories", subId));
+        await deleteDoc(merchantDoc(merchantId, "subcategories", subId));
         if (activeSubcategory === subId) setActiveSubcategory(null);
       }
 
@@ -1459,7 +1458,7 @@ export default function MenuPage() {
         for (let i = 0; i < transferItemIds.length; i += CHUNK) {
           const batch = writeBatch(db);
           for (const id of transferItemIds.slice(i, i + CHUNK)) {
-            batch.update(doc(db, "MenuItems", id), itemPayload);
+            batch.update(merchantDoc(merchantId, "MenuItems", id), itemPayload);
           }
           await batch.commit();
         }
@@ -1480,7 +1479,7 @@ export default function MenuPage() {
     try {
       const batch = writeBatch(db);
       for (const id of selectedItems) {
-        batch.delete(doc(db, "MenuItems", id));
+        batch.delete(merchantDoc(merchantId, "MenuItems", id));
       }
       await batch.commit();
       exitSelectMode();
@@ -1498,7 +1497,7 @@ export default function MenuPage() {
     setBulkCategoriesDeleting(true);
     try {
       for (const categoryId of ids) {
-        await purgeCategoryFromFirestore(categoryId);
+        await purgeCategoryFromFirestore(merchantId, categoryId);
       }
       exitCategoryFilterMode();
     } catch (err) {
@@ -1516,8 +1515,8 @@ export default function MenuPage() {
     if (!t) return;
     try {
       await setDoc(
-        doc(db, "Settings", "kitchenRoutingLabels"),
-        { merchantId, labels: arrayUnion(t) },
+        merchantDoc(merchantId, "Settings", "kitchenRoutingLabels"),
+        { labels: arrayUnion(t) },
         { merge: true }
       );
     } catch (e) {
@@ -1538,7 +1537,7 @@ export default function MenuPage() {
       const had = d.assignedItemIds.includes(id);
       const want = sel !== "" && d.id === sel;
       if (had === want) continue;
-      const ref = doc(db, KDS_DEVICES_COLLECTION, d.id);
+      const ref = merchantDoc(merchantId, KDS_DEVICES_COLLECTION, d.id);
       if (want) {
         await updateDoc(ref, {
           assignedItemIds: arrayUnion(id),
@@ -1561,7 +1560,7 @@ export default function MenuPage() {
   const persistEditItemImageUrl = useCallback(
     async (url: string) => {
       if (!editTarget) return;
-      await updateDoc(doc(db, "MenuItems", editTarget.id), { imageUrl: url });
+      await updateDoc(merchantDoc(merchantId, "MenuItems", editTarget.id), { imageUrl: url });
     },
     [editTarget]
   );
@@ -1719,7 +1718,7 @@ export default function MenuPage() {
         update.imageUrl = deleteField();
       }
 
-      await updateDoc(doc(db, "MenuItems", editTarget.id), update);
+      await updateDoc(merchantDoc(merchantId, "MenuItems", editTarget.id), update);
       try {
         await syncMenuItemKdsDeviceAssignment(
           editTarget.id,
@@ -1792,7 +1791,7 @@ export default function MenuPage() {
 
     setEditCategorySaving(true);
     try {
-      await updateDoc(doc(db, "Categories", editCategoryTarget.id), {
+      await updateDoc(merchantDoc(merchantId, "Categories", editCategoryTarget.id), {
         availableOrderTypes,
         scheduleIds,
       });
@@ -1808,7 +1807,7 @@ export default function MenuPage() {
     if (!deleteCategoryTarget) return;
     setDeletingCategory(true);
     try {
-      await purgeCategoryFromFirestore(deleteCategoryTarget.id);
+      await purgeCategoryFromFirestore(merchantId, deleteCategoryTarget.id);
       if (activeCategory === deleteCategoryTarget.id) setActiveCategory(null);
       setDeleteCategoryTarget(null);
     } catch (err) {
@@ -1842,8 +1841,7 @@ export default function MenuPage() {
 
     setAddCategorySaving(true);
     try {
-      await addDoc(collection(db, "Categories"), {
-        merchantId,
+      await addDoc(merchantCol(merchantId, "Categories"), {
         name,
         availableOrderTypes,
         scheduleIds,
@@ -1881,15 +1879,14 @@ export default function MenuPage() {
       let subId: string;
       if (subEditing) {
         subId = subEditing.id;
-        await updateDoc(doc(db, "subcategories", subId), {
+        await updateDoc(merchantDoc(merchantId, "subcategories", subId), {
           name,
           categoryId: subCategoryId,
           updatedAt: serverTimestamp(),
         });
       } else {
         const nextOrder = allSubcategories.filter((s) => s.categoryId === subCategoryId).length;
-        const ref = await addDoc(collection(db, "subcategories"), {
-          merchantId,
+        const ref = await addDoc(merchantCol(merchantId, "subcategories"), {
           name,
           categoryId: subCategoryId,
           order: nextOrder,
@@ -1902,11 +1899,11 @@ export default function MenuPage() {
       const batch = writeBatch(db);
       for (const [itemId, checked] of Object.entries(subItemSelections)) {
         if (checked) {
-          batch.update(doc(db, "MenuItems", itemId), { subcategoryId: subId });
+          batch.update(merchantDoc(merchantId, "MenuItems", itemId), { subcategoryId: subId });
         } else {
           const item = items.find((i) => i.id === itemId);
           if (item && item.subcategoryId === (subEditing?.id ?? subId)) {
-            batch.update(doc(db, "MenuItems", itemId), { subcategoryId: "" });
+            batch.update(merchantDoc(merchantId, "MenuItems", itemId), { subcategoryId: "" });
           }
         }
       }
@@ -1928,11 +1925,11 @@ export default function MenuPage() {
       if (affected.length > 0) {
         const batch = writeBatch(db);
         for (const item of affected) {
-          batch.update(doc(db, "MenuItems", item.id), { subcategoryId: "" });
+          batch.update(merchantDoc(merchantId, "MenuItems", item.id), { subcategoryId: "" });
         }
         await batch.commit();
       }
-      await deleteDoc(doc(db, "subcategories", deleteSubTarget.id));
+      await deleteDoc(merchantDoc(merchantId, "subcategories", deleteSubTarget.id));
       setDeleteSubTarget(null);
       if (activeSubcategory === deleteSubTarget.id) setActiveSubcategory(null);
     } catch (err) {
@@ -2026,7 +2023,6 @@ export default function MenuPage() {
     setAddSaving(true);
     try {
       const data: Record<string, unknown> = {
-        merchantId,
         name,
         prices,
         price,
@@ -2066,13 +2062,13 @@ export default function MenuPage() {
       }
 
       const itemId =
-        addDraftItemId ?? doc(collection(db, "MenuItems")).id;
-      const newRef = doc(db, "MenuItems", itemId);
+        addDraftItemId ?? doc(merchantCol(merchantId, "MenuItems")).id;
+      const newRef = merchantDoc(merchantId, "MenuItems", itemId);
       await setDoc(newRef, data);
       const kdsPick = addKdsDeviceId.trim();
       if (kdsPick) {
         try {
-          await updateDoc(doc(db, KDS_DEVICES_COLLECTION, kdsPick), {
+          await updateDoc(merchantDoc(merchantId, KDS_DEVICES_COLLECTION, kdsPick), {
             assignedItemIds: arrayUnion(newRef.id),
             updatedAt: serverTimestamp(),
           });
@@ -2439,7 +2435,7 @@ export default function MenuPage() {
                 <button
                   onClick={() => {
                     resetAddForm();
-                    setAddDraftItemId(doc(collection(db, "MenuItems")).id);
+                    setAddDraftItemId(doc(merchantCol(merchantId, "MenuItems")).id);
                     setAddOpen(true);
                   }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors"

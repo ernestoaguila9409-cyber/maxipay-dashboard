@@ -356,7 +356,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun ensureOpenBatch() {
-        db.collection("Batches")
+        MerchantFirestore.col("Batches")
             .whereEqualTo("closed", false)
             .limit(1)
             .get()
@@ -374,8 +374,7 @@ class MainActivity : AppCompatActivity() {
                         "type" to "OPEN",
                         "transactionCounter" to 0
                     )
-                    db.collection("Batches")
-                        .document(newBatchId)
+                    MerchantFirestore.doc("Batches", newBatchId)
                         .set(batchData)
                         .addOnSuccessListener { currentBatchId = newBatchId }
                 }
@@ -397,7 +396,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun listenForOpenOrders() {
-        openOrdersListener = db.collection("Orders")
+        openOrdersListener = MerchantFirestore.col("Orders")
             .whereEqualTo("status", "OPEN")
             .addSnapshotListener { snapshots, _ ->
                 if (snapshots == null) return@addSnapshotListener
@@ -435,7 +434,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun listenForPendingOnlineStaffConfirm() {
         pendingOnlineConfirmListener?.remove()
-        pendingOnlineConfirmListener = db.collection("Orders")
+        pendingOnlineConfirmListener = MerchantFirestore.col("Orders")
             .whereEqualTo(OnlineOrderStaffConfirm.FIELD_AWAITING, true)
             .whereEqualTo("orderSource", "online_ordering")
             .addSnapshotListener { snapshots, error ->
@@ -509,7 +508,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Incoming online orders")
             .setItems(labels) { _, which ->
                 val id = pending[which].id
-                db.collection("Orders").document(id).get()
+                MerchantFirestore.col("Orders").document(id).get()
                     .addOnSuccessListener { d ->
                         if (d.exists() && OnlineOrderStaffConfirm.isAwaitingStaffWebOnline(d)) {
                             showPendingOnlineOrderDialog(d)
@@ -528,7 +527,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun listenForUberOrders() {
         uberOrdersListener?.remove()
-        uberOrdersListener = db.collection("Orders")
+        uberOrdersListener = MerchantFirestore.col("Orders")
             .whereEqualTo("orderType", "UBER_EATS")
             .whereEqualTo("status", "OPEN")
             .addSnapshotListener { snapshots, error ->
@@ -585,7 +584,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun attachCurrentSalesListener() {
         currentSalesListener?.remove()
-        currentSalesListener = db.collection("Transactions")
+        currentSalesListener = MerchantFirestore.col("Transactions")
             .whereEqualTo("settled", false)
             .addSnapshotListener { snapshots, error ->
                 if (error != null) {

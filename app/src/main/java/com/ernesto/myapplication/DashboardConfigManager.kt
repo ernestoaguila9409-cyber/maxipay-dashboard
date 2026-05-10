@@ -21,7 +21,7 @@ object DashboardConfigManager {
         db: FirebaseFirestore,
         onResult: (List<DashboardModule>) -> Unit
     ) {
-        db.collection(COLLECTION).document(DOCUMENT)
+        MerchantFirestore.col(COLLECTION).document(DOCUMENT)
             .get(Source.SERVER)
             .addOnSuccessListener { doc ->
                 if (doc.exists()) {
@@ -45,7 +45,7 @@ object DashboardConfigManager {
         db: FirebaseFirestore,
         onResult: (List<DashboardModule>) -> Unit
     ) {
-        db.collection(COLLECTION).document(DOCUMENT).get()
+        MerchantFirestore.col(COLLECTION).document(DOCUMENT).get()
             .addOnSuccessListener { doc ->
                 if (doc.exists()) {
                     val modules = parseModules(doc.get(FIELD_MODULES))
@@ -69,7 +69,7 @@ object DashboardConfigManager {
         onUpdate: (List<DashboardModule>) -> Unit,
         onCacheThenServer: ((List<DashboardModule>) -> Unit)? = null
     ): ListenerRegistration {
-        return db.collection(COLLECTION).document(DOCUMENT)
+        return MerchantFirestore.col(COLLECTION).document(DOCUMENT)
             .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                 if (error != null) {
                     Log.w(TAG, "Listener error, forcing server fetch", error)
@@ -108,7 +108,7 @@ object DashboardConfigManager {
         val indexed = modules.mapIndexed { index, m ->
             m.copy(position = index).toMap()
         }
-        db.collection(COLLECTION).document(DOCUMENT)
+        MerchantFirestore.col(COLLECTION).document(DOCUMENT)
             .set(mapOf(FIELD_MODULES to indexed))
             .addOnSuccessListener { onComplete(true) }
             .addOnFailureListener { e ->

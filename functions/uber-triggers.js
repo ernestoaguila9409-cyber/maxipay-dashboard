@@ -1,5 +1,5 @@
 const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
-const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const { FieldValue } = require("firebase-admin/firestore");
 const logger = require("firebase-functions/logger");
 const uberApi = require("./uber-api");
 
@@ -16,7 +16,7 @@ const uberApi = require("./uber-api");
  *   * → RELEASED      =>  releaseOrder      (uses order.releaseReason / details)
  */
 exports.uberOnOrderStatusChange = onDocumentUpdated(
-  "Orders/{orderId}",
+  "Merchants/{merchantId}/orders/{orderId}",
   async (event) => {
     const before = event.data.before.data();
     const after = event.data.after.data();
@@ -27,7 +27,7 @@ exports.uberOnOrderStatusChange = onDocumentUpdated(
     const newStatus = after.status;
     if (oldStatus === newStatus) return;
 
-    const orderId = event.params.orderId;
+    const { merchantId, orderId } = event.params;
     logger.info("[uber-triggers] Status change detected", {
       orderId, oldStatus, newStatus,
     });
@@ -139,13 +139,13 @@ exports.uberOnOrderStatusChange = onDocumentUpdated(
  * the original webhook event.
  */
 exports.uberEnrichNewOrder = onDocumentCreated(
-  "Orders/{orderId}",
+  "Merchants/{merchantId}/orders/{orderId}",
   async (event) => {
     const data = event.data?.data();
     if (!data) return;
     if (data.orderType !== "UBER_EATS") return;
 
-    const orderId = event.params.orderId;
+    const { merchantId, orderId } = event.params;
     logger.info("[uber-enrich] New Uber order detected, enriching", { orderId });
 
     try {
@@ -169,8 +169,7 @@ exports.uberEnrichNewOrder = onDocumentCreated(
       const phone = customer.phone?.number || customer.phone || null;
       if (phone) enrichment.customerPhone = phone;
 
-      const db = getFirestore();
-      await db.collection("Orders").doc(orderId).update(enrichment);
+      await event.data.ref.update(enrichment);
       logger.info("[uber-enrich] Order enriched", { orderId });
     } catch (err) {
       logger.warn("[uber-enrich] Failed to enrich order (non-fatal)", {

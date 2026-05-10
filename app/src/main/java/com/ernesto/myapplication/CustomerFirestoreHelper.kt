@@ -73,7 +73,7 @@ object CustomerFirestoreHelper {
             onResult(null)
             return
         }
-        db.collection(COLLECTION)
+        MerchantFirestore.col(COLLECTION)
             .get()
             .addOnSuccessListener { snap ->
                 val matches = snap.documents.filter { doc ->
@@ -127,14 +127,14 @@ object CustomerFirestoreHelper {
         }
 
         val tasks = mutableListOf<Task<QuerySnapshot>>()
-        tasks += db.collection(COLLECTION)
+        tasks += MerchantFirestore.col(COLLECTION)
             .orderBy("nameSearch")
             .startAt(lower)
             .endAt(lower + "\uf8ff")
             .limit(limit)
             .get()
 
-        tasks += db.collection(COLLECTION)
+        tasks += MerchantFirestore.col(COLLECTION)
             .orderBy("name")
             .startAt(trimmed)
             .endAt(trimmed + "\uf8ff")
@@ -143,7 +143,7 @@ object CustomerFirestoreHelper {
 
         val titleWords = titleCaseWordsForNameRangeQuery(trimmed)
         if (titleWords.length >= SEARCH_MIN_CHARS && titleWords != trimmed) {
-            tasks += db.collection(COLLECTION)
+            tasks += MerchantFirestore.col(COLLECTION)
                 .orderBy("name")
                 .startAt(titleWords)
                 .endAt(titleWords + "\uf8ff")
@@ -156,7 +156,7 @@ object CustomerFirestoreHelper {
             val firstForQuery = firstToken.lowercase(Locale.getDefault()).replaceFirstChar { ch ->
                 ch.titlecase(Locale.getDefault())
             }
-            tasks += db.collection(COLLECTION)
+            tasks += MerchantFirestore.col(COLLECTION)
                 .orderBy("firstName")
                 .startAt(firstForQuery)
                 .endAt(firstForQuery + "\uf8ff")
@@ -169,7 +169,7 @@ object CustomerFirestoreHelper {
             val lastTok = nameTokens.last().lowercase(Locale.getDefault()).replaceFirstChar { ch ->
                 ch.titlecase(Locale.getDefault())
             }
-            tasks += db.collection(COLLECTION)
+            tasks += MerchantFirestore.col(COLLECTION)
                 .orderBy("lastName")
                 .startAt(lastTok)
                 .endAt(lastTok + "\uf8ff")
@@ -260,7 +260,7 @@ object CustomerFirestoreHelper {
             "phone" to phone.trim(),
             "createdAt" to Timestamp.now(),
         )
-        db.collection(COLLECTION)
+        MerchantFirestore.col(COLLECTION)
             .add(map)
             .addOnSuccessListener { doc -> onResult(doc.id) }
             .addOnFailureListener(onError)

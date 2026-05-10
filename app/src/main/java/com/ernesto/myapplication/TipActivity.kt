@@ -76,10 +76,10 @@ class TipActivity : AppCompatActivity() {
             setupUI()
         }
 
-        db.collection("Orders").document(oid).get(Source.SERVER)
+        MerchantFirestore.col("Orders").document(oid).get(Source.SERVER)
             .addOnSuccessListener { doc -> applyDoc(doc) }
             .addOnFailureListener {
-                db.collection("Orders").document(oid).get()
+                MerchantFirestore.col("Orders").document(oid).get()
                     .addOnSuccessListener { doc -> applyDoc(doc) }
                     .addOnFailureListener {
                         Toast.makeText(this, "Failed to load order", Toast.LENGTH_SHORT).show()
@@ -209,7 +209,7 @@ class TipActivity : AppCompatActivity() {
             val totalPaidInCents = (doc.get("totalPaidInCents") as? Number)?.toLong() ?: 0L
             val newRemainingCents = (newTotalCents - totalPaidInCents).coerceAtLeast(0L)
 
-            db.collection("Orders").document(oid)
+            MerchantFirestore.col("Orders").document(oid)
                 .update(
                     mapOf(
                         "tipAmountInCents" to tipCents,
@@ -224,10 +224,10 @@ class TipActivity : AppCompatActivity() {
                 }
         }
 
-        db.collection("Orders").document(oid).get(Source.SERVER)
+        MerchantFirestore.col("Orders").document(oid).get(Source.SERVER)
             .addOnSuccessListener { doc -> commitFromDoc(doc) }
             .addOnFailureListener {
-                db.collection("Orders").document(oid).get()
+                MerchantFirestore.col("Orders").document(oid).get()
                     .addOnSuccessListener { doc -> commitFromDoc(doc) }
             }
     }

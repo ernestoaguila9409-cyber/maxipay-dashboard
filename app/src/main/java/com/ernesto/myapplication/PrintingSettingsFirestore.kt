@@ -27,7 +27,7 @@ object PrintingSettingsFirestore {
     val ALL_ITEM_FILTER_MODES = setOf(ALL_ITEMS, BY_LABEL)
 
     fun documentRef(db: FirebaseFirestore) =
-        db.collection(COLLECTION).document(DOCUMENT_ID)
+        MerchantFirestore.col(COLLECTION).document(DOCUMENT_ID)
 
     fun printTriggerModeFromSnapshot(snap: DocumentSnapshot): String {
         val raw = snap.getString(FIELD_PRINT_TRIGGER_MODE)?.trim()

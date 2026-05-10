@@ -36,7 +36,7 @@ object OnlineTerminalPaymentListener {
         ensureChannel(context.applicationContext)
         val app = context.applicationContext
         val db = FirebaseFirestore.getInstance()
-        registration = db.collection(OnlineTerminalPaymentRequestHelper.COLLECTION)
+        registration = MerchantFirestore.col(OnlineTerminalPaymentRequestHelper.COLLECTION)
             .whereEqualTo("status", "pending")
             .addSnapshotListener { snap, e ->
                 if (e != null) {

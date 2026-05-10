@@ -270,7 +270,7 @@ class OrdersActivity : AppCompatActivity() {
     }
 
     private fun loadEmployeeNames() {
-        db.collection("Employees").get()
+        MerchantFirestore.col("Employees").get()
             .addOnSuccessListener { snap ->
                 employeeNames = snap.mapNotNull { it.getString("name")?.takeIf { n -> n.isNotBlank() } }
                     .distinct().sorted()
@@ -334,7 +334,7 @@ class OrdersActivity : AppCompatActivity() {
         listener = null
         kitchenAggregateByOrderId.clear()
 
-        var query: Query = db.collection("Orders")
+        var query: Query = MerchantFirestore.col("Orders")
 
         if (filterBatchId != null) {
             query = query.whereEqualTo("batchId", filterBatchId)
@@ -650,7 +650,7 @@ class OrdersActivity : AppCompatActivity() {
     }
 
     private suspend fun deleteOrderWithItems(orderId: String) {
-        val orderRef = db.collection("Orders").document(orderId)
+        val orderRef = MerchantFirestore.doc("Orders", orderId)
 
         val itemsSnap = orderRef.collection("items").get().await()
         for (item in itemsSnap.documents) {

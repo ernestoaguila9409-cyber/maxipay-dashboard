@@ -76,7 +76,7 @@ class CustomerOrderHistoryRepository(
         onSuccess: (RecentHistory) -> Unit,
         onFailure: (Exception) -> Unit,
     ) {
-        db.collection(COLLECTION_ORDERS)
+        MerchantFirestore.col(COLLECTION_ORDERS)
             .whereEqualTo(FIELD_CUSTOMER_ID, customerId)
             .whereEqualTo(FIELD_STATUS, STATUS_CLOSED)
             .orderBy("createdAt", Query.Direction.DESCENDING)
@@ -115,7 +115,7 @@ class CustomerOrderHistoryRepository(
     fun updateAfterOrderClosed(orderId: String) {
         val id = orderId.trim()
         if (id.isEmpty()) return
-        val orderRef = db.collection(COLLECTION_ORDERS).document(id)
+        val orderRef = MerchantFirestore.doc(COLLECTION_ORDERS, id)
         orderRef.get().addOnSuccessListener { orderDoc ->
             if (!orderDoc.exists()) return@addOnSuccessListener
             val status = orderDoc.getString(FIELD_STATUS)?.trim()?.uppercase().orEmpty()
@@ -133,7 +133,7 @@ class CustomerOrderHistoryRepository(
 
     @Suppress("UNCHECKED_CAST")
     private fun writeSummaryIntoCustomer(customerId: String, incoming: OrderSummary) {
-        val ref = db.collection(COLLECTION_CUSTOMERS).document(customerId)
+        val ref = MerchantFirestore.doc(COLLECTION_CUSTOMERS, customerId)
         ref.get().addOnSuccessListener { snap ->
             val existing: List<OrderSummary> = (snap.get(FIELD_LAST_ORDERS) as? List<*>)
                 ?.mapNotNull { OrderSummary.fromMap(it) }
