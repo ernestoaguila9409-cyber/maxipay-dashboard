@@ -2,8 +2,10 @@ import admin from "firebase-admin";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp, verifyIdToken } from "@/lib/firebaseAdmin";
 import {
+  authUserLikelyHasPasswordSignIn,
   normalizeMerchantEmail,
   passwordResetContinueSettings,
+  sendMerchantCreatedConfirmationEmail,
   sendMerchantWelcomeEmail,
 } from "@/lib/merchantWelcomeEmail";
 import { syncSettingsBusinessInfoFromMerchant } from "@/lib/syncMerchantBusinessInfo";
@@ -268,24 +270,42 @@ export async function POST(req: Request) {
 
     let emailSent = false;
     let emailHint: string | undefined;
+    /** `password_setup` = reset link email; `merchant_linked` = existing login, confirmation only */
+    let emailKind: "password_setup" | "merchant_linked" = "password_setup";
     try {
-      const settings = passwordResetContinueSettings();
-      const resetLink = await authAdmin.generatePasswordResetLink(
-        email,
-        settings ? { url: settings.url } : undefined
-      );
-      const sendResult = await sendMerchantWelcomeEmail(email, businessName, resetLink);
-      emailSent = sendResult.ok;
-      if (!sendResult.ok) {
-        console.error("[merchants] Resend:", sendResult.message);
-        emailHint = sendResult.message.slice(0, 400);
+      const skipPasswordReset =
+        !createdNewUser && authUserLikelyHasPasswordSignIn(authUser);
+
+      if (skipPasswordReset) {
+        emailKind = "merchant_linked";
+        const sendResult = await sendMerchantCreatedConfirmationEmail(
+          email,
+          businessName
+        );
+        emailSent = sendResult.ok;
+        if (!sendResult.ok) {
+          console.error("[merchants] Resend (confirmation):", sendResult.message);
+          emailHint = sendResult.message.slice(0, 400);
+        }
+      } else {
+        const settings = passwordResetContinueSettings();
+        const resetLink = await authAdmin.generatePasswordResetLink(
+          email,
+          settings ? { url: settings.url } : undefined
+        );
+        const sendResult = await sendMerchantWelcomeEmail(email, businessName, resetLink);
+        emailSent = sendResult.ok;
+        if (!sendResult.ok) {
+          console.error("[merchants] Resend:", sendResult.message);
+          emailHint = sendResult.message.slice(0, 400);
+        }
       }
     } catch (emailErr) {
       const msg = emailErr instanceof Error ? emailErr.message : String(emailErr);
       console.error("[merchants] Email error:", emailErr);
       emailHint = msg.includes("OPERATION_NOT_ALLOWED")
         ? "Firebase Authentication: enable Email/Password and password reset for this project."
-        : `Password reset link or email failed: ${msg.slice(0, 300)}`;
+        : `${emailKind === "merchant_linked" ? "Confirmation email" : "Password reset link or email"} failed: ${msg.slice(0, 300)}`;
     }
 
     return NextResponse.json({
@@ -294,6 +314,7 @@ export async function POST(req: Request) {
       authUid: authUser.uid,
       createdNewUser,
       emailSent,
+      emailKind,
       ...(emailHint ? { emailHint } : {}),
     });
   } catch (e) {

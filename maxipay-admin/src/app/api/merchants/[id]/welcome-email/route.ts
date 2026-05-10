@@ -2,8 +2,10 @@ import admin from "firebase-admin";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp, verifyIdToken } from "@/lib/firebaseAdmin";
 import {
+  authUserLikelyHasPasswordSignIn,
   normalizeMerchantEmail,
   passwordResetContinueSettings,
+  sendMerchantCreatedConfirmationEmail,
   sendMerchantWelcomeEmail,
 } from "@/lib/merchantWelcomeEmail";
 
@@ -49,17 +51,34 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     let emailSent = false;
     let emailHint: string | undefined;
+    let emailKind: "password_setup" | "merchant_linked" = "password_setup";
     try {
-      const settings = passwordResetContinueSettings();
-      const resetLink = await authAdmin.generatePasswordResetLink(
-        email,
-        settings ? { url: settings.url } : undefined
-      );
-      const sendResult = await sendMerchantWelcomeEmail(email, businessName, resetLink);
-      emailSent = sendResult.ok;
-      if (!sendResult.ok) {
-        console.error("[welcome-email] Resend:", sendResult.message);
-        emailHint = sendResult.message.slice(0, 400);
+      const authUser = await authAdmin.getUserByEmail(email);
+      const skipPasswordReset = authUserLikelyHasPasswordSignIn(authUser);
+
+      if (skipPasswordReset) {
+        emailKind = "merchant_linked";
+        const sendResult = await sendMerchantCreatedConfirmationEmail(
+          email,
+          businessName
+        );
+        emailSent = sendResult.ok;
+        if (!sendResult.ok) {
+          console.error("[welcome-email] Resend (confirmation):", sendResult.message);
+          emailHint = sendResult.message.slice(0, 400);
+        }
+      } else {
+        const settings = passwordResetContinueSettings();
+        const resetLink = await authAdmin.generatePasswordResetLink(
+          email,
+          settings ? { url: settings.url } : undefined
+        );
+        const sendResult = await sendMerchantWelcomeEmail(email, businessName, resetLink);
+        emailSent = sendResult.ok;
+        if (!sendResult.ok) {
+          console.error("[welcome-email] Resend:", sendResult.message);
+          emailHint = sendResult.message.slice(0, 400);
+        }
       }
     } catch (emailErr) {
       const msg = emailErr instanceof Error ? emailErr.message : String(emailErr);
@@ -72,6 +91,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({
       ok: true,
       emailSent,
+      emailKind,
       ...(emailHint ? { emailHint } : {}),
     });
   } catch (e) {
