@@ -993,15 +993,16 @@ export default function BusinessInformationPage() {
                         ))}
                       </div>
 
-                      {/* Address + phone — wrapped like ESC/POS */}
+                      {/* Address + phone — one &lt;p&gt; per thermal line; monospace + nowrap so
+                          the browser does not re-wrap (matches textarea line breaks + wrapThermalText). */}
                       <div
-                        className="text-slate-500 mt-1 mx-auto"
-                        style={{ maxWidth: `${addrChars}ch` }}
+                        className="text-slate-500 mt-1 mx-auto font-mono text-left"
+                        style={{ width: `${addrChars}ch`, maxWidth: "100%" }}
                       >
                         {addressLines.map((line, i) => (
                           <p
                             key={`addr-${i}`}
-                            className="leading-snug [overflow-wrap:anywhere] break-words"
+                            className="leading-snug whitespace-nowrap"
                             style={{
                               fontSize: `${px(ps.fontSizeAddress)}px`,
                               fontWeight: ps.boldAddress ? 700 : 400,
@@ -1013,7 +1014,7 @@ export default function BusinessInformationPage() {
                         {phoneLines.map((line, i) => (
                           <p
                             key={`ph-${i}`}
-                            className="leading-snug [overflow-wrap:anywhere] break-words"
+                            className="leading-snug whitespace-nowrap"
                             style={{
                               fontSize: `${px(ps.fontSizeAddress)}px`,
                               fontWeight: ps.boldAddress ? 700 : 400,
