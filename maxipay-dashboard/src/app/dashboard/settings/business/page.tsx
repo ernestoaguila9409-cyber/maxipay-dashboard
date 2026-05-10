@@ -384,8 +384,13 @@ export default function BusinessInformationPage() {
   /* ── Firestore: business info ── */
 
   useEffect(() => {
+    const mid = (scopedMerchantId || merchantIdFromClaims || "").trim();
+    if (!mid) {
+      return;
+    }
+
     const unsub = onSnapshot(
-      merchantDoc(scopedMerchantId!, DOC_REF, DOC_ID),
+      merchantDoc(mid, DOC_REF, DOC_ID),
       (snap) => {
         if (snap.exists()) {
           const d = snap.data();
@@ -411,13 +416,18 @@ export default function BusinessInformationPage() {
       }
     );
     return () => unsub();
-  }, [dirty]);
+  }, [scopedMerchantId, merchantIdFromClaims, dirty]);
 
   /* ── Firestore: receipt / print settings ── */
 
   useEffect(() => {
+    const mid = (scopedMerchantId || merchantIdFromClaims || "").trim();
+    if (!mid) {
+      return;
+    }
+
     const unsub = onSnapshot(
-      merchantDoc(scopedMerchantId!, DOC_REF, "receiptSettings"),
+      merchantDoc(mid, DOC_REF, "receiptSettings"),
       (snap) => {
         if (snap.exists() && !psDirty) {
           const d = snap.data();
@@ -448,7 +458,7 @@ export default function BusinessInformationPage() {
       }
     );
     return () => unsub();
-  }, [psDirty]);
+  }, [scopedMerchantId, merchantIdFromClaims, psDirty]);
 
   const update = useCallback(
     (field: keyof BusinessData, value: string) => {

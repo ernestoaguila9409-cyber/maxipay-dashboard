@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { db } from "@/firebase/firebaseConfig";
-import { doc, onSnapshot } from "firebase/firestore";
+import { useMerchantId } from "@/hooks/useMerchantId";
+import { merchantDoc } from "@/lib/merchantFirestore";
+import { onSnapshot } from "firebase/firestore";
 import { Bell, Search } from "lucide-react";
 
 interface HeaderProps {
@@ -14,15 +15,16 @@ interface HeaderProps {
 
 export default function Header({ title, searchValue, onSearchChange }: HeaderProps) {
   const { user, claims } = useAuth();
+  const merchantId = useMerchantId();
   const [businessName, setBusinessName] = useState("");
   const showSearch = onSearchChange != null;
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !merchantId) {
       setBusinessName("");
       return;
     }
-    const ref = doc(db, "Settings", "businessInfo");
+    const ref = merchantDoc(merchantId, "Settings", "businessInfo");
     const unsub = onSnapshot(
       ref,
       (snap) => {
@@ -36,7 +38,7 @@ export default function Header({ title, searchValue, onSearchChange }: HeaderPro
       () => setBusinessName("")
     );
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   const roleLabel = claims.role === "super_admin" ? "Admin" : "Owner";
 
