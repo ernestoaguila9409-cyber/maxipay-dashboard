@@ -263,7 +263,7 @@ export default function KdsSettingsPage() {
   }, [user, merchantId]);
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !merchantId) {
       setMenuItemsCatalog([]);
       setMenuCatalogReady(false);
       return;
@@ -285,10 +285,13 @@ export default function KdsSettingsPage() {
       }
     );
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) {
+      setDashboardColorKeys({});
+      return;
+    }
     const unsub = onSnapshot(
       merchantDoc(merchantId, SETTINGS_COLLECTION, "dashboard"),
       (snap) => {
@@ -298,10 +301,14 @@ export default function KdsSettingsPage() {
       () => setDashboardColorKeys({})
     );
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) {
+      setDisplaySettings(defaultDisplaySettings);
+      setDisplayLoading(false);
+      return;
+    }
     const unsub = onSnapshot(
       merchantDoc(merchantId, SETTINGS_COLLECTION, KDS_SETTINGS_DOC),
       (snap) => {
@@ -335,7 +342,7 @@ export default function KdsSettingsPage() {
       }
     );
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   useEffect(() => {
     if (devices.length === 0) {
