@@ -143,7 +143,11 @@ export default function MerchantsListPage() {
               {filtered.map((m) => {
                 const cfg = statusConfig[m.status] || statusConfig.pending;
                 return (
-                  <tr key={m.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                  <tr
+                    key={m.id}
+                    className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors cursor-pointer"
+                    onClick={() => (window.location.href = `/merchants/${m.id}`)}
+                  >
                     <td className="px-6 py-4 text-sm font-mono text-slate-700">
                       {m.merchantNumber || "—"}
                     </td>

@@ -3,17 +3,18 @@
 import { useEffect, useState } from "react";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
-import { Store, Users, CheckCircle, Clock } from "lucide-react";
+import { Store, Users, CheckCircle, Clock, CreditCard } from "lucide-react";
 import Link from "next/link";
 
 interface Stats {
   total: number;
   active: number;
   pending: number;
+  terminals: number;
 }
 
 export default function AdminHomePage() {
-  const [stats, setStats] = useState<Stats>({ total: 0, active: 0, pending: 0 });
+  const [stats, setStats] = useState<Stats>({ total: 0, active: 0, pending: 0, terminals: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,8 +26,15 @@ export default function AdminHomePage() {
         if (status === "active") active++;
         else if (status === "pending") pending++;
       });
-      setStats({ total: snap.size, active, pending });
+      setStats((prev) => ({ ...prev, total: snap.size, active, pending }));
       setLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "payment_terminals"), (snap) => {
+      setStats((prev) => ({ ...prev, terminals: snap.size }));
     });
     return () => unsub();
   }, []);
@@ -38,7 +46,7 @@ export default function AdminHomePage() {
         <p className="text-slate-500 mt-1">Manage merchant accounts and platform settings.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <StatCard
           icon={Store}
           label="Total Merchants"
@@ -56,6 +64,12 @@ export default function AdminHomePage() {
           label="Pending"
           value={loading ? "..." : stats.pending}
           color="amber"
+        />
+        <StatCard
+          icon={CreditCard}
+          label="Terminals"
+          value={loading ? "..." : stats.terminals}
+          color="blue"
         />
       </div>
 
