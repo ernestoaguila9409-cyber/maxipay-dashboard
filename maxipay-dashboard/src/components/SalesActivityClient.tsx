@@ -21,6 +21,7 @@ import { getApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import { useActiveTerminalCapabilities } from "@/hooks/useActiveTerminalCapabilities";
 import { Banknote, CreditCard, Layers, Loader2, Plus, Search, X } from "lucide-react";
 import { startOfLocalDay } from "@/lib/dashboardFinance";
@@ -575,8 +576,8 @@ function refundSubcardLines(refundDocs: TxDocRow[]): string {
 }
 
 export default function SalesActivityClient() {
-  const { user, claims } = useAuth();
-  const merchantId = claims.merchantId ?? "";
+  const { user } = useAuth();
+  const merchantId = useMerchantId();
   const { capabilities: termCaps } = useActiveTerminalCapabilities();
   const [tab, setTab] = useState<TabId>("orders");
   const [datePreset, setDatePreset] = useState<DatePreset>("today");
@@ -838,7 +839,10 @@ export default function SalesActivityClient() {
   const qLower = search.trim().toLowerCase();
 
   useEffect(() => {
-    if (!db || !merchantId) return;
+    if (!db || !merchantId) {
+      setEmployeeNames([]);
+      return;
+    }
     getDocs(query(collection(db, "Employees"), where("merchantId", "==", merchantId), limit(400)))
       .then((snap) => {
         const names: string[] = [];
@@ -860,7 +864,13 @@ export default function SalesActivityClient() {
   }, [timeScope, batches, batchId]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !db || !merchantId) return;
+    if (typeof window === "undefined" || !db || !merchantId) {
+      setOrderDocs([]);
+      setTxDocs([]);
+      setCashLogDocs([]);
+      setBatches([{ id: null, label: "All batches" }]);
+      return;
+    }
     const unsubs: Array<() => void> = [];
 
     const bq = query(collection(db, "Batches"), where("merchantId", "==", merchantId), orderBy("createdAt", "desc"), limit(100));

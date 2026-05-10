@@ -12,6 +12,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import {
   DEFAULT_ONLINE_ORDERING_SETTINGS,
@@ -78,8 +79,8 @@ function OnlineMenuItemThumb({ url, dimmed }: { url?: string; dimmed?: boolean }
 }
 
 export default function OnlineMenuPage() {
-  const { user, claims } = useAuth();
-  const merchantId = claims?.merchantId ?? "";
+  const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [items, setItems] = useState<ItemRow[]>([]);
   const [oo, setOo] = useState<OnlineOrderingSettings>(DEFAULT_ONLINE_ORDERING_SETTINGS);
@@ -93,7 +94,14 @@ export default function OnlineMenuPage() {
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    if (!merchantId) {
+      setLoading(false);
+      return;
+    }
     const unsubs = [
       onSnapshot(
         query(collection(db, "Categories"), where("merchantId", "==", merchantId)),

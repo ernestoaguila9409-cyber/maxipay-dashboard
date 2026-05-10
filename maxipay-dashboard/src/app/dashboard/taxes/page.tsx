@@ -53,7 +53,15 @@ export default function TaxesPage() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    if (!merchantId) {
+      setLoading(false);
+      setTaxes([]);
+      return;
+    }
     const unsub = onSnapshot(
       query(collection(db, "Taxes"), where("merchantId", "==", merchantId)),
       (snap) => {
@@ -71,6 +79,10 @@ export default function TaxesPage() {
         });
         list.sort((a, b) => a.name.localeCompare(b.name));
         setTaxes(list);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("[Taxes] onSnapshot error:", err);
         setLoading(false);
       }
     );

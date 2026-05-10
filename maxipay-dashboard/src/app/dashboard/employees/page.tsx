@@ -170,7 +170,15 @@ export default function EmployeesPage() {
   }, [openMenuId]);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    if (!merchantId) {
+      setLoading(false);
+      setEmployees([]);
+      return;
+    }
 
     const unsub = onSnapshot(
       query(collection(db, "Employees"), where("merchantId", "==", merchantId)),

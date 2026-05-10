@@ -143,7 +143,11 @@ export default function TableLayoutEditorClient() {
   const selected = tables.find((t) => t.id === selectedId);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user || !merchantId) {
+      setLayouts([]);
+      setLayoutId(null);
+      return;
+    }
     const unsub = subscribeTableLayouts(
       db,
       merchantId,
@@ -175,7 +179,10 @@ export default function TableLayoutEditorClient() {
   }, [user, merchantId, layoutId]);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user || !merchantId) {
+      setSectionRows([]);
+      return;
+    }
     const unsub = onSnapshot(
       query(collection(db, SECTIONS_COLLECTION), where("merchantId", "==", merchantId)),
       (snap) => {

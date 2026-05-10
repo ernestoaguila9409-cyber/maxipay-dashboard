@@ -12,6 +12,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import {
   COURSE_FIRING_COLLECTION_PATH,
@@ -96,8 +97,8 @@ function isExclusiveOwner(owner: string): boolean {
 type PickerKind = "category" | "subcategory" | "item";
 
 export default function CourseFiringPage() {
-  const { user, claims, loading: authLoading } = useAuth();
-  const merchantId = claims?.merchantId ?? "";
+  const { user, loading: authLoading } = useAuth();
+  const merchantId = useMerchantId();
   const [settings, setSettings] = useState<CourseFiringSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -113,19 +114,34 @@ export default function CourseFiringPage() {
   const [pickerFilter, setPickerFilter] = useState("");
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user || !merchantId) {
+      setSettings(null);
+      return;
+    }
     const ref = doc(db, COURSE_FIRING_COLLECTION_PATH, COURSE_FIRING_DOC);
-    const unsub = onSnapshot(ref, (snap) => {
-      const data = snap.exists() ? (snap.data() as Record<string, unknown>) : undefined;
-      const parsed = parseCourseFiringSettings(data);
-      setSettings(parsed);
-      setDirty(false);
-    });
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        const data = snap.exists() ? (snap.data() as Record<string, unknown>) : undefined;
+        const parsed = parseCourseFiringSettings(data);
+        setSettings(parsed);
+        setDirty(false);
+      },
+      (err) => {
+        console.error("[Course firing] settings listener:", err);
+        setSettings(parseCourseFiringSettings(undefined));
+      }
+    );
     return unsub;
   }, [user, merchantId]);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user || !merchantId) {
+      setCategories([]);
+      setSubcategories([]);
+      setMenuItems([]);
+      return;
+    }
     const unsub1 = onSnapshot(query(collection(db, "Categories"), where("merchantId", "==", merchantId)), (snap) => {
       const list: CategoryRow[] = [];
       snap.forEach((d) => {
@@ -254,6 +270,18 @@ export default function CourseFiringPage() {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  if (!merchantId) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-16 text-center text-slate-600">
+        <p className="font-medium text-slate-800">No merchant selected</p>
+        <p className="mt-2 text-sm">
+          Sign in with a merchant account, or use super admin when exactly one merchant exists in
+          the database.
+        </p>
       </div>
     );
   }

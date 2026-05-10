@@ -15,6 +15,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import MetricCard from "@/components/MetricCard";
 import SalesChart, { type HourlySalesPoint } from "@/components/SalesChart";
@@ -117,8 +118,8 @@ interface MetricTrends {
 const emptyTrend = "—";
 
 export default function DashboardPage() {
-  const { user, claims } = useAuth();
-  const merchantId = claims.merchantId ?? "";
+  const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [period, setPeriod] = useState<DashboardPeriod>("today");
   const [netSales, setNetSales] = useState(0);
   const [ordersCount, setOrdersCount] = useState(0);
@@ -141,7 +142,14 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    if (!merchantId) {
+      setLoading(false);
+      return;
+    }
 
     let cancelled = false;
 

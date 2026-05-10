@@ -22,6 +22,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import { collectActivePrinterRoutingLabels } from "@/lib/printerStatusUtils";
 import {
   KDS_DEVICES_COLLECTION,
@@ -422,8 +423,8 @@ async function purgeCategoryFromFirestore(categoryId: string): Promise<void> {
 }
 
 export default function MenuPage() {
-  const { user, claims } = useAuth();
-  const merchantId = claims?.merchantId ?? "";
+  const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [categories, setCategories] = useState<Category[]>([]);
   const [items, setItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -565,7 +566,14 @@ export default function MenuPage() {
   const rebuildRef = useRef<() => void>(() => {});
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    if (!merchantId) {
+      setLoading(false);
+      return;
+    }
     console.log("[Menu] useEffect fired — subscribing to Firestore. subscriptionKey:", subscriptionKey);
     setLoading(true);
     bothReady.current = { cats: false, items: false };

@@ -17,7 +17,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
-import { useResolvedMerchantId } from "@/hooks/useResolvedMerchantId";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import {
   Plus,
@@ -109,7 +109,7 @@ function posReachabilityDisplay(
 
 export default function PaymentTerminalsPage() {
   const { user, claims } = useAuth();
-  const merchantId = useResolvedMerchantId();
+  const merchantId = useMerchantId();
 
   const [terminals, setTerminals] = useState<TerminalRow[]>([]);
   const [loading, setLoading] = useState(true);

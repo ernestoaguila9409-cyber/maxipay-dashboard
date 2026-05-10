@@ -16,6 +16,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import {
   Plus,
@@ -97,8 +98,8 @@ function formatScheduleDisplay(sched: Schedule): string {
 type Screen = "main" | "scheduleDetail";
 
 export default function MenusPage() {
-  const { user, claims } = useAuth();
-  const merchantId = claims?.merchantId ?? "";
+  const { user } = useAuth();
+  const merchantId = useMerchantId();
 
   // ── Data ──
   const [menus, setMenus] = useState<Menu[]>([]);
@@ -160,7 +161,14 @@ export default function MenusPage() {
 
   // ── Firestore listeners ──
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    if (!merchantId) {
+      setLoading(false);
+      return;
+    }
 
     let readyCount = 0;
     const checkReady = () => {

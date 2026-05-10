@@ -23,6 +23,7 @@ import {
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import { useActiveTerminalCapabilities } from "@/hooks/useActiveTerminalCapabilities";
 import { getApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -295,8 +296,8 @@ export default function OrderDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const orderId = typeof params.orderId === "string" ? params.orderId : "";
-  const { user, claims } = useAuth();
-  const merchantId = claims.merchantId ?? "";
+  const { user } = useAuth();
+  const merchantId = useMerchantId();
   const { capabilities: termCaps } = useActiveTerminalCapabilities();
 
   const fromSalesActivity =

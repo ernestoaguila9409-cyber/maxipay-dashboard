@@ -14,6 +14,7 @@ import {
 import { getApp } from "firebase/app";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import OrdersTable, { type Order } from "@/components/OrdersTable";
 import { Calendar, Filter, Download, User } from "lucide-react";
@@ -158,8 +159,8 @@ function passesEmployeeFilter(
 }
 
 export default function OrdersPage() {
-  const { user, claims } = useAuth();
-  const merchantId = claims.merchantId ?? "";
+  const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [rawOrders, setRawOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState<DateFilterId>("today");

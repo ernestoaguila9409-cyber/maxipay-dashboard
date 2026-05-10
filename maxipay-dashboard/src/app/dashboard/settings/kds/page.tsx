@@ -227,7 +227,15 @@ export default function KdsSettingsPage() {
   }, []);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    if (!merchantId) {
+      setLoading(false);
+      setDevices([]);
+      return;
+    }
     const unsub = onSnapshot(
       query(
         collection(db, KDS_DEVICES_COLLECTION),

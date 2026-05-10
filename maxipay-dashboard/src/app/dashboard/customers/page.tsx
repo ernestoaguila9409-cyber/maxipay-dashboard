@@ -46,7 +46,15 @@ export default function CustomersPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    if (!merchantId) {
+      setLoading(false);
+      setCustomers([]);
+      return;
+    }
 
     const unsub = onSnapshot(
       firestoreQuery(collection(db, "Customers"), where("merchantId", "==", merchantId)),

@@ -15,6 +15,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import {
   Plus,
@@ -76,8 +77,8 @@ const DAY_OPTIONS = [
 ];
 
 export default function DiscountsPage() {
-  const { user, claims } = useAuth();
-  const merchantId = claims?.merchantId ?? "";
+  const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [loading, setLoading] = useState(true);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -111,7 +112,9 @@ export default function DiscountsPage() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user || !merchantId) {
+      return;
+    }
     getDocs(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)))
       .then((snap) => {
         const items: MenuItem[] = [];
@@ -144,7 +147,14 @@ export default function DiscountsPage() {
   }, [user, merchantId]);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    if (!merchantId) {
+      setLoading(false);
+      return;
+    }
     const unsub = onSnapshot(query(collection(db, "discounts"), where("merchantId", "==", merchantId)), (snap) => {
       const list: Discount[] = [];
       snap.forEach((d) => {
@@ -167,6 +177,10 @@ export default function DiscountsPage() {
       });
       list.sort((a, b) => a.name.localeCompare(b.name));
       setDiscounts(list);
+      setLoading(false);
+    },
+    (err) => {
+      console.error("[Discounts] onSnapshot error:", err);
       setLoading(false);
     });
     return () => unsub();

@@ -15,6 +15,7 @@ import { getApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import { Layers, Loader2 } from "lucide-react";
 
 function computeNetAmount(data: DocumentData): number {
@@ -69,8 +70,8 @@ interface ClosedBatchRow {
 }
 
 export default function SalesActivityBatchesSection() {
-  const { user, claims } = useAuth();
-  const merchantId = claims.merchantId ?? "";
+  const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [loadingOpen, setLoadingOpen] = useState(true);
   const [settleable, setSettleable] = useState(0);
   const [openTotal, setOpenTotal] = useState(0);
@@ -143,7 +144,10 @@ export default function SalesActivityBatchesSection() {
   }, [user, preAuthCount, settleable, openBatchId, settleTerminalLabel]);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user || !merchantId) {
+      setSettleTerminalLabel("");
+      return;
+    }
     const qPay = query(
       collection(db, PAYMENT_TERMINALS),
       where("merchantId", "==", merchantId),
@@ -160,7 +164,17 @@ export default function SalesActivityBatchesSection() {
   }, [user, merchantId]);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user || !merchantId) {
+      setLoadingOpen(false);
+      setLoadingClosed(false);
+      setSettleable(0);
+      setOpenTotal(0);
+      setPreAuthCount(0);
+      setOpenBatchId(null);
+      setClosedRows([]);
+      setQueryError(null);
+      return;
+    }
 
     const qUnsettled = query(
       collection(db, "Transactions"),

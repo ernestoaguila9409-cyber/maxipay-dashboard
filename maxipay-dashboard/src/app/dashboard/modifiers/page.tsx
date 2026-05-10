@@ -17,6 +17,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import {
   Search,
@@ -52,8 +53,8 @@ interface ModifierGroup {
 }
 
 export default function ModifiersPage() {
-  const { user, claims } = useAuth();
-  const merchantId = claims?.merchantId ?? "";
+  const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [groups, setGroups] = useState<ModifierGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<ModifierGroup | null>(null);
   const selectedGroupIdRef = useRef<string | null>(null);
@@ -102,7 +103,14 @@ export default function ModifiersPage() {
   }, [selectedGroup]);
 
   useEffect(() => {
-    if (!user || !merchantId) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    if (!merchantId) {
+      setLoading(false);
+      return;
+    }
     const unsub = onSnapshot(query(collection(db, "ModifierGroups"), where("merchantId", "==", merchantId)), (snap) => {
       const list: ModifierGroup[] = [];
       snap.forEach((d) => {
@@ -143,6 +151,10 @@ export default function ModifiersPage() {
         if (updated) setSelectedGroup(updated);
         else setSelectedGroup(null);
       }
+    },
+    (err) => {
+      console.error("[Modifiers] onSnapshot error:", err);
+      setLoading(false);
     });
     return () => unsub();
   }, [user, merchantId]);
