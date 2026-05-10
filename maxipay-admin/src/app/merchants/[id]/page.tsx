@@ -25,8 +25,6 @@ const PROVIDER_OPTIONS: { id: ProviderType; label: string }[] = [
   { id: "SPIN_Z", label: "SPIn Z-series (Z8, QD3, QD4)" },
   { id: "SPIN_P", label: "SPIn P-series (P17, P20)" },
 ];
-const DEVICE_MODELS_Z = ["Z8", "Dejavoo QD3", "Dejavoo QD4", "Other"];
-const DEVICE_MODELS_P = ["P17", "P20", "Other"];
 
 interface Address {
   street: string;
@@ -388,11 +386,13 @@ function EditField({
   value,
   onChange,
   disabled,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
+  placeholder?: string;
 }) {
   return (
     <div>
@@ -402,7 +402,8 @@ function EditField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+        placeholder={placeholder}
+        className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-300 ${
           disabled ? "bg-slate-50 text-slate-400 cursor-not-allowed" : ""
         }`}
       />
@@ -555,8 +556,6 @@ function AddTerminalModal({
     }
   };
 
-  const models = provider === "SPIN_P" ? DEVICE_MODELS_P : DEVICE_MODELS_Z;
-
   return (
     <ModalShell title="Add Terminal" onClose={onClose}>
       <div className="space-y-4">
@@ -566,10 +565,7 @@ function AddTerminalModal({
             <label className="block text-xs font-medium text-slate-500 mb-1">Provider</label>
             <select
               value={provider}
-              onChange={(e) => {
-                setProvider(e.target.value as ProviderType);
-                setDeviceModel("");
-              }}
+              onChange={(e) => setProvider(e.target.value as ProviderType)}
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             >
               {PROVIDER_OPTIONS.map((p) => (
@@ -579,21 +575,12 @@ function AddTerminalModal({
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Device Model</label>
-            <select
-              value={deviceModel}
-              onChange={(e) => setDeviceModel(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-            >
-              <option value="">Select...</option>
-              {models.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </div>
+          <EditField
+            label="Device model"
+            value={deviceModel}
+            onChange={setDeviceModel}
+            placeholder="e.g. Dejavoo P17"
+          />
         </div>
         <div className="border-t border-slate-100 pt-4" />
         <div className="grid grid-cols-2 gap-4">

@@ -13,9 +13,6 @@ const PROVIDER_OPTIONS: { id: ProviderType; label: string }[] = [
   { id: "SPIN_P", label: "SPIn P-series (P17, P20)" },
 ];
 
-const DEVICE_MODELS_Z = ["Z8", "Dejavoo QD3", "Dejavoo QD4", "Other"];
-const DEVICE_MODELS_P = ["P17", "P20", "Other"];
-
 interface FormState {
   merchantNumber: string;
   businessName: string;
@@ -245,23 +242,13 @@ export default function CreateMerchantPage() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label htmlFor="payDeviceModel" className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Device Model
-                </label>
-                <select
-                  id="payDeviceModel"
-                  name="payDeviceModel"
-                  value={form.payDeviceModel}
-                  onChange={handleChange}
-                  className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-                >
-                  <option value="">Select model...</option>
-                  {(form.payProvider === "SPIN_P" ? DEVICE_MODELS_P : DEVICE_MODELS_Z).map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              </div>
+              <Field
+                label="Device model"
+                name="payDeviceModel"
+                value={form.payDeviceModel}
+                onChange={handleChange}
+                placeholder="e.g. Dejavoo P17, Z8, QD4"
+              />
             </div>
             <div className="my-5 border-t border-slate-200" aria-hidden />
             <div className="grid grid-cols-2 gap-4">
