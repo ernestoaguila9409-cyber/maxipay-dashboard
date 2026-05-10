@@ -16,6 +16,21 @@ service cloud.firestore {
       return isSignedIn() && myMerchantId() == merchantId;
     }
 
+    /** Signed-in Firebase user is the linked owner of this merchant document. */
+    function isLinkedMerchantOwner(merchantId) {
+      return isSignedIn()
+        && request.auth.token.role == 'merchant_owner'
+        && myMerchantId() == merchantId
+        && 'ownerAuthUid' in resource.data
+        && resource.data.ownerAuthUid == request.auth.uid;
+    }
+
+    /** Owner self-service: profile + optional dashboard PIN only (no billing IDs, etc.). */
+    function merchantOwnerSelfUpdateKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['ownerFirstName', 'ownerLastName', 'email', 'phone', 'ownerPosPin']);
+    }
+
     // ── Merchants collection (admin-only write, owner can read own) ─
     match /Merchants/{merchantId} {
       allow read, write: if isSuperAdmin();
@@ -24,6 +39,7 @@ service cloud.firestore {
         || (isSignedIn()
             && 'ownerAuthUid' in resource.data
             && resource.data.ownerAuthUid == request.auth.uid);
+      allow update: if isLinkedMerchantOwner(merchantId) && merchantOwnerSelfUpdateKeys();
 
       // ── All merchant-scoped subcollections ────────────────────
       // Path-based ownership: the merchantId segment IS the access check.

@@ -97,6 +97,7 @@ function EmployeeRowMenu({
   onToggle,
   onEdit,
   onDelete,
+  showDelete = true,
   wrapperClassName,
 }: {
   emp: Employee;
@@ -104,6 +105,7 @@ function EmployeeRowMenu({
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  showDelete?: boolean;
   wrapperClassName: string;
 }) {
   return (
@@ -136,14 +138,16 @@ function EmployeeRowMenu({
           >
             Edit
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-            onClick={onDelete}
-          >
-            Delete
-          </button>
+          {showDelete ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+              onClick={onDelete}
+            >
+              Delete
+            </button>
+          ) : null}
         </div>
       )}
     </div>
@@ -152,11 +156,21 @@ function EmployeeRowMenu({
 
 const ROLES = ["EMPLOYEE", "ADMINISTRATOR"] as const;
 
+function splitDisplayName(full: string): { first: string; last: string } {
+  const t = full.trim().replace(/\s+/g, " ");
+  if (!t) return { first: "", last: "" };
+  const i = t.indexOf(" ");
+  if (i === -1) return { first: t, last: "" };
+  return { first: t.slice(0, i), last: t.slice(i + 1).trim() };
+}
+
 export default function EmployeesPage() {
-  const { user } = useAuth();
+  const { user, claims } = useAuth();
   const merchantId = useMerchantId();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [ownerRow, setOwnerRow] = useState<Employee | null>(null);
+  /** Merchants/{id}.ownerAuthUid — preferred match for "is the logged-in owner". */
+  const [merchantOwnerAuthUid, setMerchantOwnerAuthUid] = useState("");
   const [loading, setLoading] = useState(true);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -225,9 +239,19 @@ export default function EmployeesPage() {
     return () => unsub();
   }, [user, merchantId]);
 
+  const canEditOwnerProfile = useMemo(() => {
+    if (!user) return false;
+    if (claims.role !== "merchant_owner") return false;
+    if (merchantOwnerAuthUid && merchantOwnerAuthUid === user.uid) return true;
+    const ue = user.email?.trim().toLowerCase() ?? "";
+    const oe = ownerRow?.email?.trim().toLowerCase() ?? "";
+    return ue.length > 0 && oe.length > 0 && ue === oe;
+  }, [user, claims.role, ownerRow, merchantOwnerAuthUid]);
+
   useEffect(() => {
     if (!user || !merchantId) {
       setOwnerRow(null);
+      setMerchantOwnerAuthUid("");
       return;
     }
     const ref = doc(db, "Merchants", merchantId);
@@ -236,6 +260,7 @@ export default function EmployeesPage() {
       (snap) => {
         if (!snap.exists()) {
           setOwnerRow(null);
+          setMerchantOwnerAuthUid("");
           return;
         }
         const d = snap.data();
@@ -250,11 +275,16 @@ export default function EmployeesPage() {
         const emailRaw = typeof d.email === "string" ? d.email.trim() : "";
         const email = emailRaw ? emailRaw.toLowerCase() : "";
         const phone = typeof d.phone === "string" ? d.phone.trim() : "";
+        const ouid =
+          typeof d.ownerAuthUid === "string" ? d.ownerAuthUid.trim() : "";
+        setMerchantOwnerAuthUid(ouid);
+        const posPin =
+          typeof d.ownerPosPin === "string" ? d.ownerPosPin.trim() : "";
         setOwnerRow({
           id: MERCHANT_OWNER_ROW_ID,
           name,
           role: "OWNER",
-          pin: "",
+          pin: posPin,
           active: true,
           ...(email ? { email } : {}),
           ...(phone ? { phone } : {}),
@@ -263,6 +293,7 @@ export default function EmployeesPage() {
       (err) => {
         console.error("[Employees] Merchants owner snapshot:", err);
         setOwnerRow(null);
+        setMerchantOwnerAuthUid("");
       }
     );
     return () => unsub();
@@ -325,6 +356,7 @@ export default function EmployeesPage() {
   };
 
   const openEdit = (emp: Employee) => {
+    if (isMerchantOwnerRow(emp) && !canEditOwnerProfile) return;
     setEditTarget(emp);
     setFormName(emp.name);
     setFormEmail(emp.email?.trim() ?? "");
@@ -368,7 +400,11 @@ export default function EmployeesPage() {
       return true;
     }
     const ownerEmail = ownerRow?.email?.trim().toLowerCase();
-    if (ownerEmail && normalizedEmail === ownerEmail) {
+    if (
+      ownerEmail &&
+      normalizedEmail === ownerEmail &&
+      !(editTarget && isMerchantOwnerRow(editTarget))
+    ) {
       setEmailError("This email is already used by the merchant owner.");
       return false;
     }
@@ -403,12 +439,35 @@ export default function EmployeesPage() {
     const emailOk = await validateEmailUnique(normalizedEmail, editTarget?.id);
     if (!emailOk) return;
 
-    const valid = await validatePin(trimPin, editTarget?.id);
+    const valid = await validatePin(
+      trimPin,
+      editTarget && !isMerchantOwnerRow(editTarget) ? editTarget.id : undefined
+    );
     if (!valid) return;
+
+    if (editTarget && isMerchantOwnerRow(editTarget) && !canEditOwnerProfile) {
+      return;
+    }
 
     setSaving(true);
     try {
-      if (editTarget) {
+      if (editTarget && isMerchantOwnerRow(editTarget)) {
+        const { first, last } = splitDisplayName(trimName);
+        if (!first) {
+          setSaving(false);
+          return;
+        }
+        const patch: Record<string, unknown> = {
+          ownerFirstName: first,
+          ownerLastName: last,
+          ownerPosPin: trimPin,
+        };
+        if (normalizedEmail) patch.email = normalizedEmail;
+        else patch.email = deleteField();
+        if (trimPhone) patch.phone = trimPhone;
+        else patch.phone = deleteField();
+        await updateDoc(doc(db, "Merchants", merchantId), patch);
+      } else if (editTarget) {
         await updateDoc(merchantDoc(merchantId, "Employees", editTarget.id), {
           name: trimName,
           pin: trimPin,
@@ -549,17 +608,18 @@ export default function EmployeesPage() {
                 const emailDisplay = dashIfEmpty(emp.email);
                 const menuOpen = openMenuId === emp.id;
                 const ownerRowUi = isMerchantOwnerRow(emp);
+                const ownerEditable = ownerRowUi && canEditOwnerProfile;
                 return (
                   <li key={emp.id}>
                     <div
-                      tabIndex={ownerRowUi ? -1 : 0}
+                      tabIndex={ownerRowUi && !ownerEditable ? -1 : 0}
                       onClick={() => {
-                        if (ownerRowUi) return;
+                        if (ownerRowUi && !ownerEditable) return;
                         setOpenMenuId(null);
                         openEdit(emp);
                       }}
                       onKeyDown={(e) => {
-                        if (ownerRowUi) return;
+                        if (ownerRowUi && !ownerEditable) return;
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           setOpenMenuId(null);
@@ -567,7 +627,7 @@ export default function EmployeesPage() {
                         }
                       }}
                       className={`w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/30 ${
-                        ownerRowUi
+                        ownerRowUi && !ownerEditable
                           ? "cursor-default bg-slate-50/80"
                           : "cursor-pointer hover:bg-slate-50/90"
                       }`}
@@ -589,10 +649,25 @@ export default function EmployeesPage() {
                               {emailDisplay}
                             </p>
                           </div>
-                          {ownerRowUi ? (
+                          {ownerRowUi && !ownerEditable ? (
                             <span className="flex-shrink-0 text-xs text-slate-400 px-2">
                               Account owner
                             </span>
+                          ) : ownerRowUi && ownerEditable ? (
+                            <EmployeeRowMenu
+                              emp={emp}
+                              menuOpen={menuOpen}
+                              showDelete={false}
+                              onToggle={() =>
+                                setOpenMenuId(menuOpen ? null : emp.id)
+                              }
+                              onEdit={() => {
+                                setOpenMenuId(null);
+                                openEdit(emp);
+                              }}
+                              onDelete={() => {}}
+                              wrapperClassName="relative flex-shrink-0"
+                            />
                           ) : (
                             <EmployeeRowMenu
                               emp={emp}
@@ -646,10 +721,25 @@ export default function EmployeesPage() {
                             {roleLabel(emp.role)}
                           </span>
                         </span>
-                        {ownerRowUi ? (
+                        {ownerRowUi && !ownerEditable ? (
                           <span className="flex justify-end text-xs text-slate-400 pr-1">
                             —
                           </span>
+                        ) : ownerRowUi && ownerEditable ? (
+                          <EmployeeRowMenu
+                            emp={emp}
+                            menuOpen={menuOpen}
+                            showDelete={false}
+                            onToggle={() =>
+                              setOpenMenuId(menuOpen ? null : emp.id)
+                            }
+                            onEdit={() => {
+                              setOpenMenuId(null);
+                              openEdit(emp);
+                            }}
+                            onDelete={() => {}}
+                            wrapperClassName="relative flex justify-end flex-shrink-0"
+                          />
                         ) : (
                           <EmployeeRowMenu
                             emp={emp}
@@ -684,7 +774,11 @@ export default function EmployeesPage() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
               <h2 className="text-lg font-semibold text-slate-800">
-                {editTarget ? "Edit Employee" : "Add Employee"}
+                {editTarget && isMerchantOwnerRow(editTarget)
+                  ? "Edit account owner"
+                  : editTarget
+                    ? "Edit Employee"
+                    : "Add Employee"}
               </h2>
               <button
                 onClick={closeModal}
@@ -781,33 +875,41 @@ export default function EmployeesPage() {
                 {pinError && (
                   <p className="text-red-500 text-xs mt-1.5">{pinError}</p>
                 )}
+                {editTarget && isMerchantOwnerRow(editTarget) ? (
+                  <p className="text-slate-500 text-xs mt-1.5">
+                    Four-digit access PIN for your owner profile. Must not match another team
+                    member PIN.
+                  </p>
+                ) : null}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Role
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  {ROLES.map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setFormRole(r)}
-                      className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-medium transition-all ${
-                        formRole === r
-                          ? "border-blue-500 bg-blue-50 text-blue-700"
-                          : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      {r === "ADMINISTRATOR" ? (
-                        <ShieldCheck size={16} />
-                      ) : (
-                        <Shield size={16} />
-                      )}
-                      {r === "ADMINISTRATOR" ? "Admin" : "Employee"}
-                    </button>
-                  ))}
+              {!(editTarget && isMerchantOwnerRow(editTarget)) && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    Role
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {ROLES.map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setFormRole(r)}
+                        className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-medium transition-all ${
+                          formRole === r
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        {r === "ADMINISTRATOR" ? (
+                          <ShieldCheck size={16} />
+                        ) : (
+                          <Shield size={16} />
+                        )}
+                        {r === "ADMINISTRATOR" ? "Admin" : "Employee"}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50">
               <button
@@ -824,7 +926,11 @@ export default function EmployeesPage() {
                 {saving && (
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 )}
-                {editTarget ? "Update" : "Add Employee"}
+                {editTarget && isMerchantOwnerRow(editTarget)
+                  ? "Save"
+                  : editTarget
+                    ? "Update"
+                    : "Add Employee"}
               </button>
             </div>
           </div>
