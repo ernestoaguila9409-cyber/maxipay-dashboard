@@ -9,9 +9,15 @@ export default function HomeClient() {
   const router = useRouter();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        router.replace("/dashboard");
+        const tokenResult = await user.getIdTokenResult();
+        const role = tokenResult.claims.role as string | undefined;
+        if (role === "merchant_owner" || role === "super_admin") {
+          router.replace("/dashboard");
+        } else {
+          router.replace("/login?error=no_merchant");
+        }
       } else {
         router.replace("/login");
       }

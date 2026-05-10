@@ -7,16 +7,21 @@ import Sidebar from "@/components/Sidebar";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, claims, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  const hasAccess = claims.role === "merchant_owner" || claims.role === "super_admin";
+
   useEffect(() => {
-    if (!loading && !user) {
+    if (loading) return;
+    if (!user) {
       router.replace("/login");
+    } else if (!hasAccess) {
+      router.replace("/login?error=no_merchant");
     }
-  }, [user, loading, router]);
+  }, [user, claims, loading, router, hasAccess]);
 
   if (loading) {
     return (
@@ -29,7 +34,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!user) return null;
+  if (!user || !hasAccess) return null;
 
   return (
     <div className="min-h-screen bg-slate-50">

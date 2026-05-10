@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/firebase/firebaseConfig";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { LogIn, Eye, EyeOff, X } from "lucide-react";
 
 export default function LoginClient() {
@@ -13,6 +13,13 @@ export default function LoginClient() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams.get("error") === "no_merchant") {
+      setError("Your account is not linked to a merchant. Contact your administrator.");
+    }
+  }, [searchParams]);
 
   const [accessOpen, setAccessOpen] = useState(false);
   const [accessEmail, setAccessEmail] = useState("");
@@ -26,8 +33,16 @@ export default function LoginClient() {
     setLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      router.push("/dashboard");
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const tokenResult = await cred.user.getIdTokenResult();
+      const role = tokenResult.claims.role as string | undefined;
+
+      if (role === "merchant_owner" || role === "super_admin") {
+        router.push("/dashboard");
+      } else {
+        setError("Your account is not linked to a merchant. Contact your administrator.");
+        await auth.signOut();
+      }
     } catch {
       setError("Invalid email or password. Please try again.");
     } finally {
