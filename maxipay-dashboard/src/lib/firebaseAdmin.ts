@@ -240,3 +240,14 @@ export async function verifyIdToken(
   getFirebaseAdminApp();
   return admin.auth().verifyIdToken(token);
 }
+
+/**
+ * Extracts merchantId from a decoded ID token's custom claims.
+ * Throws if the user has no merchantId (and is not a super_admin).
+ */
+export function extractMerchantId(decoded: admin.auth.DecodedIdToken): string {
+  const merchantId = decoded.merchantId as string | undefined;
+  if (merchantId) return merchantId;
+  if (decoded.role === "super_admin") return "";
+  throw new Error("No merchantId on token");
+}
