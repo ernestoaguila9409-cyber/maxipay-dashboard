@@ -317,7 +317,10 @@ export default function MerchantDetailPage() {
             <p className="text-xs text-slate-500 mb-2">
               Changing email updates Firebase Authentication for the merchant login (same account, new address).{" "}
               <strong>Resend welcome email</strong> sends a set-password link to the email{" "}
-              <em>saved</em> on this page — click <strong>Save changes</strong> first if you edited the email.
+              <em>saved</em> on this page — click <strong>Save changes</strong> first if you edited the email. After they
+              set a password, Firebase redirects to the merchant dashboard login when{" "}
+              <code className="text-[11px] bg-slate-100 px-1 rounded">MERCHANT_WEB_APP_URL</code> is set on the admin
+              server (Vercel) and that host is an authorized domain in Firebase.
             </p>
             <button
               type="button"

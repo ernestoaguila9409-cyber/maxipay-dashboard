@@ -65,8 +65,20 @@ export async function sendMerchantWelcomeEmail(
   });
 }
 
+/**
+ * Firebase password-reset "continue" URL: after the merchant sets a password on
+ * the default Firebase handler, they are sent here (must be HTTPS and listed under
+ * Firebase Console → Authentication → Settings → Authorized domains).
+ *
+ * Use the **merchant web dashboard** origin (e.g. https://dashboard.maxipaypos.com),
+ * not the admin portal URL.
+ */
 export function passwordResetContinueSettings(): { url: string } | undefined {
-  const appOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
-  if (!appOrigin) return undefined;
-  return { url: `${appOrigin}/login` };
+  const raw =
+    process.env.MERCHANT_WEB_APP_URL?.trim() ||
+    process.env.NEXT_PUBLIC_MERCHANT_WEB_APP_URL?.trim() ||
+    "";
+  const origin = raw.replace(/\/$/, "");
+  if (!origin) return undefined;
+  return { url: `${origin}/login` };
 }
