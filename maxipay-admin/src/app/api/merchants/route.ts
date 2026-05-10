@@ -101,6 +101,19 @@ export async function POST(req: Request) {
       );
     }
 
+    const ownerFirstName = body.ownerFirstName?.trim() || "";
+    const ownerLastName = body.ownerLastName?.trim() || "";
+    if (!ownerFirstName || !ownerLastName) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "missing_field",
+          message: "Owner first name and last name are required (shown on the merchant dashboard Employees list).",
+        },
+        { status: 400 }
+      );
+    }
+
     getFirebaseAdminApp();
     const dbAdmin = admin.firestore();
     const authAdmin = admin.auth();
@@ -163,8 +176,8 @@ export async function POST(req: Request) {
     await merchantRef.set({
       merchantNumber,
       businessName,
-      ownerFirstName: body.ownerFirstName?.trim() || "",
-      ownerLastName: body.ownerLastName?.trim() || "",
+      ownerFirstName,
+      ownerLastName,
       email,
       phone: body.phone?.trim() || "",
       address: {
@@ -262,9 +275,7 @@ export async function POST(req: Request) {
         authUser = await authAdmin.createUser({
           email,
           emailVerified: false,
-          displayName:
-            `${body.ownerFirstName?.trim() || ""} ${body.ownerLastName?.trim() || ""}`.trim() ||
-            businessName,
+          displayName: `${ownerFirstName} ${ownerLastName}`.trim() || businessName,
         });
         createdNewUser = true;
       } else {

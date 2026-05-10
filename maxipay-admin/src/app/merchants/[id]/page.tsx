@@ -149,6 +149,10 @@ export default function MerchantDetailPage() {
   }, [loadMerchant]);
 
   const handleSave = async () => {
+    if (!editFirst.trim() || !editLast.trim()) {
+      showToast("error", "Owner first and last name are required.");
+      return;
+    }
     setSaving(true);
     try {
       await apiCall(`/api/merchants/${merchantId}`, {

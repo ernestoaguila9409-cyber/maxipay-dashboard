@@ -220,8 +220,22 @@ export default function CreateMerchantPage() {
               Owner Information
             </h3>
             <div className="grid grid-cols-2 gap-4">
-              <Field label="First Name" name="ownerFirstName" value={form.ownerFirstName} onChange={handleChange} placeholder="John" />
-              <Field label="Last Name" name="ownerLastName" value={form.ownerLastName} onChange={handleChange} placeholder="Doe" />
+              <Field
+                label="First Name"
+                name="ownerFirstName"
+                value={form.ownerFirstName}
+                onChange={handleChange}
+                required
+                placeholder="John"
+              />
+              <Field
+                label="Last Name"
+                name="ownerLastName"
+                value={form.ownerLastName}
+                onChange={handleChange}
+                required
+                placeholder="Doe"
+              />
             </div>
             <div className="grid grid-cols-2 gap-4 mt-4">
               <Field label="Email" name="email" type="email" value={form.email} onChange={handleChange} required placeholder="owner@business.com" />

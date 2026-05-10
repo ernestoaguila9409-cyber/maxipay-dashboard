@@ -191,6 +191,33 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ ok: false, error: "no_changes" }, { status: 400 });
     }
 
+    const prevData = doc.data()!;
+    const mergedFirst =
+      typeof allowed.ownerFirstName === "string"
+        ? (allowed.ownerFirstName as string)
+        : typeof prevData.ownerFirstName === "string"
+          ? prevData.ownerFirstName
+          : "";
+    const mergedLast =
+      typeof allowed.ownerLastName === "string"
+        ? (allowed.ownerLastName as string)
+        : typeof prevData.ownerLastName === "string"
+          ? prevData.ownerLastName
+          : "";
+    if (
+      ("ownerFirstName" in allowed || "ownerLastName" in allowed) &&
+      (!String(mergedFirst).trim() || !String(mergedLast).trim())
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "Owner first and last name must both be non-empty (dashboard Employees list uses them).",
+        },
+        { status: 400 }
+      );
+    }
+
     allowed.updatedAt = admin.firestore.FieldValue.serverTimestamp();
     await ref.update(allowed);
 
