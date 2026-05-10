@@ -238,6 +238,7 @@ export async function POST(req: Request) {
     });
 
     let emailSent = false;
+    let emailHint: string | undefined;
     try {
       const appOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
       const continueUrl = appOrigin ? `${appOrigin}/login` : undefined;
@@ -245,12 +246,26 @@ export async function POST(req: Request) {
       const resetLink = await authAdmin.generatePasswordResetLink(email, settings);
       const sendResult = await sendWelcomeEmail(email, businessName, resetLink);
       emailSent = sendResult.ok;
-      if (!sendResult.ok) console.error("[merchants] SendGrid:", sendResult.message);
+      if (!sendResult.ok) {
+        console.error("[merchants] SendGrid:", sendResult.message);
+        emailHint = sendResult.message.slice(0, 400);
+      }
     } catch (emailErr) {
+      const msg = emailErr instanceof Error ? emailErr.message : String(emailErr);
       console.error("[merchants] Email error:", emailErr);
+      emailHint = msg.includes("OPERATION_NOT_ALLOWED")
+        ? "Firebase Authentication: enable Email/Password and password reset for this project."
+        : `Password reset link or email failed: ${msg.slice(0, 300)}`;
     }
 
-    return NextResponse.json({ ok: true, merchantId, authUid: authUser.uid, createdNewUser, emailSent });
+    return NextResponse.json({
+      ok: true,
+      merchantId,
+      authUid: authUser.uid,
+      createdNewUser,
+      emailSent,
+      ...(emailHint ? { emailHint } : {}),
+    });
   } catch (e) {
     return handleError(e);
   }

@@ -59,6 +59,8 @@ export default function CreateMerchantPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [emailSent, setEmailSent] = useState(true);
+  const [emailHint, setEmailHint] = useState<string | null>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -116,8 +118,10 @@ export default function CreateMerchantPage() {
         return;
       }
 
+      setEmailSent(data.emailSent === true);
+      setEmailHint(typeof data.emailHint === "string" ? data.emailHint : null);
       setSuccess(true);
-      setTimeout(() => router.push("/merchants"), 2000);
+      setTimeout(() => router.push("/merchants"), data.emailSent === true ? 2000 : 5000);
     } catch {
       setError("Something went wrong. Please try again.");
       setSubmitting(false);
@@ -136,9 +140,26 @@ export default function CreateMerchantPage() {
             <p className="text-slate-500 mb-1">
               <strong>{form.businessName}</strong> has been set up successfully.
             </p>
-            <p className="text-sm text-slate-400">
-              A welcome email has been sent to <strong>{form.email}</strong>.
-            </p>
+            {emailSent ? (
+              <p className="text-sm text-slate-400">
+                A welcome email with a password link was sent to <strong>{form.email}</strong>.
+                Check spam and promotions folders.
+              </p>
+            ) : (
+              <div className="mt-3 text-left max-w-md mx-auto">
+                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                  The merchant account was created, but <strong>no email was sent</strong>. Add{" "}
+                  <code className="text-xs bg-amber-100 px-1 rounded">SENDGRID_API_KEY</code> and a
+                  verified <code className="text-xs bg-amber-100 px-1 rounded">SENDGRID_FROM_EMAIL</code>{" "}
+                  to the <strong>admin</strong> app on Vercel, then create a password from Firebase
+                  Console → Authentication → select user → Reset password (or try again after fixing
+                  SendGrid).
+                </p>
+                {emailHint && (
+                  <p className="text-xs text-slate-600 mt-2 font-mono break-words">{emailHint}</p>
+                )}
+              </div>
+            )}
             <p className="text-sm text-slate-400 mt-4">Redirecting to merchants list...</p>
           </div>
         </div>
