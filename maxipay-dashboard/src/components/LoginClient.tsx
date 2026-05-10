@@ -15,9 +15,14 @@ export default function LoginClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const [successBanner, setSuccessBanner] = useState("");
+
   useEffect(() => {
     if (searchParams.get("error") === "no_merchant") {
       setError("Your account is not linked to a merchant. Contact your administrator.");
+    }
+    if (searchParams.get("reset") === "success") {
+      setSuccessBanner("Your password was updated. Sign in with your new password.");
     }
   }, [searchParams]);
 
@@ -130,6 +135,12 @@ export default function LoginClient() {
               Sign in to your dashboard
             </p>
           </div>
+
+          {successBanner && (
+            <div className="bg-emerald-50 text-emerald-800 text-sm px-4 py-3 rounded-lg border border-emerald-200">
+              {successBanner}
+            </div>
+          )}
 
           {error && (
             <div className="bg-red-50 text-red-600 text-sm px-4 py-3 rounded-lg border border-red-200">

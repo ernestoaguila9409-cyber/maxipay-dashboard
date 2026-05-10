@@ -67,11 +67,18 @@ export async function sendMerchantWelcomeEmail(
 
 /**
  * Firebase password-reset "continue" URL: after the merchant sets a password on
- * the default Firebase handler, they are sent here (must be HTTPS and listed under
- * Firebase Console → Authentication → Settings → Authorized domains).
+ * the branded dashboard page (`/auth/reset-password`), they are redirected here.
+ * Must be HTTPS and listed under Firebase Console → Authentication → Settings →
+ * Authorized domains.
  *
  * Use the **merchant web dashboard** origin (e.g. https://dashboard.maxipaypos.com),
  * not the admin portal URL.
+ *
+ * **Password reset email link:** In Firebase Console → Authentication → Templates →
+ * Password reset → "Customize action URL", set the action URL to:
+ * `{MERCHANT_WEB_APP_URL}/auth/reset-password` (same origin as here, no trailing slash
+ * before the path). Until that is set, links may still open the default
+ * `*.firebaseapp.com` handler.
  */
 export function passwordResetContinueSettings(): { url: string } | undefined {
   const raw =
