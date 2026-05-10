@@ -80,35 +80,39 @@ export default function CreateMerchantPage() {
       }
 
       const token = await user.getIdToken();
+      const hasPayment = form.payTpn.trim().length > 0;
+      const payload: Record<string, unknown> = {
+        merchantNumber: form.merchantNumber,
+        businessName: form.businessName,
+        ownerFirstName: form.ownerFirstName,
+        ownerLastName: form.ownerLastName,
+        email: form.email,
+        phone: form.phone,
+        address: {
+          street: form.street,
+          city: form.city,
+          state: form.state,
+          zip: form.zip,
+        },
+      };
+      if (hasPayment) {
+        payload.payment = {
+          provider: form.payProvider,
+          deviceModel: form.payDeviceModel,
+          terminalName: form.payTerminalName,
+          tpn: form.payTpn,
+          registerId: form.payRegisterId,
+          authKey: form.payAuthKey,
+          iposTransactAuthToken: form.payIposTransactToken,
+        };
+      }
       const res = await fetch("/api/merchants", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          merchantNumber: form.merchantNumber,
-          businessName: form.businessName,
-          ownerFirstName: form.ownerFirstName,
-          ownerLastName: form.ownerLastName,
-          email: form.email,
-          phone: form.phone,
-          address: {
-            street: form.street,
-            city: form.city,
-            state: form.state,
-            zip: form.zip,
-          },
-          payment: {
-            provider: form.payProvider,
-            deviceModel: form.payDeviceModel,
-            terminalName: form.payTerminalName,
-            tpn: form.payTpn,
-            registerId: form.payRegisterId,
-            authKey: form.payAuthKey,
-            iposTransactAuthToken: form.payIposTransactToken,
-          },
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -259,11 +263,15 @@ export default function CreateMerchantPage() {
             <h3 className="text-sm font-semibold text-slate-800 uppercase tracking-wider mb-4">
               Payment Information
             </h3>
+            <p className="text-xs text-slate-500 mb-4 -mt-1">
+              Optional. Leave blank to finish later — you can add a payment terminal from the merchant
+              detail page anytime.
+            </p>
             <Field label="Terminal Name" name="payTerminalName" value={form.payTerminalName} onChange={handleChange} placeholder="e.g. Main Register" />
             <div className="grid grid-cols-2 gap-4 mt-4">
               <div>
                 <label htmlFor="payProvider" className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Provider<span className="text-red-500 ml-0.5">*</span>
+                  Provider
                 </label>
                 <select
                   id="payProvider"
@@ -287,11 +295,11 @@ export default function CreateMerchantPage() {
             </div>
             <div className="my-5 border-t border-slate-200" aria-hidden />
             <div className="grid grid-cols-2 gap-4">
-              <Field label="TPN" name="payTpn" value={form.payTpn} onChange={handleChange} required placeholder="e.g. 11881706541A" />
-              <Field label="Register ID" name="payRegisterId" value={form.payRegisterId} onChange={handleChange} required placeholder="e.g. 134909005" />
+              <Field label="TPN" name="payTpn" value={form.payTpn} onChange={handleChange} placeholder="e.g. 11881706541A" />
+              <Field label="Register ID" name="payRegisterId" value={form.payRegisterId} onChange={handleChange} placeholder="e.g. 134909005" />
             </div>
             <div className="mt-4">
-              <Field label="Auth Key" name="payAuthKey" value={form.payAuthKey} onChange={handleChange} required placeholder="e.g. Qt9N7CxhDs" />
+              <Field label="Auth Key" name="payAuthKey" value={form.payAuthKey} onChange={handleChange} placeholder="e.g. Qt9N7CxhDs" />
             </div>
             {form.payProvider === "SPIN_P" && (
               <div className="mt-4">
