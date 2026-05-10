@@ -1,6 +1,7 @@
 import admin from "firebase-admin";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp, verifyIdToken } from "@/lib/firebaseAdmin";
+import { normalizeMerchantEmail } from "@/lib/merchantWelcomeEmail";
 
 export const runtime = "nodejs";
 
@@ -83,6 +84,86 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         state: typeof a.state === "string" ? a.state.trim() : "",
         zip: typeof a.zip === "string" ? a.zip.trim() : "",
       };
+    }
+
+    if (typeof body.email === "string") {
+      const newEmail = normalizeMerchantEmail(body.email);
+      if (!newEmail) {
+        return NextResponse.json({ ok: false, message: "Invalid email address." }, { status: 400 });
+      }
+      const prevRaw = doc.data()?.email;
+      const prev =
+        typeof prevRaw === "string" ? normalizeMerchantEmail(prevRaw) : null;
+
+      if (newEmail !== prev) {
+        const dup = await db.collection("Merchants").where("email", "==", newEmail).limit(1).get();
+        if (!dup.empty && dup.docs[0].id !== id) {
+          return NextResponse.json(
+            { ok: false, message: "Another merchant already uses this email." },
+            { status: 409 }
+          );
+        }
+
+        const authAdmin = admin.auth();
+
+        if (!prev) {
+          allowed.email = newEmail;
+        } else {
+          let owner: admin.auth.UserRecord;
+          try {
+            owner = await authAdmin.getUserByEmail(prev);
+          } catch (e: unknown) {
+            const code =
+              e && typeof e === "object" && "code" in e
+                ? String((e as { code: string }).code)
+                : "";
+            if (code === "auth/user-not-found") {
+              return NextResponse.json(
+                {
+                  ok: false,
+                  message:
+                    "No Firebase Auth user exists for the current email. Update the email in Firebase Console, or keep the original address.",
+                },
+                { status: 400 }
+              );
+            }
+            throw e;
+          }
+
+          const claims = owner.customClaims || {};
+          if (claims.merchantId !== id || claims.role !== "merchant_owner") {
+            return NextResponse.json(
+              {
+                ok: false,
+                message: "The login account for this email is not linked to this merchant.",
+              },
+              { status: 403 }
+            );
+          }
+
+          try {
+            const other = await authAdmin.getUserByEmail(newEmail);
+            if (other.uid !== owner.uid) {
+              return NextResponse.json(
+                {
+                  ok: false,
+                  message: "That email is already used by another Firebase account.",
+                },
+                { status: 409 }
+              );
+            }
+          } catch (e: unknown) {
+            const code =
+              e && typeof e === "object" && "code" in e
+                ? String((e as { code: string }).code)
+                : "";
+            if (code !== "auth/user-not-found") throw e;
+          }
+
+          await authAdmin.updateUser(owner.uid, { email: newEmail });
+          allowed.email = newEmail;
+        }
+      }
     }
 
     if (Object.keys(allowed).length === 0) {

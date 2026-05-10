@@ -17,6 +17,7 @@ import {
   Eye,
   EyeOff,
   X,
+  Mail,
 } from "lucide-react";
 
 type ProviderType = "SPIN_Z" | "SPIN_P";
@@ -100,8 +101,11 @@ export default function MerchantDetailPage() {
   const [editLast, setEditLast] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editMerchantNum, setEditMerchantNum] = useState("");
+  const [editEmail, setEditEmail] = useState("");
   const [editStatus, setEditStatus] = useState<string>("active");
   const [editAddress, setEditAddress] = useState<Address>({ street: "", city: "", state: "", zip: "" });
+
+  const [resendWelcomeBusy, setResendWelcomeBusy] = useState(false);
 
   const [showAddTerminal, setShowAddTerminal] = useState(false);
   const [rotateTerminal, setRotateTerminal] = useState<Terminal | null>(null);
@@ -122,6 +126,7 @@ export default function MerchantDetailPage() {
       setEditLast(m.ownerLastName || "");
       setEditPhone(m.phone || "");
       setEditMerchantNum(m.merchantNumber || "");
+      setEditEmail(m.email || "");
       setEditStatus(m.status || "active");
       setEditAddress(m.address || { street: "", city: "", state: "", zip: "" });
     } catch {
@@ -144,6 +149,7 @@ export default function MerchantDetailPage() {
           businessName: editBiz,
           ownerFirstName: editFirst,
           ownerLastName: editLast,
+          email: editEmail,
           phone: editPhone,
           merchantNumber: editMerchantNum,
           status: editStatus,
@@ -156,6 +162,39 @@ export default function MerchantDetailPage() {
       showToast("error", err instanceof Error ? err.message : "Save failed.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleResendWelcome = async () => {
+    const saved = (merchant?.email ?? "").trim().toLowerCase();
+    const draft = editEmail.trim().toLowerCase();
+    if (!saved) {
+      showToast("error", "Set an owner email and click Save changes first.");
+      return;
+    }
+    if (draft !== saved) {
+      showToast("error", "Save changes first so the new email is stored, then resend the welcome email.");
+      return;
+    }
+    setResendWelcomeBusy(true);
+    try {
+      const data = (await apiCall(`/api/merchants/${merchantId}/welcome-email`, {
+        method: "POST",
+      })) as { emailSent?: boolean; emailHint?: string };
+      if (data.emailSent) {
+        showToast("success", `Welcome email sent to ${editEmail.trim()}. Check spam folder.`);
+      } else {
+        showToast(
+          "error",
+          data.emailHint
+            ? `Email not sent: ${data.emailHint}`
+            : "Email not sent. Configure SENDGRID_API_KEY on the admin app (Vercel)."
+        );
+      }
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Could not send email.");
+    } finally {
+      setResendWelcomeBusy(false);
     }
   };
 
@@ -235,7 +274,8 @@ export default function MerchantDetailPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">{merchant.businessName}</h1>
           <p className="text-slate-500 text-sm">
-            Merchant #{merchant.merchantNumber} &middot; {merchant.email}
+            Merchant #{merchant.merchantNumber}
+            {merchant.email ? ` · ${merchant.email}` : ""}
           </p>
         </div>
       </div>
@@ -266,8 +306,33 @@ export default function MerchantDetailPage() {
           <EditField label="Business Name" value={editBiz} onChange={setEditBiz} />
           <EditField label="Owner First Name" value={editFirst} onChange={setEditFirst} />
           <EditField label="Owner Last Name" value={editLast} onChange={setEditLast} />
-          <EditField label="Email" value={merchant.email} onChange={() => {}} disabled />
+          <EditField
+            label="Owner email"
+            value={editEmail}
+            onChange={setEditEmail}
+            placeholder="owner@business.com"
+          />
           <EditField label="Phone" value={editPhone} onChange={setEditPhone} />
+          <div className="col-span-2">
+            <p className="text-xs text-slate-500 mb-2">
+              Changing email updates Firebase Authentication for the merchant login (same account, new address).{" "}
+              <strong>Resend welcome email</strong> sends a set-password link to the email{" "}
+              <em>saved</em> on this page — click <strong>Save changes</strong> first if you edited the email.
+            </p>
+            <button
+              type="button"
+              onClick={handleResendWelcome}
+              disabled={resendWelcomeBusy}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 border border-slate-200 rounded-lg hover:bg-slate-200 disabled:opacity-50 transition-colors"
+            >
+              {resendWelcomeBusy ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Mail size={16} />
+              )}
+              Resend welcome email
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 pt-4 border-t border-slate-100">
