@@ -74,7 +74,39 @@ export async function sendMerchantWelcomeEmail(
 
   if (res.status >= 200 && res.status < 300) return { ok: true };
   const body = await res.text().catch(() => "");
-  return { ok: false, message: `SendGrid ${res.status}: ${body.slice(0, 300)}` };
+  return { ok: false, message: friendlySendGridError(res.status, body) };
+}
+
+/** Turns SendGrid JSON errors into short, actionable text for admins. */
+export function friendlySendGridError(status: number, body: string): string {
+  let firstMsg = "";
+  try {
+    const j = JSON.parse(body) as { errors?: { message?: string }[] };
+    firstMsg = (j.errors?.[0]?.message ?? "").trim();
+  } catch {
+    /* ignore */
+  }
+
+  if (firstMsg === "Maximum credits exceeded") {
+    return (
+      "SendGrid: your plan has no email credits left (free tier limit reached). " +
+      "Log in at sendgrid.com → Billing / upgrade the plan, or attach a new API key with credits in Vercel (admin app)."
+    );
+  }
+  if (/Maximum credits exceeded/i.test(body)) {
+    return (
+      "SendGrid: email credits exhausted. Upgrade SendGrid or use an API key from an account with available sends."
+    );
+  }
+  if (status === 401 && firstMsg.toLowerCase().includes("authorization")) {
+    return "SendGrid: invalid API key (401). Check SENDGRID_API_KEY in Vercel for the admin app.";
+  }
+  if (status === 403 && /verified Sender Identity|sender/i.test(body)) {
+    return "SendGrid: verify SENDGRID_FROM_EMAIL as a sender in SendGrid (Sender Authentication).";
+  }
+
+  const snippet = body.replace(/\s+/g, " ").trim().slice(0, 220);
+  return snippet ? `SendGrid ${status}: ${snippet}` : `SendGrid returned HTTP ${status}.`;
 }
 
 export function passwordResetContinueSettings(): { url: string } | undefined {
