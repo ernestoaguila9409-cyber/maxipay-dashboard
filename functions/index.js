@@ -3,47 +3,66 @@ admin.initializeApp();
 
 const { onCall } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions");
-const sgMail = require("@sendgrid/mail");
 const { Vonage } = require("@vonage/server-sdk");
 const logger = require("firebase-functions/logger");
 
 /**
- * SendGrid returns error.message "Unauthorized" (HTTP 401) when the API key is missing,
- * revoked, or lacks Mail Send permission. Keys must be set on the deployed function:
- *   firebase functions:secrets:set SENDGRID_API_KEY
- * and (v2) bound in code or set as env in Google Cloud Console → Cloud Functions → Runtime.
- *
- * Password reset / verification emails are sent by Firebase Auth, not this file. Enable
- * Custom SMTP in Firebase Console → Authentication → Email templates; use a branded
- * @maxipaypos.com sender there, not receipt@ (receipts use SENDGRID_FROM_EMAIL). See
- * functions/README.md.
+ * Receipt emails use the Resend HTTP API. Set on the deployed function:
+ *   firebase functions:secrets:set RESEND_API_KEY
+ * and RESEND_FROM_EMAIL (verified sender, e.g. noreply@maxipaypos.com).
+ * If RESEND_FROM_EMAIL is unset, defaults to noreply@maxipaypos.com.
+ * See functions/README.md.
  */
-function getSendGridApiKey() {
-  const k = process.env.SENDGRID_API_KEY;
+function getResendApiKey() {
+  const k = process.env.RESEND_API_KEY;
   return k && String(k).trim() ? String(k).trim() : null;
 }
 
-async function sendGridMail(msg) {
-  const key = getSendGridApiKey();
+function getResendFromAddress() {
+  const e = process.env.RESEND_FROM_EMAIL;
+  return e && String(e).trim() ? String(e).trim() : "noreply@maxipaypos.com";
+}
+
+async function sendResendMail({ to, subject, html, from }) {
+  const key = getResendApiKey();
   if (!key) {
-    const err = new Error("SENDGRID_API_KEY is not set");
+    const err = new Error("RESEND_API_KEY is not set");
     err.code = "CONFIG";
     throw err;
   }
-  sgMail.setApiKey(key);
-  return sgMail.send(msg);
+  const fromHeader =
+    from != null && String(from).trim() ? String(from).trim() : getResendFromAddress();
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: fromHeader,
+      to: [String(to).trim()],
+      subject,
+      html,
+    }),
+  });
+  const bodyText = await res.text().catch(() => "");
+  if (res.status >= 200 && res.status < 300) return;
+  const err = new Error(bodyText || res.statusText || `HTTP ${res.status}`);
+  err.status = res.status;
+  err.body = bodyText;
+  throw err;
 }
 
-function sendGridErrorForClient(error) {
+function resendErrorForClient(error) {
   if (error?.code === "CONFIG") {
-    return "Email service is not configured. Set SENDGRID_API_KEY for Cloud Functions.";
+    return "Email service is not configured. Set RESEND_API_KEY for Cloud Functions.";
+  }
+  const status = error?.status;
+  if (status === 401 || status === 403) {
+    return "Resend rejected the request. Verify RESEND_API_KEY and redeploy.";
   }
   const msg = error?.message ? String(error.message) : "Unknown error";
-  const code = error?.response?.statusCode ?? error?.code;
-  if (msg === "Unauthorized" || code === 401) {
-    return "SendGrid rejected the request (401). Create a new API key with Mail Send permission, set SENDGRID_API_KEY as a function secret, and redeploy.";
-  }
-  return msg;
+  return msg.length > 500 ? msg.slice(0, 500) : msg;
 }
 
 const vonage = new Vonage({
@@ -1199,16 +1218,12 @@ exports.sendReceiptEmail = onCall(async (request) => {
     return { success: false, error: "Email and orderId are required." };
   }
 
-  const fromEmail = process.env.SENDGRID_FROM_EMAIL;
-  if (!fromEmail) {
-    logger.error("SENDGRID_FROM_EMAIL is not configured");
-    return { success: false, error: "Email service is not configured." };
-  }
-  if (!getSendGridApiKey()) {
-    logger.error("SENDGRID_API_KEY is not configured");
+  const fromEmail = getResendFromAddress();
+  if (!getResendApiKey()) {
+    logger.error("RESEND_API_KEY is not configured");
     return {
       success: false,
-      error: "Email service is not configured. Set SENDGRID_API_KEY for Cloud Functions.",
+      error: "Email service is not configured. Set RESEND_API_KEY for Cloud Functions.",
     };
   }
 
@@ -1228,7 +1243,7 @@ exports.sendReceiptEmail = onCall(async (request) => {
     customerName: resolvedCustomerName || (order.customerName != null ? String(order.customerName).trim() : "") || "",
   };
 
-  /** Per-guest split receipt: SendGrid HTML (no client share sheet). */
+  /** Per-guest split receipt: HTML email (no client share sheet). */
   if (validateSplitReceiptPayload(splitReceipt)) {
     const tipConfig = await fetchTipConfig(db);
     const body =
@@ -1240,7 +1255,7 @@ exports.sendReceiptEmail = onCall(async (request) => {
     const html = wrapEmail(body);
     const gl = String(splitReceipt.guestLabel).trim();
     try {
-      await sendGridMail({
+      await sendResendMail({
         to: email,
         from: fromEmail,
         subject: `Receipt - Order #${order.orderNumber || orderId} — ${gl}`,
@@ -1249,11 +1264,9 @@ exports.sendReceiptEmail = onCall(async (request) => {
       logger.info("Split receipt sent", { to: email, orderId, guestLabel: gl });
       return { success: true };
     } catch (error) {
-      logger.error("SendGrid error (split receipt):", error.message);
-      if (error.response) {
-        logger.error("SendGrid response:", JSON.stringify(error.response.body));
-      }
-      return { success: false, error: sendGridErrorForClient(error) };
+      logger.error("Resend error (split receipt):", error.message);
+      if (error.body) logger.error("Resend response body:", String(error.body).slice(0, 500));
+      return { success: false, error: resendErrorForClient(error) };
     }
   }
 
@@ -1268,7 +1281,7 @@ exports.sendReceiptEmail = onCall(async (request) => {
   }
 
   try {
-    await sendGridMail({
+    await sendResendMail({
       to: email,
       from: fromEmail,
       subject: `Receipt - Order #${order.orderNumber || orderId}`,
@@ -1277,11 +1290,9 @@ exports.sendReceiptEmail = onCall(async (request) => {
     logger.info("Receipt sent", { to: email, orderId });
     return { success: true };
   } catch (error) {
-    logger.error("SendGrid error:", error.message);
-    if (error.response) {
-      logger.error("SendGrid response:", JSON.stringify(error.response.body));
-    }
-    return { success: false, error: sendGridErrorForClient(error) };
+    logger.error("Resend error:", error.message);
+    if (error.body) logger.error("Resend response body:", String(error.body).slice(0, 500));
+    return { success: false, error: resendErrorForClient(error) };
   }
 });
 
@@ -1296,16 +1307,12 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
     return { success: false, error: "Email and orderId are required." };
   }
 
-  const fromEmail = process.env.SENDGRID_FROM_EMAIL;
-  if (!fromEmail) {
-    logger.error("SENDGRID_FROM_EMAIL is not configured");
-    return { success: false, error: "Email service is not configured." };
-  }
-  if (!getSendGridApiKey()) {
-    logger.error("SENDGRID_API_KEY is not configured");
+  const fromEmail = getResendFromAddress();
+  if (!getResendApiKey()) {
+    logger.error("RESEND_API_KEY is not configured");
     return {
       success: false,
-      error: "Email service is not configured. Set SENDGRID_API_KEY for Cloud Functions.",
+      error: "Email service is not configured. Set RESEND_API_KEY for Cloud Functions.",
     };
   }
 
@@ -1327,7 +1334,7 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
   }
 
   try {
-    await sendGridMail({
+    await sendResendMail({
       to: email,
       from: fromEmail,
       subject: `VOID Receipt - Order #${order.orderNumber || orderId}`,
@@ -1336,11 +1343,9 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
     logger.info("Void receipt sent", { to: email, orderId });
     return { success: true };
   } catch (error) {
-    logger.error("SendGrid error:", error.message);
-    if (error.response) {
-      logger.error("SendGrid response:", JSON.stringify(error.response.body));
-    }
-    return { success: false, error: sendGridErrorForClient(error) };
+    logger.error("Resend error:", error.message);
+    if (error.body) logger.error("Resend response body:", String(error.body).slice(0, 500));
+    return { success: false, error: resendErrorForClient(error) };
   }
 });
 
@@ -1356,16 +1361,12 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
       return { success: false, error: "Email and orderId are required." };
     }
 
-    const fromEmail = process.env.SENDGRID_FROM_EMAIL;
-    if (!fromEmail) {
-      logger.error("SENDGRID_FROM_EMAIL is not configured");
-      return { success: false, error: "Email service is not configured." };
-    }
-    if (!getSendGridApiKey()) {
-      logger.error("SENDGRID_API_KEY is not configured");
+    const fromEmail = getResendFromAddress();
+    if (!getResendApiKey()) {
+      logger.error("RESEND_API_KEY is not configured");
       return {
         success: false,
-        error: "Email service is not configured. Set SENDGRID_API_KEY for Cloud Functions.",
+        error: "Email service is not configured. Set RESEND_API_KEY for Cloud Functions.",
       };
     }
 
@@ -1389,7 +1390,7 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
     }
 
     try {
-      await sendGridMail({
+      await sendResendMail({
         to: email,
         from: fromEmail,
         subject: `REFUND Receipt - Order #${order.orderNumber || orderId}`,
@@ -1398,11 +1399,9 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
       logger.info("Refund receipt sent", { to: email, orderId });
       return { success: true };
     } catch (error) {
-      logger.error("SendGrid error:", error.message);
-      if (error.response) {
-        logger.error("SendGrid response:", JSON.stringify(error.response.body));
-      }
-      return { success: false, error: sendGridErrorForClient(error) };
+      logger.error("Resend error:", error.message);
+      if (error.body) logger.error("Resend response body:", String(error.body).slice(0, 500));
+      return { success: false, error: resendErrorForClient(error) };
     }
   } catch (error) {
     logger.error("sendRefundReceiptEmail error:", error.message, error);
@@ -1411,7 +1410,7 @@ exports.sendRefundReceiptEmail = onCall(async (request) => {
 });
 
 /**
- * Web dashboard: returns the same HTML document as the emailed receipt (no SendGrid).
+ * Web dashboard: returns the same HTML document as the emailed receipt (no outbound send).
  * @param {string} orderId
  * @param {"standard"|"void"|"refund"} [receiptKind] default standard
  * @param {string} [saleTransactionId] For refund receipts: original sale transaction id (REFUND.originalReferenceId).

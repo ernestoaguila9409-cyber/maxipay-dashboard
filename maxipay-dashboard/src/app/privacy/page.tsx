@@ -107,7 +107,7 @@ export default function PrivacyPolicy() {
               </li>
               <li>
                 <strong>Service providers</strong> — cloud hosting (Google
-                Firebase), email delivery (SendGrid), and analytics providers
+                Firebase), email delivery (Resend), and analytics providers
                 that help us operate the Service
               </li>
               <li>

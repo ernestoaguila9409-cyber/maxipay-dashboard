@@ -149,11 +149,11 @@ export default function CreateMerchantPage() {
               <div className="mt-3 text-left max-w-md mx-auto">
                 <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
                   The merchant account was created, but <strong>no email was sent</strong>. Add{" "}
-                  <code className="text-xs bg-amber-100 px-1 rounded">SENDGRID_API_KEY</code> and a
-                  verified <code className="text-xs bg-amber-100 px-1 rounded">SENDGRID_FROM_EMAIL</code>{" "}
+                  <code className="text-xs bg-amber-100 px-1 rounded">RESEND_API_KEY</code> and a
+                  verified <code className="text-xs bg-amber-100 px-1 rounded">RESEND_FROM_EMAIL</code>{" "}
                   to the <strong>admin</strong> app on Vercel, then create a password from Firebase
                   Console → Authentication → select user → Reset password (or try again after fixing
-                  SendGrid).
+                  Resend).
                 </p>
                 {emailHint && (
                   <p className="text-xs text-slate-600 mt-2 font-mono break-words">{emailHint}</p>

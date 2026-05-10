@@ -6,7 +6,7 @@ import com.ernesto.myapplication.engine.SplitReceiptPayload
 import com.google.firebase.functions.FirebaseFunctions
 
 /**
- * Sends a per-guest split receipt via [sendReceiptEmail] with [splitReceipt] payload (SendGrid),
+ * Sends a per-guest split receipt via [sendReceiptEmail] with [splitReceipt] payload (Resend),
  * avoiding the system email/share sheet.
  */
 object SplitReceiptEmailSender {

@@ -58,7 +58,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       const sendResult = await sendMerchantWelcomeEmail(email, businessName, resetLink);
       emailSent = sendResult.ok;
       if (!sendResult.ok) {
-        console.error("[welcome-email] SendGrid:", sendResult.message);
+        console.error("[welcome-email] Resend:", sendResult.message);
         emailHint = sendResult.message.slice(0, 400);
       }
     } catch (emailErr) {

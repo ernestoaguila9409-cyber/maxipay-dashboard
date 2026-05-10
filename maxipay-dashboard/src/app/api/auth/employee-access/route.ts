@@ -1,6 +1,7 @@
 import admin from "firebase-admin";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp } from "@/lib/firebaseAdmin";
+import { sendEmailViaResend, getResendFromAddress } from "@/lib/resendEmail";
 
 export const runtime = "nodejs";
 
@@ -68,6 +69,25 @@ function esc(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** Resend `from` header: business display name + verified address from env. */
+function resendFromForEmployeeEmail(displayName: string): string {
+  const safeName = displayName.replace(/[\r\n<>]/g, " ").trim().slice(0, 78) || "MaxiPay";
+  const auth = process.env.RESEND_AUTH_FROM_EMAIL?.trim();
+  const general = process.env.RESEND_FROM_EMAIL?.trim();
+  const raw = auth || general || "";
+
+  const withDisplayName = (fullOrEmail: string): string => {
+    const t = fullOrEmail.trim();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)) return `${safeName} <${t}>`;
+    const m = t.match(/<([^>]+@[^>]+)>/);
+    if (m) return `${safeName} <${m[1].trim()}>`;
+    return t;
+  };
+
+  if (raw) return withDisplayName(raw);
+  return withDisplayName(getResendFromAddress());
 }
 
 // ---------------------------------------------------------------------------
@@ -143,48 +163,6 @@ function composeResetEmailHtml(
 }
 
 // ---------------------------------------------------------------------------
-// SendGrid HTTP API (no extra dependency — uses global fetch)
-// ---------------------------------------------------------------------------
-
-type SendResult = { ok: true } | { ok: false; message: string };
-
-async function sendViaSendGrid(
-  to: string,
-  fromEmail: string,
-  fromName: string,
-  subject: string,
-  html: string
-): Promise<SendResult> {
-  const apiKey = process.env.SENDGRID_API_KEY;
-  if (!apiKey) {
-    return {
-      ok: false,
-      message:
-        "SENDGRID_API_KEY is not configured on the dashboard. Add it to your Vercel / hosting environment variables.",
-    };
-  }
-
-  const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      personalizations: [{ to: [{ email: to }] }],
-      from: { email: fromEmail, name: fromName },
-      subject,
-      content: [{ type: "text/html", value: html }],
-    }),
-  });
-
-  if (res.status >= 200 && res.status < 300) return { ok: true };
-
-  const body = await res.text().catch(() => "");
-  return { ok: false, message: `SendGrid ${res.status}: ${body.slice(0, 300)}` };
-}
-
-// ---------------------------------------------------------------------------
 // Generate reset link with retries (Admin SDK)
 // ---------------------------------------------------------------------------
 
@@ -221,7 +199,7 @@ async function generateResetLinkWithRetries(
 /**
  * Ensures a Firebase Auth user exists for this email (create on first use),
  * generates a password-reset link via Admin SDK, then sends a branded email
- * through SendGrid using the merchant's business name from Firestore.
+ * through Resend using the merchant's business name from Firestore.
  */
 export async function POST(req: Request) {
   const ip = getClientIp(req);
@@ -322,17 +300,18 @@ export async function POST(req: Request) {
       (typeof biz.businessName === "string" && biz.businessName.trim()) || "MaxiPay";
     const logoUrl = resolveLogoUrl(biz);
 
-    // Compose and send branded email via SendGrid
-    const fromEmail =
-      process.env.SENDGRID_AUTH_FROM_EMAIL ||
-      process.env.SENDGRID_FROM_EMAIL ||
-      "noreply@maxipaypos.com";
+    // Compose and send branded email via Resend
     const subject = `Reset your password — ${businessName}`;
     const html = composeResetEmailHtml(businessName, logoUrl, linkResult.link);
-    const sent = await sendViaSendGrid(normalized, fromEmail, businessName, subject, html);
+    const sent = await sendEmailViaResend({
+      to: normalized,
+      subject,
+      html,
+      from: resendFromForEmployeeEmail(businessName),
+    });
 
     if (!sent.ok) {
-      console.error("[employee-access] SendGrid error:", sent.message);
+      console.error("[employee-access] Resend error:", sent.message);
       return NextResponse.json(
         {
           ok: false,

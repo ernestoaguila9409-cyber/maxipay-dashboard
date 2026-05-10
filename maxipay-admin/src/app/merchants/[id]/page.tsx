@@ -188,7 +188,7 @@ export default function MerchantDetailPage() {
           "error",
           data.emailHint
             ? `Email not sent: ${data.emailHint}`
-            : "Email not sent. Configure SENDGRID_API_KEY on the admin app (Vercel)."
+            : "Email not sent. Configure RESEND_API_KEY on the admin app (Vercel)."
         );
       }
     } catch (err) {

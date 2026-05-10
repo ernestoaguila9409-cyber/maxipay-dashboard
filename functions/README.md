@@ -2,16 +2,16 @@
 
 ## 1. Receipt emails (Cloud Functions)
 
-Callable `sendReceiptEmail` uses the SendGrid **HTTP API**. Configure on the Cloud Functions runtime:
+Callable `sendReceiptEmail` (and void/refund receipt callables) use the **Resend HTTP API**. Configure on the Cloud Functions runtime:
 
 | Variable | Purpose |
 | --- | --- |
-| `SENDGRID_API_KEY` | SendGrid API key (secret) |
-| `SENDGRID_FROM_EMAIL` | Verified sender, e.g. `receipt@maxipaypos.com` |
+| `RESEND_API_KEY` | Resend API key (secret) |
+| `RESEND_FROM_EMAIL` | Verified sender. Default in code if unset: `noreply@maxipaypos.com`. Set explicitly in production. |
 
 ```bash
-firebase functions:secrets:set SENDGRID_API_KEY
-# Set SENDGRID_FROM_EMAIL in Google Cloud Console → Cloud Functions → Environment variables.
+firebase functions:secrets:set RESEND_API_KEY
+# Set RESEND_FROM_EMAIL in Google Cloud Console → Cloud Functions → Environment variables.
 ```
 
 ## 2. Password-reset / account emails (Dashboard — `employee-access` route)
@@ -22,7 +22,7 @@ The dashboard **bypasses** Firebase Auth's built-in email templates so the email
 
 1. `admin.auth().generatePasswordResetLink()` creates the one-time reset link.
 2. Business name + logo are read from `Settings/businessInfo.businessName` / `logoUrl`.
-3. A branded HTML email is composed and sent directly via the **SendGrid HTTP API**.
+3. A branded HTML email is composed and sent directly via the **Resend HTTP API**.
 
 No one needs to touch the Firebase Console — the email subject, heading, and sign-off all use the current business name automatically.
 
@@ -30,20 +30,20 @@ No one needs to touch the Firebase Console — the email subject, heading, and s
 
 | Variable | Purpose | Example |
 | --- | --- | --- |
-| `SENDGRID_API_KEY` | SendGrid API key (same key as Cloud Functions is fine) | `SG.xxxxx` |
-| `SENDGRID_AUTH_FROM_EMAIL` *(optional)* | Sender address for auth emails; falls back to `SENDGRID_FROM_EMAIL`, then `noreply@maxipaypos.com` | `noreply@maxipaypos.com` |
-| `SENDGRID_FROM_EMAIL` *(optional fallback)* | Used if `SENDGRID_AUTH_FROM_EMAIL` is not set | `receipt@maxipaypos.com` |
+| `RESEND_API_KEY` | Resend API key | `re_xxxx` |
+| `RESEND_AUTH_FROM_EMAIL` *(optional)* | Plain verified address; display name still comes from Firestore `businessName` | `noreply@yourdomain.com` |
+| `RESEND_FROM_EMAIL` | Used if `RESEND_AUTH_FROM_EMAIL` is not set; can be `Name <email@domain.com>` | `noreply@maxipaypos.com` |
 | `NEXT_PUBLIC_APP_URL` | Dashboard base URL (used as `continueUrl` after password reset) | `https://dashboard.maxipaypos.com` |
 
-The **sender display name** in the inbox (e.g. *Acme Cafe* `<noreply@maxipaypos.com>`) is set dynamically from `Settings/businessInfo.businessName` — no static Firebase Console setting required.
+The **sender display name** in the inbox (e.g. *Acme Cafe* `<noreply@yourdomain.com>`) is set dynamically from `Settings/businessInfo.businessName` when you use a plain `RESEND_AUTH_FROM_EMAIL` or a `RESEND_FROM_EMAIL` that includes an address in angle brackets.
 
-**SendGrid domain:** `maxipaypos.com` domain authentication must be verified in SendGrid (SPF + DKIM). Any `@maxipaypos.com` address then works without a separate single-sender step.
+**Resend domain:** Add and verify your domain in the [Resend dashboard](https://resend.com/docs/dashboard/domains/introduction), then set `RESEND_FROM_EMAIL` to an address on that domain.
 
 ## 3. Firebase Console SMTP (optional, for other flows)
 
-Firebase Auth's built-in SMTP config (Authentication → Email templates → SMTP settings) is still useful as a **fallback** for any client-side `sendPasswordResetEmail()` or `sendEmailVerification()` calls that do not go through the dashboard route. If you configured it, keep it enabled. The dashboard `employee-access` route does **not** use it — it sends via SendGrid directly.
+Firebase Auth's built-in SMTP config (Authentication → Email templates → SMTP settings) is still useful as a **fallback** for any client-side `sendPasswordResetEmail()` or `sendEmailVerification()` calls that do not go through the dashboard route. If you configured it, keep it enabled. The dashboard `employee-access` route does **not** use it — it sends via Resend directly.
 
-**SPF:** If you use Firebase's "custom domain" for auth *and* SendGrid for the same domain, combine both providers into a **single** SPF TXT record. See [Firebase custom domain docs](https://firebase.google.com/docs/auth/email-custom-domain).
+**SPF:** If you use Firebase's "custom domain" for auth *and* Resend for the same domain, combine both providers into a **single** SPF TXT record. See [Firebase custom domain docs](https://firebase.google.com/docs/auth/email-custom-domain).
 
 ## 4. Menu item images (Pexels) — Android + parity with dashboard
 

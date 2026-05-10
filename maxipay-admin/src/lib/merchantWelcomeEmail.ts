@@ -1,4 +1,6 @@
-/** Shared merchant welcome / password-reset email (SendGrid). */
+/** Shared merchant welcome / password-reset email (Resend). */
+
+import { sendEmailViaResend } from "@/lib/resendEmail";
 
 export function normalizeMerchantEmail(email: unknown): string | null {
   if (typeof email !== "string") return null;
@@ -16,11 +18,6 @@ export async function sendMerchantWelcomeEmail(
   businessName: string,
   resetLink: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const apiKey = process.env.SENDGRID_API_KEY;
-  if (!apiKey) return { ok: false, message: "SENDGRID_API_KEY not configured." };
-
-  const fromEmail = process.env.SENDGRID_FROM_EMAIL || "noreply@maxipaypos.com";
-
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
@@ -61,52 +58,11 @@ export async function sendMerchantWelcomeEmail(
 </body>
 </html>`;
 
-  const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      personalizations: [{ to: [{ email: to }] }],
-      from: { email: fromEmail, name: "MaxiPay" },
-      subject: `Welcome to MaxiPay — ${businessName}`,
-      content: [{ type: "text/html", value: html }],
-    }),
+  return sendEmailViaResend({
+    to,
+    subject: `Welcome to MaxiPay — ${businessName}`,
+    html,
   });
-
-  if (res.status >= 200 && res.status < 300) return { ok: true };
-  const body = await res.text().catch(() => "");
-  return { ok: false, message: friendlySendGridError(res.status, body) };
-}
-
-/** Turns SendGrid JSON errors into short, actionable text for admins. */
-export function friendlySendGridError(status: number, body: string): string {
-  let firstMsg = "";
-  try {
-    const j = JSON.parse(body) as { errors?: { message?: string }[] };
-    firstMsg = (j.errors?.[0]?.message ?? "").trim();
-  } catch {
-    /* ignore */
-  }
-
-  if (firstMsg === "Maximum credits exceeded") {
-    return (
-      "SendGrid: your plan has no email credits left (free tier limit reached). " +
-      "Log in at sendgrid.com → Billing / upgrade the plan, or attach a new API key with credits in Vercel (admin app)."
-    );
-  }
-  if (/Maximum credits exceeded/i.test(body)) {
-    return (
-      "SendGrid: email credits exhausted. Upgrade SendGrid or use an API key from an account with available sends."
-    );
-  }
-  if (status === 401 && firstMsg.toLowerCase().includes("authorization")) {
-    return "SendGrid: invalid API key (401). Check SENDGRID_API_KEY in Vercel for the admin app.";
-  }
-  if (status === 403 && /verified Sender Identity|sender/i.test(body)) {
-    return "SendGrid: verify SENDGRID_FROM_EMAIL as a sender in SendGrid (Sender Authentication).";
-  }
-
-  const snippet = body.replace(/\s+/g, " ").trim().slice(0, 220);
-  return snippet ? `SendGrid ${status}: ${snippet}` : `SendGrid returned HTTP ${status}.`;
 }
 
 export function passwordResetContinueSettings(): { url: string } | undefined {
