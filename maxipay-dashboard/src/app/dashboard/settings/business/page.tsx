@@ -3,7 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Header from "@/components/Header";
 import { db, storage } from "@/firebase/firebaseConfig";
-import { doc, getDoc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  query,
+  setDoc,
+  serverTimestamp,
+} from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
@@ -232,14 +242,24 @@ function Section({
    Merchants → Settings/businessInfo (admin creates Merchants only)
    ══════════════════════════════════════════════ */
 
+function fieldStrFromSnap(snap: { get(field: string): unknown }, k: string): string {
+  const v = snap.get(k);
+  if (v == null) return "";
+  if (typeof v === "string") return v.trim();
+  return String(v).trim();
+}
+
 function businessInfoSnapshotLooksEmpty(snap: {
   exists(): boolean;
   get(field: string): unknown;
 }): boolean {
   if (!snap.exists()) return true;
-  const f = (k: string) =>
-    typeof snap.get(k) === "string" ? (snap.get(k) as string).trim() : "";
-  return !f("businessName") && !f("phone") && !f("email") && !f("address");
+  return (
+    !fieldStrFromSnap(snap, "businessName") &&
+    !fieldStrFromSnap(snap, "phone") &&
+    !fieldStrFromSnap(snap, "email") &&
+    !fieldStrFromSnap(snap, "address")
+  );
 }
 
 function formatAddressFromMerchantDoc(addr: unknown): string {
@@ -259,8 +279,10 @@ function formatAddressFromMerchantDoc(addr: unknown): string {
    ══════════════════════════════════════════════ */
 
 export default function BusinessInformationPage() {
-  const { user } = useAuth();
-  const merchantId = useMerchantId();
+  const { user, claims } = useAuth();
+  const merchantIdFromClaims = useMerchantId();
+  /** Same as claims for owners; set from Merchants bootstrap for super_admin (single-tenant). */
+  const [scopedMerchantId, setScopedMerchantId] = useState("");
   const [data, setData] = useState<BusinessData>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -285,14 +307,35 @@ export default function BusinessInformationPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const merchantScopeRef = useRef("");
+
+  useEffect(() => {
+    if (merchantIdFromClaims) setScopedMerchantId(merchantIdFromClaims);
+  }, [merchantIdFromClaims]);
+
+  useEffect(() => {
+    merchantScopeRef.current = scopedMerchantId || merchantIdFromClaims;
+  }, [scopedMerchantId, merchantIdFromClaims]);
 
   /* ── One-time: copy Merchants/{merchantId} → Settings/businessInfo if admin never seeded it ── */
 
   useEffect(() => {
-    if (!merchantId || dirty) return;
+    if (dirty) return;
     let cancelled = false;
     (async () => {
       try {
+        let merchantId = merchantIdFromClaims;
+        if (!merchantId && claims.role === "super_admin") {
+          const mq = query(collection(db, "Merchants"), limit(2));
+          const mset = await getDocs(mq);
+          if (cancelled) return;
+          if (mset.size === 1) {
+            merchantId = mset.docs[0].id;
+          }
+        }
+        if (!merchantId) return;
+        setScopedMerchantId(merchantId);
+
         const biRef = doc(db, DOC_REF, DOC_ID);
         const biSnap = await getDoc(biRef);
         if (cancelled) return;
@@ -307,9 +350,12 @@ export default function BusinessInformationPage() {
         if (!merSnap.exists() || cancelled) return;
         const m = merSnap.data() as Record<string, unknown>;
 
-        const bizName = typeof m.businessName === "string" ? m.businessName.trim() : "";
-        const phone = typeof m.phone === "string" ? m.phone.trim() : "";
-        const email = typeof m.email === "string" ? m.email.trim() : "";
+        const bizName =
+          m.businessName == null ? "" : typeof m.businessName === "string" ? m.businessName.trim() : String(m.businessName).trim();
+        const phone =
+          m.phone == null ? "" : typeof m.phone === "string" ? m.phone.trim() : String(m.phone).trim();
+        const email =
+          m.email == null ? "" : typeof m.email === "string" ? m.email.trim() : String(m.email).trim();
         const addressStr = formatAddressFromMerchantDoc(m.address);
         if (!bizName && !phone && !email && !addressStr) return;
 
@@ -332,7 +378,7 @@ export default function BusinessInformationPage() {
     return () => {
       cancelled = true;
     };
-  }, [merchantId, dirty]);
+  }, [merchantIdFromClaims, claims.role, dirty]);
 
   /* ── Firestore: business info ── */
 
@@ -344,13 +390,15 @@ export default function BusinessInformationPage() {
           const d = snap.data();
           if (!dirty) {
             setData({
-              businessName: d.businessName ?? "",
-              address: d.address ?? "",
-              phone: d.phone ?? "",
-              email: d.email ?? "",
-              logoUrl: d.logoUrl ?? "",
+              businessName: typeof d.businessName === "string" ? d.businessName : String(d.businessName ?? ""),
+              address: typeof d.address === "string" ? d.address : String(d.address ?? ""),
+              phone: typeof d.phone === "string" ? d.phone : String(d.phone ?? ""),
+              email: typeof d.email === "string" ? d.email : String(d.email ?? ""),
+              logoUrl: typeof d.logoUrl === "string" ? d.logoUrl : String(d.logoUrl ?? ""),
             });
           }
+        } else if (!dirty) {
+          setData(EMPTY);
         }
         setLoading(false);
         setLoadError(null);
@@ -413,6 +461,21 @@ export default function BusinessInformationPage() {
     setSaveStatus("saving");
     setSaveError(null);
     try {
+      let mid = scopedMerchantId || merchantIdFromClaims;
+      if (!mid && claims.role === "super_admin") {
+        const biSnap = await getDoc(doc(db, DOC_REF, DOC_ID));
+        const raw = biSnap.exists() ? biSnap.get("merchantId") : null;
+        mid = typeof raw === "string" ? raw.trim() : "";
+      }
+      if (!mid) {
+        setSaveStatus("error");
+        setSaveError(
+          "Could not determine merchant for this account. Open the merchant once in MaxiPay Admin (it syncs business info), then refresh."
+        );
+        setTimeout(() => setSaveStatus("idle"), 5000);
+        return;
+      }
+
       await setDoc(
         doc(db, DOC_REF, DOC_ID),
         {
@@ -422,7 +485,7 @@ export default function BusinessInformationPage() {
           email: data.email.trim(),
           logoUrl: data.logoUrl.trim(),
           updatedAt: serverTimestamp(),
-          merchantId,
+          merchantId: mid,
         },
         { merge: true }
       );
@@ -433,7 +496,7 @@ export default function BusinessInformationPage() {
       if (!existingSlug || typeof existingSlug !== "string" || !existingSlug.trim()) {
         const generated = slugify(data.businessName.trim());
         if (generated) {
-          await setDoc(ooRef, { onlineOrderingSlug: generated, updatedAt: serverTimestamp(), merchantId }, { merge: true });
+          await setDoc(ooRef, { onlineOrderingSlug: generated, updatedAt: serverTimestamp(), merchantId: mid }, { merge: true });
         }
       }
 
@@ -445,7 +508,7 @@ export default function BusinessInformationPage() {
       setSaveError("Save failed. Check your connection and try again.");
       setTimeout(() => setSaveStatus("idle"), 5000);
     }
-  }, [data, merchantId]);
+  }, [data, scopedMerchantId, merchantIdFromClaims, claims.role]);
 
   /* ── logo ── */
 
@@ -509,14 +572,16 @@ export default function BusinessInformationPage() {
     setPsDirty(true);
     psTimerRef.current = setTimeout(async () => {
       try {
-        await setDoc(doc(db, DOC_REF, "receiptSettings"), { ...updated, merchantId }, { merge: true });
+        const midNow = merchantScopeRef.current;
+        if (!midNow) return;
+        await setDoc(doc(db, DOC_REF, "receiptSettings"), { ...updated, merchantId: midNow }, { merge: true });
         setPsDirty(false);
       } catch (e) {
         console.error("[PrintSettings] save error:", e);
         setPsDirty(false);
       }
     }, 800);
-  }, [merchantId]);
+  }, []);
 
   const pSet = useCallback(
     <K extends keyof PrintSettings>(k: K, v: PrintSettings[K]) =>

@@ -129,6 +129,14 @@ export default function MerchantDetailPage() {
       setEditEmail(m.email || "");
       setEditStatus(m.status || "active");
       setEditAddress(m.address || { street: "", city: "", state: "", zip: "" });
+
+      try {
+        await apiCall(`/api/merchants/${merchantId}/sync-business-settings`, {
+          method: "POST",
+        });
+      } catch {
+        /* POS/dashboard sync is best-effort; merchant list still loaded */
+      }
     } catch {
       showToast("error", "Failed to load merchant.");
     } finally {

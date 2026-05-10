@@ -1,5 +1,11 @@
 import admin from "firebase-admin";
 
+function stringFromFirestore(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "string") return v.trim();
+  return String(v).trim();
+}
+
 /** Flatten Merchants/{id}.address into the single string used by Settings/businessInfo. */
 export function formatMerchantAddressForSettings(addr: unknown): string {
   if (!addr || typeof addr !== "object") return "";
@@ -23,10 +29,9 @@ export async function syncSettingsBusinessInfoFromMerchant(
   merchantId: string,
   merchantData: admin.firestore.DocumentData
 ): Promise<void> {
-  const businessName =
-    typeof merchantData.businessName === "string" ? merchantData.businessName.trim() : "";
-  const phone = typeof merchantData.phone === "string" ? merchantData.phone.trim() : "";
-  const email = typeof merchantData.email === "string" ? merchantData.email.trim() : "";
+  const businessName = stringFromFirestore(merchantData.businessName);
+  const phone = stringFromFirestore(merchantData.phone);
+  const email = stringFromFirestore(merchantData.email);
   const address = formatMerchantAddressForSettings(merchantData.address);
 
   const ref = db.collection("Settings").doc("businessInfo");
