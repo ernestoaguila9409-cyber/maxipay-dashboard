@@ -374,4 +374,5 @@
     <string name="device_activation_failed">Could not link device: %1$s</string>
     <string name="device_activation_forced_title">Device deactivated</string>
     <string name="device_activation_forced_instructions">This terminal was deactivated from the dashboard. Enter a new 6-digit activation code from Settings → Devices → Add device, then tap Link this device.</string>
+    <string name="device_activation_required_first">This device must be linked before anyone can sign in. In the merchant dashboard go to Settings → Devices → Add device, copy the 6-digit code, enter it below, then tap GO. Codes expire in 15 minutes and work once.</string>
 </resources>

@@ -18,6 +18,9 @@ object PosDeviceActivation {
     private const val ACTIVATIONS_COLLECTION = "DeviceActivations"
     private const val DEVICES_COLLECTION = "PosDevices"
 
+    /** Set to true when a dashboard activation code is redeemed ([redeemCode]). */
+    const val FIELD_ENROLLED_FROM_DASHBOARD = "enrolledFromDashboard"
+
     private const val CODE_LEN = 6
 
     private const val ERR_NO_DOC = "ACTIVATION_NO_DOC"
@@ -90,7 +93,7 @@ object PosDeviceActivation {
                     "appVersion" to appVer,
                     "appVersionCode" to verCode,
                     "activatedAt" to FieldValue.serverTimestamp(),
-                    "enrolledFromDashboard" to true,
+                    FIELD_ENROLLED_FROM_DASHBOARD to true,
                     PosDeviceDeactivationWatch.FIELD_DEACTIVATED to false,
                     "lastSeen" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp(),

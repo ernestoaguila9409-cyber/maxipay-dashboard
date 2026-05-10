@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.OvershootInterpolator
@@ -15,6 +16,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Source
 import com.google.firebase.functions.FirebaseFunctions
 
 class LoginActivity : AppCompatActivity() {
@@ -25,7 +27,7 @@ class LoginActivity : AppCompatActivity() {
     /**
      * Anonymous Firebase Auth is required for Firestore after login. Starting it while the user
      * enters their PIN overlaps that latency with [verifyPin], so the post-PIN path is often a
-     * single network round trip instead of two sequential calls.
+     * single network round trip instead of two sequential ones.
      */
     private fun prewarmAnonymousAuth() {
         if (auth.currentUser == null) {
@@ -46,15 +48,23 @@ class LoginActivity : AppCompatActivity() {
 
         setContentView(R.layout.activity_login)
 
-        prewarmAnonymousAuth()
-        ReceiptSettings.startBusinessInfoSync(this)
-
-        val bizName = ReceiptSettings.load(this).businessName
-        CustomerDisplayManager.setIdle(this, bizName)
-
-        scheduleActivationLockIfNeeded()
-
+        val gateProgress = findViewById<View>(R.id.loginGateProgress)
         dotsContainer = findViewById(R.id.dotsContainer)
+        findViewById<View>(R.id.loginKeypadRoot)
+
+        prewarmAnonymousAuth()
+
+        scheduleDeviceGateAndContinue {
+            gateProgress.visibility = View.GONE
+            dotsContainer.visibility = View.VISIBLE
+            findViewById<View>(R.id.loginKeypadRoot).visibility = View.VISIBLE
+
+            ReceiptSettings.startBusinessInfoSync(this)
+
+            val bizName = ReceiptSettings.load(this).businessName
+            CustomerDisplayManager.setIdle(this, bizName)
+        }
+
         pinDots = listOf(
             findViewById(R.id.pinDot0),
             findViewById(R.id.pinDot1),
@@ -101,6 +111,49 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Blocks the PIN screen until we know this install is allowed to sign in:
+     * 1) If [PosDeviceDeactivationWatch.FIELD_DEACTIVATED] is true → forced activation (same as before).
+     * 2) If [PosDeviceActivation.FIELD_ENROLLED_FROM_DASHBOARD] is not true → must redeem a dashboard code first.
+     * Uses [Source.SERVER] so a stale local cache cannot skip the gate.
+     *
+     * If the server read fails (offline / rules), we allow the PIN screen so devices are not bricked.
+     */
+    private fun scheduleDeviceGateAndContinue(onReady: () -> Unit) {
+        fun readDeviceFromServer() {
+            PosDeviceIdentity.resolveInstallationDocId(this) { docId ->
+                FirebaseFirestore.getInstance()
+                    .collection("PosDevices")
+                    .document(docId)
+                    .get(Source.SERVER)
+                    .addOnSuccessListener { snap ->
+                        if (snap.exists() && snap.getBoolean(PosDeviceDeactivationWatch.FIELD_DEACTIVATED) == true) {
+                            DeviceActivationActivity.launchForceLock(this)
+                            finish()
+                            return@addOnSuccessListener
+                        }
+                        val enrolled = snap.exists() &&
+                            snap.getBoolean(PosDeviceActivation.FIELD_ENROLLED_FROM_DASHBOARD) == true
+                        if (!enrolled) {
+                            DeviceActivationActivity.launchEnrollmentRequired(this)
+                            finish()
+                            return@addOnSuccessListener
+                        }
+                        runOnUiThread { onReady() }
+                    }
+                    .addOnFailureListener { e ->
+                        Log.w(TAG, "device gate: PosDevices server read failed, showing PIN anyway", e)
+                        runOnUiThread { onReady() }
+                    }
+            }
+        }
+        if (auth.currentUser != null) {
+            readDeviceFromServer()
+        } else {
+            auth.signInAnonymously().addOnCompleteListener { readDeviceFromServer() }
+        }
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     private fun addPressAnimation(view: View) {
         view.setOnTouchListener { v, event ->
@@ -114,31 +167,6 @@ class LoginActivity : AppCompatActivity() {
                 }
             }
             false
-        }
-    }
-
-    /** If the dashboard deactivated this installation, block PIN until a new activation code is entered. */
-    private fun scheduleActivationLockIfNeeded() {
-        fun readDeviceAndMaybeLock() {
-            PosDeviceIdentity.resolveInstallationDocId(this) { docId ->
-                FirebaseFirestore.getInstance()
-                    .collection("PosDevices")
-                    .document(docId)
-                    .get()
-                    .addOnSuccessListener { snap ->
-                        if (!snap.exists()) return@addOnSuccessListener
-                        if (snap.getBoolean(PosDeviceDeactivationWatch.FIELD_DEACTIVATED) != true) {
-                            return@addOnSuccessListener
-                        }
-                        DeviceActivationActivity.launchForceLock(this)
-                        finish()
-                    }
-            }
-        }
-        if (auth.currentUser != null) {
-            readDeviceAndMaybeLock()
-        } else {
-            auth.signInAnonymously().addOnCompleteListener { readDeviceAndMaybeLock() }
         }
     }
 
@@ -237,5 +265,9 @@ class LoginActivity : AppCompatActivity() {
             .addOnFailureListener {
                 onLoginFailed("Login failed")
             }
+    }
+
+    companion object {
+        private const val TAG = "LoginActivity"
     }
 }

@@ -4,6 +4,15 @@
     android:layout_height="match_parent"
     android:background="@drawable/bg_login_gradient">
 
+    <ProgressBar
+        android:id="@+id/loginGateProgress"
+        style="?android:attr/progressBarStyleLarge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:indeterminateTint="#B8A0FF"
+        android:visibility="visible" />
+
     <View
         android:layout_width="360dp"
         android:layout_height="360dp"
@@ -57,7 +66,8 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="36dp"
             android:orientation="horizontal"
-            android:gravity="center">
+            android:gravity="center"
+            android:visibility="invisible">
 
             <ImageView
                 android:id="@+id/pinDot0"
@@ -94,11 +104,13 @@
 
         <!-- Keypad -->
         <LinearLayout
+            android:id="@+id/loginKeypadRoot"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="40dp"
             android:orientation="vertical"
-            android:gravity="center">
+            android:gravity="center"
+            android:visibility="invisible">
 
             <LinearLayout
                 android:layout_width="wrap_content"

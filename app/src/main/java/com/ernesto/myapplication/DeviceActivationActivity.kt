@@ -46,15 +46,17 @@ import androidx.compose.ui.unit.sp
 class DeviceActivationActivity : AppCompatActivity() {
 
     private var forceLock: Boolean = false
+    private var enrollmentRequired: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         forceLock = intent.getBooleanExtra(EXTRA_FORCE_LOCK, false)
+        enrollmentRequired = intent.getBooleanExtra(EXTRA_ENROLLMENT_REQUIRED, false)
 
         setContentView(R.layout.activity_device_activation)
         supportActionBar?.hide()
 
-        if (forceLock) {
+        if (forceLock || enrollmentRequired) {
             onBackPressedDispatcher.addCallback(
                 this,
                 object : OnBackPressedCallback(true) {
@@ -63,15 +65,17 @@ class DeviceActivationActivity : AppCompatActivity() {
             )
         }
 
+        val subtitleRes = when {
+            enrollmentRequired -> R.string.device_activation_required_first
+            forceLock -> R.string.device_activation_forced_instructions
+            else -> R.string.device_activation_instructions
+        }
+
         val composeView = findViewById<ComposeView>(R.id.composeActivation)
         composeView.setContent {
             MaterialTheme {
                 ActivationScreen(
-                    subtitle = if (forceLock) {
-                        getString(R.string.device_activation_forced_instructions)
-                    } else {
-                        getString(R.string.device_activation_instructions)
-                    },
+                    subtitle = getString(subtitleRes),
                     onSubmit = { code, setLoading, setError ->
                         submitCode(code, setLoading, setError)
                     },
@@ -98,7 +102,7 @@ class DeviceActivationActivity : AppCompatActivity() {
                         R.string.device_activation_success,
                         Toast.LENGTH_LONG,
                     ).show()
-                    if (forceLock) {
+                    if (forceLock || enrollmentRequired) {
                         startActivity(
                             Intent(this, LoginActivity::class.java).apply {
                                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -118,19 +122,34 @@ class DeviceActivationActivity : AppCompatActivity() {
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        if (forceLock) return true
+        if (forceLock || enrollmentRequired) return true
         finish()
         return true
     }
 
     companion object {
         const val EXTRA_FORCE_LOCK = "extra_force_device_activation"
+        const val EXTRA_ENROLLMENT_REQUIRED = "extra_enrollment_required"
 
         fun launchForceLock(context: Context) {
             context.startActivity(
                 Intent(context, DeviceActivationActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
                     putExtra(EXTRA_FORCE_LOCK, true)
+                },
+            )
+        }
+
+        /**
+         * Blocks PIN login until a valid dashboard activation code is redeemed
+         * ([PosDeviceActivation.FIELD_ENROLLED_FROM_DASHBOARD] on [PosDevices]).
+         */
+        fun launchEnrollmentRequired(context: Context) {
+            context.startActivity(
+                Intent(context, DeviceActivationActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    putExtra(EXTRA_FORCE_LOCK, true)
+                    putExtra(EXTRA_ENROLLMENT_REQUIRED, true)
                 },
             )
         }
