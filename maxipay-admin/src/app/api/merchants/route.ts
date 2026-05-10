@@ -6,6 +6,7 @@ import {
   passwordResetContinueSettings,
   sendMerchantWelcomeEmail,
 } from "@/lib/merchantWelcomeEmail";
+import { syncSettingsBusinessInfoFromMerchant } from "@/lib/syncMerchantBusinessInfo";
 
 export const runtime = "nodejs";
 
@@ -176,6 +177,22 @@ export async function POST(req: Request) {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       createdBy: decoded.uid,
     });
+
+    try {
+      await syncSettingsBusinessInfoFromMerchant(dbAdmin, merchantId, {
+        businessName,
+        email,
+        phone: body.phone?.trim() || "",
+        address: {
+          street: body.address?.street?.trim() || "",
+          city: body.address?.city?.trim() || "",
+          state: body.address?.state?.trim() || "",
+          zip: body.address?.zip?.trim() || "",
+        },
+      });
+    } catch (syncErr) {
+      console.error("[merchants] Settings/businessInfo sync failed:", syncErr);
+    }
 
     const pay = body.payment;
     const hasTpn = !!pay?.tpn?.trim();

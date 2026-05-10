@@ -2,6 +2,7 @@ import admin from "firebase-admin";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp, verifyIdToken } from "@/lib/firebaseAdmin";
 import { normalizeMerchantEmail } from "@/lib/merchantWelcomeEmail";
+import { syncSettingsBusinessInfoFromMerchant } from "@/lib/syncMerchantBusinessInfo";
 
 export const runtime = "nodejs";
 
@@ -191,6 +192,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     allowed.updatedAt = admin.firestore.FieldValue.serverTimestamp();
     await ref.update(allowed);
+
+    try {
+      const fresh = await ref.get();
+      if (fresh.exists) {
+        await syncSettingsBusinessInfoFromMerchant(db, id, fresh.data()!);
+      }
+    } catch (syncErr) {
+      console.error("[merchants/[id]] Settings/businessInfo sync failed:", syncErr);
+    }
 
     return NextResponse.json({ ok: true });
   } catch (e) {

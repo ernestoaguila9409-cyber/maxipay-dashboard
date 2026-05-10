@@ -229,6 +229,32 @@ function Section({
 }
 
 /* ══════════════════════════════════════════════
+   Merchants → Settings/businessInfo (admin creates Merchants only)
+   ══════════════════════════════════════════════ */
+
+function businessInfoSnapshotLooksEmpty(snap: {
+  exists(): boolean;
+  get(field: string): unknown;
+}): boolean {
+  if (!snap.exists()) return true;
+  const f = (k: string) =>
+    typeof snap.get(k) === "string" ? (snap.get(k) as string).trim() : "";
+  return !f("businessName") && !f("phone") && !f("email") && !f("address");
+}
+
+function formatAddressFromMerchantDoc(addr: unknown): string {
+  if (!addr || typeof addr !== "object") return "";
+  const o = addr as Record<string, unknown>;
+  const street = typeof o.street === "string" ? o.street.trim() : "";
+  const line2 = [o.city, o.state, o.zip]
+    .map((x) => (typeof x === "string" ? x.trim() : ""))
+    .filter(Boolean)
+    .join(" ");
+  if (street && line2) return `${street}\n${line2}`;
+  return street || line2;
+}
+
+/* ══════════════════════════════════════════════
    Main page component
    ══════════════════════════════════════════════ */
 
@@ -259,6 +285,54 @@ export default function BusinessInformationPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  /* ── One-time: copy Merchants/{merchantId} → Settings/businessInfo if admin never seeded it ── */
+
+  useEffect(() => {
+    if (!merchantId || dirty) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const biRef = doc(db, DOC_REF, DOC_ID);
+        const biSnap = await getDoc(biRef);
+        if (cancelled) return;
+        if (biSnap.exists()) {
+          const docMid = biSnap.get("merchantId");
+          const midStr = typeof docMid === "string" ? docMid.trim() : "";
+          if (midStr && midStr !== merchantId) return;
+        }
+        if (!businessInfoSnapshotLooksEmpty(biSnap)) return;
+
+        const merSnap = await getDoc(doc(db, "Merchants", merchantId));
+        if (!merSnap.exists() || cancelled) return;
+        const m = merSnap.data() as Record<string, unknown>;
+
+        const bizName = typeof m.businessName === "string" ? m.businessName.trim() : "";
+        const phone = typeof m.phone === "string" ? m.phone.trim() : "";
+        const email = typeof m.email === "string" ? m.email.trim() : "";
+        const addressStr = formatAddressFromMerchantDoc(m.address);
+        if (!bizName && !phone && !email && !addressStr) return;
+
+        await setDoc(
+          biRef,
+          {
+            businessName: bizName,
+            address: addressStr,
+            phone,
+            email,
+            merchantId,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch (e) {
+        console.warn("[Business] bootstrap from Merchants doc failed:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [merchantId, dirty]);
 
   /* ── Firestore: business info ── */
 
