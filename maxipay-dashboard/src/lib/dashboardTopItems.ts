@@ -61,6 +61,7 @@ async function aggregateLineRevenueByItemName(
  * Uses the same order snapshot as the dashboard (may miss orders if volume exceeds fetch limit).
  */
 export async function buildTopItemsForDashboard(
+  merchantId: string,
   snapshot: QuerySnapshot<DocumentData>,
   primaryStart: Date,
   primaryEnd: Date,

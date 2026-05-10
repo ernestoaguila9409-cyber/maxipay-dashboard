@@ -19,6 +19,7 @@ import Header from "@/components/Header";
 import SalesChart, { type HourlySalesPoint } from "@/components/SalesChart";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import { buildDailySalesPoints } from "@/lib/dashboardFinance";
 import {
   getDailySalesSummary,
@@ -399,6 +400,7 @@ function PeriodSegmented({
 
 export default function OverviewReportClient() {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [period, setPeriod] = useState<ReportPeriod>("today");
   const [loading, setLoading] = useState(true);
   const [usingMock, setUsingMock] = useState(false);
@@ -414,7 +416,7 @@ export default function OverviewReportClient() {
     const enginePeriod = period === "today" ? "today" : period === "week" ? "week" : "month";
     const { start, end } = periodRange(enginePeriod);
 
-    if (!user) {
+    if (!user || !merchantId) {
       setSummary(MOCK_SUMMARY);
       setHourly(mockHourlySales());
       setOrderTypes(MOCK_ORDER_TYPES);
@@ -430,9 +432,9 @@ export default function OverviewReportClient() {
 
     try {
       const [s, h, o] = await Promise.all([
-        getDailySalesSummary(start, end),
-        getHourlySales(start, end),
-        getSalesByOrderType(start, end),
+        getDailySalesSummary(merchantId, start, end),
+        getHourlySales(merchantId, start, end),
+        getSalesByOrderType(merchantId, start, end),
       ]);
 
       let trend: HourlySalesPoint[];
@@ -444,6 +446,7 @@ export default function OverviewReportClient() {
           const snap = await getDocs(
             query(
               collection(db, "Orders"),
+              where("merchantId", "==", merchantId),
               where("createdAt", ">=", Timestamp.fromDate(start)),
               where("createdAt", "<", Timestamp.fromDate(end))
             )
@@ -473,7 +476,7 @@ export default function OverviewReportClient() {
     } finally {
       setLoading(false);
     }
-  }, [user, period]);
+  }, [user, merchantId, period]);
 
   useEffect(() => {
     load();

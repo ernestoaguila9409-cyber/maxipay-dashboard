@@ -158,7 +158,8 @@ function passesEmployeeFilter(
 }
 
 export default function OrdersPage() {
-  const { user } = useAuth();
+  const { user, claims } = useAuth();
+  const merchantId = claims.merchantId ?? "";
   const [rawOrders, setRawOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState<DateFilterId>("today");
@@ -170,10 +171,10 @@ export default function OrdersPage() {
   const [employeeFilter, setEmployeeFilter] = useState<string>("all");
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !merchantId) {
       setRawOrders([]);
       setLoading(false);
-      console.log("[Orders] Skipping Firestore — no authenticated user.");
+      console.log("[Orders] Skipping Firestore — no authenticated user or merchantId.");
       return;
     }
 
@@ -185,9 +186,9 @@ export default function OrdersPage() {
     const unsubscribers: (() => void)[] = [];
 
     if (ORDERS_FETCH_MODE === "debug_raw") {
-      const col = collection(db, "Orders");
+      const col = query(collection(db, "Orders"), where("merchantId", "==", merchantId));
       console.log(
-        "[Orders debug] Subscribing to collection(db, \"Orders\") — no where/orderBy/limit"
+        "[Orders debug] Subscribing to collection(db, \"Orders\") — merchantId scoped"
       );
 
       const unsub = onSnapshot(
@@ -218,9 +219,9 @@ export default function OrdersPage() {
       );
       unsubscribers.push(unsub);
     } else if (ORDERS_FETCH_MODE === "step_a") {
-      const q = query(collection(db, "Orders"), orderBy("createdAt", "desc"));
+      const q = query(collection(db, "Orders"), where("merchantId", "==", merchantId), orderBy("createdAt", "desc"));
       console.log(
-        "[Orders step_a] query: orderBy(createdAt desc) only — no where/limit"
+        "[Orders step_a] query: merchantId scoped + orderBy(createdAt desc)"
       );
 
       const unsub = onSnapshot(
@@ -247,11 +248,13 @@ export default function OrdersPage() {
 
       const qRecent = query(
         collection(db, "Orders"),
+        where("merchantId", "==", merchantId),
         orderBy("createdAt", "desc"),
         limit(ORDERS_LIMIT)
       );
       const qOpen = query(
         collection(db, "Orders"),
+        where("merchantId", "==", merchantId),
         where("status", "==", "OPEN"),
         orderBy("createdAt", "desc"),
         limit(OPEN_ORDERS_LIMIT)
@@ -312,7 +315,7 @@ export default function OrdersPage() {
     return () => {
       unsubscribers.forEach((u) => u());
     };
-  }, [user]);
+  }, [user, merchantId]);
 
   const dateRange = useMemo((): { start: Date; end: Date } | null => {
     const now = new Date();

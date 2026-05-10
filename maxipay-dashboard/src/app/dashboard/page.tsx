@@ -117,7 +117,8 @@ interface MetricTrends {
 const emptyTrend = "—";
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, claims } = useAuth();
+  const merchantId = claims.merchantId ?? "";
   const [period, setPeriod] = useState<DashboardPeriod>("today");
   const [netSales, setNetSales] = useState(0);
   const [ordersCount, setOrdersCount] = useState(0);
@@ -140,7 +141,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) return;
 
     let cancelled = false;
 
@@ -157,6 +158,7 @@ export default function DashboardPage() {
           snapshotRecent = await getDocs(
             query(
               collection(db, "Orders"),
+              where("merchantId", "==", merchantId),
               where("createdAt", ">=", Timestamp.fromDate(fetchStart)),
               where("createdAt", "<=", Timestamp.fromDate(fetchEnd)),
               orderBy("createdAt", "desc"),
@@ -171,6 +173,7 @@ export default function DashboardPage() {
           snapshotRecent = await getDocs(
             query(
               collection(db, "Orders"),
+              where("merchantId", "==", merchantId),
               orderBy("createdAt", "desc"),
               limit(800)
             )
@@ -241,11 +244,13 @@ export default function DashboardPage() {
 
         const [payments, batchesSnap] = await Promise.all([
           aggregatePaymentBreakdownFromTransactionIds(
+            merchantId,
             current.saleTransactionIds
           ),
           getDocs(
             query(
               collection(db, "Batches"),
+              where("merchantId", "==", merchantId),
               where("closed", "==", false),
               limit(1)
             )
@@ -260,6 +265,7 @@ export default function DashboardPage() {
 
         try {
           const top = await buildTopItemsForDashboard(
+            merchantId,
             snapshotRecent,
             ranges.primaryStart,
             ranges.primaryEnd,
@@ -283,7 +289,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, period]);
+  }, [user, merchantId, period]);
 
   const periodHeadline =
     period === "today"

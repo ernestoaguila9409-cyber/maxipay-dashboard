@@ -130,11 +130,13 @@ function normalizeCardBrand(raw: string): string {
 }
 
 async function fetchTransactions(
+  merchantId: string,
   start: Date,
   end: Date
 ): Promise<TxDoc[]> {
   const q = query(
     collection(db, "Transactions"),
+    where("merchantId", "==", merchantId),
     where("createdAt", ">=", Timestamp.fromDate(start)),
     where("createdAt", "<", Timestamp.fromDate(end))
   );
@@ -143,11 +145,13 @@ async function fetchTransactions(
 }
 
 async function fetchOrders(
+  merchantId: string,
   start: Date,
   end: Date
 ): Promise<OrderDoc[]> {
   const q = query(
     collection(db, "Orders"),
+    where("merchantId", "==", merchantId),
     where("createdAt", ">=", Timestamp.fromDate(start)),
     where("createdAt", "<", Timestamp.fromDate(end))
   );
@@ -163,12 +167,13 @@ async function fetchOrderItems(
 }
 
 export async function getDailySalesSummary(
+  merchantId: string,
   start: Date,
   end: Date
 ): Promise<DailySalesSummary> {
   const [txDocs, orderDocs] = await Promise.all([
-    fetchTransactions(start, end),
-    fetchOrders(start, end),
+    fetchTransactions(merchantId, start, end),
+    fetchOrders(merchantId, start, end),
   ]);
 
   let grossCents = 0;
@@ -266,10 +271,11 @@ export async function getDailySalesSummary(
 }
 
 export async function getSalesByOrderType(
+  merchantId: string,
   start: Date,
   end: Date
 ): Promise<SalesByOrderType> {
-  const orderDocs = await fetchOrders(start, end);
+  const orderDocs = await fetchOrders(merchantId, start, end);
   let dineInCents = 0;
   let toGoCents = 0;
   let barCents = 0;
@@ -297,11 +303,13 @@ export async function getSalesByOrderType(
 }
 
 export async function getHourlySales(
+  merchantId: string,
   start: Date,
   end: Date
 ): Promise<HourlySale[]> {
   const q = query(
     collection(db, "Orders"),
+    where("merchantId", "==", merchantId),
     where("status", "==", "CLOSED"),
     where("createdAt", ">=", Timestamp.fromDate(start)),
     where("createdAt", "<", Timestamp.fromDate(end))
@@ -325,10 +333,11 @@ export async function getHourlySales(
 }
 
 export async function getCardBrandSales(
+  merchantId: string,
   start: Date,
   end: Date
 ): Promise<CardBrandSale[]> {
-  const txDocs = await fetchTransactions(start, end);
+  const txDocs = await fetchTransactions(merchantId, start, end);
   const brandMap = new Map<string, { cents: number; count: number }>();
 
   for (const doc of txDocs) {
@@ -355,12 +364,13 @@ export async function getCardBrandSales(
 }
 
 export async function getEmployeeMetrics(
+  merchantId: string,
   start: Date,
   end: Date
 ): Promise<EmployeeMetrics[]> {
   const [txDocs, orderDocs] = await Promise.all([
-    fetchTransactions(start, end),
-    fetchOrders(start, end),
+    fetchTransactions(merchantId, start, end),
+    fetchOrders(merchantId, start, end),
   ]);
 
   const map = new Map<

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { collection, query, where, limit, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import type { PaymentCapabilities, PaymentProviderId } from "@/lib/paymentProviders";
 
 const PAYMENTS_COLLECTION = "payment_terminals";
@@ -25,6 +26,7 @@ export interface ActiveTerminalInfo {
 }
 
 export function useActiveTerminalCapabilities(): ActiveTerminalInfo {
+  const merchantId = useMerchantId();
   const [info, setInfo] = useState<ActiveTerminalInfo>({
     capabilities: DEFAULT_CAPABILITIES,
     provider: "",
@@ -32,8 +34,10 @@ export function useActiveTerminalCapabilities(): ActiveTerminalInfo {
   });
 
   useEffect(() => {
+    if (!merchantId) return;
     const q = query(
       collection(db, PAYMENTS_COLLECTION),
+      where("merchantId", "==", merchantId),
       where("active", "==", true),
       limit(1),
     );
@@ -52,7 +56,7 @@ export function useActiveTerminalCapabilities(): ActiveTerminalInfo {
       });
     });
     return () => unsub();
-  }, []);
+  }, [merchantId]);
 
   return info;
 }

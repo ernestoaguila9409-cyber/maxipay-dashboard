@@ -6,6 +6,7 @@ import { db, storage } from "@/firebase/firebaseConfig";
 import { doc, getDoc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import {
   Save,
   Check,
@@ -233,6 +234,7 @@ function Section({
 
 export default function BusinessInformationPage() {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [data, setData] = useState<BusinessData>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -346,6 +348,7 @@ export default function BusinessInformationPage() {
           email: data.email.trim(),
           logoUrl: data.logoUrl.trim(),
           updatedAt: serverTimestamp(),
+          merchantId,
         },
         { merge: true }
       );
@@ -356,7 +359,7 @@ export default function BusinessInformationPage() {
       if (!existingSlug || typeof existingSlug !== "string" || !existingSlug.trim()) {
         const generated = slugify(data.businessName.trim());
         if (generated) {
-          await setDoc(ooRef, { onlineOrderingSlug: generated, updatedAt: serverTimestamp() }, { merge: true });
+          await setDoc(ooRef, { onlineOrderingSlug: generated, updatedAt: serverTimestamp(), merchantId }, { merge: true });
         }
       }
 
@@ -368,7 +371,7 @@ export default function BusinessInformationPage() {
       setSaveError("Save failed. Check your connection and try again.");
       setTimeout(() => setSaveStatus("idle"), 5000);
     }
-  }, [data]);
+  }, [data, merchantId]);
 
   /* ── logo ── */
 
@@ -432,14 +435,14 @@ export default function BusinessInformationPage() {
     setPsDirty(true);
     psTimerRef.current = setTimeout(async () => {
       try {
-        await setDoc(doc(db, DOC_REF, "receiptSettings"), updated, { merge: true });
+        await setDoc(doc(db, DOC_REF, "receiptSettings"), { ...updated, merchantId }, { merge: true });
         setPsDirty(false);
       } catch (e) {
         console.error("[PrintSettings] save error:", e);
         setPsDirty(false);
       }
     }, 800);
-  }, []);
+  }, [merchantId]);
 
   const pSet = useCallback(
     <K extends keyof PrintSettings>(k: K, v: PrintSettings[K]) =>

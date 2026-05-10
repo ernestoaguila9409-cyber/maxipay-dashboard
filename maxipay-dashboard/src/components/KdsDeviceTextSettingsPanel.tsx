@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import {
   adjustKdsTextField,
   argbToCss,
@@ -85,6 +86,7 @@ function Stepper({
 }
 
 export function KdsDeviceTextSettingsPanel({ deviceId }: Props) {
+  const merchantId = useMerchantId();
   const [ui, setUi] = useState<KdsTextUiSettings>(() => coerceKdsTextUi(parseKdsTextUi(null)));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -121,14 +123,14 @@ export function KdsDeviceTextSettingsPanel({ deviceId }: Props) {
       try {
         await setDoc(
           doc(db, KDS_DEVICES_COLLECTION, id, SETTINGS_SUB, UI_DOC),
-          kdsTextUiToFirestore(coerced)
+          { ...kdsTextUiToFirestore(coerced), merchantId }
         );
       } catch (e) {
         console.error("[KDS text ui save]", e);
         setError("Save failed. Check your connection and Firestore rules.");
       }
     },
-    [deviceId]
+    [deviceId, merchantId]
   );
 
   const bump = (key: KdsTextFieldKey, delta: number) => {

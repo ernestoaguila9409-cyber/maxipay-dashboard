@@ -4,6 +4,8 @@ import {
   writeBatch,
   doc,
   getDocs,
+  query,
+  where,
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
@@ -373,8 +375,8 @@ function parseItems(wb: XLSX.WorkBook): ParsedItem[] {
 
 const MAX_BATCH_OPS = 450;
 
-async function clearCollection(collectionName: string) {
-  const snap = await getDocs(collection(db, collectionName));
+async function clearCollection(merchantId: string, collectionName: string) {
+  const snap = await getDocs(query(collection(db, collectionName), where("merchantId", "==", merchantId)));
   const batches: ReturnType<typeof writeBatch>[] = [];
   let batch = writeBatch(db);
   let count = 0;
@@ -394,6 +396,7 @@ async function clearCollection(collectionName: string) {
 }
 
 export async function importMenuToFirestore(
+  merchantId: string,
   parsed: ParsedMenu,
   onProgress?: (p: ImportProgress) => void
 ): Promise<ImportResult> {
@@ -419,12 +422,12 @@ export async function importMenuToFirestore(
   // 1 ─ Clear existing data
   report("Clearing existing menu data…");
   await Promise.all([
-    clearCollection("Categories"),
-    clearCollection("MenuItems"),
-    clearCollection("ModifierGroups"),
-    clearCollection("ModifierOptions"),
-    clearCollection("ItemModifierGroups"),
-    clearCollection("Taxes"),
+    clearCollection(merchantId, "Categories"),
+    clearCollection(merchantId, "MenuItems"),
+    clearCollection(merchantId, "ModifierGroups"),
+    clearCollection(merchantId, "ModifierOptions"),
+    clearCollection(merchantId, "ItemModifierGroups"),
+    clearCollection(merchantId, "Taxes"),
   ]);
 
   // 2 ─ Write categories
@@ -436,6 +439,7 @@ export async function importMenuToFirestore(
     for (const cat of parsed.categories) {
       const ref = doc(db, "Categories", cat.id);
       batch.set(ref, {
+        merchantId,
         name: cat.name,
         normalizedName: normalizeCategoryName(cat.name),
         availableOrderTypes: ["DINE_IN", "TO_GO", "BAR_TAB"],
@@ -460,6 +464,7 @@ export async function importMenuToFirestore(
     for (const group of parsed.modifierGroups) {
       const ref = doc(db, "ModifierGroups", group.id);
       batch.set(ref, {
+        merchantId,
         name: group.name,
         required: false,
         minSelection: 0,
@@ -492,6 +497,7 @@ export async function importMenuToFirestore(
     for (const tax of parsed.taxRates) {
       const ref = doc(db, "Taxes", tax.id);
       batch.set(ref, {
+        merchantId,
         name: tax.name,
         type: "PERCENTAGE",
         amount: tax.rate,
@@ -569,6 +575,7 @@ export async function importMenuToFirestore(
       }
 
       const itemData: Record<string, unknown> = {
+        merchantId,
         name: item.name,
         price: item.price,
         stock: 9999,
@@ -761,6 +768,7 @@ export function prepareScannedMenuForFirestore(rows: ScannedMenuCategoryRow[]) {
 }
 
 export async function importScannedMenuToFirestore(
+  merchantId: string,
   rows: ScannedMenuCategoryRow[],
   onProgress?: (p: ImportProgress) => void
 ): Promise<ScannedMenuImportResult> {
@@ -782,7 +790,7 @@ export async function importScannedMenuToFirestore(
 
   onProgress?.({ stage: "Loading categories…", current: 0, total: 4 });
 
-  const existingSnap = await getDocs(collection(db, "Categories"));
+  const existingSnap = await getDocs(query(collection(db, "Categories"), where("merchantId", "==", merchantId)));
   const normToFirestoreId = new Map<string, string>();
   for (const d of existingSnap.docs) {
     const name = (d.get("name") as string) || "";
@@ -804,6 +812,7 @@ export async function importScannedMenuToFirestore(
     if (firestoreId === undefined) {
       const ref = doc(collection(db, "Categories"));
       batch.set(ref, {
+        merchantId,
         name: cat.name,
         normalizedName: cat.normalizedName,
         availableOrderTypes: ["DINE_IN", "TO_GO", "BAR_TAB"],
@@ -831,6 +840,7 @@ export async function importScannedMenuToFirestore(
     if (firestoreId === undefined) {
       const ref = doc(collection(db, "Categories"));
       batch.set(ref, {
+        merchantId,
         name: sub.name,
         normalizedName: norm,
         parentCategoryId: parentFid,
@@ -858,6 +868,7 @@ export async function importScannedMenuToFirestore(
   for (const mg of prepared.modifierGroupDocs) {
     const ref = doc(collection(db, "ModifierGroups"));
     batch.set(ref, {
+      merchantId,
       name: mg.name,
       required: mg.required,
       minSelection: mg.minSelection,
@@ -925,6 +936,7 @@ export async function importScannedMenuToFirestore(
 
     const ref = doc(collection(db, "MenuItems"));
     batch.set(ref, {
+      merchantId,
       name: it.name,
       price: it.price,
       prices: { default: it.price },

@@ -12,9 +12,12 @@ import {
   getDoc,
   getDocs,
   writeBatch,
+  query,
+  where,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import {
   Plus,
@@ -106,6 +109,7 @@ function posReachabilityDisplay(
 
 export default function PaymentsPage() {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
 
   const [terminals, setTerminals] = useState<TerminalRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -132,8 +136,12 @@ export default function PaymentsPage() {
   const provider: PaymentProviderCatalogEntry = PAYMENT_PROVIDERS[providerId];
 
   useEffect(() => {
-    if (!user) return;
-    const unsub = onSnapshot(collection(db, PAYMENTS_COLLECTION), (snap) => {
+    if (!user || !merchantId) return;
+    const q = query(
+      collection(db, PAYMENTS_COLLECTION),
+      where("merchantId", "==", merchantId),
+    );
+    const unsub = onSnapshot(q, (snap) => {
       const list: TerminalRow[] = [];
       snap.forEach((d) => {
         const data = d.data() as Partial<PaymentTerminalDoc>;
@@ -158,7 +166,7 @@ export default function PaymentsPage() {
       setLoading(false);
     });
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   /** One-way: align legacy `Terminals.active` with dashboard `payment_terminals.active` (POS may still read legacy). */
   useEffect(() => {
@@ -254,6 +262,7 @@ export default function PaymentsPage() {
         ),
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
+        merchantId,
       });
       setModalOpen(false);
     } catch (err) {
@@ -348,6 +357,7 @@ export default function PaymentsPage() {
           ...payload,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
+          merchantId,
         });
         queued++;
       });

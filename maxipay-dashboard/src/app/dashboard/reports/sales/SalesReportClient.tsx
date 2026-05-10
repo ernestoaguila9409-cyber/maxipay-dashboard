@@ -16,6 +16,7 @@ import { ArrowDown, ArrowUp, Search } from "lucide-react";
 import Header from "@/components/Header";
 import SalesChart, { type HourlySalesPoint } from "@/components/SalesChart";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import { periodRange } from "@/lib/reportEngine";
 import {
   buildChartPoints,
@@ -124,6 +125,7 @@ const CATEGORY_BAR_COLORS = [
 
 export default function SalesReportClient() {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [period, setPeriod] = useState<ReportPeriod>("today");
   const [chartMode, setChartMode] = useState<ChartGranularity>("hourly");
   const [loading, setLoading] = useState(true);
@@ -138,7 +140,7 @@ export default function SalesReportClient() {
     const enginePeriod = period === "today" ? "today" : period === "week" ? "week" : "month";
     const { start, end: endExclusive } = periodRange(enginePeriod);
 
-    if (!user) {
+    if (!user || !merchantId) {
       setPayload(buildMockSalesReportPayload());
       setUsingMock(true);
       setLoading(false);
@@ -146,7 +148,7 @@ export default function SalesReportClient() {
     }
 
     try {
-      const data = await loadSalesReportData(start, endExclusive);
+      const data = await loadSalesReportData(merchantId, start, endExclusive);
       setPayload(data);
       setUsingMock(false);
     } catch (e) {
@@ -156,7 +158,7 @@ export default function SalesReportClient() {
     } finally {
       setLoading(false);
     }
-  }, [user, period]);
+  }, [user, merchantId, period]);
 
   useEffect(() => {
     load();

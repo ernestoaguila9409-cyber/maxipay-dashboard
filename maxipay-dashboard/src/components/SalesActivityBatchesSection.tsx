@@ -69,7 +69,8 @@ interface ClosedBatchRow {
 }
 
 export default function SalesActivityBatchesSection() {
-  const { user } = useAuth();
+  const { user, claims } = useAuth();
+  const merchantId = claims.merchantId ?? "";
   const [loadingOpen, setLoadingOpen] = useState(true);
   const [settleable, setSettleable] = useState(0);
   const [openTotal, setOpenTotal] = useState(0);
@@ -142,9 +143,10 @@ export default function SalesActivityBatchesSection() {
   }, [user, preAuthCount, settleable, openBatchId, settleTerminalLabel]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) return;
     const qPay = query(
       collection(db, PAYMENT_TERMINALS),
+      where("merchantId", "==", merchantId),
       where("active", "==", true)
     );
     const unsubPay = onSnapshot(
@@ -155,13 +157,14 @@ export default function SalesActivityBatchesSection() {
       () => {}
     );
     return () => unsubPay();
-  }, [user]);
+  }, [user, merchantId]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) return;
 
     const qUnsettled = query(
       collection(db, "Transactions"),
+      where("merchantId", "==", merchantId),
       where("settled", "==", false),
       where("voided", "==", false)
     );
@@ -204,6 +207,7 @@ export default function SalesActivityBatchesSection() {
 
     const qOpenBatch = query(
       collection(db, "Batches"),
+      where("merchantId", "==", merchantId),
       where("closed", "==", false),
       limit(1)
     );
@@ -218,6 +222,7 @@ export default function SalesActivityBatchesSection() {
 
     const qBatches = query(
       collection(db, "Batches"),
+      where("merchantId", "==", merchantId),
       orderBy("createdAt", "desc"),
       limit(120)
     );
@@ -281,7 +286,7 @@ export default function SalesActivityBatchesSection() {
       unsubOpenBatch();
       unsubBatches();
     };
-  }, [user]);
+  }, [user, merchantId]);
 
   const openSummaryLine = useMemo(() => {
     const parts = [

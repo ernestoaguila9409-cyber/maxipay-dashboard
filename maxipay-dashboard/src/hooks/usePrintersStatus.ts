@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, type Unsubscribe } from "firebase/firestore";
+import { collection, onSnapshot, query, where, type Unsubscribe } from "firebase/firestore";
 
 import { db } from "@/firebase/firebaseConfig";
 import {
@@ -42,7 +42,7 @@ const STATUS_ORDER: Record<PrinterStatus, number> = {
  * Real-time `Printers` collection + periodic wall-clock tick.
  * Status comes from the POS via the `status` field — NOT computed here.
  */
-export function usePrintersStatus(enabled: boolean): UsePrintersStatusResult {
+export function usePrintersStatus(enabled: boolean, merchantId: string): UsePrintersStatusResult {
   const [raw, setRaw] = useState<PrinterDocFields[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +51,7 @@ export function usePrintersStatus(enabled: boolean): UsePrintersStatusResult {
   const [sort, setSort] = useState<PrinterSort>("name");
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || !merchantId) {
       setRaw([]);
       setError(null);
       setLoading(false);
@@ -59,7 +59,10 @@ export function usePrintersStatus(enabled: boolean): UsePrintersStatusResult {
     }
 
     setLoading(true);
-    const col = collection(db, "Printers");
+    const col = query(
+      collection(db, "Printers"),
+      where("merchantId", "==", merchantId),
+    );
     let unsub: Unsubscribe | undefined;
 
     try {
@@ -91,7 +94,7 @@ export function usePrintersStatus(enabled: boolean): UsePrintersStatusResult {
     return () => {
       unsub?.();
     };
-  }, [enabled]);
+  }, [enabled, merchantId]);
 
   useEffect(() => {
     const id = window.setInterval(() => {

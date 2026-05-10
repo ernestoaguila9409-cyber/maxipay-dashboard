@@ -108,11 +108,12 @@ export function tablesCollectionRef(db: Firestore, layoutId: string) {
 
 export function subscribeTableLayouts(
   db: Firestore,
+  merchantId: string,
   onData: (layouts: Array<{ id: string; data: TableLayoutDocument }>) => void,
   onError?: (e: Error) => void
 ): Unsubscribe {
   return onSnapshot(
-    collection(db, TABLE_LAYOUTS_COLLECTION),
+    query(collection(db, TABLE_LAYOUTS_COLLECTION), where("merchantId", "==", merchantId)),
     (snap) => {
       const list = snap.docs
         .map((d) => ({
@@ -226,12 +227,14 @@ function parseTableDoc(raw: DocumentData): TableLayoutTableDocument {
 
 export async function createTableLayout(
   db: Firestore,
+  merchantId: string,
   partial: Partial<TableLayoutDocument> & Pick<TableLayoutDocument, "name">
 ): Promise<string> {
   const ref = doc(collection(db, TABLE_LAYOUTS_COLLECTION));
-  const snap = await getDocs(collection(db, TABLE_LAYOUTS_COLLECTION));
+  const snap = await getDocs(query(collection(db, TABLE_LAYOUTS_COLLECTION), where("merchantId", "==", merchantId)));
   const sortOrder = snap.size;
   await setDoc(ref, {
+    merchantId,
     name: partial.name,
     isDefault: partial.isDefault ?? snap.empty,
     canvasWidth: partial.canvasWidth ?? DEFAULT_CANVAS.width,
@@ -261,7 +264,7 @@ export async function createTableLayout(
     updatedAt: serverTimestamp(),
   });
   if (snap.empty || partial.isDefault) {
-    await setDefaultTableLayout(db, ref.id);
+    await setDefaultTableLayout(db, merchantId, ref.id);
   }
   return ref.id;
 }
@@ -304,8 +307,8 @@ export async function updateTableLayoutMeta(
 }
 
 /** Ensures exactly one default layout (best-effort batch). */
-export async function setDefaultTableLayout(db: Firestore, layoutId: string): Promise<void> {
-  const snap = await getDocs(collection(db, TABLE_LAYOUTS_COLLECTION));
+export async function setDefaultTableLayout(db: Firestore, merchantId: string, layoutId: string): Promise<void> {
+  const snap = await getDocs(query(collection(db, TABLE_LAYOUTS_COLLECTION), where("merchantId", "==", merchantId)));
   const batch = writeBatch(db);
   snap.docs.forEach((d) => {
     batch.update(d.ref, {
@@ -316,7 +319,7 @@ export async function setDefaultTableLayout(db: Firestore, layoutId: string): Pr
   await batch.commit();
 }
 
-export async function deleteTableLayout(db: Firestore, layoutId: string): Promise<void> {
+export async function deleteTableLayout(db: Firestore, merchantId: string, layoutId: string): Promise<void> {
   const tablesSnap = await getDocs(tablesCollectionRef(db, layoutId));
   let batch = writeBatch(db);
   let n = 0;
@@ -331,7 +334,7 @@ export async function deleteTableLayout(db: Firestore, layoutId: string): Promis
   }
   if (n > 0) await batch.commit();
   await deleteDoc(layoutDocRef(db, layoutId));
-  const remaining = await getDocs(collection(db, TABLE_LAYOUTS_COLLECTION));
+  const remaining = await getDocs(query(collection(db, TABLE_LAYOUTS_COLLECTION), where("merchantId", "==", merchantId)));
   if (!remaining.empty && !remaining.docs.some((d) => d.data().isDefault === true)) {
     await updateDoc(remaining.docs[0].ref, {
       isDefault: true,
@@ -401,12 +404,13 @@ export async function batchUpdateLayoutTables(
 /** Copy legacy `Tables` docs into a new layout (one-time migration). */
 export async function importLegacyTablesLayout(
   db: Firestore,
+  merchantId: string,
   layoutName: string
 ): Promise<string> {
   const legacy = await getDocs(
-    query(collection(db, "Tables"), where("active", "==", true), limit(500))
+    query(collection(db, "Tables"), where("merchantId", "==", merchantId), where("active", "==", true), limit(500))
   );
-  const layoutId = await createTableLayout(db, { name: layoutName, isDefault: true });
+  const layoutId = await createTableLayout(db, merchantId, { name: layoutName, isDefault: true });
   let order = 0;
   for (const d of legacy.docs) {
     const raw = d.data();
@@ -438,7 +442,7 @@ export function sanitizeSectionDocumentId(displayName: string): string {
 }
 
 /** Doc id = sanitized display name (matches Android when name has no `/`). */
-export async function upsertFirestoreSection(db: Firestore, displayName: string): Promise<void> {
+export async function upsertFirestoreSection(db: Firestore, merchantId: string, displayName: string): Promise<void> {
   const name = displayName.trim();
   if (!name) throw new Error("Section name is required");
   if (name === "." || name === "..") throw new Error("Invalid section name");
@@ -447,7 +451,7 @@ export async function upsertFirestoreSection(db: Firestore, displayName: string)
   if (!docId) throw new Error("Section name is required");
   await setDoc(
     doc(db, SECTIONS_COLLECTION, docId),
-    { name, updatedAt: serverTimestamp() },
+    { merchantId, name, updatedAt: serverTimestamp() },
     { merge: true }
   );
 }

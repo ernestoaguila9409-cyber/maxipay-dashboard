@@ -11,6 +11,7 @@ import {
 import { db } from "@/firebase/firebaseConfig";
 import Header from "@/components/Header";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import {
   usePrintersStatus,
   type PrinterSort,
@@ -537,8 +538,9 @@ const EMPTY_FORM: PrinterFormData = { name: "", ipAddress: "", port: "", labels:
 
 export default function PrintersPage() {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const { printers, loading, error, filter, setFilter, sort, setSort } =
-    usePrintersStatus(!!user);
+    usePrintersStatus(!!user, merchantId);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -582,10 +584,11 @@ export default function PrintersPage() {
           status: "UNKNOWN",
           lastSeen: null,
           createdAt: serverTimestamp(),
+          merchantId,
         });
       }
     },
-    [editId]
+    [editId, merchantId]
   );
 
   const handleTest = useCallback(async (printerId: string) => {

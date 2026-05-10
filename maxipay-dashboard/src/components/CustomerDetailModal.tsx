@@ -18,6 +18,7 @@ import {
   type CustomerReservationRow,
 } from "@/lib/customerReservationUtils";
 import { X, Loader2, ExternalLink } from "lucide-react";
+import { useMerchantId } from "@/hooks/useMerchantId";
 
 const RESERVATIONS_COLLECTION = "Reservations";
 
@@ -108,6 +109,7 @@ export default function CustomerDetailModal({
   customerId,
   onClose,
 }: CustomerDetailModalProps) {
+  const merchantId = useMerchantId();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profileName, setProfileName] = useState("");
@@ -143,6 +145,7 @@ export default function CustomerDetailModal({
 
       const ordersQ = query(
         collection(db, "Orders"),
+        where("merchantId", "==", merchantId),
         where("customerId", "==", cid),
         orderBy("createdAt", "desc")
       );
@@ -188,6 +191,7 @@ export default function CustomerDetailModal({
 
       const resQ = query(
         collection(db, RESERVATIONS_COLLECTION),
+        where("merchantId", "==", merchantId),
         where("customerId", "==", cid)
       );
       const resSnap = await getDocs(resQ);
@@ -209,12 +213,12 @@ export default function CustomerDetailModal({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [merchantId]);
 
   useEffect(() => {
-    if (!customerId) return;
+    if (!customerId || !merchantId) return;
     void load(customerId);
-  }, [customerId, load]);
+  }, [customerId, merchantId, load]);
 
   if (!customerId) return null;
 

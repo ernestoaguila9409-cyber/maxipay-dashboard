@@ -8,10 +8,13 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
+  query,
+  where,
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import {
   Plus,
@@ -35,6 +38,7 @@ interface TaxEntry {
 
 export default function TaxesPage() {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [taxes, setTaxes] = useState<TaxEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -49,26 +53,29 @@ export default function TaxesPage() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
-    const unsub = onSnapshot(collection(db, "Taxes"), (snap) => {
-      const list: TaxEntry[] = [];
-      snap.forEach((d) => {
-        const data = d.data();
-        list.push({
-          id: d.id,
-          name: data.name ?? "",
-          type: data.type ?? "PERCENTAGE",
-          amount: data.amount ?? 0,
-          enabled: data.enabled ?? true,
-          enabledOnline: data.enabledOnline === true,
+    if (!user || !merchantId) return;
+    const unsub = onSnapshot(
+      query(collection(db, "Taxes"), where("merchantId", "==", merchantId)),
+      (snap) => {
+        const list: TaxEntry[] = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          list.push({
+            id: d.id,
+            name: data.name ?? "",
+            type: data.type ?? "PERCENTAGE",
+            amount: data.amount ?? 0,
+            enabled: data.enabled ?? true,
+            enabledOnline: data.enabledOnline === true,
+          });
         });
-      });
-      list.sort((a, b) => a.name.localeCompare(b.name));
-      setTaxes(list);
-      setLoading(false);
-    });
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        setTaxes(list);
+        setLoading(false);
+      }
+    );
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   const openAdd = () => {
     setEditing(null);
@@ -102,6 +109,7 @@ export default function TaxesPage() {
         });
       } else {
         await addDoc(collection(db, "Taxes"), {
+          merchantId,
           name,
           type: taxType,
           amount,

@@ -5,6 +5,8 @@ import {
   collection,
   doc,
   onSnapshot,
+  query,
+  where,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
@@ -76,7 +78,8 @@ function OnlineMenuItemThumb({ url, dimmed }: { url?: string; dimmed?: boolean }
 }
 
 export default function OnlineMenuPage() {
-  const { user } = useAuth();
+  const { user, claims } = useAuth();
+  const merchantId = claims?.merchantId ?? "";
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [items, setItems] = useState<ItemRow[]>([]);
   const [oo, setOo] = useState<OnlineOrderingSettings>(DEFAULT_ONLINE_ORDERING_SETTINGS);
@@ -90,10 +93,10 @@ export default function OnlineMenuPage() {
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) return;
     const unsubs = [
       onSnapshot(
-        collection(db, "Categories"),
+        query(collection(db, "Categories"), where("merchantId", "==", merchantId)),
         (snap) => {
           const rows: CategoryRow[] = [];
           snap.forEach((d) => {
@@ -109,7 +112,7 @@ export default function OnlineMenuPage() {
         },
         () => setCategories([])
       ),
-      onSnapshot(collection(db, "MenuItems"), (snap) => {
+      onSnapshot(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)), (snap) => {
         const rows: ItemRow[] = [];
         snap.forEach((d) => rows.push(parseItem(d.id, d.data() as Record<string, unknown>)));
         rows.sort((a, b) => a.name.localeCompare(b.name));
@@ -132,7 +135,7 @@ export default function OnlineMenuPage() {
       ),
     ];
     return () => unsubs.forEach((u) => u());
-  }, [user]);
+  }, [user, merchantId]);
 
   const initDraftFromSettings = useCallback(() => {
     setSelectedCat(new Set(oo.onlineMenuCategoryIds));
@@ -231,6 +234,7 @@ export default function OnlineMenuPage() {
       await setDoc(
         doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
         {
+          merchantId,
           onlineMenuCurationEnabled: true,
           onlineMenuCategoryIds: categoryIds,
           onlineMenuItemIds: itemIds,
@@ -259,6 +263,7 @@ export default function OnlineMenuPage() {
       await setDoc(
         doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
         {
+          merchantId,
           onlineMenuCurationEnabled: false,
           onlineMenuCategoryIds: [],
           onlineMenuItemIds: [],

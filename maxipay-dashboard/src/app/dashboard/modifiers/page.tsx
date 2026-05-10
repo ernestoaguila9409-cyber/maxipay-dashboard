@@ -52,7 +52,8 @@ interface ModifierGroup {
 }
 
 export default function ModifiersPage() {
-  const { user } = useAuth();
+  const { user, claims } = useAuth();
+  const merchantId = claims?.merchantId ?? "";
   const [groups, setGroups] = useState<ModifierGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<ModifierGroup | null>(null);
   const selectedGroupIdRef = useRef<string | null>(null);
@@ -101,8 +102,8 @@ export default function ModifiersPage() {
   }, [selectedGroup]);
 
   useEffect(() => {
-    if (!user) return;
-    const unsub = onSnapshot(collection(db, "ModifierGroups"), (snap) => {
+    if (!user || !merchantId) return;
+    const unsub = onSnapshot(query(collection(db, "ModifierGroups"), where("merchantId", "==", merchantId)), (snap) => {
       const list: ModifierGroup[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -144,7 +145,7 @@ export default function ModifiersPage() {
       }
     });
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   const selectedOptions = selectedGroup?.options ?? [];
   const filteredOptions = selectedOptions.filter(
@@ -232,6 +233,7 @@ export default function ModifiersPage() {
         });
       } else {
         await addDoc(collection(db, "ModifierGroups"), {
+          merchantId,
           name,
           required: groupRequired,
           minSelection,
@@ -515,6 +517,7 @@ export default function ModifiersPage() {
 
         const newGroupRef = doc(collection(db, "ModifierGroups"));
         batch.set(newGroupRef, {
+          merchantId,
           name: newGroupName,
           required: true,
           minSelection: 1,

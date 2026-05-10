@@ -151,13 +151,13 @@ export function buildRevenueByWeekPoints(
   }));
 }
 
-async function loadCategoryAndMenuMaps(): Promise<{
+async function loadCategoryAndMenuMaps(merchantId: string): Promise<{
   categoryNameById: Map<string, string>;
   itemMetaById: Map<string, { categoryId: string; name: string }>;
 }> {
   const [catSnap, itemSnap] = await Promise.all([
-    getDocs(collection(db, "Categories")),
-    getDocs(collection(db, "MenuItems")),
+    getDocs(query(collection(db, "Categories"), where("merchantId", "==", merchantId))),
+    getDocs(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId))),
   ]);
   const categoryNameById = new Map<string, string>();
   catSnap.forEach((d) => {
@@ -174,11 +174,12 @@ async function loadCategoryAndMenuMaps(): Promise<{
   return { categoryNameById, itemMetaById };
 }
 
-async function fetchRefundCount(start: Date, endExclusive: Date): Promise<number> {
+async function fetchRefundCount(merchantId: string, start: Date, endExclusive: Date): Promise<number> {
   try {
     const snap = await getDocs(
       query(
         collection(db, "Transactions"),
+        where("merchantId", "==", merchantId),
         where("createdAt", ">=", Timestamp.fromDate(start)),
         where("createdAt", "<", Timestamp.fromDate(endExclusive))
       )
@@ -289,13 +290,14 @@ async function aggregateItemRows(
 }
 
 export async function loadSalesReportData(
+  merchantId: string,
   start: Date,
   endExclusive: Date
 ): Promise<SalesReportPayload> {
   const [summary, categoryMaps, refundCount] = await Promise.all([
-    getDailySalesSummary(start, endExclusive),
-    loadCategoryAndMenuMaps(),
-    fetchRefundCount(start, endExclusive),
+    getDailySalesSummary(merchantId, start, endExclusive),
+    loadCategoryAndMenuMaps(merchantId),
+    fetchRefundCount(merchantId, start, endExclusive),
   ]);
 
   let ordersSnap: QuerySnapshot<DocumentData>;
@@ -303,6 +305,7 @@ export async function loadSalesReportData(
     ordersSnap = await getDocs(
       query(
         collection(db, "Orders"),
+        where("merchantId", "==", merchantId),
         where("createdAt", ">=", Timestamp.fromDate(start)),
         where("createdAt", "<", Timestamp.fromDate(endExclusive)),
         orderBy("createdAt", "desc"),
@@ -311,7 +314,7 @@ export async function loadSalesReportData(
     );
   } catch {
     ordersSnap = await getDocs(
-      query(collection(db, "Orders"), orderBy("createdAt", "desc"), limit(800))
+      query(collection(db, "Orders"), where("merchantId", "==", merchantId), orderBy("createdAt", "desc"), limit(800))
     );
   }
 

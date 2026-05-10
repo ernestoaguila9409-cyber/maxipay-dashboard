@@ -1,4 +1,4 @@
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 
 // ─── Types ──────────────────────────────────────────────────────────────
@@ -97,8 +97,8 @@ export function similarityScore(a: string, b: string): number {
 
 // ─── Firestore loader ───────────────────────────────────────────────────
 
-export async function fetchExistingMenuItems(): Promise<ExistingMenuItem[]> {
-  const snap = await getDocs(collection(db, "MenuItems"));
+export async function fetchExistingMenuItems(merchantId: string): Promise<ExistingMenuItem[]> {
+  const snap = await getDocs(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)));
   const items: ExistingMenuItem[] = [];
 
   for (const d of snap.docs) {

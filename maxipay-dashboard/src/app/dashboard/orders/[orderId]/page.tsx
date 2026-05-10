@@ -295,7 +295,8 @@ export default function OrderDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const orderId = typeof params.orderId === "string" ? params.orderId : "";
-  const { user } = useAuth();
+  const { user, claims } = useAuth();
+  const merchantId = claims.merchantId ?? "";
   const { capabilities: termCaps } = useActiveTerminalCapabilities();
 
   const fromSalesActivity =
@@ -395,7 +396,7 @@ export default function OrderDetailPage() {
   }, [voidCmdId]);
 
   useEffect(() => {
-    if (!user || !orderId) {
+    if (!user || !orderId || !merchantId) {
       setLoading(false);
       return;
     }
@@ -464,6 +465,7 @@ export default function OrderDetailPage() {
             try {
               const refundQ = query(
                 collection(db, "Transactions"),
+                where("merchantId", "==", merchantId),
                 where("type", "==", "REFUND"),
                 where("originalReferenceId", "==", saleId)
               );
@@ -564,7 +566,7 @@ export default function OrderDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, orderId, orderRefreshNonce]);
+  }, [user, merchantId, orderId, orderRefreshNonce]);
 
   if (!user) {
     return (

@@ -8,12 +8,15 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
+  query,
+  where,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
 import { FirebaseError } from "firebase/app";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import {
   KdsPreview,
@@ -178,6 +181,7 @@ function generatePairingCode(): string {
 
 export default function KdsSettingsPage() {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const router = useRouter();
   const [devices, setDevices] = useState<KdsDevice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -223,9 +227,12 @@ export default function KdsSettingsPage() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) return;
     const unsub = onSnapshot(
-      collection(db, KDS_DEVICES_COLLECTION),
+      query(
+        collection(db, KDS_DEVICES_COLLECTION),
+        where("merchantId", "==", merchantId),
+      ),
       (snap) => {
         const list: KdsDevice[] = [];
         snap.forEach((d) => {
@@ -247,7 +254,7 @@ export default function KdsSettingsPage() {
       }
     );
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   useEffect(() => {
     if (!user) {
@@ -379,6 +386,7 @@ export default function KdsSettingsPage() {
           assignedCategoryIds: [],
           assignedItemIds: [],
           createdAt: serverTimestamp(),
+          merchantId,
         });
         setModalOpen(false);
         setPairingCreated({ code: pairingCode, deviceName: trimmed });
@@ -429,6 +437,7 @@ export default function KdsSettingsPage() {
             ticketYellowAfterMinutes: next.ticketYellowAfterMinutes,
             ticketRedAfterMinutes: next.ticketRedAfterMinutes,
             updatedAt: serverTimestamp(),
+            merchantId,
           },
           { merge: true }
         );
@@ -438,7 +447,7 @@ export default function KdsSettingsPage() {
         setSavingDisplay(false);
       }
     },
-    [user]
+    [user, merchantId]
   );
 
   const updateDisplay = (partial: Partial<KdsDisplaySettings>) => {

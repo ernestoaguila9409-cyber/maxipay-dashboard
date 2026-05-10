@@ -575,7 +575,8 @@ function refundSubcardLines(refundDocs: TxDocRow[]): string {
 }
 
 export default function SalesActivityClient() {
-  const { user } = useAuth();
+  const { user, claims } = useAuth();
+  const merchantId = claims.merchantId ?? "";
   const { capabilities: termCaps } = useActiveTerminalCapabilities();
   const [tab, setTab] = useState<TabId>("orders");
   const [datePreset, setDatePreset] = useState<DatePreset>("today");
@@ -837,8 +838,8 @@ export default function SalesActivityClient() {
   const qLower = search.trim().toLowerCase();
 
   useEffect(() => {
-    if (!db) return;
-    getDocs(query(collection(db, "Employees"), limit(400)))
+    if (!db || !merchantId) return;
+    getDocs(query(collection(db, "Employees"), where("merchantId", "==", merchantId), limit(400)))
       .then((snap) => {
         const names: string[] = [];
         snap.forEach((d) => {
@@ -849,7 +850,7 @@ export default function SalesActivityClient() {
         setEmployeeNames(names);
       })
       .catch(() => setEmployeeNames([]));
-  }, [db]);
+  }, [db, merchantId]);
 
   useEffect(() => {
     if (timeScope !== "batch") return;
@@ -859,10 +860,10 @@ export default function SalesActivityClient() {
   }, [timeScope, batches, batchId]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !db) return;
+    if (typeof window === "undefined" || !db || !merchantId) return;
     const unsubs: Array<() => void> = [];
 
-    const bq = query(collection(db, "Batches"), orderBy("createdAt", "desc"), limit(100));
+    const bq = query(collection(db, "Batches"), where("merchantId", "==", merchantId), orderBy("createdAt", "desc"), limit(100));
     unsubs.push(
       onSnapshot(
         bq,
@@ -891,11 +892,13 @@ export default function SalesActivityClient() {
     const ordersQ = queryBatchId
       ? query(
           collection(db, "Orders"),
+          where("merchantId", "==", merchantId),
           where("batchId", "==", queryBatchId),
           limit(400)
         )
       : query(
           collection(db, "Orders"),
+          where("merchantId", "==", merchantId),
           where("createdAt", ">=", tsStart),
           where("createdAt", "<", tsEnd),
           orderBy("createdAt", "desc"),
@@ -905,11 +908,13 @@ export default function SalesActivityClient() {
     const txQ = queryBatchId
       ? query(
           collection(db, "Transactions"),
+          where("merchantId", "==", merchantId),
           where("batchId", "==", queryBatchId),
           limit(900)
         )
       : query(
           collection(db, "Transactions"),
+          where("merchantId", "==", merchantId),
           where("createdAt", ">=", tsStart),
           where("createdAt", "<", tsEnd),
           orderBy("createdAt", "desc"),
@@ -949,6 +954,7 @@ export default function SalesActivityClient() {
       if (!queryBatchId) {
         const voidedOrdersQ = query(
           collection(db, "Orders"),
+          where("merchantId", "==", merchantId),
           where("status", "==", "VOIDED"),
           where("voidedAt", ">=", tsStart),
           where("voidedAt", "<", tsEnd),
@@ -1002,6 +1008,7 @@ export default function SalesActivityClient() {
       if (!queryBatchId) {
         const voidedTxQ = query(
           collection(db, "Transactions"),
+          where("merchantId", "==", merchantId),
           where("voided", "==", true),
           where("voidedAt", ">=", tsStart),
           where("voidedAt", "<", tsEnd),
@@ -1036,11 +1043,13 @@ export default function SalesActivityClient() {
       const cashQ = queryBatchId
         ? query(
             collection(db, "cashLogs"),
+            where("merchantId", "==", merchantId),
             where("batchId", "==", queryBatchId),
             limit(400)
           )
         : query(
             collection(db, "cashLogs"),
+            where("merchantId", "==", merchantId),
             where("createdAt", ">=", tsStart),
             where("createdAt", "<", tsEnd),
             orderBy("createdAt", "desc"),
@@ -1063,7 +1072,7 @@ export default function SalesActivityClient() {
     }
 
     return () => unsubs.forEach((u) => u());
-  }, [tsStart, tsEnd, queryBatchId]);
+  }, [tsStart, tsEnd, queryBatchId, merchantId]);
 
   const orderIdsMatchingSearch = useMemo(() => {
     if (!qLower) return null as Set<string> | null;
@@ -1370,6 +1379,7 @@ export default function SalesActivityClient() {
     setCashSaving(true);
     try {
       await addDoc(collection(db, "cashLogs"), {
+        merchantId,
         type: cashModal,
         amountInCents: Math.round(v * 100),
         reason: cashReason.trim(),
@@ -2100,6 +2110,7 @@ export default function SalesActivityClient() {
                         setRefundSubmitErr(null);
                         try {
                           const ref = await addDoc(collection(db, REMOTE_PAYMENT_COMMANDS), {
+                            merchantId,
                             type: "refundTransaction",
                             transactionId: txModal.id,
                             orderId: oid,

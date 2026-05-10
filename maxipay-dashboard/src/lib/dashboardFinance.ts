@@ -228,6 +228,7 @@ export function buildDailySalesPoints(
  * Matches Android ReportEngine-style payment types (Cash, Credit, Debit, …).
  */
 export async function aggregatePaymentBreakdownFromTransactionIds(
+  merchantId: string,
   transactionIds: string[]
 ): Promise<PaymentBreakdownTotals> {
   const result: PaymentBreakdownTotals = { card: 0, cash: 0, other: 0 };

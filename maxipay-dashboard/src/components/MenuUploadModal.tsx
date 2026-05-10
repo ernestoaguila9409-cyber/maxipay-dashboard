@@ -16,6 +16,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import {
   parseCloverExcel,
   importMenuToFirestore,
@@ -217,6 +218,7 @@ export default function MenuUploadModal({
   initialTab = "excel",
 }: Props) {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const fileRef = useRef<HTMLInputElement>(null);
   const picInputRef = useRef<HTMLInputElement>(null);
 
@@ -334,7 +336,7 @@ export default function MenuUploadModal({
 
     setExcelStage("importing");
     try {
-      const res = await importMenuToFirestore(parsed, setProgress);
+      const res = await importMenuToFirestore(merchantId, parsed, setProgress);
       setResult(res);
       setExcelStage("done");
       onImportComplete();
@@ -374,7 +376,7 @@ export default function MenuUploadModal({
   const runDuplicateCheck = async (rows: ScannedMenuCategoryRow[]) => {
     setPictureStage("checking-duplicates");
     try {
-      const existing = await fetchExistingMenuItems();
+      const existing = await fetchExistingMenuItems(merchantId);
       const flattened = flattenScannedCategories(rows);
       const result = detectDuplicates(flattened, existing);
       setDupResult(result);
@@ -644,7 +646,7 @@ export default function MenuUploadModal({
     setPictureStage("checking-duplicates");
     setPicError("");
     try {
-      const existing = await fetchExistingMenuItems();
+      const existing = await fetchExistingMenuItems(merchantId);
       const flattened = flattenScannedCategories(cleaned);
       const result = detectDuplicates(flattened, existing);
       setDupResult(result);
@@ -673,7 +675,7 @@ export default function MenuUploadModal({
     setPictureStage("importing");
     setPicError("");
     try {
-      const res = await importScannedMenuToFirestore(rows, setPicProgress);
+      const res = await importScannedMenuToFirestore(merchantId, rows, setPicProgress);
       setPicResult(res);
       setPictureStage("done");
       onImportComplete();

@@ -422,7 +422,8 @@ async function purgeCategoryFromFirestore(categoryId: string): Promise<void> {
 }
 
 export default function MenuPage() {
-  const { user } = useAuth();
+  const { user, claims } = useAuth();
+  const merchantId = claims?.merchantId ?? "";
   const [categories, setCategories] = useState<Category[]>([]);
   const [items, setItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -564,7 +565,7 @@ export default function MenuPage() {
   const rebuildRef = useRef<() => void>(() => {});
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) return;
     console.log("[Menu] useEffect fired — subscribing to Firestore. subscriptionKey:", subscriptionKey);
     setLoading(true);
     bothReady.current = { cats: false, items: false };
@@ -611,7 +612,7 @@ export default function MenuPage() {
     console.log("[Menu] Subscribing to Firestore collections. User UID:", user.uid);
 
     const unsubCats = onSnapshot(
-      collection(db, "Categories"),
+      query(collection(db, "Categories"), where("merchantId", "==", merchantId)),
       (snap) => {
         console.log("[Menu] Categories snapshot → docs:", snap.size);
         catSnap.current.clear();
@@ -640,7 +641,7 @@ export default function MenuPage() {
     );
 
     const unsubSchedules = onSnapshot(
-      collection(db, "menuSchedules"),
+      query(collection(db, "menuSchedules"), where("merchantId", "==", merchantId)),
       (snap) => {
         console.log("[Menu] menuSchedules snapshot → docs:", snap.size);
         const list: Schedule[] = [];
@@ -655,7 +656,7 @@ export default function MenuPage() {
     );
 
     const unsubItems = onSnapshot(
-      collection(db, "MenuItems"),
+      query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)),
       (snap) => {
         console.log("[Menu] MenuItems snapshot → docs:", snap.size);
         const list: MenuItemSnapRow[] = [];
@@ -766,7 +767,7 @@ export default function MenuPage() {
     );
 
     const unsubModGroups = onSnapshot(
-      collection(db, "ModifierGroups"),
+      query(collection(db, "ModifierGroups"), where("merchantId", "==", merchantId)),
       (snap) => {
         console.log("[Menu] ModifierGroups snapshot → docs:", snap.size);
         const list: ModifierGroup[] = [];
@@ -798,7 +799,7 @@ export default function MenuPage() {
     );
 
     const unsubTaxes = onSnapshot(
-      collection(db, "Taxes"),
+      query(collection(db, "Taxes"), where("merchantId", "==", merchantId)),
       (snap) => {
         console.log("[Menu] Taxes snapshot → docs:", snap.size);
         const list: TaxEntry[] = [];
@@ -822,7 +823,7 @@ export default function MenuPage() {
     );
 
     const unsubMenuEntities = onSnapshot(
-      collection(db, "menus"),
+      query(collection(db, "menus"), where("merchantId", "==", merchantId)),
       (snap) => {
         console.log("[Menu] menus snapshot → docs:", snap.size);
         const list: MenuEntity[] = [];
@@ -844,7 +845,7 @@ export default function MenuPage() {
     );
 
     const unsubSubcategories = onSnapshot(
-      query(collection(db, "subcategories"), orderBy("order", "asc")),
+      query(collection(db, "subcategories"), where("merchantId", "==", merchantId), orderBy("order", "asc")),
       (snap) => {
         const list: SubcategoryEntry[] = [];
         snap.forEach((d) => {
@@ -871,7 +872,7 @@ export default function MenuPage() {
     );
 
     const unsubPrintersForLabels = onSnapshot(
-      collection(db, "Printers"),
+      query(collection(db, "Printers"), where("merchantId", "==", merchantId)),
       (snap) => {
         const rows: Record<string, unknown>[] = [];
         snap.forEach((d) => rows.push(d.data() as Record<string, unknown>));
@@ -882,7 +883,7 @@ export default function MenuPage() {
     );
 
     const unsubKdsPicker = onSnapshot(
-      collection(db, KDS_DEVICES_COLLECTION),
+      query(collection(db, KDS_DEVICES_COLLECTION), where("merchantId", "==", merchantId)),
       (snap) => {
         const rows: KdsDevicePickerRow[] = [];
         snap.forEach((d) => {
@@ -911,7 +912,7 @@ export default function MenuPage() {
       unsubKdsPicker();
       bothReady.current = { cats: false, items: false };
     };
-  }, [user, subscriptionKey]);
+  }, [user, merchantId, subscriptionKey]);
 
   useEffect(() => {
     allSubcategoriesRef.current = allSubcategories;
@@ -1358,6 +1359,7 @@ export default function MenuPage() {
         const oldSubs = allSubcategories.filter((s) => s.categoryId === sourceCatId);
 
         const newSubRef = await addDoc(collection(db, "subcategories"), {
+          merchantId,
           name: sourceCat.name,
           categoryId: transferCategoryId,
           order: orderOffset,
@@ -1414,6 +1416,7 @@ export default function MenuPage() {
 
         const catName = pickUniqueCategoryName(sub.name);
         const newCatRef = await addDoc(collection(db, "Categories"), {
+          merchantId,
           name: catName,
           availableOrderTypes: availTypes,
           scheduleIds: promoteScheduleFields.scheduleIds,
@@ -1506,7 +1509,7 @@ export default function MenuPage() {
     try {
       await setDoc(
         doc(db, "Settings", "kitchenRoutingLabels"),
-        { labels: arrayUnion(t) },
+        { merchantId, labels: arrayUnion(t) },
         { merge: true }
       );
     } catch (e) {
@@ -1832,6 +1835,7 @@ export default function MenuPage() {
     setAddCategorySaving(true);
     try {
       await addDoc(collection(db, "Categories"), {
+        merchantId,
         name,
         availableOrderTypes,
         scheduleIds,
@@ -1877,6 +1881,7 @@ export default function MenuPage() {
       } else {
         const nextOrder = allSubcategories.filter((s) => s.categoryId === subCategoryId).length;
         const ref = await addDoc(collection(db, "subcategories"), {
+          merchantId,
           name,
           categoryId: subCategoryId,
           order: nextOrder,
@@ -2013,6 +2018,7 @@ export default function MenuPage() {
     setAddSaving(true);
     try {
       const data: Record<string, unknown> = {
+        merchantId,
         name,
         prices,
         price,

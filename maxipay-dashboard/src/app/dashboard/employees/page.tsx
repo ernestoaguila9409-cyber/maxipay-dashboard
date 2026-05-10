@@ -15,6 +15,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import {
   UserPlus,
@@ -137,6 +138,7 @@ const ROLES = ["EMPLOYEE", "ADMINISTRATOR"] as const;
 
 export default function EmployeesPage() {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -168,10 +170,10 @@ export default function EmployeesPage() {
   }, [openMenuId]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) return;
 
     const unsub = onSnapshot(
-      collection(db, "Employees"),
+      query(collection(db, "Employees"), where("merchantId", "==", merchantId)),
       (snap) => {
         const list: Employee[] = [];
         snap.forEach((d) => {
@@ -196,7 +198,7 @@ export default function EmployeesPage() {
     );
 
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   const sortedEmployees = useMemo(() => {
     const list = [...employees];
@@ -260,7 +262,7 @@ export default function EmployeesPage() {
       setPinError("PIN must be exactly 4 digits");
       return false;
     }
-    const q = query(collection(db, "Employees"), where("pin", "==", pin));
+    const q = query(collection(db, "Employees"), where("merchantId", "==", merchantId), where("pin", "==", pin));
     const snap = await getDocs(q);
     const conflict = snap.docs.some((d) => d.id !== excludeId);
     if (conflict) {
@@ -282,6 +284,7 @@ export default function EmployeesPage() {
     }
     const q = query(
       collection(db, "Employees"),
+      where("merchantId", "==", merchantId),
       where("email", "==", normalizedEmail)
     );
     const snap = await getDocs(q);
@@ -326,6 +329,7 @@ export default function EmployeesPage() {
         });
       } else {
         await addDoc(collection(db, "Employees"), {
+          merchantId,
           name: trimName,
           pin: trimPin,
           role: formRole,

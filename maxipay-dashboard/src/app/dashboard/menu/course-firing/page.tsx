@@ -5,6 +5,8 @@ import {
   collection,
   doc,
   onSnapshot,
+  query,
+  where,
   setDoc,
   writeBatch,
 } from "firebase/firestore";
@@ -94,7 +96,8 @@ function isExclusiveOwner(owner: string): boolean {
 type PickerKind = "category" | "subcategory" | "item";
 
 export default function CourseFiringPage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, claims, loading: authLoading } = useAuth();
+  const merchantId = claims?.merchantId ?? "";
   const [settings, setSettings] = useState<CourseFiringSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -110,7 +113,7 @@ export default function CourseFiringPage() {
   const [pickerFilter, setPickerFilter] = useState("");
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) return;
     const ref = doc(db, COURSE_FIRING_COLLECTION_PATH, COURSE_FIRING_DOC);
     const unsub = onSnapshot(ref, (snap) => {
       const data = snap.exists() ? (snap.data() as Record<string, unknown>) : undefined;
@@ -119,11 +122,11 @@ export default function CourseFiringPage() {
       setDirty(false);
     });
     return unsub;
-  }, [user]);
+  }, [user, merchantId]);
 
   useEffect(() => {
-    if (!user) return;
-    const unsub1 = onSnapshot(collection(db, "Categories"), (snap) => {
+    if (!user || !merchantId) return;
+    const unsub1 = onSnapshot(query(collection(db, "Categories"), where("merchantId", "==", merchantId)), (snap) => {
       const list: CategoryRow[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -132,7 +135,7 @@ export default function CourseFiringPage() {
       list.sort((a, b) => a.name.localeCompare(b.name));
       setCategories(list);
     });
-    const unsub2 = onSnapshot(collection(db, "subcategories"), (snap) => {
+    const unsub2 = onSnapshot(query(collection(db, "subcategories"), where("merchantId", "==", merchantId)), (snap) => {
       const list: SubcategoryRow[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -145,7 +148,7 @@ export default function CourseFiringPage() {
       list.sort((a, b) => a.name.localeCompare(b.name));
       setSubcategories(list);
     });
-    const unsub3 = onSnapshot(collection(db, "MenuItems"), (snap) => {
+    const unsub3 = onSnapshot(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)), (snap) => {
       const list: CourseMenuItem[] = [];
       snap.forEach((d) => {
         const row = parseCourseMenuItem(d.id, d.data() as Record<string, unknown>);
@@ -159,7 +162,7 @@ export default function CourseFiringPage() {
       unsub2();
       unsub3();
     };
-  }, [user]);
+  }, [user, merchantId]);
 
   const catNameById = useMemo(() => new Map(categories.map((c) => [c.id, c.name])), [categories]);
 

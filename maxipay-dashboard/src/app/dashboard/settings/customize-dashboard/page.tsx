@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Header from "@/components/Header";
 import { db } from "@/firebase/firebaseConfig";
 import { doc, setDoc, onSnapshot } from "firebase/firestore";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import {
   DndContext,
   closestCenter,
@@ -627,6 +628,7 @@ function ColorPickerModal({
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 export default function CustomizeDashboardPage() {
+  const merchantId = useMerchantId();
   const [modules, setModules] = useState<DashboardModule[]>([]);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -679,7 +681,7 @@ export default function CustomizeDashboardPage() {
         colorKey: m.colorKey || (m.key === "dine_in" ? "green" : m.key === "to_go" ? "orange" : m.key === "bar" ? "teal" : "purple"),
         position: i,
       }));
-      await setDoc(doc(db, "Settings", "dashboard"), { modules: indexed });
+      await setDoc(doc(db, "Settings", "dashboard"), { modules: indexed, merchantId });
       setHasChanges(false);
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 3000);
@@ -688,7 +690,7 @@ export default function CustomizeDashboardPage() {
       setSaveStatus("error");
       setTimeout(() => setSaveStatus("idle"), 4000);
     }
-  }, [modules, hasChanges]);
+  }, [modules, hasChanges, merchantId]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;

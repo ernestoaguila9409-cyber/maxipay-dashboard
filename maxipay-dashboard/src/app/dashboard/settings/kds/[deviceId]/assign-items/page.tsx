@@ -7,6 +7,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  where,
   updateDoc,
   serverTimestamp,
 } from "firebase/firestore";
@@ -15,6 +16,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import {
   buildScheduleAssignmentSections,
   deriveSelectedItemIdsFromDevice,
@@ -68,6 +70,7 @@ type SectionListFilter =
 
 export default function KdsAssignItemsPage() {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const router = useRouter();
   const params = useParams();
   const deviceId = String(params.deviceId ?? "").trim();
@@ -101,7 +104,7 @@ export default function KdsAssignItemsPage() {
   >({});
 
   useEffect(() => {
-    if (!user || !deviceId) {
+    if (!user || !deviceId || !merchantId) {
       setLoading(false);
       return;
     }
@@ -128,7 +131,10 @@ export default function KdsAssignItemsPage() {
     );
 
     const unsubSchedules = onSnapshot(
-      collection(db, MENU_SCHEDULES_COLLECTION),
+      query(
+        collection(db, MENU_SCHEDULES_COLLECTION),
+        where("merchantId", "==", merchantId),
+      ),
       (snap) => {
         const list: { id: string; name: string }[] = [];
         snap.forEach((d) => {
@@ -145,7 +151,10 @@ export default function KdsAssignItemsPage() {
     );
 
     const unsubCats = onSnapshot(
-      collection(db, CATEGORIES_COLLECTION),
+      query(
+        collection(db, CATEGORIES_COLLECTION),
+        where("merchantId", "==", merchantId),
+      ),
       (snap) => {
         const list: CategoryRow[] = [];
         snap.forEach((d) => {
@@ -160,7 +169,10 @@ export default function KdsAssignItemsPage() {
     );
 
     const unsubItems = onSnapshot(
-      collection(db, MENU_ITEMS_COLLECTION),
+      query(
+        collection(db, MENU_ITEMS_COLLECTION),
+        where("merchantId", "==", merchantId),
+      ),
       (snap) => {
         const list: MenuItemForKds[] = [];
         snap.forEach((d) => {
@@ -180,7 +192,7 @@ export default function KdsAssignItemsPage() {
     );
 
     const unsubSubcats = onSnapshot(
-      query(collection(db, SUBCATEGORIES_COLLECTION), orderBy("order", "asc")),
+      query(collection(db, SUBCATEGORIES_COLLECTION), where("merchantId", "==", merchantId), orderBy("order", "asc")),
       (snap) => {
         const list: SubcategoryRow[] = [];
         snap.forEach((d) => {
@@ -207,7 +219,7 @@ export default function KdsAssignItemsPage() {
       unsubItems();
       unsubSubcats();
     };
-  }, [user, deviceId]);
+  }, [user, deviceId, merchantId]);
 
   useEffect(() => {
     if (dirty) return;

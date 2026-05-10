@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot, query as firestoreQuery, where } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import CustomerDetailModal from "@/components/CustomerDetailModal";
 import { Contact, Search } from "lucide-react";
@@ -38,16 +39,17 @@ function formatPhone(phone: string): string {
 
 export default function CustomersPage() {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) return;
 
     const unsub = onSnapshot(
-      collection(db, "Customers"),
+      firestoreQuery(collection(db, "Customers"), where("merchantId", "==", merchantId)),
       (snap) => {
         const list: CustomerRow[] = [];
         snap.forEach((d) => {
@@ -85,7 +87,7 @@ export default function CustomersPage() {
     );
 
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

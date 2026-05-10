@@ -9,6 +9,8 @@ import {
   doc,
   getDocs,
   onSnapshot,
+  query,
+  where,
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
@@ -74,7 +76,8 @@ const DAY_OPTIONS = [
 ];
 
 export default function DiscountsPage() {
-  const { user } = useAuth();
+  const { user, claims } = useAuth();
+  const merchantId = claims?.merchantId ?? "";
   const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [loading, setLoading] = useState(true);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -108,8 +111,8 @@ export default function DiscountsPage() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
-    getDocs(collection(db, "MenuItems"))
+    if (!user || !merchantId) return;
+    getDocs(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)))
       .then((snap) => {
         const items: MenuItem[] = [];
         snap.forEach((d) => {
@@ -127,7 +130,7 @@ export default function DiscountsPage() {
       })
       .catch((err) => console.error("Failed to load menu items:", err));
 
-    getDocs(collection(db, "Categories"))
+    getDocs(query(collection(db, "Categories"), where("merchantId", "==", merchantId)))
       .then((snap) => {
         const cats: Category[] = [];
         snap.forEach((d) => {
@@ -138,11 +141,11 @@ export default function DiscountsPage() {
         setCategories(cats);
       })
       .catch((err) => console.error("Failed to load categories:", err));
-  }, [user]);
+  }, [user, merchantId]);
 
   useEffect(() => {
-    if (!user) return;
-    const unsub = onSnapshot(collection(db, "discounts"), (snap) => {
+    if (!user || !merchantId) return;
+    const unsub = onSnapshot(query(collection(db, "discounts"), where("merchantId", "==", merchantId)), (snap) => {
       const list: Discount[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -167,7 +170,7 @@ export default function DiscountsPage() {
       setLoading(false);
     });
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   // ── Discount CRUD ──
 
@@ -233,6 +236,7 @@ export default function DiscountsPage() {
         data.updatedAt = serverTimestamp();
         await updateDoc(doc(db, "discounts", editing.id), data);
       } else {
+        data.merchantId = merchantId;
         data.createdAt = serverTimestamp();
         await addDoc(collection(db, "discounts"), data);
       }

@@ -8,6 +8,8 @@ import {
   updateDoc,
   deleteDoc,
   onSnapshot,
+  query,
+  where,
   writeBatch,
   arrayUnion,
   arrayRemove,
@@ -95,7 +97,8 @@ function formatScheduleDisplay(sched: Schedule): string {
 type Screen = "main" | "scheduleDetail";
 
 export default function MenusPage() {
-  const { user } = useAuth();
+  const { user, claims } = useAuth();
+  const merchantId = claims?.merchantId ?? "";
 
   // ── Data ──
   const [menus, setMenus] = useState<Menu[]>([]);
@@ -157,7 +160,7 @@ export default function MenusPage() {
 
   // ── Firestore listeners ──
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) return;
 
     let readyCount = 0;
     const checkReady = () => {
@@ -165,7 +168,7 @@ export default function MenusPage() {
       if (readyCount >= 4) setLoading(false);
     };
 
-    const unsubMenus = onSnapshot(collection(db, "menus"), (snap) => {
+    const unsubMenus = onSnapshot(query(collection(db, "menus"), where("merchantId", "==", merchantId)), (snap) => {
       const list: Menu[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -181,7 +184,7 @@ export default function MenusPage() {
       checkReady();
     });
 
-    const unsubSchedules = onSnapshot(collection(db, "menuSchedules"), (snap) => {
+    const unsubSchedules = onSnapshot(query(collection(db, "menuSchedules"), where("merchantId", "==", merchantId)), (snap) => {
       const list: Schedule[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -198,7 +201,7 @@ export default function MenusPage() {
       checkReady();
     });
 
-    const unsubItems = onSnapshot(collection(db, "MenuItems"), (snap) => {
+    const unsubItems = onSnapshot(query(collection(db, "MenuItems"), where("merchantId", "==", merchantId)), (snap) => {
       const list: MenuItem[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -233,7 +236,7 @@ export default function MenusPage() {
       checkReady();
     });
 
-    const unsubCats = onSnapshot(collection(db, "Categories"), (snap) => {
+    const unsubCats = onSnapshot(query(collection(db, "Categories"), where("merchantId", "==", merchantId)), (snap) => {
       const list: Category[] = [];
       snap.forEach((d) => {
         const data = d.data();
@@ -250,7 +253,7 @@ export default function MenusPage() {
       unsubItems();
       unsubCats();
     };
-  }, [user]);
+  }, [user, merchantId]);
 
   // ── Derived ──
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c.name])), [categories]);
@@ -373,6 +376,7 @@ export default function MenusPage() {
         });
       } else {
         await addDoc(collection(db, "menus"), {
+          merchantId,
           name,
           isActive: menuIsActive,
           scheduleIds: [],
@@ -453,7 +457,7 @@ export default function MenusPage() {
     setScheduleError("");
     setScheduleSaving(true);
     try {
-      const data = {
+      const data: Record<string, unknown> = {
         name,
         days: selectedDays,
         startTime: scheduleStart,
@@ -462,6 +466,7 @@ export default function MenusPage() {
       if (scheduleEdit) {
         await updateDoc(doc(db, "menuSchedules", scheduleEdit.id), data);
       } else {
+        data.merchantId = merchantId;
         const ref = await addDoc(collection(db, "menuSchedules"), data);
         const newScheduleId = ref.id;
         const menuIdsToAssign = Object.entries(scheduleAssignToMenus)

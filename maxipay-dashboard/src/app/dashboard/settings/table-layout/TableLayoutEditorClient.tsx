@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 import {
   Copy,
   LayoutTemplate,
@@ -18,6 +18,7 @@ import {
 } from "@/components/ReservationTimingCard";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import {
   batchUpdateLayoutTables,
   createTableLayout,
@@ -79,6 +80,7 @@ type SectionRow = { id: string; name: string };
 
 export default function TableLayoutEditorClient() {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const sectionListId = useId();
   const [layouts, setLayouts] = useState<Array<{ id: string; data: TableLayoutDocument }>>([]);
   const [layoutId, setLayoutId] = useState<string | null>(null);
@@ -141,9 +143,10 @@ export default function TableLayoutEditorClient() {
   const selected = tables.find((t) => t.id === selectedId);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) return;
     const unsub = subscribeTableLayouts(
       db,
+      merchantId,
       (list) => {
         setLayouts(list);
         setLayoutId((prev) => {
@@ -155,10 +158,10 @@ export default function TableLayoutEditorClient() {
       (e) => console.error(e)
     );
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   useEffect(() => {
-    if (!user || !layoutId) {
+    if (!user || !merchantId || !layoutId) {
       setTables([]);
       return;
     }
@@ -169,22 +172,25 @@ export default function TableLayoutEditorClient() {
       (e) => console.error(e)
     );
     return () => unsub();
-  }, [user, layoutId]);
+  }, [user, merchantId, layoutId]);
 
   useEffect(() => {
-    if (!user) return;
-    const unsub = onSnapshot(collection(db, SECTIONS_COLLECTION), (snap) => {
-      const rows: SectionRow[] = [];
-      snap.forEach((d) => {
-        const n = String(d.get("name") ?? d.id).trim();
-        if (!n || n.toLowerCase() === "bar") return;
-        rows.push({ id: d.id, name: n });
-      });
-      rows.sort((a, b) => a.name.localeCompare(b.name));
-      setSectionRows(rows);
-    });
+    if (!user || !merchantId) return;
+    const unsub = onSnapshot(
+      query(collection(db, SECTIONS_COLLECTION), where("merchantId", "==", merchantId)),
+      (snap) => {
+        const rows: SectionRow[] = [];
+        snap.forEach((d) => {
+          const n = String(d.get("name") ?? d.id).trim();
+          if (!n || n.toLowerCase() === "bar") return;
+          rows.push({ id: d.id, name: n });
+        });
+        rows.sort((a, b) => a.name.localeCompare(b.name));
+        setSectionRows(rows);
+      }
+    );
     return () => unsub();
-  }, [user]);
+  }, [user, merchantId]);
 
   const canvasW = layout?.canvasWidth ?? DEFAULT_CANVAS.width;
   const canvasH = layout?.canvasHeight ?? DEFAULT_CANVAS.height;
@@ -279,7 +285,7 @@ export default function TableLayoutEditorClient() {
     if (!name?.trim()) return;
     setSaveState("saving");
     try {
-      const id = await createTableLayout(db, { name: name.trim() });
+      const id = await createTableLayout(db, merchantId, { name: name.trim() });
       setLayoutId(id);
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 1200);
@@ -307,7 +313,7 @@ export default function TableLayoutEditorClient() {
     if (!window.confirm(`Delete layout "${layout.name}" and all its tables?`)) return;
     setSaveState("saving");
     try {
-      await deleteTableLayout(db, layoutId);
+      await deleteTableLayout(db, merchantId, layoutId);
       setSelectedId(null);
       setSaveState("idle");
     } catch {
@@ -319,7 +325,7 @@ export default function TableLayoutEditorClient() {
     if (!layoutId) return;
     setSaveState("saving");
     try {
-      await setDefaultTableLayout(db, layoutId);
+      await setDefaultTableLayout(db, merchantId, layoutId);
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 1200);
     } catch {
@@ -331,7 +337,7 @@ export default function TableLayoutEditorClient() {
     if (!window.confirm("Create a new layout from legacy Tables collection?")) return;
     setImporting(true);
     try {
-      const id = await importLegacyTablesLayout(db, "Imported from POS");
+      const id = await importLegacyTablesLayout(db, merchantId, "Imported from POS");
       setLayoutId(id);
     } catch (e) {
       console.error(e);
@@ -354,7 +360,7 @@ export default function TableLayoutEditorClient() {
     }
     setSaveState("saving");
     try {
-      await upsertFirestoreSection(db, name);
+      await upsertFirestoreSection(db, merchantId, name);
       setNewSectionName("");
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 1200);

@@ -13,6 +13,7 @@ import {
   type OnlineOrderingSettings,
 } from "@/lib/onlineOrderingShared";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import {
   ShoppingBag,
   ExternalLink,
@@ -31,6 +32,7 @@ import {
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function OnlineOrderingSettingsPage() {
+  const merchantId = useMerchantId();
   const [settings, setSettings] = useState<OnlineOrderingSettings>(DEFAULT_ONLINE_ORDERING_SETTINGS);
   const [businessName, setBusinessName] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -83,6 +85,7 @@ export default function OnlineOrderingSettingsPage() {
       const payload: Record<string, unknown> = {
         ...flags,
         updatedAt: serverTimestamp(),
+        merchantId,
       };
       if (credentials) {
         payload.iposHppTpn = credentials.tpn;
@@ -117,6 +120,7 @@ export default function OnlineOrderingSettingsPage() {
           iposHppTpn: tpn,
           iposHppAuthToken: authToken,
           updatedAt: serverTimestamp(),
+          merchantId,
         },
         { merge: true }
       );
@@ -135,7 +139,7 @@ export default function OnlineOrderingSettingsPage() {
     try {
       await setDoc(
         doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
-        { onlineOrderingSlug: cleaned, updatedAt: serverTimestamp() },
+        { onlineOrderingSlug: cleaned, updatedAt: serverTimestamp(), merchantId },
         { merge: true }
       );
     } catch (e) {

@@ -7,6 +7,8 @@ import {
   doc,
   getDoc,
   onSnapshot,
+  query,
+  where,
   serverTimestamp,
   setDoc,
   Timestamp,
@@ -14,6 +16,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import {
   POS_DEVICES_COLLECTION,
@@ -85,7 +88,7 @@ function parseDevice(id: string, data: Record<string, unknown>): PosDeviceRow {
   };
 }
 
-async function createDeviceActivationCode(): Promise<{ code: string; expiresAtMs: number }> {
+async function createDeviceActivationCode(merchantId: string): Promise<{ code: string; expiresAtMs: number }> {
   const ttl = DEVICE_ACTIVATION_TTL_MS;
   for (let attempt = 0; attempt < 12; attempt++) {
     const code = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
@@ -98,6 +101,7 @@ async function createDeviceActivationCode(): Promise<{ code: string; expiresAtMs
       createdAt: serverTimestamp(),
       expiresAt: Timestamp.fromMillis(expiresAtMs),
       consumed: false,
+      merchantId,
     });
     return { code, expiresAtMs };
   }
@@ -125,6 +129,7 @@ function formatCountdown(msRemaining: number): string {
 
 export default function PosDevicesSettingsPage() {
   const { user, loading: authLoading } = useAuth();
+  const merchantId = useMerchantId();
   const [devices, setDevices] = useState<PosDeviceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -154,13 +159,16 @@ export default function PosDevicesSettingsPage() {
   }, [modalOpen, modalExpiresAtMs]);
 
   useEffect(() => {
-    if (authLoading || !user) {
+    if (authLoading || !user || !merchantId) {
       setLoading(authLoading);
       return;
     }
 
     const unsub = onSnapshot(
-      collection(db, POS_DEVICES_COLLECTION),
+      query(
+        collection(db, POS_DEVICES_COLLECTION),
+        where("merchantId", "==", merchantId),
+      ),
       (snap) => {
         const rows = snap.docs
           .map((d) => parseDevice(d.id, d.data() as Record<string, unknown>))
@@ -182,14 +190,14 @@ export default function PosDevicesSettingsPage() {
     );
 
     return () => unsub();
-  }, [user, authLoading]);
+  }, [user, authLoading, merchantId]);
 
   const handleAddDevice = useCallback(async () => {
     setCreatingCode(true);
     setError(null);
     setCopyDone(false);
     try {
-      const { code, expiresAtMs } = await createDeviceActivationCode();
+      const { code, expiresAtMs } = await createDeviceActivationCode(merchantId);
       setModalCode(code);
       setModalExpiresAtMs(expiresAtMs);
       setModalOpen(true);
@@ -199,7 +207,7 @@ export default function PosDevicesSettingsPage() {
     } finally {
       setCreatingCode(false);
     }
-  }, []);
+  }, [merchantId]);
 
   const copyCode = useCallback(async () => {
     if (!modalCode) return;
