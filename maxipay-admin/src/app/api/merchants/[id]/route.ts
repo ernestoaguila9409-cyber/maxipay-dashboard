@@ -98,12 +98,22 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         typeof prevRaw === "string" ? normalizeMerchantEmail(prevRaw) : null;
 
       if (newEmail !== prev) {
-        const dup = await db.collection("Merchants").where("email", "==", newEmail).limit(1).get();
-        if (!dup.empty && dup.docs[0].id !== id) {
-          return NextResponse.json(
-            { ok: false, message: "Another merchant already uses this email." },
-            { status: 409 }
-          );
+        const dupSnap = await db.collection("Merchants").where("email", "==", newEmail).get();
+        const conflicting = dupSnap.docs.filter((d) => d.id !== id);
+        const thisOwner = String(doc.data()?.ownerAuthUid ?? "").trim();
+        for (const d of conflicting) {
+          const otherOwner = String(d.data()?.ownerAuthUid ?? "").trim();
+          if (!otherOwner) continue;
+          if (!thisOwner || otherOwner !== thisOwner) {
+            return NextResponse.json(
+              {
+                ok: false,
+                message:
+                  "Another merchant already uses this email under a different owner account.",
+              },
+              { status: 409 }
+            );
+          }
         }
 
         const authAdmin = admin.auth();

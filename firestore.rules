@@ -19,7 +19,11 @@ service cloud.firestore {
     // ── Merchants collection (admin-only write, owner can read own) ─
     match /Merchants/{merchantId} {
       allow read, write: if isSuperAdmin();
-      allow read: if isMerchantOwner(merchantId);
+      // Owner may read merchant root docs for any store linked to their uid (multi-store / switcher).
+      allow read: if isMerchantOwner(merchantId)
+        || (isSignedIn()
+            && 'ownerAuthUid' in resource.data
+            && resource.data.ownerAuthUid == request.auth.uid);
 
       // ── All merchant-scoped subcollections ────────────────────
       // Path-based ownership: the merchantId segment IS the access check.

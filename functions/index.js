@@ -2879,6 +2879,52 @@ exports.closeOpenBatchFromDashboard = onCall(
   }
 );
 
+/**
+ * Dashboard: merchant owner with multiple `Merchants` docs (same `ownerAuthUid`) switches active `merchantId` in JWT.
+ */
+exports.selectActiveMerchant = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    return { ok: false, error: "You must be signed in." };
+  }
+  if (request.auth.token?.role !== "merchant_owner") {
+    return { ok: false, error: "Only store owners can switch businesses." };
+  }
+  const selected =
+    request.data?.merchantId != null ? String(request.data.merchantId).trim() : "";
+  if (!selected) {
+    return { ok: false, error: "merchantId is required." };
+  }
+
+  const db = admin.firestore();
+  const auth = admin.auth();
+  const mdoc = await db.collection("Merchants").doc(selected).get();
+  if (!mdoc.exists) {
+    return { ok: false, error: "Business not found." };
+  }
+  const ownerUid = mdoc.get("ownerAuthUid");
+  if (ownerUid !== request.auth.uid) {
+    return { ok: false, error: "You do not have access to this business." };
+  }
+
+  const owned = await db.collection("Merchants").where("ownerAuthUid", "==", request.auth.uid).get();
+  const merchantIds = owned.docs.map((d) => d.id);
+  if (!merchantIds.includes(selected)) {
+    return { ok: false, error: "Business is not linked to your account." };
+  }
+
+  const user = await auth.getUser(request.auth.uid);
+  const prev =
+    user.customClaims && typeof user.customClaims === "object" ? { ...user.customClaims } : {};
+  await auth.setCustomUserClaims(request.auth.uid, {
+    ...prev,
+    role: "merchant_owner",
+    merchantId: selected,
+    merchantIds,
+  });
+
+  return { ok: true, merchantId: selected, merchantIds };
+});
+
 // ---------------------------------------------------------------------------
 // iPOSpays Hosted Payment Page — online ordering payments
 // ---------------------------------------------------------------------------

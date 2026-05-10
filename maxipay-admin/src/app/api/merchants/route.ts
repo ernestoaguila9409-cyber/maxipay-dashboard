@@ -7,6 +7,7 @@ import {
   sendMerchantWelcomeEmail,
 } from "@/lib/merchantWelcomeEmail";
 import { syncSettingsBusinessInfoFromMerchant } from "@/lib/syncMerchantBusinessInfo";
+import { syncMerchantOwnerClaims } from "@/lib/syncMerchantOwnerClaims";
 
 export const runtime = "nodejs";
 
@@ -118,19 +119,6 @@ export async function POST(req: Request) {
     const dbAdmin = admin.firestore();
     const authAdmin = admin.auth();
 
-    const existing = await dbAdmin
-      .collection("Merchants")
-      .where("email", "==", email)
-      .limit(1)
-      .get();
-
-    if (!existing.empty) {
-      return NextResponse.json(
-        { ok: false, error: "duplicate", message: "A merchant with this email already exists." },
-        { status: 409 }
-      );
-    }
-
     const dupNumber = await dbAdmin
       .collection("Merchants")
       .where("merchantNumber", "==", merchantNumber)
@@ -148,11 +136,13 @@ export async function POST(req: Request) {
       );
     }
 
-    // One Firebase user per email: merchant onboarding overwrites custom claims. Never
-    // attach a merchant to the super_admin account or admin portal access is lost.
+    // One Firebase Auth user per email; multiple Merchants may share that owner.
+    // Never attach a merchant to the super_admin account or admin portal access is lost.
+    let authUser: admin.auth.UserRecord;
+    let createdNewUser = false;
     try {
-      const existingAuth = await authAdmin.getUserByEmail(email);
-      const priorRole = (existingAuth.customClaims as Record<string, unknown> | undefined)?.role;
+      authUser = await authAdmin.getUserByEmail(email);
+      const priorRole = (authUser.customClaims as Record<string, unknown> | undefined)?.role;
       if (priorRole === "super_admin") {
         return NextResponse.json(
           {
@@ -166,8 +156,19 @@ export async function POST(req: Request) {
       }
     } catch (e: unknown) {
       const code =
-        e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : "";
-      if (code !== "auth/user-not-found") throw e;
+        e && typeof e === "object" && "code" in e
+          ? String((e as { code: string }).code)
+          : "";
+      if (code === "auth/user-not-found") {
+        authUser = await authAdmin.createUser({
+          email,
+          emailVerified: false,
+          displayName: `${ownerFirstName} ${ownerLastName}`.trim() || businessName,
+        });
+        createdNewUser = true;
+      } else {
+        throw e;
+      }
     }
 
     const merchantRef = dbAdmin.collection("Merchants").doc();
@@ -189,6 +190,7 @@ export async function POST(req: Request) {
       status: "active",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       createdBy: decoded.uid,
+      ownerAuthUid: authUser.uid,
     });
 
     try {
@@ -262,34 +264,7 @@ export async function POST(req: Request) {
       });
     }
 
-    let authUser: admin.auth.UserRecord;
-    let createdNewUser = false;
-    try {
-      authUser = await authAdmin.getUserByEmail(email);
-    } catch (e: unknown) {
-      const code =
-        e && typeof e === "object" && "code" in e
-          ? String((e as { code: string }).code)
-          : "";
-      if (code === "auth/user-not-found") {
-        authUser = await authAdmin.createUser({
-          email,
-          emailVerified: false,
-          displayName: `${ownerFirstName} ${ownerLastName}`.trim() || businessName,
-        });
-        createdNewUser = true;
-      } else {
-        throw e;
-      }
-    }
-
-    await authAdmin.setCustomUserClaims(authUser.uid, {
-      role: "merchant_owner",
-      merchantId,
-    });
-
-    /** Stable link for admin email updates even if custom claims are later overwritten (e.g. same user promoted super_admin). */
-    await merchantRef.update({ ownerAuthUid: authUser.uid });
+    await syncMerchantOwnerClaims(authAdmin, dbAdmin, authUser.uid, merchantId);
 
     let emailSent = false;
     let emailHint: string | undefined;

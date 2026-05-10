@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
+import MerchantAccountSwitcher from "@/components/MerchantAccountSwitcher";
 import { merchantDoc } from "@/lib/merchantFirestore";
 import { onSnapshot } from "firebase/firestore";
 import { Bell, Search } from "lucide-react";
@@ -63,7 +64,9 @@ export default function Header({ title, searchValue, onSearchChange }: HeaderPro
           </div>
         )}
 
-        {businessName ? (
+        {claims.role === "merchant_owner" ? (
+          <MerchantAccountSwitcher activeBusinessName={businessName} />
+        ) : businessName ? (
           <span
             className="text-sm font-semibold text-slate-800 truncate max-w-[7rem] sm:max-w-[12rem] md:max-w-[14rem] shrink text-right"
             title={businessName}
