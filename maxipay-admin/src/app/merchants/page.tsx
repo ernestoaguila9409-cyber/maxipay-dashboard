@@ -136,6 +136,7 @@ export default function MerchantsListPage() {
                 <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Email</th>
                 <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Created</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Staff</th>
                 <th className="w-10" />
               </tr>
             </thead>
@@ -171,6 +172,14 @@ export default function MerchantsListPage() {
                             year: "numeric",
                           })
                         : "—"}
+                    </td>
+                    <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+                      <Link
+                        href={`/merchants/${m.id}/employees`}
+                        className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                      >
+                        Employees
+                      </Link>
                     </td>
                     <td className="px-4 py-4">
                       <ChevronRight size={18} className="text-slate-400" />

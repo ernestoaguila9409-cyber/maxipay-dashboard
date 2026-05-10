@@ -279,17 +279,25 @@ export default function MerchantDetailPage() {
         Back to Merchants
       </Link>
 
-      <div className="flex items-center gap-4 mb-8">
-        <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center">
-          <Store size={24} className="text-slate-600" />
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-8">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center">
+            <Store size={24} className="text-slate-600" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">{merchant.businessName}</h1>
+            <p className="text-slate-500 text-sm">
+              Merchant #{merchant.merchantNumber}
+              {merchant.email ? ` · ${merchant.email}` : ""}
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">{merchant.businessName}</h1>
-          <p className="text-slate-500 text-sm">
-            Merchant #{merchant.merchantNumber}
-            {merchant.email ? ` · ${merchant.email}` : ""}
-          </p>
-        </div>
+        <Link
+          href={`/merchants/${merchantId}/employees`}
+          className="inline-flex items-center justify-center sm:justify-start gap-2 px-4 py-2.5 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 transition-colors shrink-0"
+        >
+          Employees information
+        </Link>
       </div>
 
       {/* ─── Business Info ─── */}
