@@ -134,6 +134,28 @@ export async function POST(req: Request) {
       );
     }
 
+    // One Firebase user per email: merchant onboarding overwrites custom claims. Never
+    // attach a merchant to the super_admin account or admin portal access is lost.
+    try {
+      const existingAuth = await authAdmin.getUserByEmail(email);
+      const priorRole = (existingAuth.customClaims as Record<string, unknown> | undefined)?.role;
+      if (priorRole === "super_admin") {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "admin_email_conflict",
+            message:
+              "This email is already your platform super admin sign-in. Use a different email for the merchant owner so admin access stays separate.",
+          },
+          { status: 409 }
+        );
+      }
+    } catch (e: unknown) {
+      const code =
+        e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : "";
+      if (code !== "auth/user-not-found") throw e;
+    }
+
     const merchantRef = dbAdmin.collection("Merchants").doc();
     const merchantId = merchantRef.id;
 
