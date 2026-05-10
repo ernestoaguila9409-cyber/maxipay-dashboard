@@ -235,6 +235,9 @@ export async function POST(req: Request) {
       merchantId,
     });
 
+    /** Stable link for admin email updates even if custom claims are later overwritten (e.g. same user promoted super_admin). */
+    await merchantRef.update({ ownerAuthUid: authUser.uid });
+
     let emailSent = false;
     let emailHint: string | undefined;
     try {

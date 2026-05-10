@@ -17,8 +17,8 @@ export async function POST(req: Request) {
     getFirebaseAdminApp();
     const authAdmin = admin.auth();
 
-    const existing = await findExistingSuperAdmin(authAdmin);
-    if (existing) {
+    const existingSuperAdmin = await findExistingSuperAdmin(authAdmin);
+    if (existingSuperAdmin) {
       return NextResponse.json(
         {
           ok: false,
@@ -29,7 +29,12 @@ export async function POST(req: Request) {
       );
     }
 
-    await authAdmin.setCustomUserClaims(decoded.uid, { role: "super_admin" });
+    const user = await authAdmin.getUser(decoded.uid);
+    const priorClaims = (user.customClaims || {}) as Record<string, unknown>;
+    await authAdmin.setCustomUserClaims(decoded.uid, {
+      ...priorClaims,
+      role: "super_admin",
+    });
 
     return NextResponse.json({
       ok: true,

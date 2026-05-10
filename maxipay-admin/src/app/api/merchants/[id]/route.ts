@@ -105,13 +105,20 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         }
 
         const authAdmin = admin.auth();
+        const ownerUidFromDocRaw = doc.data()?.ownerAuthUid;
+        const ownerUidFromDoc =
+          typeof ownerUidFromDocRaw === "string" ? ownerUidFromDocRaw.trim() : "";
 
         if (!prev) {
           allowed.email = newEmail;
         } else {
           let owner: admin.auth.UserRecord;
           try {
-            owner = await authAdmin.getUserByEmail(prev);
+            if (ownerUidFromDoc) {
+              owner = await authAdmin.getUser(ownerUidFromDoc);
+            } else {
+              owner = await authAdmin.getUserByEmail(prev);
+            }
           } catch (e: unknown) {
             const code =
               e && typeof e === "object" && "code" in e
@@ -130,12 +137,21 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             throw e;
           }
 
-          const claims = owner.customClaims || {};
-          if (claims.merchantId !== id || claims.role !== "merchant_owner") {
+          const claims = owner.customClaims as Record<string, unknown> | undefined;
+          const claimMid = typeof claims?.merchantId === "string" ? claims.merchantId : undefined;
+          const emailMatchesDoc = normalizeMerchantEmail(owner.email) === prev;
+
+          const linkedByStoredUid = !!ownerUidFromDoc && owner.uid === ownerUidFromDoc;
+          const linkedByClaim = claimMid === id;
+          /** Same email as Firestore but claims were replaced (e.g. /api/setup set only role: super_admin). */
+          const linkedByEmailOnlyRecovery = !ownerUidFromDoc && emailMatchesDoc && claimMid === undefined;
+
+          if (!linkedByStoredUid && !linkedByClaim && !linkedByEmailOnlyRecovery) {
             return NextResponse.json(
               {
                 ok: false,
-                message: "The login account for this email is not linked to this merchant.",
+                message:
+                  "The Firebase account is not linked to this merchant (missing merchantId on the account, or ownerAuthUid on the document). If the owner used the same login as a super admin, add field ownerAuthUid on this Merchants doc in Firestore to their Firebase uid, then try again.",
               },
               { status: 403 }
             );
@@ -162,6 +178,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
           await authAdmin.updateUser(owner.uid, { email: newEmail });
           allowed.email = newEmail;
+          if (!ownerUidFromDoc) {
+            allowed.ownerAuthUid = owner.uid;
+          }
         }
       }
     }
