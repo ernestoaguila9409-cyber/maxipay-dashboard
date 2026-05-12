@@ -12,6 +12,7 @@ import {
   where,
   getDocs,
   deleteField,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
@@ -31,6 +32,8 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  CheckSquare,
+  AlertTriangle,
 } from "lucide-react";
 
 /** Synthetic row for the merchant account owner (from `Merchants/{id}`, not `employees`). */
@@ -190,6 +193,11 @@ export default function EmployeesPage() {
   /** null = sort by name; asc = Admin → Employee; desc = Employee → Admin */
   const [roleSort, setRoleSort] = useState<null | "asc" | "desc">(null);
 
+  const [listSelectMode, setListSelectMode] = useState(false);
+  const [selectedListIds, setSelectedListIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteListConfirm, setBulkDeleteListConfirm] = useState(false);
+  const [bulkDeletingList, setBulkDeletingList] = useState(false);
+
   useEffect(() => {
     if (!openMenuId) return;
     const onDocMouseDown = (e: MouseEvent) => {
@@ -308,6 +316,35 @@ export default function EmployeesPage() {
     );
   }, [employees, ownerRow]);
 
+  const bulkSelectableIds = useMemo(
+    () => staffEmployees.map((e) => e.id),
+    [staffEmployees]
+  );
+
+  const exitListSelectMode = () => {
+    setListSelectMode(false);
+    setSelectedListIds(new Set());
+  };
+
+  const toggleListSelectRow = (emp: Employee) => {
+    if (isMerchantOwnerRow(emp)) return;
+    setSelectedListIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(emp.id)) next.delete(emp.id);
+      else next.add(emp.id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllList = () => {
+    if (bulkSelectableIds.length === 0) return;
+    setSelectedListIds((prev) => {
+      const allSelected = bulkSelectableIds.every((id) => prev.has(id));
+      if (allSelected) return new Set();
+      return new Set(bulkSelectableIds);
+    });
+  };
+
   const rowsForSort = useMemo(() => {
     return ownerRow ? [ownerRow, ...staffEmployees] : [...staffEmployees];
   }, [ownerRow, staffEmployees]);
@@ -344,6 +381,7 @@ export default function EmployeesPage() {
         : "Role · Employee first";
 
   const openAdd = () => {
+    exitListSelectMode();
     setEditTarget(null);
     setFormName("");
     setFormEmail("");
@@ -356,6 +394,7 @@ export default function EmployeesPage() {
   };
 
   const openEdit = (emp: Employee) => {
+    if (listSelectMode) return;
     if (isMerchantOwnerRow(emp) && !canEditOwnerProfile) return;
     setEditTarget(emp);
     setFormName(emp.name);
@@ -512,22 +551,102 @@ export default function EmployeesPage() {
     }
   };
 
+  const handleBulkDeleteList = async () => {
+    const ids = [...selectedListIds].filter(
+      (id) => id !== MERCHANT_OWNER_ROW_ID && bulkSelectableIds.includes(id)
+    );
+    if (ids.length === 0 || !merchantId) return;
+    setBulkDeletingList(true);
+    try {
+      const CHUNK = 450;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const batch = writeBatch(db);
+        for (const id of ids.slice(i, i + CHUNK)) {
+          batch.delete(merchantDoc(merchantId, "Employees", id));
+        }
+        await batch.commit();
+      }
+      exitListSelectMode();
+      setBulkDeleteListConfirm(false);
+    } catch (err) {
+      console.error("Failed to bulk delete employees:", err);
+    } finally {
+      setBulkDeletingList(false);
+    }
+  };
+
   return (
     <>
       <Header title="Employees" />
       <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-slate-500 text-sm">
             {sortedEmployees.length} team member
             {sortedEmployees.length !== 1 ? "s" : ""}
           </p>
-          <button
-            onClick={openAdd}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
-          >
-            <UserPlus size={16} />
-            Add Employee
-          </button>
+          <div className="flex flex-wrap items-center gap-2 justify-end">
+            {listSelectMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={toggleSelectAllList}
+                  disabled={bulkSelectableIds.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <CheckSquare size={14} />
+                  {selectedListIds.size === bulkSelectableIds.length &&
+                  bulkSelectableIds.length > 0
+                    ? "Deselect All"
+                    : "Select All"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkDeleteListConfirm(true)}
+                  disabled={selectedListIds.size === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Trash2 size={14} />
+                  Delete
+                  {selectedListIds.size > 0 ? ` (${selectedListIds.size})` : ""}
+                </button>
+                <button
+                  type="button"
+                  onClick={exitListSelectMode}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  <X size={14} />
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setListSelectMode(true);
+                    setSelectedListIds(new Set());
+                  }}
+                  disabled={bulkSelectableIds.length === 0}
+                  title={
+                    bulkSelectableIds.length === 0
+                      ? "Add team members to use bulk delete"
+                      : "Select employees or admins to delete"
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <CheckSquare size={14} />
+                  <span className="hidden sm:inline">Select</span>
+                </button>
+                <button
+                  onClick={openAdd}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+                >
+                  <UserPlus size={16} />
+                  Add Employee
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {!loading && employees.length > 0 && (
@@ -576,7 +695,14 @@ export default function EmployeesPage() {
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             {/* column headers — hidden on xs, shown md+ for table alignment */}
-            <div className="hidden md:grid md:grid-cols-[40px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto_44px] md:gap-3 md:items-center px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <div
+              className={`hidden md:grid md:gap-3 md:items-center px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500 ${
+                listSelectMode
+                  ? "md:grid-cols-[36px_40px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto_44px]"
+                  : "md:grid-cols-[40px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto_44px]"
+              }`}
+            >
+              {listSelectMode ? <span aria-hidden className="w-9" /> : null}
               <span />
               <span>Name</span>
               <span>Phone</span>
@@ -615,16 +741,29 @@ export default function EmployeesPage() {
                 const menuOpen = openMenuId === emp.id;
                 const ownerRowUi = isMerchantOwnerRow(emp);
                 const ownerEditable = ownerRowUi && canEditOwnerProfile;
+                const listSelectable = !ownerRowUi;
+                const isListChecked = selectedListIds.has(emp.id);
                 return (
                   <li key={emp.id}>
                     <div
                       tabIndex={ownerRowUi && !ownerEditable ? -1 : 0}
                       onClick={() => {
+                        if (listSelectMode) {
+                          if (listSelectable) toggleListSelectRow(emp);
+                          return;
+                        }
                         if (ownerRowUi && !ownerEditable) return;
                         setOpenMenuId(null);
                         openEdit(emp);
                       }}
                       onKeyDown={(e) => {
+                        if (listSelectMode) {
+                          if (listSelectable && (e.key === "Enter" || e.key === " ")) {
+                            e.preventDefault();
+                            toggleListSelectRow(emp);
+                          }
+                          return;
+                        }
                         if (ownerRowUi && !ownerEditable) return;
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
@@ -633,14 +772,30 @@ export default function EmployeesPage() {
                         }
                       }}
                       className={`w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/30 ${
-                        ownerRowUi && !ownerEditable
-                          ? "cursor-default bg-slate-50/80"
-                          : "cursor-pointer hover:bg-slate-50/90"
+                        listSelectMode && listSelectable
+                          ? "cursor-pointer hover:bg-blue-50/40"
+                          : ownerRowUi && !ownerEditable
+                            ? "cursor-default bg-slate-50/80"
+                            : "cursor-pointer hover:bg-slate-50/90"
                       }`}
                     >
                       {/* Mobile: stacked scan-friendly block */}
                       <div className="md:hidden px-4 py-3 space-y-2">
                         <div className="flex items-center gap-3">
+                          {listSelectMode && (
+                            <div className="flex w-9 shrink-0 items-center justify-center">
+                              {listSelectable ? (
+                                <input
+                                  type="checkbox"
+                                  checked={isListChecked}
+                                  onChange={() => toggleListSelectRow(emp)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  aria-label={`Select ${emp.name}`}
+                                />
+                              ) : null}
+                            </div>
+                          )}
                           <div
                             className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 text-blue-700 text-xs font-bold"
                             aria-hidden
@@ -659,7 +814,7 @@ export default function EmployeesPage() {
                             <span className="flex-shrink-0 text-xs text-slate-400 px-2">
                               Account owner
                             </span>
-                          ) : ownerRowUi && ownerEditable ? (
+                          ) : !listSelectMode && ownerRowUi && ownerEditable ? (
                             <EmployeeRowMenu
                               emp={emp}
                               menuOpen={menuOpen}
@@ -674,7 +829,7 @@ export default function EmployeesPage() {
                               onDelete={() => {}}
                               wrapperClassName="relative flex-shrink-0"
                             />
-                          ) : (
+                          ) : !listSelectMode ? (
                             <EmployeeRowMenu
                               emp={emp}
                               menuOpen={menuOpen}
@@ -691,9 +846,13 @@ export default function EmployeesPage() {
                               }}
                               wrapperClassName="relative flex-shrink-0"
                             />
-                          )}
+                          ) : null}
                         </div>
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-[52px] text-sm">
+                        <div
+                          className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-sm ${
+                            listSelectMode ? "pl-12" : "pl-[52px]"
+                          }`}
+                        >
                           <span className="text-slate-600">{phoneDisplay}</span>
                           <span
                             className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${roleBadgeClass(emp.role)}`}
@@ -704,7 +863,27 @@ export default function EmployeesPage() {
                       </div>
 
                       {/* Desktop: single aligned row */}
-                      <div className="hidden md:grid md:grid-cols-[40px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto_44px] md:gap-3 md:items-center px-4 py-3">
+                      <div
+                        className={`hidden md:grid md:gap-3 md:items-center px-4 py-3 ${
+                          listSelectMode
+                            ? "md:grid-cols-[36px_40px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto_44px]"
+                            : "md:grid-cols-[40px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto_44px]"
+                        }`}
+                      >
+                        {listSelectMode && (
+                          <div className="flex items-center justify-center">
+                            {listSelectable ? (
+                              <input
+                                type="checkbox"
+                                checked={isListChecked}
+                                onChange={() => toggleListSelectRow(emp)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                aria-label={`Select ${emp.name}`}
+                              />
+                            ) : null}
+                          </div>
+                        )}
                         <div
                           className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold"
                           aria-hidden
@@ -731,7 +910,7 @@ export default function EmployeesPage() {
                           <span className="flex justify-end text-xs text-slate-400 pr-1">
                             —
                           </span>
-                        ) : ownerRowUi && ownerEditable ? (
+                        ) : !listSelectMode && ownerRowUi && ownerEditable ? (
                           <EmployeeRowMenu
                             emp={emp}
                             menuOpen={menuOpen}
@@ -746,7 +925,7 @@ export default function EmployeesPage() {
                             onDelete={() => {}}
                             wrapperClassName="relative flex justify-end flex-shrink-0"
                           />
-                        ) : (
+                        ) : !listSelectMode ? (
                           <EmployeeRowMenu
                             emp={emp}
                             menuOpen={menuOpen}
@@ -763,6 +942,8 @@ export default function EmployeesPage() {
                             }}
                             wrapperClassName="relative flex justify-end flex-shrink-0"
                           />
+                        ) : (
+                          <span className="flex justify-end w-10" aria-hidden />
                         )}
                       </div>
                     </div>
@@ -943,6 +1124,58 @@ export default function EmployeesPage() {
                     ? "Update"
                     : "Add Employee"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bulk delete selected employees (Admin / Employee only; never Owner) ── */}
+      {bulkDeleteListConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div
+            className="absolute inset-0"
+            onClick={() => !bulkDeletingList && setBulkDeleteListConfirm(false)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 overflow-hidden">
+            <div className="px-6 py-5 space-y-4">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center">
+                  <AlertTriangle size={24} className="text-red-500" />
+                </div>
+                <h3 className="text-lg font-semibold text-slate-800 text-center">
+                  Delete {selectedListIds.size} team member
+                  {selectedListIds.size !== 1 ? "s" : ""}?
+                </h3>
+              </div>
+              <p className="text-sm text-slate-500 text-center">
+                This removes the selected Admin and Employee accounts from this merchant. The
+                account owner cannot be deleted. This cannot be undone.
+              </p>
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => !bulkDeletingList && setBulkDeleteListConfirm(false)}
+                  disabled={bulkDeletingList}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleBulkDeleteList()}
+                  disabled={bulkDeletingList || selectedListIds.size === 0}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {bulkDeletingList ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Deleting…
+                    </>
+                  ) : (
+                    "Delete All"
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
