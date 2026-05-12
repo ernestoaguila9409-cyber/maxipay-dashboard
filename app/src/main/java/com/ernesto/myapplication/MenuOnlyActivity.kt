@@ -8,6 +8,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.View
+import android.view.WindowManager
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.HorizontalScrollView
@@ -51,6 +52,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     private var pendingPrice: String = ""
     private var pendingStock: String = ""
     private var pendingSubId: String = ""
+    private var pendingVariablePrice: Boolean = false
     private var pendingModifierIds: ArrayList<String> = arrayListOf()
     private var pendingTaxIds: ArrayList<String> = arrayListOf()
     private var pendingUseCategoryAvail: Boolean = true
@@ -64,6 +66,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     private lateinit var modifierLauncher: ActivityResultLauncher<Intent>
     private lateinit var taxLauncher: ActivityResultLauncher<Intent>
     private lateinit var printerLabelLauncher: ActivityResultLauncher<Intent>
+    private var posKeyboardController: PosKeyboardController? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -113,6 +116,8 @@ class MenuOnlyActivity : AppCompatActivity() {
             }
         }
 
+        posKeyboardController = PosKeyboardController.attach(this, listOf(editSearch))
+
         editSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -138,6 +143,12 @@ class MenuOnlyActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         loadStockSetting()
+    }
+
+    override fun onDestroy() {
+        posKeyboardController?.detach()
+        posKeyboardController = null
+        super.onDestroy()
     }
 
     private fun loadStockSetting() {
@@ -488,6 +499,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                     val scheduleIds = (doc.get("scheduleIds") as? List<String>) ?: emptyList()
 
                     val imgUrl = doc.getString("imageUrl")?.trim()?.takeIf { it.isNotEmpty() }
+                    val modifierGroupIds = MerchantFirestore.mergeMenuItemModifierGroupIds(doc)
                     itemList.add(
                         ItemModel(
                             id = doc.id,
@@ -497,6 +509,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                             stock = stock,
                             categoryId = doc.getString("categoryId") ?: "",
                             availableOrderTypes = availableOrderTypes,
+                            modifierGroupIds = modifierGroupIds,
                             isScheduled = isScheduled,
                             scheduleIds = scheduleIds,
                             menuId = doc.getString("menuId"),
@@ -506,6 +519,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                             subcategoryId = doc.getString("subcategoryId") ?: "",
                             printerLabel = MenuItemRoutingLabel.fromMenuItemDoc(doc),
                             imageUrl = imgUrl,
+                            variablePrice = doc.getBoolean("variablePrice") ?: false,
                         )
                     )
                 }
@@ -599,6 +613,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                         (doc.get("scheduleIds") as? List<String>) ?: emptyList()
 
                     val imgUrl = doc.getString("imageUrl")?.trim()?.takeIf { it.isNotEmpty() }
+                    val modifierGroupIds = MerchantFirestore.mergeMenuItemModifierGroupIds(doc)
                     itemList.add(
                         ItemModel(
                             id = doc.id,
@@ -608,6 +623,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                             stock = stock,
                             categoryId = doc.getString("categoryId") ?: "",
                             availableOrderTypes = availableOrderTypes,
+                            modifierGroupIds = modifierGroupIds,
                             isScheduled = isScheduled,
                             scheduleIds = scheduleIds,
                             menuId = doc.getString("menuId"),
@@ -617,6 +633,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                             subcategoryId = subcategoryId,
                             printerLabel = MenuItemRoutingLabel.fromMenuItemDoc(doc),
                             imageUrl = imgUrl,
+                            variablePrice = doc.getBoolean("variablePrice") ?: false,
                         )
                     )
                 }
@@ -637,6 +654,89 @@ class MenuOnlyActivity : AppCompatActivity() {
                 currentAdapter = adapter
                 itemRecycler.adapter = adapter
             }
+    }
+
+    // =========================================================
+    // KEYBOARD-AWARE DIALOG HELPERS
+    // =========================================================
+
+    /**
+     * Returns the desired dialog window width: a fixed card width capped to the screen so the
+     * dialog renders as a centered card (with the activity visible on either side) instead of
+     * spanning edge to edge.
+     */
+    private fun keyboardAwareDialogWidthPx(): Int {
+        val density = resources.displayMetrics.density
+        val targetDp = 560
+        val sideMarginPx = (32 * density).toInt()
+        val maxByScreen = resources.displayMetrics.widthPixels - sideMarginPx
+        return ((targetDp * density).toInt()).coerceAtMost(maxByScreen.coerceAtLeast(1))
+    }
+
+    /**
+     * Configure a dialog's window so its content sits as a **centered card near the top** of
+     * the screen with a comfortable margin and **never grows past the keyboard's top edge**.
+     * Height follows the content (the embedded ScrollView handles overflow).
+     */
+    private fun applyKeyboardAwareDialogWindow(dialog: AlertDialog) {
+        dialog.setCanceledOnTouchOutside(false)
+        val w = dialog.window ?: return
+        val density = resources.displayMetrics.density
+        w.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        w.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        w.setLayout(
+            keyboardAwareDialogWidthPx(),
+            WindowManager.LayoutParams.WRAP_CONTENT,
+        )
+        w.attributes = w.attributes.apply {
+            gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL
+            y = (24 * density).toInt()
+        }
+    }
+
+    /**
+     * Subscribe the dialog to keyboard visibility events. When the keyboard appears, the
+     * dialog window's max height is constrained so its bottom edge stays above the keyboard.
+     * When the keyboard disappears, the dialog returns to wrapping its content. Returns the
+     * listener so the caller can unregister it on dismiss.
+     */
+    private fun installKeyboardAwareResizing(
+        dialog: AlertDialog,
+    ): PosKeyboardController.VisibilityListener {
+        val listener = object : PosKeyboardController.VisibilityListener {
+            override fun onKeyboardShown(heightPx: Int) {
+                val w = dialog.window ?: return
+                val density = resources.displayMetrics.density
+                val topMarginPx = (24 * density).toInt()
+                val bottomMarginPx = (8 * density).toInt()
+                val statusBarPx = statusBarInsetPx()
+                val available = resources.displayMetrics.heightPixels -
+                    statusBarPx - topMarginPx - bottomMarginPx - heightPx
+                val maxH = available.coerceAtLeast((120 * density).toInt())
+                w.setLayout(keyboardAwareDialogWidthPx(), maxH)
+                w.attributes = w.attributes.apply {
+                    gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL
+                    y = topMarginPx
+                }
+            }
+
+            override fun onKeyboardHidden() {
+                applyKeyboardAwareDialogWindow(dialog)
+            }
+        }
+        posKeyboardController?.addVisibilityListener(listener)
+        return listener
+    }
+
+    private fun statusBarInsetPx(): Int {
+        val root = window.decorView
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            val insets = root.rootWindowInsets
+                ?.getInsets(android.view.WindowInsets.Type.statusBars())
+            if (insets != null) return insets.top
+        }
+        val resId = resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (resId > 0) resources.getDimensionPixelSize(resId) else 0
     }
 
     // =========================================================
@@ -684,12 +784,30 @@ class MenuOnlyActivity : AppCompatActivity() {
             checkBoxes[orderType] = cb
         }
 
+        val scrollView = android.widget.ScrollView(this)
+        scrollView.isFillViewport = true
+        scrollView.addView(
+            layout,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+
         val dialog = AlertDialog.Builder(this)
             .setTitle("Add Category")
-            .setView(layout)
+            .setView(scrollView)
             .setPositiveButton("Add", null)
             .setNegativeButton("Cancel", null)
             .create()
+
+        applyKeyboardAwareDialogWindow(dialog)
+        val keyboardListener = installKeyboardAwareResizing(dialog)
+
+        dialog.setOnDismissListener {
+            posKeyboardController?.removeVisibilityListener(keyboardListener)
+            posKeyboardController?.dismissWithoutAnimation()
+        }
 
         dialog.setOnShowListener {
             val addButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
@@ -728,6 +846,7 @@ class MenuOnlyActivity : AppCompatActivity() {
         }
 
         dialog.show()
+        posKeyboardController?.addEditText(input)
     }
 
     private fun checkCategoryExists(name: String, callback: (Boolean) -> Unit) {
@@ -916,6 +1035,12 @@ class MenuOnlyActivity : AppCompatActivity() {
         }
         layout.addView(priceInput)
 
+        val variablePriceSwitch = Switch(this).apply {
+            text = getString(R.string.item_detail_variable_price_label)
+            isChecked = pendingVariablePrice
+        }
+        layout.addView(variablePriceSwitch)
+
         val stockInput = EditText(this).apply {
             hint = "Stock"
             inputType = InputType.TYPE_CLASS_NUMBER
@@ -957,6 +1082,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                 pendingPrice = priceInput.text.toString()
                 pendingStock = stockInput.text.toString()
                 pendingSubId = selectedSubId
+                pendingVariablePrice = variablePriceSwitch.isChecked
                 val intent = Intent(this, SelectPrinterLabelActivity::class.java)
                 intent.putExtra(SelectPrinterLabelActivity.EXTRA_CURRENT_LABEL, pendingPrinterLabel)
                 printerLabelLauncher.launch(intent)
@@ -978,6 +1104,7 @@ class MenuOnlyActivity : AppCompatActivity() {
             pendingPrice = priceInput.text.toString()
             pendingStock = stockInput.text.toString()
             pendingSubId = selectedSubId
+            pendingVariablePrice = variablePriceSwitch.isChecked
             val intent = Intent(this, SelectModifiersActivity::class.java)
             intent.putStringArrayListExtra("SELECTED_IDS", pendingModifierIds)
             modifierLauncher.launch(intent)
@@ -988,6 +1115,7 @@ class MenuOnlyActivity : AppCompatActivity() {
             pendingPrice = priceInput.text.toString()
             pendingStock = stockInput.text.toString()
             pendingSubId = selectedSubId
+            pendingVariablePrice = variablePriceSwitch.isChecked
             val intent = Intent(this, SelectTaxesActivity::class.java)
             intent.putStringArrayListExtra("SELECTED_IDS", pendingTaxIds)
             taxLauncher.launch(intent)
@@ -998,6 +1126,7 @@ class MenuOnlyActivity : AppCompatActivity() {
             pendingPrice = priceInput.text.toString()
             pendingStock = stockInput.text.toString()
             pendingSubId = selectedSubId
+            pendingVariablePrice = variablePriceSwitch.isChecked
             openKdsPickerFromAddDialog()
         })
 
@@ -1048,7 +1177,9 @@ class MenuOnlyActivity : AppCompatActivity() {
             .setPositiveButton("Add") { _, _ ->
                 addItemDialogOpen = false
                 val name = nameInput.text.toString().trim()
-                val price = priceInput.text.toString().toDoubleOrNull()
+                val variableItem = variablePriceSwitch.isChecked
+                val parsedPrice = priceInput.text.toString().toDoubleOrNull()
+                val price = if (variableItem) parsedPrice ?: 0.0 else parsedPrice
                 val stock = if (stockCountingEnabled)
                     stockInput.text.toString().toLongOrNull() ?: 0L
                 else
@@ -1058,7 +1189,11 @@ class MenuOnlyActivity : AppCompatActivity() {
                     Toast.makeText(this, "Please enter item name", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                if (price == null || price < 0) {
+                if (!variableItem && (price == null || price < 0)) {
+                    Toast.makeText(this, "Enter a valid price", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                if (variableItem && price < 0) {
                     Toast.makeText(this, "Enter a valid price", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
@@ -1067,18 +1202,22 @@ class MenuOnlyActivity : AppCompatActivity() {
                     return@setPositiveButton
                 }
 
+                val unitPrice = if (variableItem) parsedPrice ?: 0.0 else price!!
+
                 val item = hashMapOf<String, Any>(
                     "name" to name,
-                    "price" to price,
-                    "pricing" to hashMapOf("pos" to price),
+                    "price" to unitPrice,
+                    "pricing" to hashMapOf("pos" to unitPrice),
                     "channels" to hashMapOf("pos" to true),
                     "stock" to stock,
                     "categoryId" to selectedCategoryId!!,
                     "subcategoryId" to selectedSubId,
                     "taxIds" to pendingTaxIds.toList(),
+                    "taxMode" to if (pendingTaxIds.isNotEmpty()) "FORCE_APPLY" else "INHERIT",
                     "modifierGroupIds" to pendingModifierIds.toList(),
                     "isScheduled" to false,
                     "scheduleIds" to emptyList<String>(),
+                    "variablePrice" to variableItem,
                 )
 
                 val pl = pendingPrinterLabel.trim().takeIf { it.isNotEmpty() }
@@ -1164,8 +1303,19 @@ class MenuOnlyActivity : AppCompatActivity() {
                 clearPendingForm()
             }
             .create()
+        applyKeyboardAwareDialogWindow(addDialog)
+        val addItemKeyboardListener = installKeyboardAwareResizing(addDialog)
+        addDialog.setOnDismissListener {
+            posKeyboardController?.removeVisibilityListener(addItemKeyboardListener)
+            posKeyboardController?.dismissWithoutAnimation()
+        }
         addDialog.show()
         currentAddItemDialog = addDialog
+        posKeyboardController?.addEditText(nameInput)
+        posKeyboardController?.addNumericEditText(priceInput)
+        if (stockCountingEnabled) {
+            posKeyboardController?.addNumericEditText(stockInput)
+        }
     }
 
     private fun clearPendingForm() {
@@ -1180,6 +1330,7 @@ class MenuOnlyActivity : AppCompatActivity() {
         pendingPrinterLabel = ""
         pendingKdsDeviceIds = arrayListOf()
         pendingKdsTouched = false
+        pendingVariablePrice = false
     }
 
     private fun openKdsPickerFromAddDialog() {

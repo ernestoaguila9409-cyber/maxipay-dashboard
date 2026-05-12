@@ -577,6 +577,7 @@ export async function importMenuToFirestore(
         categoryId: resolvedCategoryId,
         modifierGroupIds: validModGroupIds,
         taxIds: validTaxIds,
+        taxMode: validTaxIds.length > 0 ? "FORCE_APPLY" : "INHERIT",
         externalMappings: {},
       };
 
@@ -941,6 +942,7 @@ export async function importScannedMenuToFirestore(
       scheduleIds: [],
       modifierGroupIds: resolvedMgIds,
       taxIds: [],
+      taxMode: "INHERIT",
       externalMappings: {},
     });
     itemCount++;

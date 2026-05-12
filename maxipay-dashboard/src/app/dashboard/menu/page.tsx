@@ -168,6 +168,8 @@ interface MenuItem {
   resolvedKitchenRoutingLabel?: string;
   /** Firebase Storage download URL (menu / online ordering). */
   imageUrl?: string;
+  /** When true, POS prompts staff for unit price; stored price is suggested default only. */
+  variablePrice?: boolean;
 }
 
 /** Firestore MenuItems row held in memory before rebuild() adds category-derived fields. */
@@ -190,6 +192,11 @@ function sortKdsDevicesByName(devices: KdsDevicePickerRow[]): KdsDevicePickerRow
   return [...devices].sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
   );
+}
+
+/** POS / OrderEngine only honor `taxIds` when `taxMode` is FORCE_APPLY; otherwise all enabled taxes apply. */
+function taxModeForItemTaxIds(taxIds: string[]): "FORCE_APPLY" | "INHERIT" {
+  return taxIds.length > 0 ? "FORCE_APPLY" : "INHERIT";
 }
 
 /** KDS devices that would show this item (explicit ids, assigned categories, or no filter). */
@@ -478,6 +485,7 @@ export default function MenuPage() {
   const [addMenuIds, setAddMenuIds] = useState<Record<string, boolean>>({});
   const [addPosPrice, setAddPosPrice] = useState("");
   const [addPosSelected, setAddPosSelected] = useState(false);
+  const [addVariablePrice, setAddVariablePrice] = useState(false);
   const [addOnlinePrice, setAddOnlinePrice] = useState("");
   const [addMenuPrices, setAddMenuPrices] = useState<Record<string, string>>({});
   const [menuEntities, setMenuEntities] = useState<MenuEntity[]>([]);
@@ -513,6 +521,7 @@ export default function MenuPage() {
   const [editMenuIds, setEditMenuIds] = useState<Record<string, boolean>>({});
   const [editPosPrice, setEditPosPrice] = useState("");
   const [editOnlinePrice, setEditOnlinePrice] = useState("");
+  const [editVariablePrice, setEditVariablePrice] = useState(false);
   const [editChannelOnline, setEditChannelOnline] = useState(false);
   const [editMenuPrices, setEditMenuPrices] = useState<Record<string, string>>({});
 
@@ -761,6 +770,7 @@ export default function MenuPage() {
               typeof data.imageUrl === "string" && data.imageUrl.trim()
                 ? data.imageUrl.trim()
                 : undefined,
+            variablePrice: data.variablePrice === true,
           });
         });
         itemSnap.current = list;
@@ -1534,10 +1544,11 @@ export default function MenuPage() {
     try {
       const ids = [...selectedItems];
       const CHUNK = 400;
+      const taxMode = taxModeForItemTaxIds(taxIds);
       for (let i = 0; i < ids.length; i += CHUNK) {
         const batch = writeBatch(db);
         for (const id of ids.slice(i, i + CHUNK)) {
-          batch.update(merchantDoc(merchantId, "MenuItems", id), { taxIds });
+          batch.update(merchantDoc(merchantId, "MenuItems", id), { taxIds, taxMode });
         }
         await batch.commit();
       }
@@ -1715,6 +1726,7 @@ export default function MenuPage() {
 
     setEditPosPrice(item.pricing.pos.toFixed(2));
     setEditOnlinePrice(item.pricing.online.toFixed(2));
+    setEditVariablePrice(item.variablePrice === true);
     setEditChannelOnline(item.channels.online);
     setEditSubcategoryId(item.subcategoryId ?? "");
 
@@ -1776,13 +1788,18 @@ export default function MenuPage() {
 
     const parsedPos = parseFloat(editPosPrice);
     const firstMenuPrice = Object.values(prices)[0];
-    const posPrice = (!isNaN(parsedPos) && parsedPos >= 0) ? parsedPos : (firstMenuPrice ?? -1);
-    if (posPrice < 0) return;
+    let posPrice = (!isNaN(parsedPos) && parsedPos >= 0) ? parsedPos : (firstMenuPrice ?? -1);
+    if (posPrice < 0) {
+      if (editVariablePrice) posPrice = 0;
+      else return;
+    }
 
     prices.default = posPrice;
     const price = posPrice;
 
     const update: Record<string, unknown> = { prices, price };
+
+    update.variablePrice = editVariablePrice;
 
     update.pricing = {
       pos: posPrice,
@@ -1826,6 +1843,7 @@ export default function MenuPage() {
       update.taxIds = Object.entries(editTaxes)
         .filter(([, v]) => v)
         .map(([k]) => k);
+      update.taxMode = taxModeForItemTaxIds(update.taxIds as string[]);
 
       if (editMenuId) update.menuId = editMenuId;
 
@@ -1877,6 +1895,7 @@ export default function MenuPage() {
     setAddMenuPrices({});
     setAddPosPrice("");
     setAddPosSelected(false);
+    setAddVariablePrice(false);
     setAddOnlinePrice("");
     setAddUseCategoryTypes(true);
     setAddOrderTypes(Object.fromEntries(ALL_ORDER_TYPES.map((t) => [t, true])));
@@ -2122,7 +2141,10 @@ export default function MenuPage() {
         ? ((!isNaN(parsedPos) && parsedPos >= 0) ? parsedPos : (firstMenuPrice ?? -1))
         : (firstMenuPrice ?? -1);
     }
-    if (posPrice < 0) return;
+    if (posPrice < 0) {
+      if (addVariablePrice) posPrice = 0;
+      else return;
+    }
 
     prices.default = posPrice;
     const price = posPrice;
@@ -2172,7 +2194,10 @@ export default function MenuPage() {
           .filter(([, v]) => v)
           .map(([k]) => k),
         externalMappings: {},
+        variablePrice: addVariablePrice,
       };
+      const addTaxIdList = data.taxIds as string[];
+      data.taxMode = taxModeForItemTaxIds(addTaxIdList);
 
       if (!addUseCategoryTypes) {
         data.availableOrderTypes = ALL_ORDER_TYPES.filter((t) => addOrderTypes[t]);
@@ -2234,6 +2259,7 @@ export default function MenuPage() {
       row["Modifier Group IDs"] = item.modifierGroupIds.join(", ");
       row["Tax IDs"] = item.taxIds.join(", ");
       row["Order Types"] = item.effectiveOrderTypes.join(", ");
+      row["Variable price at POS"] = item.variablePrice ? "Yes" : "No";
       return row;
     });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(itemRows), "Items");
@@ -2447,7 +2473,24 @@ export default function MenuPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setBulkAssignTaxes({});
+                      const assignableList = taxes.filter((t) => t.enabled || t.enabledOnline);
+                      const assignableIds = new Set(assignableList.map((t) => t.id));
+                      const sel = [...selectedItems];
+                      let common: Set<string> | null = null;
+                      for (const id of sel) {
+                        const it = items.find((x) => x.id === id);
+                        if (!it) continue;
+                        const row = new Set(it.taxIds.filter((tid) => assignableIds.has(tid)));
+                        if (common === null) common = row;
+                        else {
+                          for (const tid of [...common]) {
+                            if (!row.has(tid)) common.delete(tid);
+                          }
+                        }
+                      }
+                      const init: Record<string, boolean> = {};
+                      if (common) for (const tid of common) init[tid] = true;
+                      setBulkAssignTaxes(init);
                       setBulkAssignKind("taxes");
                     }}
                     disabled={selectedItems.size === 0}
@@ -3757,7 +3800,8 @@ export default function MenuPage() {
                 <>
                   <p className="text-sm text-slate-500">
                     This replaces the tax selection on every selected item (same as editing each item and
-                    saving).
+                    saving). Taxes that every selected item already shares are pre-checked; adjust and
+                    Apply to update Firestore and the POS.
                   </p>
                   <div className="flex flex-col gap-2 max-h-52 overflow-y-auto rounded-xl border border-slate-100 p-3">
                     {taxes
@@ -4248,6 +4292,21 @@ export default function MenuPage() {
                     disabled={addSaving}
                   />
                 )}
+
+                <label className="flex items-start gap-3 cursor-pointer rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                  <input
+                    type="checkbox"
+                    checked={addVariablePrice}
+                    onChange={(e) => setAddVariablePrice(e.target.checked)}
+                    className="w-4 h-4 mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-800">Variable price at register</span>
+                    <span className="block text-xs text-slate-500 mt-0.5">
+                      Staff enter the selling price on the POS when adding this item. Menu prices below are suggested defaults only.
+                    </span>
+                  </span>
+                </label>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -4915,6 +4974,21 @@ export default function MenuPage() {
                     />
                   </div>
                 )}
+
+                <label className="flex items-start gap-3 cursor-pointer rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                  <input
+                    type="checkbox"
+                    checked={editVariablePrice}
+                    onChange={(e) => setEditVariablePrice(e.target.checked)}
+                    className="w-4 h-4 mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-800">Variable price at register</span>
+                    <span className="block text-xs text-slate-500 mt-0.5">
+                      When enabled, the POS asks staff for the unit price at add-to-cart. The amounts above are suggested defaults.
+                    </span>
+                  </span>
+                </label>
 
                 <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
                   <div>
