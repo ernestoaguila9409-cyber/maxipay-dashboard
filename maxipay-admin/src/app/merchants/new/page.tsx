@@ -187,6 +187,12 @@ export default function CreateMerchantPage() {
           <p className="text-slate-500 mt-1">
             Set up a new merchant account. The owner will receive an email to set their password.
           </p>
+          <p className="text-slate-400 text-sm mt-2 max-w-xl">
+            Every merchant—including new ones—uses the same merchant web dashboard (same URL and app
+            build). Menu features such as multi-select and bulk assign taxes, kitchen label, or KDS are
+            available to all stores once the latest merchant dashboard is deployed; nothing extra is
+            required on this form.
+          </p>
         </div>
 
         {error && (

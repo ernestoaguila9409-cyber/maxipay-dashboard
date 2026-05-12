@@ -176,6 +176,10 @@ export async function POST(req: Request) {
     const merchantRef = dbAdmin.collection("Merchants").doc();
     const merchantId = merchantRef.id;
 
+    // Menu, taxes, KDS devices, etc. live under Merchants/{merchantId} as the store uses the POS
+    // and the shared merchant web dashboard (maxipay-dashboard). Admin does not ship per-merchant
+    // dashboard builds; every new merchant uses the same deployed dashboard + Firestore rules.
+
     await merchantRef.set({
       merchantNumber,
       businessName,
