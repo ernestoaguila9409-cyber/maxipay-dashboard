@@ -80,13 +80,6 @@
         { "fieldPath": "pin", "order": "ASCENDING" },
         { "fieldPath": "active", "order": "ASCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "employees",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        { "fieldPath": "email", "order": "ASCENDING" }
-      ]
     }
   ],
   "fieldOverrides": [
@@ -103,6 +96,16 @@
     {
       "collectionGroup": "deviceActivations",
       "fieldPath": "code",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "employees",
+      "fieldPath": "email",
       "indexes": [
         {
           "order": "ASCENDING",
