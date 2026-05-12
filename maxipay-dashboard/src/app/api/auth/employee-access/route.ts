@@ -85,6 +85,52 @@ async function syncDashboardStaffClaims(
   });
 }
 
+function isFirestoreMissingIndexError(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const o = e as { code?: unknown; message?: unknown };
+  const code = String(o.code ?? "");
+  const msg = String(o.message ?? "").toLowerCase();
+  return (
+    code === "failed-precondition" ||
+    code === "9" ||
+    msg.includes("requires an index") ||
+    msg.includes("failed_precondition") ||
+    msg.includes("failed-precondition")
+  );
+}
+
+/**
+ * Find employee docs with this email across all merchants.
+ * Prefer collectionGroup (needs a COLLECTION_GROUP index on `employees.email`).
+ * If that fails (index not deployed yet), fall back to one query per merchant.
+ */
+async function findEmployeeDocsByEmail(
+  db: admin.firestore.Firestore,
+  normalized: string
+): Promise<admin.firestore.QueryDocumentSnapshot[]> {
+  try {
+    const snap = await db.collectionGroup("employees").where("email", "==", normalized).get();
+    return snap.docs;
+  } catch (e: unknown) {
+    if (!isFirestoreMissingIndexError(e)) throw e;
+    console.warn(
+      "[employee-access] collectionGroup(employees) failed; falling back to per-merchant queries:",
+      e
+    );
+    const merchantRefs = await db.collection("Merchants").listDocuments();
+    const out: admin.firestore.QueryDocumentSnapshot[] = [];
+    const chunkSize = 30;
+    for (let i = 0; i < merchantRefs.length; i += chunkSize) {
+      const chunk = merchantRefs.slice(i, i + chunkSize);
+      const snaps = await Promise.all(
+        chunk.map((mref) => mref.collection("employees").where("email", "==", normalized).get())
+      );
+      for (const s of snaps) out.push(...s.docs);
+    }
+    return out;
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -270,9 +316,9 @@ export async function POST(req: Request) {
 
     getFirebaseAdminApp();
     const db = admin.firestore();
-    const snap = await db.collectionGroup("employees").where("email", "==", normalized).get();
+    const employeeDocs = await findEmployeeDocsByEmail(db, normalized);
 
-    if (snap.empty) {
+    if (employeeDocs.length === 0) {
       console.info(
         "[employee-access] No Firestore employees with email =",
         normalized,
@@ -282,7 +328,7 @@ export async function POST(req: Request) {
     }
 
     const byMerchant = new Map<string, admin.firestore.QueryDocumentSnapshot[]>();
-    for (const doc of snap.docs) {
+    for (const doc of employeeDocs) {
       const mid = merchantIdFromEmployeeDocPath(doc.ref.path);
       if (!mid) continue;
       const arr = byMerchant.get(mid) ?? [];
