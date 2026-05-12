@@ -374,16 +374,22 @@ export default function EmployeesPage() {
     setEmailError("");
   };
 
-  const validatePin = async (pin: string, excludeId?: string): Promise<boolean> => {
+  const validatePin = async (pin: string, excludeEmployeeDocId?: string): Promise<boolean> => {
     if (pin.length !== 4 || !/^\d{4}$/.test(pin)) {
       setPinError("PIN must be exactly 4 digits");
       return false;
     }
     const q = query(merchantCol(merchantId, "Employees"), where("pin", "==", pin));
     const snap = await getDocs(q);
-    const conflict = snap.docs.some((d) => d.id !== excludeId);
-    if (conflict) {
-      setPinError("PIN already in use by another employee");
+    const conflictEmployee = snap.docs.some((d) => d.id !== excludeEmployeeDocId);
+    if (conflictEmployee) {
+      setPinError("PIN already in use by another team member in this account");
+      return false;
+    }
+    const ownerPin = ownerRow?.pin?.trim() ?? "";
+    const editingOwnerProfile = editTarget && isMerchantOwnerRow(editTarget);
+    if (ownerPin === pin && !editingOwnerProfile) {
+      setPinError("PIN already in use by the account owner in this account");
       return false;
     }
     setPinError("");
@@ -880,7 +886,12 @@ export default function EmployeesPage() {
                     Four-digit access PIN for your owner profile. Must not match another team
                     member PIN.
                   </p>
-                ) : null}
+                ) : (
+                  <p className="text-slate-500 text-xs mt-1.5">
+                    Must be unique in this merchant account (not used by another employee or the
+                    account owner PIN).
+                  </p>
+                )}
               </div>
               {!(editTarget && isMerchantOwnerRow(editTarget)) && (
                 <div>
