@@ -188,10 +188,14 @@ export default function CreateMerchantPage() {
             Set up a new merchant account. The owner will receive an email to set their password.
           </p>
           <p className="text-slate-400 text-sm mt-2 max-w-xl">
-            Every merchant—including new ones—uses the same merchant web dashboard (same URL and app
-            build). Menu features such as multi-select and bulk assign taxes, kitchen label, or KDS are
-            available to all stores once the latest merchant dashboard is deployed; nothing extra is
-            required on this form.
+            Every new merchant uses the <strong className="font-medium text-slate-500">same</strong> merchant
+            web dashboard (one URL, one deployed app). You do not enable features per merchant on this form.
+            After you create the account, the owner gets the same capabilities as any other store— including
+            menu import from Excel or picture, multi-select bulk actions on menu items (taxes, kitchen label,
+            KDS, modifiers), and scanning modifier lists from a picture on the Modifiers page—whenever those
+            exist in your <strong className="font-medium text-slate-500">current</strong> merchant dashboard
+            deployment. Deploy the latest <code className="text-xs bg-slate-100 px-1 rounded">maxipay-dashboard</code>{" "}
+            so all merchants, including new ones, receive updates.
           </p>
         </div>
 

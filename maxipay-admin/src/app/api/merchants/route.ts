@@ -176,9 +176,12 @@ export async function POST(req: Request) {
     const merchantRef = dbAdmin.collection("Merchants").doc();
     const merchantId = merchantRef.id;
 
-    // Menu, taxes, KDS devices, etc. live under Merchants/{merchantId} as the store uses the POS
-    // and the shared merchant web dashboard (maxipay-dashboard). Admin does not ship per-merchant
-    // dashboard builds; every new merchant uses the same deployed dashboard + Firestore rules.
+    // Store data and dashboard UX live under Merchants/{merchantId} + shared Firestore rules.
+    // The merchant web app (maxipay-dashboard) is ONE deployment for ALL merchants—admin does not
+    // fork builds per store. New merchants get the same features as everyone else once the hosted
+    // dashboard is current: menu (Excel/picture import, bulk assign taxes / label / KDS / modifiers),
+    // Modifiers (picture scan to import groups), and the rest of the dashboard. No extra flags on
+    // this API are required for those features.
 
     await merchantRef.set({
       merchantNumber,
