@@ -542,11 +542,12 @@ export default function MenuPage() {
   const [bulkCategoriesDeleteConfirm, setBulkCategoriesDeleteConfirm] = useState(false);
   const [bulkCategoriesDeleting, setBulkCategoriesDeleting] = useState(false);
 
-  /** Bulk assign taxes / kitchen label / KDS while in item select mode. */
-  const [bulkAssignKind, setBulkAssignKind] = useState<null | "taxes" | "label" | "kds">(null);
+  /** Bulk assign taxes / kitchen label / KDS / modifiers while in item select mode. */
+  const [bulkAssignKind, setBulkAssignKind] = useState<null | "taxes" | "label" | "kds" | "modifiers">(null);
   const [bulkAssignTaxes, setBulkAssignTaxes] = useState<Record<string, boolean>>({});
   const [bulkAssignPrinterLabel, setBulkAssignPrinterLabel] = useState("");
   const [bulkAssignKdsDeviceId, setBulkAssignKdsDeviceId] = useState("");
+  const [bulkAssignModifiers, setBulkAssignModifiers] = useState<Record<string, boolean>>({});
   const [bulkAssignSaving, setBulkAssignSaving] = useState(false);
 
   const [transferMode, setTransferMode] = useState(false);
@@ -1594,6 +1595,30 @@ export default function MenuPage() {
     }
   };
 
+  const handleBulkAssignModifiersApply = async () => {
+    if (selectedItems.size === 0 || !merchantId) return;
+    const modifierGroupIds = Object.entries(bulkAssignModifiers)
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    setBulkAssignSaving(true);
+    try {
+      const ids = [...selectedItems];
+      const CHUNK = 400;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const batch = writeBatch(db);
+        for (const id of ids.slice(i, i + CHUNK)) {
+          batch.update(merchantDoc(merchantId, "MenuItems", id), { modifierGroupIds });
+        }
+        await batch.commit();
+      }
+      setBulkAssignKind(null);
+    } catch (err) {
+      console.error("Failed bulk assign modifiers:", err);
+    } finally {
+      setBulkAssignSaving(false);
+    }
+  };
+
   const handleBulkDeleteCategories = async () => {
     const ids = [...filterCategoryIds];
     if (ids.length === 0) return;
@@ -2459,6 +2484,21 @@ export default function MenuPage() {
                   >
                     <Monitor size={14} />
                     <span className="hidden sm:inline">KDS</span>
+                  </button>
+                )}
+                {modifierGroups.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBulkAssignModifiers({});
+                      setBulkAssignKind("modifiers");
+                    }}
+                    disabled={selectedItems.size === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Set modifier groups on all selected items"
+                  >
+                    <SlidersHorizontal size={14} />
+                    <span className="hidden sm:inline">Modifiers</span>
                   </button>
                 )}
                 <button
@@ -3687,7 +3727,7 @@ export default function MenuPage() {
         </div>
       )}
 
-      {/* ── Bulk assign taxes / label / KDS ── */}
+      {/* ── Bulk assign taxes / label / KDS / modifiers ── */}
       {bulkAssignKind && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
@@ -3701,6 +3741,7 @@ export default function MenuPage() {
                   {bulkAssignKind === "taxes" && `Assign taxes (${selectedItems.size})`}
                   {bulkAssignKind === "label" && `Assign kitchen label (${selectedItems.size})`}
                   {bulkAssignKind === "kds" && `Assign KDS (${selectedItems.size})`}
+                  {bulkAssignKind === "modifiers" && `Assign modifiers (${selectedItems.size})`}
                 </h3>
                 <button
                   type="button"
@@ -3789,6 +3830,82 @@ export default function MenuPage() {
                 </>
               )}
 
+              {bulkAssignKind === "modifiers" && modifierGroups.length > 0 && (() => {
+                const nestedIds = new Set<string>();
+                for (const g of modifierGroups) {
+                  for (const o of g.options) {
+                    for (const tid of o.triggersModifierGroupIds) nestedIds.add(tid);
+                  }
+                }
+                const topLevelGroups = modifierGroups.filter((g) => !nestedIds.has(g.id));
+                const nestedGroups = modifierGroups.filter((g) => nestedIds.has(g.id));
+                const selectedBulkModCount = Object.values(bulkAssignModifiers).filter(Boolean).length;
+                return (
+                  <>
+                    <p className="text-sm text-slate-500">
+                      This replaces modifier groups on every selected item (same as editing each item and
+                      saving). Leave all unchecked to clear modifiers from the selection.
+                    </p>
+                    {selectedBulkModCount > 0 && (
+                      <p className="text-xs text-slate-400">
+                        {selectedBulkModCount} group{selectedBulkModCount !== 1 ? "s" : ""} selected
+                      </p>
+                    )}
+                    <div className="flex flex-col gap-2 max-h-52 overflow-y-auto rounded-xl border border-slate-100 p-3">
+                      {topLevelGroups.map((g) => (
+                        <label key={g.id} className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={bulkAssignModifiers[g.id] ?? false}
+                            onChange={(e) =>
+                              setBulkAssignModifiers((prev) => ({
+                                ...prev,
+                                [g.id]: e.target.checked,
+                              }))
+                            }
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-slate-700">{g.name}</span>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                              g.groupType === "REMOVE"
+                                ? "bg-red-50 text-red-500"
+                                : "bg-slate-100 text-slate-400"
+                            }`}
+                          >
+                            {g.groupType === "REMOVE" ? "Remove" : "Add-on"}
+                          </span>
+                        </label>
+                      ))}
+                      {nestedGroups.length > 0 && (
+                        <div className="mt-1 pt-1 border-t border-slate-100">
+                          <p className="text-[10px] text-slate-400 mb-1">Triggered by modifier options:</p>
+                          {nestedGroups.map((g) => (
+                            <label key={g.id} className="flex items-center gap-2 cursor-pointer opacity-60">
+                              <input
+                                type="checkbox"
+                                checked={bulkAssignModifiers[g.id] ?? false}
+                                onChange={(e) =>
+                                  setBulkAssignModifiers((prev) => ({
+                                    ...prev,
+                                    [g.id]: e.target.checked,
+                                  }))
+                                }
+                                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="text-sm text-slate-700">{g.name}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-50 text-blue-500">
+                                Nested
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+
               <div className="flex gap-3 pt-1">
                 <button
                   type="button"
@@ -3803,7 +3920,8 @@ export default function MenuPage() {
                   onClick={() => {
                     if (bulkAssignKind === "taxes") void handleBulkAssignTaxesApply();
                     else if (bulkAssignKind === "label") void handleBulkAssignLabelApply();
-                    else void handleBulkAssignKdsApply();
+                    else if (bulkAssignKind === "kds") void handleBulkAssignKdsApply();
+                    else void handleBulkAssignModifiersApply();
                   }}
                   disabled={bulkAssignSaving}
                   className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
