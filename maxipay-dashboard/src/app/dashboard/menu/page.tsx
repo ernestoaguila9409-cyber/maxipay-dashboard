@@ -542,6 +542,13 @@ export default function MenuPage() {
   const [bulkCategoriesDeleteConfirm, setBulkCategoriesDeleteConfirm] = useState(false);
   const [bulkCategoriesDeleting, setBulkCategoriesDeleting] = useState(false);
 
+  /** Bulk assign taxes / kitchen label / KDS while in item select mode. */
+  const [bulkAssignKind, setBulkAssignKind] = useState<null | "taxes" | "label" | "kds">(null);
+  const [bulkAssignTaxes, setBulkAssignTaxes] = useState<Record<string, boolean>>({});
+  const [bulkAssignPrinterLabel, setBulkAssignPrinterLabel] = useState("");
+  const [bulkAssignKdsDeviceId, setBulkAssignKdsDeviceId] = useState("");
+  const [bulkAssignSaving, setBulkAssignSaving] = useState(false);
+
   const [transferMode, setTransferMode] = useState(false);
   const [transferItems, setTransferItems] = useState<Set<string>>(new Set());
   const [transferCategories, setTransferCategories] = useState<Set<string>>(new Set());
@@ -960,6 +967,16 @@ export default function MenuPage() {
     return [...merged].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   }, [activePrinterRoutingLabels, editPrinterLabel]);
 
+  const bulkAssignableLabelOptions = useMemo(() => {
+    const cur = bulkAssignPrinterLabel.trim();
+    const norms = new Set(activePrinterRoutingLabels.map((x) => x.toLowerCase()));
+    const merged =
+      cur && !norms.has(cur.toLowerCase())
+        ? [...activePrinterRoutingLabels, cur]
+        : activePrinterRoutingLabels;
+    return [...merged].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [activePrinterRoutingLabels, bulkAssignPrinterLabel]);
+
   useEffect(() => {
     kdsPickerRowsRef.current = kdsPickerDevices;
   }, [kdsPickerDevices]);
@@ -983,6 +1000,18 @@ export default function MenuPage() {
       a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
     );
   }, [activeKdsSelectOptions, editKdsDeviceId, kdsPickerDevices]);
+
+  const bulkAssignKdsSelectOptions = useMemo(() => {
+    const base = [...activeKdsSelectOptions];
+    const sel = bulkAssignKdsDeviceId.trim();
+    if (sel && !base.some((d) => d.id === sel)) {
+      const row = kdsPickerDevices.find((d) => d.id === sel);
+      if (row) base.push(row);
+    }
+    return base.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+    );
+  }, [activeKdsSelectOptions, bulkAssignKdsDeviceId, kdsPickerDevices]);
 
   /** If KDS list loads after the edit modal opens, pre-select a device that routes this item. */
   useEffect(() => {
@@ -1488,6 +1517,80 @@ export default function MenuPage() {
     } finally {
       setBulkDeleting(false);
       setBulkDeleteConfirm(false);
+    }
+  };
+
+  const closeBulkAssignModal = () => {
+    if (bulkAssignSaving) return;
+    setBulkAssignKind(null);
+  };
+
+  const handleBulkAssignTaxesApply = async () => {
+    if (selectedItems.size === 0 || !merchantId) return;
+    const assignable = taxes.filter((t) => t.enabled || t.enabledOnline);
+    const taxIds = assignable.filter((t) => bulkAssignTaxes[t.id]).map((t) => t.id);
+    setBulkAssignSaving(true);
+    try {
+      const ids = [...selectedItems];
+      const CHUNK = 400;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const batch = writeBatch(db);
+        for (const id of ids.slice(i, i + CHUNK)) {
+          batch.update(merchantDoc(merchantId, "MenuItems", id), { taxIds });
+        }
+        await batch.commit();
+      }
+      setBulkAssignKind(null);
+    } catch (err) {
+      console.error("Failed bulk assign taxes:", err);
+    } finally {
+      setBulkAssignSaving(false);
+    }
+  };
+
+  const handleBulkAssignLabelApply = async () => {
+    if (selectedItems.size === 0 || !merchantId) return;
+    const pl = bulkAssignPrinterLabel.trim();
+    setBulkAssignSaving(true);
+    try {
+      if (pl) await mergeKitchenLabelToSettings(pl);
+      const ids = [...selectedItems];
+      const CHUNK = 400;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const batch = writeBatch(db);
+        for (const id of ids.slice(i, i + CHUNK)) {
+          const item = items.find((x) => x.id === id);
+          if (!item) continue;
+          const inheritedOnly =
+            inheritedKitchenRoutingLabelOnly(item, categories, allSubcategories)?.trim() ?? "";
+          if (!pl || pl === inheritedOnly) {
+            batch.update(merchantDoc(merchantId, "MenuItems", id), { printerLabel: deleteField() });
+          } else {
+            batch.update(merchantDoc(merchantId, "MenuItems", id), { printerLabel: pl });
+          }
+        }
+        await batch.commit();
+      }
+      setBulkAssignKind(null);
+    } catch (err) {
+      console.error("Failed bulk assign label:", err);
+    } finally {
+      setBulkAssignSaving(false);
+    }
+  };
+
+  const handleBulkAssignKdsApply = async () => {
+    if (selectedItems.size === 0 || !merchantId) return;
+    setBulkAssignSaving(true);
+    try {
+      for (const id of selectedItems) {
+        await syncMenuItemKdsDeviceAssignment(id, bulkAssignKdsDeviceId, kdsPickerDevices);
+      }
+      setBulkAssignKind(null);
+    } catch (err) {
+      console.error("Failed bulk assign KDS:", err);
+    } finally {
+      setBulkAssignSaving(false);
     }
   };
 
@@ -2315,6 +2418,49 @@ export default function MenuPage() {
                   <CheckSquare size={14} />
                   {selectedItems.size === filtered.length ? "Deselect All" : "Select All"}
                 </button>
+                {taxes.some((t) => t.enabled || t.enabledOnline) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBulkAssignTaxes({});
+                      setBulkAssignKind("taxes");
+                    }}
+                    disabled={selectedItems.size === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Set taxes on all selected items"
+                  >
+                    <Receipt size={14} />
+                    <span className="hidden sm:inline">Taxes</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBulkAssignPrinterLabel("");
+                    setBulkAssignKind("label");
+                  }}
+                  disabled={selectedItems.size === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Set kitchen routing label on all selected items"
+                >
+                  <Printer size={14} />
+                  <span className="hidden sm:inline">Label</span>
+                </button>
+                {kdsPickerDevices.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBulkAssignKdsDeviceId("");
+                      setBulkAssignKind("kds");
+                    }}
+                    disabled={selectedItems.size === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Route all selected items to one KDS (explicit device list)"
+                  >
+                    <Monitor size={14} />
+                    <span className="hidden sm:inline">KDS</span>
+                  </button>
+                )}
                 <button
                   onClick={() => setBulkDeleteConfirm(true)}
                   disabled={selectedItems.size === 0}
@@ -3533,6 +3679,142 @@ export default function MenuPage() {
                     </>
                   ) : (
                     "Delete All"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bulk assign taxes / label / KDS ── */}
+      {bulkAssignKind && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={closeBulkAssignModal}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
+            <div className="px-6 py-5 space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-lg font-semibold text-slate-800">
+                  {bulkAssignKind === "taxes" && `Assign taxes (${selectedItems.size})`}
+                  {bulkAssignKind === "label" && `Assign kitchen label (${selectedItems.size})`}
+                  {bulkAssignKind === "kds" && `Assign KDS (${selectedItems.size})`}
+                </h3>
+                <button
+                  type="button"
+                  onClick={closeBulkAssignModal}
+                  disabled={bulkAssignSaving}
+                  className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors disabled:opacity-40"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {bulkAssignKind === "taxes" && (
+                <>
+                  <p className="text-sm text-slate-500">
+                    This replaces the tax selection on every selected item (same as editing each item and
+                    saving).
+                  </p>
+                  <div className="flex flex-col gap-2 max-h-52 overflow-y-auto rounded-xl border border-slate-100 p-3">
+                    {taxes
+                      .filter((t) => t.enabled || t.enabledOnline)
+                      .map((t) => (
+                        <label key={t.id} className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={bulkAssignTaxes[t.id] ?? false}
+                            onChange={(e) =>
+                              setBulkAssignTaxes((prev) => ({
+                                ...prev,
+                                [t.id]: e.target.checked,
+                              }))
+                            }
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-slate-700">{t.name}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-amber-50 text-amber-600">
+                            {t.amount}%
+                          </span>
+                        </label>
+                      ))}
+                  </div>
+                </>
+              )}
+
+              {bulkAssignKind === "label" && (
+                <>
+                  <p className="text-xs text-slate-400">
+                    Labels match kitchen printers on the POS. (None) clears item-level routing; category or
+                    subcategory labels still apply. If the label matches what the category already provides,
+                    the item field is cleared for that row.
+                  </p>
+                  <select
+                    value={bulkAssignPrinterLabel}
+                    onChange={(e) => setBulkAssignPrinterLabel(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                  >
+                    <option value="">(None)</option>
+                    {bulkAssignableLabelOptions.map((lbl) => (
+                      <option key={lbl} value={lbl}>
+                        {lbl}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+
+              {bulkAssignKind === "kds" && (
+                <>
+                  <p className="text-xs text-slate-400">
+                    Active KDS devices only. This updates the explicit per-item device list for each selected
+                    item; (None) removes the item from every device&apos;s explicit list (category-based routing
+                    is unchanged).
+                  </p>
+                  <select
+                    value={bulkAssignKdsDeviceId}
+                    onChange={(e) => setBulkAssignKdsDeviceId(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 bg-white"
+                  >
+                    <option value="">(None)</option>
+                    {bulkAssignKdsSelectOptions.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                        {!d.isActive ? " (inactive)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={closeBulkAssignModal}
+                  disabled={bulkAssignSaving}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (bulkAssignKind === "taxes") void handleBulkAssignTaxesApply();
+                    else if (bulkAssignKind === "label") void handleBulkAssignLabelApply();
+                    else void handleBulkAssignKdsApply();
+                  }}
+                  disabled={bulkAssignSaving}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {bulkAssignSaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Applying…
+                    </>
+                  ) : (
+                    "Apply"
                   )}
                 </button>
               </div>
