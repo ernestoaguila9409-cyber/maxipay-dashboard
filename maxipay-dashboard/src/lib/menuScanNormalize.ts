@@ -269,3 +269,24 @@ export function normalizeStructuredMenu(parsed: unknown): NormalizedScanMenu {
 
   return { categories };
 }
+
+/**
+ * Modifier-only scan AI output: `{ "modifierGroups": [ ... ] }` or `{ "groups": [ ... ] }`.
+ * Each group matches {@link NormalizedModifierGroup}; flattening rules match full menu scans.
+ */
+export function normalizeStructuredModifierScan(parsed: unknown): NormalizedModifierGroup[] {
+  if (!parsed || typeof parsed !== "object") return [];
+  const root = parsed as Record<string, unknown>;
+  const raw = root.modifierGroups ?? root.groups;
+  if (!Array.isArray(raw)) return [];
+  const out: NormalizedModifierGroup[] = [];
+  for (const g of raw) {
+    const n = normalizeModifierGroup(g);
+    if (n) {
+      for (const split of splitFlattenedOptions([n])) {
+        out.push(split);
+      }
+    }
+  }
+  return out;
+}

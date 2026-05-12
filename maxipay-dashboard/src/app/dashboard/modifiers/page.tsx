@@ -20,6 +20,7 @@ import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
+import ModifierScanModal from "@/components/ModifierScanModal";
 import {
   Search,
   Plus,
@@ -98,6 +99,8 @@ export default function ModifiersPage() {
 
   const [cleanupRunning, setCleanupRunning] = useState(false);
   const [cleanupDismissed, setCleanupDismissed] = useState(false);
+
+  const [modifierScanOpen, setModifierScanOpen] = useState(false);
 
   useEffect(() => {
     selectedGroupIdRef.current = selectedGroup?.id ?? null;
@@ -637,6 +640,14 @@ export default function ModifiersPage() {
                           <CheckSquare size={16} />
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => setModifierScanOpen(true)}
+                        className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-50 hover:text-indigo-600 transition-colors"
+                        title="Scan modifiers from picture"
+                      >
+                        <ImageIcon size={18} />
+                      </button>
                       <button
                         onClick={openAddGroup}
                         className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
@@ -1498,6 +1509,14 @@ export default function ModifiersPage() {
           </div>
         </div>
       )}
+
+      <ModifierScanModal
+        open={modifierScanOpen}
+        onClose={() => setModifierScanOpen(false)}
+        onImportComplete={() => {
+          /* Realtime listener refreshes groups */
+        }}
+      />
     </>
   );
 }

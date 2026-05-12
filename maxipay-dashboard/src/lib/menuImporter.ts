@@ -11,6 +11,7 @@ import {
   formatCategoryDisplayName,
   normalizeCategoryName,
 } from "@/lib/categoryNameUtils";
+import type { NormalizedModifierGroup } from "@/lib/menuScanNormalize";
 
 // ─── Parsed types ────────────────────────────────────────────────────
 
@@ -952,6 +953,138 @@ export async function importScannedMenuToFirestore(
     categories: newCategoriesCreated,
     subcategories: newSubcategoriesCreated,
     items: itemCount,
+    modifierGroups: newModifierGroups,
+    modifierOptions: totalModifierOptions,
+  };
+}
+
+// ─── Picture scan → modifier groups only (adds groups; does not touch menu items) ───
+
+export interface ModifierGroupsOnlyImportResult {
+  modifierGroups: number;
+  modifierOptions: number;
+}
+
+/**
+ * Maps AI-normalized modifier groups to rows with stable client ids (for Firestore option ids).
+ */
+export function normalizedModifierGroupsToScanRows(
+  groups: NormalizedModifierGroup[]
+): ScannedModifierGroupRow[] {
+  return groups.map((mg) => ({
+    id: crypto.randomUUID(),
+    name: mg.name,
+    required: mg.required ?? false,
+    minSelection: mg.minSelection ?? (mg.required ? 1 : 0),
+    maxSelection: mg.maxSelection ?? 1,
+    options: mg.options.map(
+      (opt): ScannedModifierOptionRow => ({
+        id: crypto.randomUUID(),
+        name: opt.name,
+        price: opt.price,
+        triggersModifierGroupNames: opt.triggersModifierGroupNames ?? [],
+      })
+    ),
+  }));
+}
+
+/**
+ * Creates new ModifierGroups documents and resolves `triggersModifierGroupNames` → ids (same as menu scan import).
+ */
+export async function importScannedModifierGroupsToFirestore(
+  merchantId: string,
+  rows: ScannedModifierGroupRow[],
+  onProgress?: (p: ImportProgress) => void
+): Promise<ModifierGroupsOnlyImportResult> {
+  const prepared = rows
+    .filter((mg) => mg.name.trim())
+    .map((mg) => ({
+      clientId: mg.id,
+      name: mg.name.trim(),
+      required: mg.required ?? false,
+      minSelection: mg.minSelection ?? (mg.required ? 1 : 0),
+      maxSelection: mg.maxSelection ?? 1,
+      options: mg.options
+        .filter((o) => o.name.trim())
+        .map((o) => ({
+          clientId: o.id,
+          name: o.name.trim(),
+          price: Math.max(0, o.price ?? 0),
+          triggersModifierGroupNames: o.triggersModifierGroupNames ?? [],
+        })),
+    }));
+
+  onProgress?.({ stage: "Creating modifier groups…", current: 0, total: 2 });
+
+  let batch = writeBatch(db);
+  let count = 0;
+  const commitIfNeeded = async () => {
+    if (count >= MAX_BATCH_OPS) {
+      await batch.commit();
+      batch = writeBatch(db);
+      count = 0;
+    }
+  };
+
+  const mgClientToFirestore = new Map<string, string>();
+  const mgNameToFirestoreId = new Map<string, string>();
+  let newModifierGroups = 0;
+  let totalModifierOptions = 0;
+
+  for (const mg of prepared) {
+    const ref = doc(merchantCol(merchantId, "ModifierGroups"));
+    batch.set(ref, {
+      name: mg.name,
+      required: mg.required,
+      minSelection: mg.minSelection,
+      maxSelection: mg.maxSelection,
+      groupType: "ADD",
+      options: mg.options.map((opt) => ({
+        id: opt.clientId,
+        name: opt.name,
+        price: opt.price,
+        triggersModifierGroupIds: [],
+      })),
+    });
+    mgClientToFirestore.set(mg.clientId, ref.id);
+    mgNameToFirestoreId.set(mg.name.toLowerCase(), ref.id);
+    newModifierGroups++;
+    totalModifierOptions += mg.options.length;
+    count++;
+    await commitIfNeeded();
+  }
+  if (count > 0) await batch.commit();
+  batch = writeBatch(db);
+  count = 0;
+
+  onProgress?.({ stage: "Linking triggered modifiers…", current: 1, total: 2 });
+
+  for (const mg of prepared) {
+    const firestoreId = mgClientToFirestore.get(mg.clientId);
+    if (!firestoreId) continue;
+    const needsUpdate = mg.options.some((o) => o.triggersModifierGroupNames.length > 0);
+    if (!needsUpdate) continue;
+    const resolvedOptions = mg.options.map((opt) => {
+      const triggerIds = opt.triggersModifierGroupNames
+        .map((n) => mgNameToFirestoreId.get(n.toLowerCase()))
+        .filter((id): id is string => !!id);
+      return {
+        id: opt.clientId,
+        name: opt.name,
+        price: opt.price,
+        triggersModifierGroupIds: triggerIds,
+      };
+    });
+    const ref = merchantDoc(merchantId, "ModifierGroups", firestoreId);
+    batch.update(ref, { options: resolvedOptions });
+    count++;
+    await commitIfNeeded();
+  }
+  if (count > 0) await batch.commit();
+
+  onProgress?.({ stage: "Done", current: 2, total: 2 });
+
+  return {
     modifierGroups: newModifierGroups,
     modifierOptions: totalModifierOptions,
   };
