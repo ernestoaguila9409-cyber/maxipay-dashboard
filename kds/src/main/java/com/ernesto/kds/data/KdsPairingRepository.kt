@@ -25,7 +25,7 @@ class KdsPairingRepository(
             return Result.failure(IllegalArgumentException("Enter all 6 digits"))
         }
         return runCatching {
-            val snapshot = MerchantFirestore.col("kds_devices")
+            val snapshot = db.collectionGroup("kds_devices")
                 .whereEqualTo("pairingCode", digits)
                 .limit(1)
                 .get()
@@ -36,6 +36,11 @@ class KdsPairingRepository(
             }
 
             val doc = snapshot.documents.first()
+            val merchantDoc = doc.reference.parent?.parent
+            val merchantId = merchantDoc?.id?.trim().orEmpty()
+            if (merchantId.isEmpty()) {
+                throw IllegalStateException("Invalid data layout")
+            }
             if (doc.getBoolean("isPaired") == true) {
                 throw IllegalStateException("Code already used")
             }
@@ -56,7 +61,10 @@ class KdsPairingRepository(
             prefs.edit()
                 .putString(KdsDevicePrefs.KEY_DEVICE_DOC_ID, doc.id)
                 .putString(KdsDevicePrefs.KEY_STATION_ID, stationId)
+                .putString(KdsDevicePrefs.KEY_MERCHANT_ID, merchantId)
                 .commit()
+
+            MerchantFirestore.init(merchantId)
 
             doc.id
         }

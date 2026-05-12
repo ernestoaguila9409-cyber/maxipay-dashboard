@@ -19,6 +19,7 @@ import coil.load
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.google.firebase.firestore.FieldValue
@@ -32,6 +33,8 @@ class ItemDetailActivity : AppCompatActivity() {
 
     private lateinit var txtName: TextView
     private lateinit var txtPrice: TextView
+    private lateinit var switchVariablePrice: SwitchMaterial
+    private lateinit var txtVariablePriceHint: TextView
     private lateinit var txtCategory: TextView
     private lateinit var containerTaxes: LinearLayout
     private lateinit var txtTaxesEmpty: TextView
@@ -58,6 +61,7 @@ class ItemDetailActivity : AppCompatActivity() {
     private var itemImageUrl: String? = null
     private var itemPrice = 0.0
     private var itemPrices: Map<String, Double> = emptyMap()
+    private var itemVariablePrice = false
     private var itemCategoryId = ""
     /** Category doc ids where this item is placed (matches dashboard / KDS [placementCategoryIds]). */
     private var itemPlacementCategoryIds: Set<String> = emptySet()
@@ -69,6 +73,8 @@ class ItemDetailActivity : AppCompatActivity() {
     private var labels: List<String> = emptyList()
     /** KDS devices that show this item (explicit ids, category routing, or no filter = all). */
     private var kdsAssignedStations: List<KdsDeviceRow> = emptyList()
+
+    private var suppressVariablePriceSwitch = false
 
     private data class KdsDeviceRow(val id: String, val name: String)
 
@@ -86,6 +92,8 @@ class ItemDetailActivity : AppCompatActivity() {
 
         txtName = findViewById(R.id.txtItemDetailName)
         txtPrice = findViewById(R.id.txtItemDetailPrice)
+        switchVariablePrice = findViewById(R.id.switchItemDetailVariablePrice)
+        txtVariablePriceHint = findViewById(R.id.txtItemDetailVariablePriceHint)
         txtCategory = findViewById(R.id.txtItemDetailCategory)
         containerTaxes = findViewById(R.id.containerTaxes)
         txtTaxesEmpty = findViewById(R.id.txtTaxesEmpty)
@@ -106,6 +114,22 @@ class ItemDetailActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.btnEditItemName).setOnClickListener { showEditNameDialog() }
         txtPrice.setOnClickListener { showEditPriceDialog() }
+        switchVariablePrice.setOnCheckedChangeListener { _, checked ->
+            if (suppressVariablePriceSwitch) return@setOnCheckedChangeListener
+            MerchantFirestore.col("MenuItems").document(itemId)
+                .update("variablePrice", checked)
+                .addOnSuccessListener {
+                    itemVariablePrice = checked
+                    bindHeader()
+                    Toast.makeText(this, R.string.item_detail_saved, Toast.LENGTH_SHORT).show()
+                }
+                .addOnFailureListener {
+                    suppressVariablePriceSwitch = true
+                    switchVariablePrice.isChecked = itemVariablePrice
+                    suppressVariablePriceSwitch = false
+                    Toast.makeText(this, R.string.item_detail_load_failed, Toast.LENGTH_SHORT).show()
+                }
+        }
         findViewById<MaterialButton>(R.id.btnAddTax).setOnClickListener { showAddTaxDialog() }
         findViewById<MaterialButton>(R.id.btnAddModifier).setOnClickListener { showAddModifierDialog() }
         findViewById<MaterialButton>(R.id.btnAddLabel).setOnClickListener { showAddLabelDialog() }
@@ -237,13 +261,16 @@ class ItemDetailActivity : AppCompatActivity() {
                 itemPrice = doc.getDouble("price") ?: 0.0
                 @Suppress("UNCHECKED_CAST")
                 itemPrices = (doc.get("prices") as? Map<String, Double>) ?: emptyMap()
+                itemVariablePrice = doc.getBoolean("variablePrice") ?: false
+                suppressVariablePriceSwitch = true
+                switchVariablePrice.isChecked = itemVariablePrice
+                suppressVariablePriceSwitch = false
                 itemCategoryId = doc.getString("categoryId").orEmpty()
                 itemPlacementCategoryIds = KdsStationRouting.placementCategoryIdsFromMenuItemDoc(doc)
                 itemSubcategoryId = subcategoryIdForItem(doc, itemCategoryId)
                 @Suppress("UNCHECKED_CAST")
                 assignedTaxIds = (doc.get("assignedTaxIds") as? List<String>) ?: emptyList()
-                @Suppress("UNCHECKED_CAST")
-                assignedModifierGroupIds = (doc.get("assignedModifierGroupIds") as? List<String>) ?: emptyList()
+                assignedModifierGroupIds = MerchantFirestore.mergeMenuItemModifierGroupIds(doc)
                 @Suppress("UNCHECKED_CAST")
                 val labelsField = (doc.get("labels") as? List<*>)?.mapNotNull { it as? String }?.map { it.trim() }
                     ?.filter { it.isNotEmpty() }
@@ -277,8 +304,14 @@ class ItemDetailActivity : AppCompatActivity() {
 
     private fun bindHeader() {
         txtName.text = itemName
-        val displayPrice = itemPrices.values.firstOrNull() ?: itemPrice
-        txtPrice.text = String.format("$%.2f", displayPrice)
+        val suggested = itemPrices.values.firstOrNull() ?: itemPrice
+        val suggestedFmt = String.format(Locale.US, "%.2f", suggested)
+        txtPrice.text = if (itemVariablePrice) {
+            "${getString(R.string.menu_grid_price_variable)}\n${getString(R.string.item_detail_price_suggested_line, suggestedFmt)}"
+        } else {
+            String.format(Locale.US, "$%s", suggestedFmt)
+        }
+        txtVariablePriceHint.visibility = if (itemVariablePrice) View.VISIBLE else View.GONE
     }
 
     private fun bindImageSection() {
@@ -734,9 +767,15 @@ class ItemDetailActivity : AppCompatActivity() {
 
     private fun saveAssignedModifierGroupIds(ids: List<String>) {
         val updates: Map<String, Any> = if (ids.isEmpty()) {
-            mapOf("assignedModifierGroupIds" to FieldValue.delete())
+            mapOf(
+                "assignedModifierGroupIds" to FieldValue.delete(),
+                "modifierGroupIds" to FieldValue.delete(),
+            )
         } else {
-            mapOf("assignedModifierGroupIds" to ids)
+            mapOf(
+                "assignedModifierGroupIds" to ids,
+                "modifierGroupIds" to ids,
+            )
         }
         MerchantFirestore.col("MenuItems").document(itemId).update(updates)
             .addOnSuccessListener {

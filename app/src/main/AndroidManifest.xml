@@ -148,7 +148,8 @@
             android:windowSoftInputMode="adjustNothing" />
         <activity
             android:name=".MenuOnlyActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".PaymentActivity"
             android:exported="false" />

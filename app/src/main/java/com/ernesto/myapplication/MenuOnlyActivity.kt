@@ -1193,7 +1193,7 @@ class MenuOnlyActivity : AppCompatActivity() {
                     Toast.makeText(this, "Enter a valid price", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                if (variableItem && price < 0) {
+                if (variableItem && (parsedPrice ?: 0.0) < 0) {
                     Toast.makeText(this, "Enter a valid price", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }

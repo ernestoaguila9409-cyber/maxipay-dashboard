@@ -182,6 +182,13 @@ export async function POST(req: Request) {
     // dashboard is current: menu (Excel/picture import, bulk assign taxes / label / KDS / modifiers),
     // Modifiers (picture scan to import groups), and the rest of the dashboard. No extra flags on
     // this API are required for those features.
+    //
+    // Schema contract (all merchants, including ones created here): links from a menu item to
+    // modifier groups are stored on `Merchants/{merchantId}/MenuItems/{itemId}` as **modifierGroupIds**
+    // (string array). The Android POS inventory app and POS menu read that field; they also merge
+    // legacy **assignedModifierGroupIds** if present. Any new server or dashboard code that creates or
+    // updates menu items should set **modifierGroupIds** (not assignedModifierGroupIds alone) so
+    // assignments stay visible across web and Android for every account.
 
     await merchantRef.set({
       merchantNumber,

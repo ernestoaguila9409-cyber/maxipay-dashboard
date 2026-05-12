@@ -2,6 +2,7 @@ package com.ernesto.myapplication
 
 import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.DocumentReference
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 
 /**
@@ -90,5 +91,28 @@ object MerchantFirestore {
     /** Merchant-scoped document reference: `Merchants/{mid}/{resolvedName}/{docId}`. */
     fun doc(collectionName: String, docId: String): DocumentReference {
         return col(collectionName).document(docId)
+    }
+
+    /**
+     * Dashboard stores modifier links on menu items as **modifierGroupIds**; legacy Android used
+     * **assignedModifierGroupIds**. Merge both (deduped, dashboard order first) for inventory/detail.
+     */
+    fun mergeMenuItemModifierGroupIds(doc: DocumentSnapshot): List<String> {
+        @Suppress("UNCHECKED_CAST")
+        val fromDashboard = (doc.get("modifierGroupIds") as? List<*>)
+            ?.mapNotNull { it as? String } ?: emptyList()
+        @Suppress("UNCHECKED_CAST")
+        val fromLegacy = (doc.get("assignedModifierGroupIds") as? List<*>)
+            ?.mapNotNull { it as? String } ?: emptyList()
+        val out = LinkedHashSet<String>()
+        for (id in fromDashboard) {
+            val t = id.trim()
+            if (t.isNotEmpty()) out.add(t)
+        }
+        for (id in fromLegacy) {
+            val t = id.trim()
+            if (t.isNotEmpty()) out.add(t)
+        }
+        return out.toList()
     }
 }

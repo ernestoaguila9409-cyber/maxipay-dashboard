@@ -30,34 +30,41 @@
             android:layout_height="0dp"
             android:layout_weight="3" />
 
-        <!-- Header -->
+        <!-- Header: merchant business name (synced from Settings/businessInfo) -->
         <TextView
-            android:layout_width="wrap_content"
+            android:id="@+id/loginTitleBusiness"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="MaxiPay POS"
+            android:layout_marginHorizontal="32dp"
+            android:gravity="center_horizontal"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:text="@string/login_business_title_fallback"
             android:textColor="@android:color/white"
-            android:textSize="30sp"
+            android:textSize="28sp"
             android:textStyle="bold"
             android:fontFamily="sans-serif-medium"
-            android:letterSpacing="0.04" />
+            android:letterSpacing="0.02" />
 
         <TextView
+            android:id="@+id/loginSubtitlePowered"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="Powered by Volt ⚡"
+            android:layout_marginTop="8dp"
+            android:text="@string/login_powered_by"
             android:textColor="#9F7BFF"
             android:textSize="14sp"
             android:fontFamily="sans-serif-medium" />
 
         <TextView
+            android:id="@+id/loginTagline"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Secure Merchant Access"
+            android:layout_marginTop="6dp"
+            android:text="@string/login_tagline"
             android:textColor="#99FFFFFF"
             android:textSize="12sp"
-            android:letterSpacing="0.08" />
+            android:letterSpacing="0.06" />
 
         <!-- PIN Dots -->
         <LinearLayout

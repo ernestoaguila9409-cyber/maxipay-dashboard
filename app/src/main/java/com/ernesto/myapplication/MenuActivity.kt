@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -20,6 +21,8 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
+import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,6 +38,7 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.abs
+import kotlin.math.round
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
@@ -1217,6 +1221,7 @@ class MenuActivity : AppCompatActivity() {
         val printerLabel: String?,
         val subcategoryId: String,
         val imageUrl: String? = null,
+        val variablePrice: Boolean = false,
     )
 
     private fun trimMenuImageUrl(raw: String?): String? =
@@ -1351,6 +1356,7 @@ class MenuActivity : AppCompatActivity() {
                     val imgUrl = trimMenuImageUrl(doc.getString("imageUrl"))
                     val courseId = doc.getString("courseId")?.trim()?.takeIf { it.isNotEmpty() }
                     if (courseId != null) menuItemCourseIds[itemId] = courseId
+                    val variablePrice = doc.getBoolean("variablePrice") ?: false
                     items.add(
                         MenuGridItem(
                             itemId = itemId,
@@ -1364,6 +1370,7 @@ class MenuActivity : AppCompatActivity() {
                             printerLabel = printerLabel,
                             subcategoryId = itemSubId,
                             imageUrl = imgUrl,
+                            variablePrice = variablePrice,
                         )
                     )
                 }
@@ -1454,6 +1461,7 @@ class MenuActivity : AppCompatActivity() {
                     val printerLabel = MenuItemRoutingLabel.resolve(itemLabel, subLabel, catLabel)
 
                     val imgUrl = trimMenuImageUrl(doc.getString("imageUrl"))
+                    val variablePrice = doc.getBoolean("variablePrice") ?: false
                     items.add(
                         MenuGridItem(
                             itemId = itemId,
@@ -1467,6 +1475,7 @@ class MenuActivity : AppCompatActivity() {
                             printerLabel = printerLabel,
                             subcategoryId = subcategoryId,
                             imageUrl = imgUrl,
+                            variablePrice = variablePrice,
                         )
                     )
                 }
@@ -1509,7 +1518,11 @@ class MenuActivity : AppCompatActivity() {
 
             fun bind(item: MenuGridItem) {
                 txtName.text = item.name
-                txtPrice.text = "$${String.format(Locale.US, "%.2f", item.price)}"
+                txtPrice.text = if (item.variablePrice) {
+                    getString(R.string.menu_grid_price_variable)
+                } else {
+                    "$${String.format(Locale.US, "%.2f", item.price)}"
+                }
                 val img = trimMenuImageUrl(item.imageUrl)
                 if (img != null) {
                     imgThumb.visibility = View.VISIBLE
@@ -1571,46 +1584,197 @@ class MenuActivity : AppCompatActivity() {
             .addOnSuccessListener { itemDoc ->
                 val resolvedImage =
                     trimMenuImageUrl(imageUrl) ?: trimMenuImageUrl(itemDoc.getString("imageUrl"))
-                val itemLabel = MenuItemRoutingLabel.fromMenuItemDoc(itemDoc)
-                val itemCatId = itemDoc.getString("categoryId").orEmpty()
-                val itemSubId = itemDoc.getString("subcategoryId").orEmpty()
-                val subLabel = allSubcategories.firstOrNull { it.id == itemSubId }?.kitchenLabel
-                val catLabel = categoryKitchenLabels[itemCatId]
-                val printerLabel = MenuItemRoutingLabel.resolve(itemLabel, subLabel, catLabel)
-                @Suppress("UNCHECKED_CAST")
-                val embedded = (itemDoc.get("modifierGroupIds") as? List<String>)
-                    ?.filter { it.isNotBlank() } ?: emptyList()
-                @Suppress("UNCHECKED_CAST")
-                val assigned = (itemDoc.get("assignedModifierGroupIds") as? List<String>)
-                    ?.filter { it.isNotBlank() } ?: emptyList()
-                val merged = (embedded + assigned).distinct()
-
-                if (merged.isNotEmpty()) {
-                    showModifierDialog(
-                        itemId, name, basePrice, stock, merged, taxMode, taxIds, printerLabel,
-                        imageUrl = resolvedImage,
-                    )
+                val variablePrice = itemDoc.getBoolean("variablePrice") ?: false
+                if (variablePrice) {
+                    showVariablePriceAtCartDialog(name, basePrice) { chosenPrice ->
+                        continueCheckAndShowModifiers(
+                            itemDoc, itemId, name, chosenPrice, stock, taxMode, taxIds, resolvedImage,
+                        )
+                    }
                 } else {
-                    MerchantFirestore.col("ItemModifierGroups")
-                        .whereEqualTo("itemId", itemId)
-                        .orderBy("displayOrder")
-                        .get()
-                        .addOnSuccessListener { documents ->
-                            if (documents.isEmpty) {
-                                addToCart(
-                                    itemId, name, basePrice, stock, emptyList(),
-                                    taxMode, taxIds, printerLabel, imageUrl = resolvedImage,
-                                )
-                            } else {
-                                val groupIds = documents.mapNotNull { it.getString("groupId") }
-                                showModifierDialog(
-                                    itemId, name, basePrice, stock, groupIds, taxMode, taxIds, printerLabel,
-                                    imageUrl = resolvedImage,
-                                )
-                            }
-                        }
+                    continueCheckAndShowModifiers(
+                        itemDoc, itemId, name, basePrice, stock, taxMode, taxIds, resolvedImage,
+                    )
                 }
             }
+    }
+
+    private fun continueCheckAndShowModifiers(
+        itemDoc: com.google.firebase.firestore.DocumentSnapshot,
+        itemId: String,
+        name: String,
+        effectiveBasePrice: Double,
+        stock: Long,
+        taxMode: String,
+        taxIds: List<String>,
+        resolvedImage: String?,
+    ) {
+        val itemLabel = MenuItemRoutingLabel.fromMenuItemDoc(itemDoc)
+        val itemCatId = itemDoc.getString("categoryId").orEmpty()
+        val itemSubId = itemDoc.getString("subcategoryId").orEmpty()
+        val subLabel = allSubcategories.firstOrNull { it.id == itemSubId }?.kitchenLabel
+        val catLabel = categoryKitchenLabels[itemCatId]
+        val printerLabel = MenuItemRoutingLabel.resolve(itemLabel, subLabel, catLabel)
+        @Suppress("UNCHECKED_CAST")
+        val embedded = (itemDoc.get("modifierGroupIds") as? List<String>)
+            ?.filter { it.isNotBlank() } ?: emptyList()
+        @Suppress("UNCHECKED_CAST")
+        val assigned = (itemDoc.get("assignedModifierGroupIds") as? List<String>)
+            ?.filter { it.isNotBlank() } ?: emptyList()
+        val merged = (embedded + assigned).distinct()
+
+        if (merged.isNotEmpty()) {
+            showModifierDialog(
+                itemId, name, effectiveBasePrice, stock, merged, taxMode, taxIds, printerLabel,
+                imageUrl = resolvedImage,
+            )
+        } else {
+            MerchantFirestore.col("ItemModifierGroups")
+                .whereEqualTo("itemId", itemId)
+                .orderBy("displayOrder")
+                .get()
+                .addOnSuccessListener { documents ->
+                    if (documents.isEmpty) {
+                        addToCart(
+                            itemId, name, effectiveBasePrice, stock, emptyList(),
+                            taxMode, taxIds, printerLabel, imageUrl = resolvedImage,
+                        )
+                    } else {
+                        val groupIds = documents.mapNotNull { it.getString("groupId") }
+                        showModifierDialog(
+                            itemId, name, effectiveBasePrice, stock, groupIds, taxMode, taxIds, printerLabel,
+                            imageUrl = resolvedImage,
+                        )
+                    }
+                }
+        }
+    }
+
+    // ── Variable price dialog: same overlay numeric keypad as inventory (MenuOnly) ─────────
+
+    private fun keyboardAwareVariablePriceDialogWidthPx(): Int {
+        val density = resources.displayMetrics.density
+        val targetDp = 560
+        val sideMarginPx = (32 * density).toInt()
+        val maxByScreen = resources.displayMetrics.widthPixels - sideMarginPx
+        return ((targetDp * density).toInt()).coerceAtMost(maxByScreen.coerceAtLeast(1))
+    }
+
+    private fun applyKeyboardAwareVariablePriceDialog(dialog: AlertDialog) {
+        dialog.setCanceledOnTouchOutside(false)
+        val w = dialog.window ?: return
+        val density = resources.displayMetrics.density
+        w.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        w.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        w.setLayout(
+            keyboardAwareVariablePriceDialogWidthPx(),
+            WindowManager.LayoutParams.WRAP_CONTENT,
+        )
+        w.attributes = w.attributes.apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = (24 * density).toInt()
+        }
+    }
+
+    private fun statusBarInsetPxForDialogs(): Int {
+        val root = window.decorView
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val insets = root.rootWindowInsets?.getInsets(WindowInsets.Type.statusBars())
+            if (insets != null) return insets.top
+        }
+        val resId = resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (resId > 0) resources.getDimensionPixelSize(resId) else 0
+    }
+
+    private fun installVariablePriceKeyboardResizing(
+        dialog: AlertDialog,
+        controller: PosKeyboardController,
+    ): PosKeyboardController.VisibilityListener {
+        val listener = object : PosKeyboardController.VisibilityListener {
+            override fun onKeyboardShown(heightPx: Int) {
+                val w = dialog.window ?: return
+                val density = resources.displayMetrics.density
+                val topMarginPx = (24 * density).toInt()
+                val bottomMarginPx = (8 * density).toInt()
+                val statusBarPx = statusBarInsetPxForDialogs()
+                val available = resources.displayMetrics.heightPixels -
+                    statusBarPx - topMarginPx - bottomMarginPx - heightPx
+                val maxH = available.coerceAtLeast((120 * density).toInt())
+                w.setLayout(keyboardAwareVariablePriceDialogWidthPx(), maxH)
+                w.attributes = w.attributes.apply {
+                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    y = topMarginPx
+                }
+            }
+
+            override fun onKeyboardHidden() {
+                applyKeyboardAwareVariablePriceDialog(dialog)
+            }
+        }
+        controller.addVisibilityListener(listener)
+        return listener
+    }
+
+    private fun showVariablePriceAtCartDialog(
+        itemName: String,
+        suggestedPrice: Double,
+        onPriceChosen: (Double) -> Unit,
+    ) {
+        val density = resources.displayMetrics.density
+        val pad = (16 * density).toInt()
+        val scrollView = ScrollView(this).apply {
+            isFillViewport = true
+        }
+        val input = EditText(this).apply {
+            hint = getString(R.string.variable_price_hint)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(
+                if (suggestedPrice > 0) String.format(Locale.US, "%.2f", suggestedPrice) else "",
+            )
+            setPadding(pad, pad, pad, pad)
+        }
+        scrollView.addView(
+            input,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+
+        val dlg = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.variable_price_dialog_title, itemName))
+            .setMessage(R.string.variable_price_dialog_message)
+            .setView(scrollView)
+            .setPositiveButton(R.string.variable_price_dialog_confirm, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+
+        applyKeyboardAwareVariablePriceDialog(dlg)
+        val kb = PosKeyboardController.attach(this, emptyList())
+        val keyboardListener = installVariablePriceKeyboardResizing(dlg, kb)
+        kb.addNumericEditText(input)
+
+        dlg.setOnDismissListener {
+            kb.removeVisibilityListener(keyboardListener)
+            kb.dismissWithoutAnimation()
+            kb.detach()
+        }
+
+        dlg.setOnShowListener {
+            dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val raw = input.text.toString().trim()
+                val parsed = raw.toDoubleOrNull()
+                if (parsed == null || parsed < 0) {
+                    Toast.makeText(this, R.string.variable_price_invalid, Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                dlg.dismiss()
+                onPriceChosen(parsed)
+            }
+        }
+        dlg.show()
+        input.requestFocus()
     }
 
     private data class SelectedOption(
@@ -3092,7 +3256,7 @@ class MenuActivity : AppCompatActivity() {
                 attachOrderKitchenStatusListener(oid)
 
                 val guest = selectedGuest
-                val lineKey = cartKey(itemId, modifiers, guest)
+                val lineKey = cartKey(itemId, modifiers, guest, basePrice)
                 val existingItem = cartMap[lineKey]
                 val currentQtyInCart = existingItem?.quantity ?: 0
 
@@ -3944,7 +4108,7 @@ class MenuActivity : AppCompatActivity() {
     // ----------------------------
     // FIRESTORE ORDER / ITEMS
     // ----------------------------
-    private fun cartKey(itemId: String, modifiers: List<OrderModifier>, guest: Int = 0): String {
+    private fun cartKey(itemId: String, modifiers: List<OrderModifier>, guest: Int = 0, basePrice: Double = 0.0): String {
         fun modKey(mods: List<OrderModifier>): String {
             return mods.sortedBy { "${it.action}|${it.name}|${it.price}" }.joinToString("|") { mod ->
                 val childPart = if (mod.children.isNotEmpty()) "[${modKey(mod.children)}]" else ""
@@ -3953,7 +4117,8 @@ class MenuActivity : AppCompatActivity() {
         }
         val modsKey = modKey(modifiers)
         val guestPart = if (guest > 0) "__G${guest}" else ""
-        return "${itemId}__${modsKey}${guestPart}"
+        val cents = round(basePrice * 100.0).toLong()
+        return "${itemId}__${modsKey}${guestPart}__P${cents}"
     }
 
     // ----------------------------

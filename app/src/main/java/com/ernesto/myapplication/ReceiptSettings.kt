@@ -3,8 +3,10 @@ package com.ernesto.myapplication
 import android.content.Context
 import android.util.Log
 import java.util.Locale
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
 
 const val LINE_WIDTH = 48
 const val LINE_WIDTH_WIDE = 24
@@ -152,6 +154,83 @@ data class ReceiptSettings(
             onSettingsChanged = listener
         }
 
+        /** Same shape as [maxipay-admin] `formatMerchantAddressForSettings`. */
+        fun formatMerchantAddressFromRootField(addressField: Any?): String {
+            if (addressField !is Map<*, *>) return ""
+            val street = (addressField["street"] as? String)?.trim().orEmpty()
+            val city = (addressField["city"] as? String)?.trim().orEmpty()
+            val state = (addressField["state"] as? String)?.trim().orEmpty()
+            val zip = (addressField["zip"] as? String)?.trim().orEmpty()
+            val line2 = listOf(city, state, zip).filter { it.isNotEmpty() }.joinToString(" ")
+            return when {
+                street.isNotEmpty() && line2.isNotEmpty() -> "$street\n$line2"
+                else -> street.ifEmpty { line2 }
+            }
+        }
+
+        /**
+         * Splits the combined receipt "address" box back into Firestore [address] + [phone],
+         * matching how [startBusinessInfoSync] builds [ReceiptSettings.addressText].
+         */
+        fun splitAddressTextForFirestore(addressText: String): Pair<String, String> {
+            val trimmed = addressText.trimEnd()
+            if (trimmed.isEmpty()) return "" to ""
+            val lines = trimmed.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+            if (lines.isEmpty()) return "" to ""
+            val last = lines.last()
+            val digits = last.count { it.isDigit() }
+            val phoneLike = digits >= 7 ||
+                last.contains("Tel:", ignoreCase = true) ||
+                last.startsWith("+") ||
+                Regex("(?i)^\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}\$").matches(last)
+            return if (phoneLike && lines.size > 1) {
+                lines.dropLast(1).joinToString("\n") to last
+            } else {
+                trimmed to ""
+            }
+        }
+
+        /**
+         * When `settings/businessInfo` is missing or empty, copy from [Merchants] root (admin
+         * onboarding) so POS and dashboard share one document.
+         */
+        fun hydrateBusinessInfoFromMerchantRoot(context: Context) {
+            if (!MerchantFirestore.isInitialized) return
+            val mid = MerchantFirestore.merchantId.trim()
+            if (mid.isEmpty()) return
+            val db = FirebaseFirestore.getInstance()
+            db.collection("Merchants").document(mid).get()
+                .addOnSuccessListener { mSnap ->
+                    if (!mSnap.exists()) return@addOnSuccessListener
+                    val d = mSnap.data ?: return@addOnSuccessListener
+                    val businessName = (d["businessName"] as? String)?.trim().orEmpty()
+                    val phone = (d["phone"] as? String)?.trim().orEmpty()
+                    val email = (d["email"] as? String)?.trim().orEmpty()
+                    val address = formatMerchantAddressFromRootField(d["address"])
+                    if (businessName.isEmpty() && address.isEmpty() && phone.isEmpty() && email.isEmpty()) {
+                        return@addOnSuccessListener
+                    }
+                    val payload = hashMapOf<String, Any>(
+                        "businessName" to businessName,
+                        "address" to address,
+                        "phone" to phone,
+                        "email" to email,
+                        "updatedAt" to FieldValue.serverTimestamp(),
+                    )
+                    MerchantFirestore.doc("Settings", "businessInfo")
+                        .set(payload, SetOptions.merge())
+                        .addOnSuccessListener {
+                            Log.d("ReceiptSettings", "Hydrated businessInfo from Merchants/$mid")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.w("ReceiptSettings", "Hydrate businessInfo write failed", e)
+                        }
+                }
+                .addOnFailureListener { e ->
+                    Log.w("ReceiptSettings", "Hydrate Merchants read failed", e)
+                }
+        }
+
         fun startBusinessInfoSync(context: Context) {
             stopBusinessInfoSync()
             val db = FirebaseFirestore.getInstance()
@@ -162,13 +241,22 @@ data class ReceiptSettings(
                         Log.w("ReceiptSettings", "Business info sync error", err)
                         return@addSnapshotListener
                     }
-                    if (snap == null || !snap.exists()) return@addSnapshotListener
+                    if (snap == null) return@addSnapshotListener
+                    if (!snap.exists()) {
+                        hydrateBusinessInfoFromMerchantRoot(context)
+                        return@addSnapshotListener
+                    }
 
-                    val bizName = snap.getString("businessName") ?: return@addSnapshotListener
-                    val address = snap.getString("address") ?: ""
-                    val phone = snap.getString("phone") ?: ""
-                    val email = snap.getString("email") ?: ""
-                    val logoUrl = snap.getString("logoUrl") ?: ""
+                    val bizName = snap.getString("businessName")?.trim().orEmpty()
+                    val address = snap.getString("address")?.trim().orEmpty()
+                    val phone = snap.getString("phone")?.trim().orEmpty()
+                    val email = snap.getString("email")?.trim().orEmpty()
+                    val logoUrl = snap.getString("logoUrl")?.trim().orEmpty()
+
+                    if (bizName.isEmpty() && address.isEmpty() && phone.isEmpty() && email.isEmpty()) {
+                        hydrateBusinessInfoFromMerchantRoot(context)
+                        return@addSnapshotListener
+                    }
 
                     val addressBlock = buildString {
                         if (address.isNotBlank()) append(address)
@@ -180,15 +268,15 @@ data class ReceiptSettings(
 
                     val current = load(context)
                     val updated = current.copy(
-                        businessName = bizName,
-                        addressText = addressBlock,
+                        businessName = bizName.ifEmpty { current.businessName },
+                        addressText = addressBlock.ifEmpty { current.addressText },
                         email = email,
                         logoUrl = logoUrl
                     )
                     if (current != updated) {
                         save(context, updated)
                         onSettingsChanged?.invoke(updated)
-                        Log.d("ReceiptSettings", "Synced business info: $bizName")
+                        Log.d("ReceiptSettings", "Synced business info: ${updated.businessName}")
                     }
                 }
 
@@ -238,6 +326,11 @@ data class ReceiptSettings(
         }
 
         fun saveToFirestore(s: ReceiptSettings) {
+            if (!MerchantFirestore.isInitialized) {
+                Log.w("ReceiptSettings", "saveToFirestore skipped: MerchantFirestore not initialized")
+                return
+            }
+            val mid = MerchantFirestore.merchantId.trim()
             val db = FirebaseFirestore.getInstance()
 
             val receiptData = hashMapOf(
@@ -265,21 +358,34 @@ data class ReceiptSettings(
                 .addOnSuccessListener { Log.d("ReceiptSettings", "Receipt settings saved to Firestore") }
                 .addOnFailureListener { Log.w("ReceiptSettings", "Receipt settings Firestore save failed", it) }
 
-            val parts = s.addressText.split("\n")
-            val address = parts.firstOrNull() ?: ""
-            val phone = if (parts.size > 1) parts.last() else ""
+            val (address, phone) = splitAddressTextForFirestore(s.addressText)
 
             val bizData = hashMapOf<String, Any>(
-                "businessName" to s.businessName,
+                "businessName" to s.businessName.trim(),
                 "address" to address,
                 "phone" to phone,
-                "email" to s.email,
-                "logoUrl" to s.logoUrl
+                "email" to s.email.trim(),
+                "logoUrl" to s.logoUrl.trim(),
+                "updatedAt" to FieldValue.serverTimestamp(),
             )
             MerchantFirestore.doc("Settings", "businessInfo")
-                .set(bizData, com.google.firebase.firestore.SetOptions.merge())
+                .set(bizData, SetOptions.merge())
                 .addOnSuccessListener { Log.d("ReceiptSettings", "Business info saved to Firestore") }
                 .addOnFailureListener { Log.w("ReceiptSettings", "Business info Firestore save failed", it) }
+
+            val merchantPatch = mutableMapOf<String, Any>(
+                "businessName" to s.businessName.trim(),
+                "phone" to phone,
+            )
+            val emailTrim = s.email.trim()
+            if (emailTrim.isNotEmpty()) {
+                merchantPatch["email"] = emailTrim
+            }
+            db.collection("Merchants").document(mid).update(merchantPatch)
+                .addOnSuccessListener { Log.d("ReceiptSettings", "Merchant profile business fields updated") }
+                .addOnFailureListener { e ->
+                    Log.w("ReceiptSettings", "Merchants root update failed (admin list may lag)", e)
+                }
         }
     }
 }

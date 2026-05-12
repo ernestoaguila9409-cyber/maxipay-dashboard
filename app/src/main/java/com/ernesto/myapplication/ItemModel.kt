@@ -34,8 +34,10 @@ data class ItemModel(
     val subcategoryId: String = "",
     /** Single kitchen routing label; must match a label on a kitchen printer. */
     val printerLabel: String? = null,
-    /** Firebase Storage / HTTPS URL from dashboard item image. */
+    /** Optional menu / inventory thumbnail URL (Firestore `imageUrl`). */
     val imageUrl: String? = null,
+    /** When true, POS prompts for unit price at add-to-cart; menu price is a suggested default only. */
+    val variablePrice: Boolean = false,
 ) {
     fun getPrice(channel: String): Double = when (channel) {
         "pos" -> pricing?.pos ?: price

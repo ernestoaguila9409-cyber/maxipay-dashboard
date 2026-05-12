@@ -23,6 +23,7 @@ class ItemAdapter(
         val imgThumb: ImageView = view.findViewById(R.id.imgItemThumb)
         val txtItemName: TextView = view.findViewById(R.id.txtItemName)
         val txtItemPrice: TextView = view.findViewById(R.id.txtItemPrice)
+        val txtItemModifiers: TextView = view.findViewById(R.id.txtItemModifiers)
         val txtItemStock: TextView = view.findViewById(R.id.txtItemStock)
         val txtStockStatus: TextView = view.findViewById(R.id.txtStockStatus)
     }
@@ -48,7 +49,27 @@ class ItemAdapter(
         val item = filteredList[position]
 
         holder.txtItemName.text = item.name
-        holder.txtItemPrice.text = "$${String.format("%.2f", item.getPrice("pos"))}"
+        if (item.variablePrice) {
+            val suggested = String.format("%.2f", item.getPrice("pos"))
+            holder.txtItemPrice.text =
+                context.getString(R.string.inventory_price_variable) + "\n" +
+                    context.getString(R.string.item_detail_price_suggested_line, suggested)
+        } else {
+            holder.txtItemPrice.text = "$${String.format("%.2f", item.getPrice("pos"))}"
+        }
+
+        val modCount = item.modifierGroupIds.size
+        if (modCount > 0) {
+            holder.txtItemModifiers.visibility = View.VISIBLE
+            holder.txtItemModifiers.text = context.resources.getQuantityString(
+                R.plurals.inventory_item_modifier_groups,
+                modCount,
+                modCount,
+            )
+        } else {
+            holder.txtItemModifiers.visibility = View.GONE
+            holder.txtItemModifiers.text = ""
+        }
 
         val img = item.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
         if (img != null) {

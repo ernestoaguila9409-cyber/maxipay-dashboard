@@ -722,6 +722,31 @@ class OrderDetailActivity : AppCompatActivity() {
             }
     }
 
+    /**
+     * Outstanding amount still to collect (matches [PaymentEngine] `remainingInCents` on the order).
+     * Not the same as [totalInCents] minus refunds — that ignores payments and mislabels the summary row.
+     */
+    private fun orderBalanceDueInCents(
+        totalInCents: Long,
+        totalPaidInCents: Long,
+        remainingInCentsFromDoc: Long?,
+    ): Long {
+        val fromDoc = remainingInCentsFromDoc
+        if (fromDoc != null) return fromDoc.coerceAtLeast(0L)
+        return (totalInCents - totalPaidInCents).coerceAtLeast(0L)
+    }
+
+    /** Max additional refund: cannot exceed collected sale minus already refunded. */
+    private fun orderRefundableCapacityInCents(
+        totalInCents: Long,
+        totalPaidInCents: Long,
+        totalRefundedInCents: Long,
+    ): Long {
+        val byOrder = (totalInCents - totalRefundedInCents).coerceAtLeast(0L)
+        val byPaid = (totalPaidInCents - totalRefundedInCents).coerceAtLeast(0L)
+        return minOf(byOrder, byPaid)
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun displayOrderSummary(orderDoc: DocumentSnapshot, status: String = "") {
         val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
@@ -738,6 +763,8 @@ class OrderDetailActivity : AppCompatActivity() {
         }
 
         val totalRefundedInCents = orderDoc.getLong("totalRefundedInCents") ?: 0L
+        val totalPaidInCents = orderDoc.getLong("totalPaidInCents") ?: 0L
+        val remainingInCentsFromDoc = orderDoc.getLong("remainingInCents")
         renderSummary(
             totalInCents,
             taxBreakdown,
@@ -745,7 +772,9 @@ class OrderDetailActivity : AppCompatActivity() {
             discountInCents,
             appliedDiscounts,
             totalRefundedInCents,
-            isVoided
+            isVoided,
+            totalPaidInCents,
+            remainingInCentsFromDoc,
         )
     }
 
@@ -796,9 +825,12 @@ class OrderDetailActivity : AppCompatActivity() {
                             val taxBreakdown = doc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
                             val tipAmountInCents = doc.getLong("tipAmountInCents") ?: 0L
                             val discountInCents = doc.getLong("discountInCents") ?: 0L
-                            val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
                             @Suppress("UNCHECKED_CAST")
-                            val appliedDiscounts = doc.get("appliedDiscounts") as? List<Map<String, Any>> ?: emptyList()
+                            val appliedDiscounts =
+                                doc.get("appliedDiscounts") as? List<Map<String, Any>> ?: emptyList()
+                            val totalRefundedInCents = doc.getLong("totalRefundedInCents") ?: 0L
+                            val totalPaidInCents = doc.getLong("totalPaidInCents") ?: 0L
+                            val remainingInCentsFromDoc = doc.getLong("remainingInCents")
                             if (totalInCents > 0L) {
                                 renderSummary(
                                     totalInCents,
@@ -806,7 +838,10 @@ class OrderDetailActivity : AppCompatActivity() {
                                     tipAmountInCents,
                                     discountInCents,
                                     appliedDiscounts,
-                                    totalRefundedInCents
+                                    totalRefundedInCents,
+                                    isVoided = false,
+                                    totalPaidInCents = totalPaidInCents,
+                                    remainingInCentsFromDoc = remainingInCentsFromDoc,
                                 )
                             }
                         }
@@ -824,7 +859,9 @@ class OrderDetailActivity : AppCompatActivity() {
         discountInCents: Long = 0L,
         appliedDiscounts: List<Map<String, Any>> = emptyList(),
         totalRefundedInCents: Long = 0L,
-        isVoided: Boolean = false
+        isVoided: Boolean = false,
+        totalPaidInCents: Long = 0L,
+        remainingInCentsFromDoc: Long? = null,
     ) {
         var taxTotalCents = 0L
         discountSummaryContainer.removeAllViews()
@@ -931,12 +968,16 @@ class OrderDetailActivity : AppCompatActivity() {
             )
             txtRemainingTotal.text = MoneyUtils.centsToDisplay(0L)
         } else {
-            val remainingCents = (totalInCents - totalRefundedInCents).coerceAtLeast(0L)
+            val balanceDueCents = orderBalanceDueInCents(
+                totalInCents = totalInCents,
+                totalPaidInCents = totalPaidInCents,
+                remainingInCentsFromDoc = remainingInCentsFromDoc,
+            )
             val refundedLabel = refundedSummaryRow.getChildAt(0) as? TextView
             refundedLabel?.text = getString(R.string.order_detail_refunded)
             txtRefundedAmount.text = MoneyUtils.centsToDisplay(totalRefundedInCents)
             refundedSummaryRow.visibility = if (totalRefundedInCents > 0L) View.VISIBLE else View.GONE
-            txtRemainingTotal.text = MoneyUtils.centsToDisplay(remainingCents)
+            txtRemainingTotal.text = MoneyUtils.centsToDisplay(balanceDueCents)
         }
         orderSummaryContainer.visibility = View.VISIBLE
     }
@@ -2086,12 +2127,17 @@ class OrderDetailActivity : AppCompatActivity() {
                 if (!orderDoc.exists()) return@addOnSuccessListener
                 val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
                 val totalRefundedInCents = orderDoc.getLong("totalRefundedInCents") ?: 0L
-                val remainingCents = (totalInCents - totalRefundedInCents).coerceAtLeast(0L)
-                if (remainingCents <= 0L) {
+                val totalPaidInCents = orderDoc.getLong("totalPaidInCents") ?: 0L
+                val refundableCapacity = orderRefundableCapacityInCents(
+                    totalInCents,
+                    totalPaidInCents,
+                    totalRefundedInCents,
+                )
+                if (refundableCapacity <= 0L) {
                     Toast.makeText(this, "Order is already fully refunded.", Toast.LENGTH_SHORT).show()
                     return@addOnSuccessListener
                 }
-                RefundDialogHelper.showRefundOptionsDialog(this, remainingCents) { amountCents ->
+                RefundDialogHelper.showRefundOptionsDialog(this, refundableCapacity) { amountCents ->
                     executeRefundForAmount(amountCents, finishAfter = true)
                 }
             }
@@ -2192,7 +2238,12 @@ class OrderDetailActivity : AppCompatActivity() {
 
         val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
         val totalRefundedInCents = orderDoc.getLong("totalRefundedInCents") ?: 0L
-        val remainingBalance = totalInCents - totalRefundedInCents
+        val totalPaidInCents = orderDoc.getLong("totalPaidInCents") ?: 0L
+        val remainingBalance = orderRefundableCapacityInCents(
+            totalInCents,
+            totalPaidInCents,
+            totalRefundedInCents,
+        )
 
         if (remainingBalance <= 0L) {
             Toast.makeText(this, "Order is already fully refunded.", Toast.LENGTH_SHORT).show()
@@ -2249,7 +2300,12 @@ class OrderDetailActivity : AppCompatActivity() {
 
                 val orderTotalInCents = orderDoc.getLong("totalInCents") ?: 0L
                 val alreadyRefundedInCents = orderDoc.getLong("totalRefundedInCents") ?: 0L
-                val remainingRefundable = orderTotalInCents - alreadyRefundedInCents
+                val totalPaidInCents = orderDoc.getLong("totalPaidInCents") ?: 0L
+                val remainingRefundable = orderRefundableCapacityInCents(
+                    orderTotalInCents,
+                    totalPaidInCents,
+                    alreadyRefundedInCents,
+                )
                 if (remainingRefundable <= 0L) {
                     Toast.makeText(this, "Order is already fully refunded.", Toast.LENGTH_SHORT).show()
                     return@addOnSuccessListener

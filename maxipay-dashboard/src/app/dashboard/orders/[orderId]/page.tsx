@@ -36,6 +36,8 @@ import {
   formatTaxBreakdownLabel,
   formatTipSummaryLabel,
   groupAppliedDiscounts,
+  orderBalanceDueInCents,
+  orderRefundableCapacityInCents,
   orderStatusDisplayForUi,
   orderTypeBadgeStyle,
   parseTaxBreakdown,
@@ -620,7 +622,13 @@ export default function OrderDetailPage() {
   const subtotalCents =
     totalInCents + discountInCents - taxTotalCents - tipAmountInCents;
   const tipLabel = formatTipSummaryLabel(tipAmountInCents, subtotalCents);
-  const remainingInCents = Math.max(0, totalInCents - totalRefundedInCents);
+  const orderRec = orderData as Record<string, unknown> | undefined;
+  const balanceDueInCents = orderRec ? orderBalanceDueInCents(orderRec) : 0;
+  const refundableCapacityCents = orderRec
+    ? orderRefundableCapacityInCents(orderRec)
+    : 0;
+  /** Sale value not yet refunded (for refund eligibility / caps), not the same as balance due. */
+  const netUnrefundedSaleCents = Math.max(0, totalInCents - totalRefundedInCents);
   const typeBadge = orderTypeBadgeStyle(orderTypeRaw);
 
   const saleIdForRefund = String(
@@ -631,7 +639,7 @@ export default function OrderDetailPage() {
     orderData != null &&
     saleTransactionData != null &&
     status === "CLOSED" &&
-    remainingInCents > 0 &&
+    netUnrefundedSaleCents > 0 &&
     saleIdForRefund.length > 0 &&
     saleTransactionData.voided !== true &&
     !txRecordHasCashTender(saleTransactionData) &&
@@ -690,7 +698,7 @@ export default function OrderDetailPage() {
 
   const maxDirectRefundCents = Math.min(
     Math.max(0, totalInCents),
-    Math.max(0, remainingInCents)
+    Math.max(0, refundableCapacityCents)
   );
 
   const lineSwipeRefundEnabled =
@@ -699,7 +707,7 @@ export default function OrderDetailPage() {
   const directRefundModalMaxCents = directRefundTargetLine
     ? Math.min(
         Math.max(0, directRefundTargetLine.lineTotalInCents),
-        Math.max(0, remainingInCents),
+        Math.max(0, refundableCapacityCents),
         Math.max(0, totalInCents)
       )
     : maxDirectRefundCents;
@@ -901,7 +909,7 @@ export default function OrderDetailPage() {
                           setDirectRefundModalErr(null);
                           const maxC = Math.min(
                             line.lineTotalInCents,
-                            remainingInCents
+                            refundableCapacityCents
                           );
                           setDirectRefundModalAmount(
                             maxC > 0 ? (maxC / 100).toFixed(2) : ""
@@ -1092,7 +1100,7 @@ export default function OrderDetailPage() {
                       Remaining
                     </span>
                     <span className="font-bold text-slate-900">
-                      ${centsToMoney(remainingInCents)}
+                      ${centsToMoney(balanceDueInCents)}
                     </span>
                   </div>
                 </div>
@@ -1374,9 +1382,9 @@ export default function OrderDetailPage() {
                           );
                           return;
                         }
-                        if (amountInCents > remainingInCents) {
+                        if (amountInCents > refundableCapacityCents) {
                           setDirectRefundModalErr(
-                            `Amount cannot exceed the remaining balance ($${centsToMoney(remainingInCents)}).`
+                            `Amount cannot exceed the refundable amount ($${centsToMoney(refundableCapacityCents)}).`
                           );
                           return;
                         }

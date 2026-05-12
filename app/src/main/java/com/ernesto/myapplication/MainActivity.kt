@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.viewpager2.widget.ViewPager2
 import android.media.RingtoneManager
 import com.google.firebase.firestore.DocumentChange
@@ -42,6 +43,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var dashboardAdapter: DashboardAdapter
     private lateinit var dashboardPager: ViewPager2
     private lateinit var pageIndicator: LinearLayout
+    private lateinit var leftDashboardPanel: View
+    private lateinit var sidebarDivider: View
     private lateinit var pendingOnlineOrderSign: View
     private lateinit var txtPendingOnlineSignOrderLine: TextView
     private lateinit var txtPendingOnlineSignCustomer: TextView
@@ -96,10 +99,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         val txtLoggedUser = findViewById<TextView>(R.id.txtLoggedUser)
-        txtLoggedUser.text = "Logged in as: $employeeName"
+        txtLoggedUser.text = employeeName.ifBlank { getString(R.string.app_name) }
 
         val txtEmployeeRole = findViewById<TextView>(R.id.txtEmployeeRole)
         txtEmployeeRole.text = employeeRole.ifBlank { "EMPLOYEE" }
+
+        leftDashboardPanel = findViewById(R.id.leftDashboardPanel)
+        sidebarDivider = findViewById(R.id.sidebarDivider)
 
         txtTodayTotal = findViewById(R.id.txtTodayTotal)
         txtTodayCount = findViewById(R.id.txtTodayCount)
@@ -111,6 +117,8 @@ class MainActivity : AppCompatActivity() {
         pendingOnlineOrderSign.setOnClickListener { onOnlineStaffConfirmBannerClicked() }
 
         setupDashboardGrid()
+        updatePageIndicator(0)
+        updateDashboardShellForPage(0)
         OnlineOrderingDashboardSync.start(db)
         OnlineOrderingDashboardSync.addListener(onlineOrderingOpenStateListener)
         OnlineOrderKitchenRoutingCache.start(db)
@@ -199,6 +207,7 @@ class MainActivity : AppCompatActivity() {
         dashboardPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 updatePageIndicator(position)
+                updateDashboardShellForPage(position)
             }
         })
 
@@ -237,7 +246,15 @@ class MainActivity : AppCompatActivity() {
             ),
         )
         updatePageIndicator(dashboardPager.currentItem)
+        updateDashboardShellForPage(dashboardPager.currentItem)
         applyOrderTypeVisibility()
+    }
+
+    private fun updateDashboardShellForPage(page: Int) {
+        val showSidebar = page == 0
+        val vis = if (showSidebar) View.VISIBLE else View.GONE
+        leftDashboardPanel.visibility = vis
+        sidebarDivider.visibility = vis
     }
 
     private fun updatePageIndicator(selectedPage: Int) {
@@ -260,7 +277,13 @@ class MainActivity : AppCompatActivity() {
             dot.layoutParams = params
             dot.background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(if (i == selectedPage) 0xFF6A4FB3.toInt() else 0xFFCCCCCC.toInt())
+                setColor(
+                    if (i == selectedPage) {
+                        ContextCompat.getColor(this@MainActivity, R.color.dashboard_page_dot_selected)
+                    } else {
+                        ContextCompat.getColor(this@MainActivity, R.color.dashboard_page_dot_unselected)
+                    },
+                )
             }
             pageIndicator.addView(dot)
         }

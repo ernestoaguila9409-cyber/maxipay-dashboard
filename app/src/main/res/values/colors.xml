@@ -28,4 +28,13 @@
 
     <color name="reservation_time_field_bg">#F3F4F6</color>
     <color name="reservation_time_field_stroke">#E5E7EB</color>
+
+    <color name="dashboard_main_bg">#F0F2F5</color>
+    <color name="dashboard_sidebar_bg">#1A1D24</color>
+    <color name="dashboard_sidebar_muted">#9AA0AE</color>
+    <color name="dashboard_logout_stroke">#E53935</color>
+    <color name="dashboard_page_dot_selected">#1976D2</color>
+    <color name="dashboard_page_dot_unselected">#CCCCCC</color>
+    <color name="dashboard_role_chip_stroke">#C5A059</color>
+    <color name="dashboard_role_chip_text">#E8C77B</color>
 </resources>

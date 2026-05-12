@@ -35,6 +35,7 @@ import {
   orderListNetCents,
   orderListStatusBadgeStyle,
   orderListStatusBarColor,
+  orderRefundableCapacityInCents,
   orderTypeBadgeStyle,
 } from "@/lib/orderDisplayUtils";
 
@@ -736,8 +737,7 @@ export default function SalesActivityClient() {
         if (cancelled || !snap.exists()) return;
         const d = snap.data() as Record<string, unknown>;
         const totalInCents = Number(d.totalInCents ?? 0);
-        const totalRefundedInCents = Number(d.totalRefundedInCents ?? 0);
-        const remainingInCents = Math.max(0, totalInCents - totalRefundedInCents);
+        const remainingInCents = orderRefundableCapacityInCents(d);
         if (!cancelled) {
           setOrderRefundCaps({ totalInCents, remainingInCents });
         }
@@ -804,10 +804,9 @@ export default function SalesActivityClient() {
               if (!ord.exists()) return;
               const od = ord.data() as Record<string, unknown>;
               const totalInCents = Number(od.totalInCents ?? 0);
-              const totalRefundedInCents = Number(od.totalRefundedInCents ?? 0);
               setOrderRefundCaps({
                 totalInCents,
-                remainingInCents: Math.max(0, totalInCents - totalRefundedInCents),
+                remainingInCents: orderRefundableCapacityInCents(od),
               });
             });
           }
@@ -2494,13 +2493,9 @@ export default function SalesActivityClient() {
                         if (ordSnap.exists()) {
                           const od = ordSnap.data() as Record<string, unknown>;
                           const totalInCents = Number(od.totalInCents ?? 0);
-                          const totalRefundedInCents = Number(od.totalRefundedInCents ?? 0);
                           setOrderRefundCaps({
                             totalInCents,
-                            remainingInCents: Math.max(
-                              0,
-                              totalInCents - totalRefundedInCents
-                            ),
+                            remainingInCents: orderRefundableCapacityInCents(od),
                           });
                         }
                       } catch {

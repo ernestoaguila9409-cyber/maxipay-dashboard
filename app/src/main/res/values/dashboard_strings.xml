@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dashboard_today_sales_label">Today\'s sales</string>
+    <string name="dashboard_log_out">Log out</string>
+    <string name="dashboard_menu_desc">Menu</string>
+
+    <string name="dashboard_desc_online_orders">View and confirm online orders.</string>
+    <string name="dashboard_desc_transactions">View and manage transactions.</string>
+    <string name="dashboard_desc_settle_batch">Close out and settle your batch.</string>
+    <string name="dashboard_desc_employees">Manage your team.</string>
+    <string name="dashboard_desc_customers">View and manage customers.</string>
+    <string name="dashboard_desc_orders">View and manage orders.</string>
+    <string name="dashboard_desc_setup">Configure and manage settings.</string>
+    <string name="dashboard_desc_modifiers">Edit global modifier options.</string>
+    <string name="dashboard_desc_inventory">Browse menu and inventory.</string>
+    <string name="dashboard_desc_reports">Sales and operational reports.</string>
+    <string name="dashboard_desc_printers">Receipt and kitchen printers.</string>
+    <string name="dashboard_desc_cash_flow">Cash drawer and paid-outs.</string>
+    <string name="dashboard_desc_tips">Adjust tips on open checks.</string>
+    <string name="dashboard_desc_reservation">Table reservations and waitlist.</string>
+</resources>

@@ -12,10 +12,10 @@ import android.view.animation.OvershootInterpolator
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Source
 import com.google.firebase.functions.FirebaseFunctions
 
@@ -39,6 +39,7 @@ class LoginActivity : AppCompatActivity() {
     private val maxPinLength = 4
     private lateinit var pinDots: List<ImageView>
     private lateinit var dotsContainer: LinearLayout
+    private lateinit var loginTitleBusiness: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +52,18 @@ class LoginActivity : AppCompatActivity() {
         val gateProgress = findViewById<View>(R.id.loginGateProgress)
         dotsContainer = findViewById(R.id.dotsContainer)
         findViewById<View>(R.id.loginKeypadRoot)
+        loginTitleBusiness = findViewById(R.id.loginTitleBusiness)
+
+        ensureMerchantInitialized()
+        applyLoginHeaderFromSettings(ReceiptSettings.load(this))
+        if (MerchantFirestore.isInitialized) {
+            PosDeviceIdentity.syncMerchantBusinessNameFromFirestore(applicationContext) {
+                runOnUiThread { applyLoginHeaderFromSettings(ReceiptSettings.load(this)) }
+            }
+        }
+        ReceiptSettings.setOnSettingsChangedListener { rs ->
+            runOnUiThread { applyLoginHeaderFromSettings(rs) }
+        }
 
         prewarmAnonymousAuth()
 
@@ -59,10 +72,16 @@ class LoginActivity : AppCompatActivity() {
             dotsContainer.visibility = View.VISIBLE
             findViewById<View>(R.id.loginKeypadRoot).visibility = View.VISIBLE
 
-            ReceiptSettings.startBusinessInfoSync(this)
-
-            val bizName = ReceiptSettings.load(this).businessName
-            CustomerDisplayManager.setIdle(this, bizName)
+            if (MerchantFirestore.isInitialized) {
+                PosDeviceIdentity.syncMerchantBusinessNameFromFirestore(applicationContext) {
+                    runOnUiThread {
+                        ReceiptSettings.startBusinessInfoSync(this)
+                        applyLoginHeaderFromSettings(ReceiptSettings.load(this))
+                        val bizName = ReceiptSettings.load(this).businessName
+                        CustomerDisplayManager.setIdle(this, bizName)
+                    }
+                }
+            }
         }
 
         pinDots = listOf(
@@ -111,46 +130,65 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
+    override fun onDestroy() {
+        // Do not call [ReceiptSettings.stopBusinessInfoSync] here — [MainActivity] starts its own
+        // listeners right after login; tearing them down from this activity would break sync.
+        ReceiptSettings.setOnSettingsChangedListener(null)
+        super.onDestroy()
+    }
+
+    private fun applyLoginHeaderFromSettings(rs: ReceiptSettings) {
+        val fromIdentity = PosDeviceIdentity.getMerchantBusinessName(this).trim()
+        val fromReceipt = rs.businessName.trim()
+        val name = when {
+            fromIdentity.isNotEmpty() -> fromIdentity
+            fromReceipt.isNotEmpty() -> fromReceipt
+            else -> getString(R.string.login_business_title_fallback)
+        }
+        loginTitleBusiness.text = name
+    }
+
     /**
      * Blocks the PIN screen until we know this install is allowed to sign in:
-     * 1) If [PosDeviceDeactivationWatch.FIELD_DEACTIVATED] is true → forced activation (same as before).
-     * 2) If [PosDeviceActivation.FIELD_ENROLLED_FROM_DASHBOARD] is not true → must redeem a dashboard code first.
+     * 1) No persisted merchant id → device was never activated → [DeviceActivationActivity].
+     * 2) If [PosDeviceDeactivationWatch.FIELD_DEACTIVATED] is true → forced re-activation.
+     * 3) If [PosDeviceActivation.FIELD_ENROLLED_FROM_DASHBOARD] is not true → must redeem code.
      * Uses [Source.SERVER] so a stale local cache cannot skip the gate.
      *
-     * If the server read fails (offline / rules), we allow the PIN screen so devices are not bricked.
+     * If the server read fails (offline), we allow the PIN screen so devices are not bricked.
      */
     private fun scheduleDeviceGateAndContinue(onReady: () -> Unit) {
         fun readDeviceFromServer() {
-            resolveMerchantIdAndContinue {
-                if (!MerchantFirestore.isInitialized) {
-                    Log.w(TAG, "device gate: no merchant resolved, showing PIN anyway")
-                    runOnUiThread { onReady() }
-                    return@resolveMerchantIdAndContinue
-                }
-                PosDeviceIdentity.resolveInstallationDocId(this) { docId ->
-                    MerchantFirestore.col("PosDevices")
-                        .document(docId)
-                        .get(Source.SERVER)
-                        .addOnSuccessListener { snap ->
-                            if (snap.exists() && snap.getBoolean(PosDeviceDeactivationWatch.FIELD_DEACTIVATED) == true) {
-                                DeviceActivationActivity.launchForceLock(this)
-                                finish()
-                                return@addOnSuccessListener
-                            }
-                            val enrolled = snap.exists() &&
-                                snap.getBoolean(PosDeviceActivation.FIELD_ENROLLED_FROM_DASHBOARD) == true
-                            if (!enrolled) {
-                                DeviceActivationActivity.launchEnrollmentRequired(this)
-                                finish()
-                                return@addOnSuccessListener
-                            }
-                            runOnUiThread { onReady() }
+            ensureMerchantInitialized()
+            if (!MerchantFirestore.isInitialized) {
+                Log.d(TAG, "device gate: no merchantId persisted → activation required")
+                DeviceActivationActivity.launchEnrollmentRequired(this)
+                finish()
+                return
+            }
+            PosDeviceIdentity.resolveInstallationDocId(this) { docId ->
+                MerchantFirestore.col("PosDevices")
+                    .document(docId)
+                    .get(Source.SERVER)
+                    .addOnSuccessListener { snap ->
+                        if (snap.exists() && snap.getBoolean(PosDeviceDeactivationWatch.FIELD_DEACTIVATED) == true) {
+                            DeviceActivationActivity.launchForceLock(this)
+                            finish()
+                            return@addOnSuccessListener
                         }
-                        .addOnFailureListener { e ->
-                            Log.w(TAG, "device gate: PosDevices server read failed, showing PIN anyway", e)
-                            runOnUiThread { onReady() }
+                        val enrolled = snap.exists() &&
+                            snap.getBoolean(PosDeviceActivation.FIELD_ENROLLED_FROM_DASHBOARD) == true
+                        if (!enrolled) {
+                            DeviceActivationActivity.launchEnrollmentRequired(this)
+                            finish()
+                            return@addOnSuccessListener
                         }
-                }
+                        runOnUiThread { onReady() }
+                    }
+                    .addOnFailureListener { e ->
+                        Log.w(TAG, "device gate: PosDevices server read failed", e)
+                        runOnUiThread { onReady() }
+                    }
             }
         }
         if (auth.currentUser != null) {
@@ -229,7 +267,11 @@ class LoginActivity : AppCompatActivity() {
         if (isLoggingIn) return
         isLoggingIn = true
 
-        val data = hashMapOf("pin" to pin)
+        val data = hashMapOf<String, Any>("pin" to pin)
+        val mid = PosDeviceIdentity.getMerchantId(this).trim()
+        if (mid.isNotEmpty()) {
+            data["merchantId"] = mid
+        }
 
         functions.getHttpsCallable("verifyPin")
             .call(data)
@@ -247,17 +289,16 @@ class LoginActivity : AppCompatActivity() {
                 val role = response["role"] as? String ?: ""
 
                 fun openMainAfterAuth() {
-                    resolveMerchantIdAndContinue {
-                        isLoggingIn = false
-                        TerminalPrefs.initFromFirestore()
-                        SessionEmployee.setEmployee(this, name, role)
+                    ensureMerchantInitialized()
+                    isLoggingIn = false
+                    TerminalPrefs.initFromFirestore()
+                    SessionEmployee.setEmployee(this, name, role)
 
-                        val intent = Intent(this, MainActivity::class.java)
-                        intent.putExtra("employeeName", name)
-                        intent.putExtra("employeeRole", role)
-                        startActivity(intent)
-                        finish()
-                    }
+                    val intent = Intent(this, MainActivity::class.java)
+                    intent.putExtra("employeeName", name)
+                    intent.putExtra("employeeRole", role)
+                    startActivity(intent)
+                    finish()
                 }
 
                 if (auth.currentUser != null) {
@@ -276,32 +317,17 @@ class LoginActivity : AppCompatActivity() {
     }
 
     /**
-     * Query Merchants collection. If exactly one merchant doc exists, initialize
-     * [MerchantFirestore] with its id. For multi-tenant the POS would use a
-     * merchantId from the device activation record or JWT instead.
+     * Reads the persisted merchant id (set by [PosDeviceActivation.redeemCode]) and
+     * initialises [MerchantFirestore] if not already done. Call at every entry point
+     * that needs Firestore paths (gate, post-login).
      */
-    private fun resolveMerchantIdAndContinue(onReady: () -> Unit) {
-        if (MerchantFirestore.isInitialized) {
-            onReady()
-            return
+    private fun ensureMerchantInitialized() {
+        if (MerchantFirestore.isInitialized) return
+        val mid = PosDeviceIdentity.getMerchantId(this)
+        if (mid.isNotEmpty()) {
+            MerchantFirestore.init(mid)
+            Log.d(TAG, "MerchantFirestore initialized from prefs: $mid")
         }
-        FirebaseFirestore.getInstance()
-            .collection("Merchants")
-            .limit(2)
-            .get()
-            .addOnSuccessListener { snap ->
-                if (snap.size() == 1) {
-                    MerchantFirestore.init(snap.documents[0].id)
-                    Log.d(TAG, "MerchantFirestore initialized: ${snap.documents[0].id}")
-                } else {
-                    Log.w(TAG, "Expected 1 merchant, found ${snap.size()}")
-                }
-                onReady()
-            }
-            .addOnFailureListener { e ->
-                Log.w(TAG, "Failed to resolve merchantId, continuing anyway", e)
-                onReady()
-            }
     }
 
     companion object {

@@ -370,6 +370,32 @@ export function orderStatusDisplayForUi(data: Record<string, unknown>): string {
 }
 
 /**
+ * Amount the customer still owes (matches POS `remainingInCents` / PaymentEngine).
+ * Do not use `totalInCents - totalRefundedInCents` for this — that ignores payments.
+ */
+export function orderBalanceDueInCents(data: Record<string, unknown>): number {
+  const total = Math.round(Number(data.totalInCents ?? 0));
+  const paid = Math.round(Number(data.totalPaidInCents ?? 0));
+  const stored = data.remainingInCents;
+  if (stored != null && stored !== "") {
+    const n = typeof stored === "number" ? stored : Number(stored);
+    if (Number.isFinite(n)) return Math.max(0, Math.round(n));
+  }
+  return Math.max(0, total - paid);
+}
+
+/**
+ * Max additional refund in cents: cannot exceed collected sale (`totalPaidInCents`)
+ * minus already refunded, nor the unrefunded portion of the order total.
+ */
+export function orderRefundableCapacityInCents(data: Record<string, unknown>): number {
+  const total = Math.round(Number(data.totalInCents ?? 0));
+  const paid = Math.round(Number(data.totalPaidInCents ?? 0));
+  const refunded = Math.round(Number(data.totalRefundedInCents ?? 0));
+  return Math.max(0, Math.min(total - refunded, paid - refunded));
+}
+
+/**
  * Sales activity (web): voiding a card sale updates `Transactions` (`voided`, `voidedBy`)
  * but the linked `Orders` row often stays `CLOSED` without `status: VOIDED`.
  * Merge void state from the sale/capture/pre-auth transaction so Orders tab badges

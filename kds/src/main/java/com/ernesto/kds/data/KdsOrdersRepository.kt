@@ -39,6 +39,11 @@ class KdsOrdersRepository(
      * card to another device are hidden (first KDS to press Start keeps the ticket).
      */
     fun observeKitchenOrders(kdsDeviceDocId: String = ""): Flow<List<Order>> = callbackFlow {
+        if (!MerchantFirestore.isInitialized) {
+            trySend(emptyList())
+            awaitClose { }
+            return@callbackFlow
+        }
         val filterDeviceId = kdsDeviceDocId.trim()
         val lock = Any()
         var printingConfig = KdsPrintingConfig.DEFAULT
@@ -142,6 +147,11 @@ class KdsOrdersRepository(
 
     /** Dashboard tile color keys (dine_in, to_go, bar) from Settings/dashboard. */
     fun observeDashboardColorKeys(): Flow<Map<String, String>> = callbackFlow {
+        if (!MerchantFirestore.isInitialized) {
+            trySend(emptyMap())
+            awaitClose { }
+            return@callbackFlow
+        }
         val listener = MerchantFirestore.col("Settings").document("dashboard")
             .addSnapshotListener { snapshot: DocumentSnapshot?, _: FirebaseFirestoreException? ->
                 val raw = snapshot?.get("modules")
@@ -152,6 +162,11 @@ class KdsOrdersRepository(
 
     /** KDS layout prefs from Settings/kds (web dashboard “Display settings”). */
     fun observeKdsDisplaySettings(): Flow<KdsDisplaySettings> = callbackFlow {
+        if (!MerchantFirestore.isInitialized) {
+            trySend(KdsDisplaySettings())
+            awaitClose { }
+            return@callbackFlow
+        }
         val listener = MerchantFirestore.col("Settings").document("kds")
             .addSnapshotListener { snapshot: DocumentSnapshot?, _: FirebaseFirestoreException? ->
                 if (snapshot == null || !snapshot.exists()) {
@@ -184,6 +199,11 @@ class KdsOrdersRepository(
 
     /** KDS device IDs that should show all online orders regardless of menu assignment. */
     fun observeOnlineRoutingKdsDeviceIds(): Flow<Set<String>> = callbackFlow {
+        if (!MerchantFirestore.isInitialized) {
+            trySend(emptySet())
+            awaitClose { }
+            return@callbackFlow
+        }
         val listener = MerchantFirestore.col("Settings").document("onlineOrdering")
             .addSnapshotListener { snap: DocumentSnapshot?, _: FirebaseFirestoreException? ->
                 if (snap == null || !snap.exists()) {
@@ -206,6 +226,11 @@ class KdsOrdersRepository(
      */
     fun observeKdsDeviceMenuAssignment(deviceDocId: String): Flow<KdsMenuAssignment> = callbackFlow {
         if (deviceDocId.isBlank()) {
+            trySend(KdsMenuAssignment())
+            awaitClose { }
+            return@callbackFlow
+        }
+        if (!MerchantFirestore.isInitialized) {
             trySend(KdsMenuAssignment())
             awaitClose { }
             return@callbackFlow
@@ -235,6 +260,11 @@ class KdsOrdersRepository(
      * Matches dashboard “placement” for multi-category items.
      */
     fun observeMenuItemCategoryPlacements(): Flow<Map<String, Set<String>>> = callbackFlow {
+        if (!MerchantFirestore.isInitialized) {
+            trySend(emptyMap())
+            awaitClose { }
+            return@callbackFlow
+        }
         val listener = MerchantFirestore.col("MenuItems")
             .addSnapshotListener { snapshot: QuerySnapshot?, _: FirebaseFirestoreException? ->
                 val map = LinkedHashMap<String, Set<String>>()
@@ -267,6 +297,11 @@ class KdsOrdersRepository(
     fun observeKdsTextSettings(deviceDocId: String): Flow<KdsTextSettings> = callbackFlow {
         val id = deviceDocId.trim()
         if (id.isEmpty()) {
+            trySend(KdsTextSettings.Default)
+            awaitClose { }
+            return@callbackFlow
+        }
+        if (!MerchantFirestore.isInitialized) {
             trySend(KdsTextSettings.Default)
             awaitClose { }
             return@callbackFlow
