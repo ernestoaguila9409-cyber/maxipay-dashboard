@@ -12,7 +12,12 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const hasAccess = claims.role === "merchant_owner" || claims.role === "super_admin";
+  const hasAccess =
+    claims.role === "merchant_owner" ||
+    claims.role === "super_admin" ||
+    (claims.role === "merchant_staff" &&
+      Boolean((claims.merchantId ?? "").trim()) &&
+      (claims.merchantIds?.length ?? 0) > 0);
 
   useEffect(() => {
     if (loading) return;

@@ -1451,23 +1451,57 @@ exports.getReceiptEmailPreview = onCall(async (request) => {
 // 4. PIN Verification (returns a custom auth token)
 // ---------------------------------------------------------------------------
 
-// TODO: Multi-tenant — verifyPin is called from the POS before the user is
-// authenticated, so request.auth.token.merchantId is not available. Options:
-//   1. Use a collectionGroup query on "employees" (requires composite index).
-//   2. Pass merchantId from the POS device config in request.data.
-//   3. Query Merchants to find which one has an employee with this PIN.
-// For now, the flat root-level Employees collection is kept as a fallback.
+// POS sends [merchantId] from device activation prefs (no JWT merchantId yet).
+// Owner PIN lives on [Merchants/{merchantId}.ownerPosPin]; staff PINs on [employees] subcollection.
 exports.verifyPin = onCall(async (request) => {
-  const { pin } = request.data || {};
+  const { pin, merchantId: merchantIdRaw } = request.data || {};
 
   if (!pin) {
     return { success: false, error: "PIN is required." };
   }
 
+  const pinStr = String(pin).trim();
   const db = admin.firestore();
+  const merchantId =
+    typeof merchantIdRaw === "string" && merchantIdRaw.trim()
+      ? merchantIdRaw.trim()
+      : "";
+
+  if (merchantId) {
+    const mSnap = await db.collection("Merchants").doc(merchantId).get();
+    if (mSnap.exists) {
+      const d = mSnap.data() || {};
+      const ownerPin = String(d.ownerPosPin ?? "").trim();
+      if (ownerPin && ownerPin === pinStr) {
+        const fn = String(d.ownerFirstName ?? "").trim();
+        const ln = String(d.ownerLastName ?? "").trim();
+        const biz = String(d.businessName ?? "").trim();
+        const name =
+          [fn, ln].filter(Boolean).join(" ").trim() || biz || "Owner";
+        return { success: true, name, role: "OWNER" };
+      }
+    }
+
+    const empSnap = await merchantCol(merchantId, "Employees")
+      .where("pin", "==", pinStr)
+      .where("active", "==", true)
+      .limit(1)
+      .get();
+
+    if (!empSnap.empty) {
+      const ed = empSnap.docs[0].data() || {};
+      const name = ed.name ?? "";
+      const role = ed.role ?? "";
+      return { success: true, name, role };
+    }
+
+    return { success: false, error: "Invalid PIN" };
+  }
+
+  // Legacy: root-level Employees (pre–multi-tenant installs).
   const snap = await db
     .collection("Employees")
-    .where("pin", "==", pin)
+    .where("pin", "==", pinStr)
     .where("active", "==", true)
     .limit(1)
     .get();
@@ -2886,9 +2920,6 @@ exports.selectActiveMerchant = onCall(async (request) => {
   if (!request.auth?.uid) {
     return { ok: false, error: "You must be signed in." };
   }
-  if (request.auth.token?.role !== "merchant_owner") {
-    return { ok: false, error: "Only store owners can switch businesses." };
-  }
   const selected =
     request.data?.merchantId != null ? String(request.data.merchantId).trim() : "";
   if (!selected) {
@@ -2901,6 +2932,32 @@ exports.selectActiveMerchant = onCall(async (request) => {
   if (!mdoc.exists) {
     return { ok: false, error: "Business not found." };
   }
+
+  const role = request.auth.token?.role;
+  const user = await auth.getUser(request.auth.uid);
+  const prev =
+    user.customClaims && typeof user.customClaims === "object" ? { ...user.customClaims } : {};
+
+  if (role === "merchant_staff") {
+    const allowed = Array.isArray(request.auth.token.merchantIds)
+      ? request.auth.token.merchantIds.map((x) => String(x))
+      : [];
+    if (!allowed.includes(selected)) {
+      return { ok: false, error: "You do not have access to this business." };
+    }
+    await auth.setCustomUserClaims(request.auth.uid, {
+      ...prev,
+      role: "merchant_staff",
+      merchantId: selected,
+      merchantIds: allowed,
+    });
+    return { ok: true, merchantId: selected, merchantIds: allowed };
+  }
+
+  if (role !== "merchant_owner") {
+    return { ok: false, error: "Only store owners or staff can switch businesses." };
+  }
+
   const ownerUid = mdoc.get("ownerAuthUid");
   if (ownerUid !== request.auth.uid) {
     return { ok: false, error: "You do not have access to this business." };
@@ -2912,9 +2969,6 @@ exports.selectActiveMerchant = onCall(async (request) => {
     return { ok: false, error: "Business is not linked to your account." };
   }
 
-  const user = await auth.getUser(request.auth.uid);
-  const prev =
-    user.customClaims && typeof user.customClaims === "object" ? { ...user.customClaims } : {};
   await auth.setCustomUserClaims(request.auth.uid, {
     ...prev,
     role: "merchant_owner",

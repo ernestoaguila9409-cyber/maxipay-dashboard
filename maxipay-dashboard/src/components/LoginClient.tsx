@@ -42,7 +42,7 @@ export default function LoginClient() {
       const tokenResult = await cred.user.getIdTokenResult();
       const role = tokenResult.claims.role as string | undefined;
 
-      if (role === "merchant_owner" || role === "super_admin") {
+      if (role === "merchant_owner" || role === "super_admin" || role === "merchant_staff") {
         router.push("/dashboard");
       } else {
         setError("Your account is not linked to a merchant. Contact your administrator.");

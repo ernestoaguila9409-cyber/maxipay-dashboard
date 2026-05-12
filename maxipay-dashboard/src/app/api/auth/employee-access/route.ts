@@ -1,7 +1,7 @@
 import admin from "firebase-admin";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp } from "@/lib/firebaseAdmin";
-import { merchantCol, merchantDoc } from "@/lib/merchantFirestoreAdmin";
+import { merchantDoc } from "@/lib/merchantFirestoreAdmin";
 import { sendEmailViaResend, getResendFromAddress } from "@/lib/resendEmail";
 
 export const runtime = "nodejs";
@@ -37,6 +37,52 @@ function normalizeEmail(email: unknown): string | null {
   const t = email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)) return null;
   return t;
+}
+
+/** `Merchants/{mid}/employees/{id}` → mid */
+function merchantIdFromEmployeeDocPath(path: string): string | null {
+  const parts = path.split("/");
+  if (parts.length >= 4 && parts[0] === "Merchants" && parts[2] === "employees") {
+    return parts[1] ?? null;
+  }
+  return null;
+}
+
+function parseMerchantIdsClaim(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => String(x)).filter(Boolean);
+}
+
+/**
+ * Staff dashboard: JWT lists every merchant where this Firebase user has an employee row
+ * with matching email. Do not downgrade merchant owners or super admins.
+ */
+async function syncDashboardStaffClaims(
+  auth: admin.auth.Auth,
+  uid: string,
+  merchantIdsFromEmployees: string[]
+): Promise<void> {
+  const user = await auth.getUser(uid);
+  const prev = (user.customClaims ?? {}) as Record<string, unknown>;
+  const role = typeof prev.role === "string" ? prev.role : "";
+  if (role === "super_admin" || role === "merchant_owner") {
+    return;
+  }
+
+  const sortedUnique = [...new Set(merchantIdsFromEmployees.filter(Boolean))].sort();
+  if (sortedUnique.length === 0) return;
+
+  const prevList = parseMerchantIdsClaim(prev.merchantIds);
+  const merged = [...new Set([...prevList, ...sortedUnique])].sort();
+  const curMid = typeof prev.merchantId === "string" ? prev.merchantId : "";
+  const active = merged.includes(curMid) ? curMid : merged[0];
+
+  await auth.setCustomUserClaims(uid, {
+    ...prev,
+    role: "merchant_staff",
+    merchantId: active,
+    merchantIds: merged,
+  });
 }
 
 function sleep(ms: number): Promise<void> {
@@ -213,15 +259,6 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { searchParams } = new URL(req.url);
-    const merchantId = searchParams.get("merchantId")?.trim();
-    if (!merchantId) {
-      return NextResponse.json(
-        { ok: false, error: "missing_merchant", message: "merchantId is required." },
-        { status: 400 }
-      );
-    }
-
     const body = (await req.json().catch(() => ({}))) as { email?: string };
     const normalized = normalizeEmail(body.email);
     if (!normalized) {
@@ -233,27 +270,51 @@ export async function POST(req: Request) {
 
     getFirebaseAdminApp();
     const db = admin.firestore();
-    const snap = await merchantCol(merchantId, "Employees")
-      .where("email", "==", normalized)
-      .limit(2)
-      .get();
+    const snap = await db.collectionGroup("employees").where("email", "==", normalized).get();
 
     if (snap.empty) {
       console.info(
-        "[employee-access] No Firestore Employees document with field email =",
+        "[employee-access] No Firestore employees with email =",
         normalized,
         "(password reset is not sent; fix the profile email or spelling.)"
       );
       return NextResponse.json({ ok: true, message: PUBLIC_MESSAGE });
     }
 
-    if (snap.size > 1) {
-      console.error(
-        "[employee-access] Multiple Employees share email; refusing to send:",
-        normalized
-      );
+    const byMerchant = new Map<string, admin.firestore.QueryDocumentSnapshot[]>();
+    for (const doc of snap.docs) {
+      const mid = merchantIdFromEmployeeDocPath(doc.ref.path);
+      if (!mid) continue;
+      const arr = byMerchant.get(mid) ?? [];
+      arr.push(doc);
+      byMerchant.set(mid, arr);
+    }
+
+    for (const [mid, docs] of byMerchant) {
+      if (docs.length > 1) {
+        console.error(
+          "[employee-access] Duplicate employee email within one merchant; refusing:",
+          normalized,
+          "merchant",
+          mid
+        );
+        return NextResponse.json({ ok: true, message: PUBLIC_MESSAGE });
+      }
+    }
+
+    const activeMerchantIds: string[] = [];
+    for (const [mid, docs] of byMerchant) {
+      const data = docs[0].data() as Record<string, unknown>;
+      if (data.active === false) continue;
+      activeMerchantIds.push(mid);
+    }
+
+    if (activeMerchantIds.length === 0) {
+      console.info("[employee-access] All matching employees inactive for", normalized);
       return NextResponse.json({ ok: true, message: PUBLIC_MESSAGE });
     }
+
+    activeMerchantIds.sort();
 
     // Ensure Firebase Auth user exists
     const auth = admin.auth();
@@ -288,6 +349,9 @@ export async function POST(req: Request) {
       await sleep(800);
     }
 
+    const uid = (await auth.getUserByEmail(normalized)).uid;
+    await syncDashboardStaffClaims(auth, uid, activeMerchantIds);
+
     // Generate password-reset link via Admin SDK
     const appOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
     const continueUrl = appOrigin ? `${appOrigin}/login` : undefined;
@@ -304,8 +368,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // Fetch business branding from Firestore
-    const biz = await fetchBusinessInfo(db, merchantId);
+    // Fetch business branding from Firestore (first linked merchant)
+    const brandingMerchantId = activeMerchantIds[0];
+    const biz = await fetchBusinessInfo(db, brandingMerchantId);
     const businessName =
       (typeof biz.businessName === "string" && biz.businessName.trim()) || "MaxiPay";
     const logoUrl = resolveLogoUrl(biz);

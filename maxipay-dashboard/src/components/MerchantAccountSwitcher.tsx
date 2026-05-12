@@ -1,7 +1,7 @@
 "use client";
 
 import { getApp } from "firebase/app";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs, query, where, doc, getDoc } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Store } from "lucide-react";
@@ -26,31 +26,68 @@ export default function MerchantAccountSwitcher({
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!user || claims.role !== "merchant_owner") {
+    if (!user) {
       setStores([]);
       return;
     }
-    let cancelled = false;
-    (async () => {
-      try {
-        const q = query(collection(db, "Merchants"), where("ownerAuthUid", "==", user.uid));
-        const snap = await getDocs(q);
-        if (cancelled) return;
-        setStores(
-          snap.docs.map((d) => ({
-            id: d.id,
-            name:
-              String(d.data().businessName || d.data().merchantNumber || d.id).trim() || d.id,
-          }))
-        );
-      } catch {
-        if (!cancelled) setStores([]);
+
+    if (claims.role === "merchant_owner") {
+      let cancelled = false;
+      (async () => {
+        try {
+          const q = query(collection(db, "Merchants"), where("ownerAuthUid", "==", user.uid));
+          const snap = await getDocs(q);
+          if (cancelled) return;
+          setStores(
+            snap.docs.map((d) => ({
+              id: d.id,
+              name:
+                String(d.data().businessName || d.data().merchantNumber || d.id).trim() || d.id,
+            }))
+          );
+        } catch {
+          if (!cancelled) setStores([]);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (claims.role === "merchant_staff") {
+      const ids =
+        Array.isArray(claims.merchantIds) && claims.merchantIds.length > 0
+          ? claims.merchantIds.map((x) => String(x)).filter(Boolean)
+          : [];
+      if (ids.length === 0) {
+        setStores([]);
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [user, claims.role, user?.uid]);
+      let cancelled = false;
+      (async () => {
+        try {
+          const rows = await Promise.all(ids.map((id) => getDoc(doc(db, "Merchants", id))));
+          if (cancelled) return;
+          setStores(
+            rows
+              .filter((s) => s.exists())
+              .map((s) => ({
+                id: s.id,
+                name:
+                  String(s.data().businessName || s.data().merchantNumber || s.id).trim() || s.id,
+              }))
+          );
+        } catch {
+          if (!cancelled) setStores([]);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setStores([]);
+  }, [user, claims.role, claims.merchantIds, user?.uid]);
 
   useEffect(() => {
     if (!open) return;

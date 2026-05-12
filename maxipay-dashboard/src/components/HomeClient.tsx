@@ -13,7 +13,7 @@ export default function HomeClient() {
       if (user) {
         const tokenResult = await user.getIdTokenResult();
         const role = tokenResult.claims.role as string | undefined;
-        if (role === "merchant_owner" || role === "super_admin") {
+        if (role === "merchant_owner" || role === "super_admin" || role === "merchant_staff") {
           router.replace("/dashboard");
         } else {
           router.replace("/login?error=no_merchant");

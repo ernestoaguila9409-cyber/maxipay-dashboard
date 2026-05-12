@@ -41,7 +41,8 @@ export default function Header({ title, searchValue, onSearchChange }: HeaderPro
     return () => unsub();
   }, [user, merchantId]);
 
-  const roleLabel = claims.role === "super_admin" ? "Admin" : "Owner";
+  const roleLabel =
+    claims.role === "super_admin" ? "Admin" : claims.role === "merchant_staff" ? "Staff" : "Owner";
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-20">
@@ -64,7 +65,7 @@ export default function Header({ title, searchValue, onSearchChange }: HeaderPro
           </div>
         )}
 
-        {claims.role === "merchant_owner" ? (
+        {claims.role === "merchant_owner" || claims.role === "merchant_staff" ? (
           <MerchantAccountSwitcher activeBusinessName={businessName} />
         ) : businessName ? (
           <span
