@@ -1,5 +1,7 @@
 package com.volt.maximobile
 
+import android.app.Application
+import android.graphics.Color as AndroidColor
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,12 +22,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -85,16 +88,38 @@ private fun MaxiRoot() {
         mutableStateOf(if (mid.isNotBlank()) Screen.Pin else Screen.Activation)
     }
     var activationCode by remember { mutableStateOf("") }
-    var pin by remember { mutableStateOf("") }
     var employeeName by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
+    var activationForced by remember { mutableStateOf(false) }
+    var businessTitle by remember { mutableStateOf(PosDeviceIdentity.getMerchantBusinessName(context)) }
 
     var categories by remember { mutableStateOf<List<CatUi>>(emptyList()) }
     var selectedCategoryId by remember { mutableStateOf<String?>(null) }
     var items by remember { mutableStateOf<List<ItemUi>>(emptyList()) }
     val cart = remember { mutableStateListOf<CartLine>() }
     var payDialog by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        val app = context.applicationContext as Application
+        PosDeviceDeactivationNotifier.onForceActivation = {
+            screen = Screen.Activation
+            employeeName = ""
+            activationCode = ""
+            activationForced = true
+            categories = emptyList()
+            selectedCategoryId = null
+            items = emptyList()
+            cart.clear()
+            payDialog = false
+            busy = false
+            err = null
+        }
+        PosDeviceDeactivationWatch.syncFirestoreListener(app)
+        onDispose {
+            PosDeviceDeactivationNotifier.onForceActivation = null
+        }
+    }
 
     fun loadCategories() {
         scope.launch {
@@ -128,7 +153,111 @@ private fun MaxiRoot() {
     }
 
     LaunchedEffect(screen) {
-        if (screen == Screen.Menu) loadCategories()
+        when (screen) {
+            Screen.Menu -> loadCategories()
+            Screen.Pin -> {
+                PosDeviceIdentity.syncMerchantBusinessNameFromFirestore(context.applicationContext)
+                businessTitle = PosDeviceIdentity.getMerchantBusinessName(context)
+            }
+            else -> Unit
+        }
+    }
+
+    SideEffect {
+        val act = context as? ComponentActivity ?: return@SideEffect
+        val w = act.window
+        if (screen == Screen.Pin) {
+            w.statusBarColor = AndroidColor.parseColor("#12002F")
+            w.navigationBarColor = AndroidColor.parseColor("#12002F")
+        } else {
+            w.statusBarColor = AndroidColor.WHITE
+            w.navigationBarColor = AndroidColor.WHITE
+        }
+    }
+
+    if (screen == Screen.Activation) {
+        val subtitle = if (activationForced) {
+            stringResource(R.string.device_activation_forced_instructions)
+        } else {
+            stringResource(R.string.device_activation_instructions)
+        }
+        MaxiActivationScreen(
+            subtitle = subtitle,
+            code = activationCode,
+            onCodeChange = { raw ->
+                activationCode = raw.filter { it.isDigit() }.take(6)
+                err = null
+            },
+            error = err,
+            busy = busy,
+            onSubmit = {
+                busy = true
+                err = null
+                PosDeviceActivation.redeemCode(
+                    context,
+                    activationCode,
+                    onSuccess = {
+                        activationCode = ""
+                        err = null
+                        activationForced = false
+                        screen = Screen.Pin
+                        busy = false
+                        PosDeviceDeactivationWatch.syncFirestoreListener(
+                            context.applicationContext as Application,
+                        )
+                    },
+                    onError = { msg ->
+                        err = msg
+                        busy = false
+                    },
+                )
+            },
+        )
+        return
+    }
+
+    if (screen == Screen.Pin) {
+        val fallbackTitle = stringResource(R.string.login_business_title_fallback)
+        val headerTitle = businessTitle.trim().ifBlank { fallbackTitle }
+        StaffPinLoginScreen(
+            businessTitle = headerTitle,
+            errorMessage = err,
+            busy = busy,
+            onClearError = { err = null },
+            onSubmitPin = { code ->
+                scope.launch {
+                    if (busy) return@launch
+                    busy = true
+                    err = null
+                    try {
+                        val mid = PosDeviceIdentity.getMerchantId(context).trim()
+                        if (mid.isEmpty()) {
+                            err = "Merchant ID missing"
+                            return@launch
+                        }
+                        val data = hashMapOf<String, Any>("pin" to code, "merchantId" to mid)
+                        val res = FirebaseFunctions.getInstance()
+                            .getHttpsCallable("verifyPin")
+                            .call(data)
+                            .await()
+                        @Suppress("UNCHECKED_CAST")
+                        val map = res.data as? Map<String, Any?> ?: emptyMap()
+                        if (map["success"] as? Boolean != true) {
+                            err = "Invalid PIN"
+                            return@launch
+                        }
+                        employeeName = map["name"] as? String ?: "Staff"
+                        MerchantFirestore.init(mid)
+                        screen = Screen.Menu
+                    } catch (e: Exception) {
+                        err = e.message ?: "Login failed"
+                    } finally {
+                        busy = false
+                    }
+                }
+            },
+        )
+        return
     }
 
     Scaffold(
@@ -149,89 +278,6 @@ private fun MaxiRoot() {
                 Spacer(Modifier.height(8.dp))
             }
             when (screen) {
-                Screen.Activation -> {
-                    Text(stringResource(R.string.device_activation_title), style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    Text(stringResource(R.string.device_activation_instructions))
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = activationCode,
-                        onValueChange = { raw ->
-                            val digits = raw.filter { it.isDigit() }.take(6)
-                            activationCode = digits
-                        },
-                        label = { Text(stringResource(R.string.device_activation_hint)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = {
-                            busy = true
-                            err = null
-                            PosDeviceActivation.redeemCode(
-                                context,
-                                activationCode,
-                                onSuccess = {
-                                    activationCode = ""
-                                    err = null
-                                    screen = Screen.Pin
-                                    busy = false
-                                },
-                                onError = { msg ->
-                                    err = msg
-                                    busy = false
-                                },
-                            )
-                        },
-                        enabled = !busy && activationCode.length == 6,
-                    ) { Text(stringResource(R.string.device_activation_submit)) }
-                }
-
-                Screen.Pin -> {
-                    Text("Staff PIN")
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = pin,
-                        onValueChange = { if (it.length <= 8) pin = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("PIN") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                busy = true
-                                err = null
-                                try {
-                                    val mid = PosDeviceIdentity.getMerchantId(context).trim()
-                                    val data = hashMapOf<String, Any>("pin" to pin, "merchantId" to mid)
-                                    val res = FirebaseFunctions.getInstance()
-                                        .getHttpsCallable("verifyPin")
-                                        .call(data)
-                                        .await()
-                                    @Suppress("UNCHECKED_CAST")
-                                    val map = res.data as? Map<String, Any?> ?: emptyMap()
-                                    if (map["success"] as? Boolean != true) {
-                                        err = "Invalid PIN"
-                                        return@launch
-                                    }
-                                    employeeName = map["name"] as? String ?: "Staff"
-                                    MerchantFirestore.init(mid)
-                                    pin = ""
-                                    screen = Screen.Menu
-                                } catch (e: Exception) {
-                                    err = e.message ?: "Login failed"
-                                } finally {
-                                    busy = false
-                                }
-                            }
-                        },
-                        enabled = !busy && pin.length >= 4,
-                    ) { Text("Sign in") }
-                }
-
                 Screen.Menu -> {
                     if (busy && categories.isEmpty()) {
                         CircularProgressIndicator()
@@ -316,6 +362,7 @@ private fun MaxiRoot() {
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Checkout & pay") }
                 }
+                else -> Unit
             }
             if (busy) {
                 Spacer(Modifier.height(8.dp))

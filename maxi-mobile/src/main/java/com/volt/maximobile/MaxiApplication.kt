@@ -22,7 +22,19 @@ class MaxiApplication : Application() {
                     .build(),
             )
         }
-        FirebaseAuth.getInstance().signInAnonymously()
+        PosDeviceDeactivationWatch.install(this)
+
+        val auth = FirebaseAuth.getInstance()
+        auth.addAuthStateListener { a ->
+            if (a.currentUser != null) {
+                PosDeviceDeactivationWatch.syncFirestoreListener(this)
+            }
+        }
+
+        auth.signInAnonymously()
+            .addOnSuccessListener {
+                PosDeviceDeactivationWatch.syncFirestoreListener(this@MaxiApplication)
+            }
             .addOnFailureListener { e ->
                 Log.w(TAG, "Anonymous auth failed (Firestore may still be blocked by rules): ${e.message}")
             }
