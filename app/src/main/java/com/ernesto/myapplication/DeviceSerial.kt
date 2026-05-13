@@ -3,6 +3,7 @@ package com.ernesto.myapplication
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
+import android.provider.Settings
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
@@ -150,5 +151,21 @@ object DeviceSerial {
             Build.SERIAL
         }
         return raw
+    }
+
+    /**
+     * Always available on real devices; used when hardware serial cannot be read (common on
+     * targetSdk 29+). Not the factory sticker serial but uniquely identifies the install.
+     */
+    @SuppressLint("HardwareIds")
+    fun getStableAndroidId(context: Context): String {
+        return try {
+            Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+                ?.trim()
+                ?.take(64)
+                .orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
     }
 }

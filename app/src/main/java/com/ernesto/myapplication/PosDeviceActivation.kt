@@ -127,6 +127,7 @@ object PosDeviceActivation {
                     } catch (_: Exception) { 0L }
                     val deviceLabel = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
                     val deviceSerial = DeviceSerial.getBestEffort(context)
+                    val deviceStableId = DeviceSerial.getStableAndroidId(context)
 
                     if (actDoc.getBoolean("consumed") == true) {
                         onError(context.getString(R.string.device_activation_already_used))
@@ -162,6 +163,9 @@ object PosDeviceActivation {
                             "lastSeen" to FieldValue.serverTimestamp(),
                             "updatedAt" to FieldValue.serverTimestamp(),
                         )
+                        if (deviceStableId.isNotEmpty()) {
+                            devicePayload["deviceStableId"] = deviceStableId
+                        }
                         if (deviceSerial.isNotEmpty()) {
                             devicePayload["deviceSerial"] = deviceSerial
                         }
