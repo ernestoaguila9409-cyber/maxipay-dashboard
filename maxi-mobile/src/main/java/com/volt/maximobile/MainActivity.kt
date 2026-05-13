@@ -5,22 +5,13 @@ import android.graphics.Color as AndroidColor
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -41,12 +32,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.Filter
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.functions.FirebaseFunctions
 import com.volt.maximobile.engine.PaymentEngine
 import com.volt.maximobile.spin.SpinClient
 import java.io.IOException
+import java.util.Calendar
 import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -62,10 +57,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-private enum class Screen { Activation, Pin, Menu }
+private enum class Screen { Activation, Pin, Hub, TablePick, BarSeatPick, Menu }
 
-private data class CatUi(val id: String, val name: String)
-private data class ItemUi(val id: String, val name: String, val categoryId: String, val priceDollars: Double)
+private enum class OrderChannel { DINE_IN, TO_GO, BAR }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
@@ -99,6 +93,11 @@ private fun MaxiRoot() {
     var items by remember { mutableStateOf<List<ItemUi>>(emptyList()) }
     val cart = remember { mutableStateListOf<CartLine>() }
     var payDialog by remember { mutableStateOf(false) }
+    var orderChannel by remember { mutableStateOf(OrderChannel.TO_GO) }
+    var contextTableId by remember { mutableStateOf<String?>(null) }
+    var contextTableName by remember { mutableStateOf<String?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
+    var activeScheduleIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     DisposableEffect(Unit) {
         val app = context.applicationContext as Application
@@ -111,6 +110,11 @@ private fun MaxiRoot() {
             selectedCategoryId = null
             items = emptyList()
             cart.clear()
+            orderChannel = OrderChannel.TO_GO
+            contextTableId = null
+            contextTableName = null
+            searchQuery = ""
+            activeScheduleIds = emptySet()
             payDialog = false
             busy = false
             err = null
@@ -126,21 +130,30 @@ private fun MaxiRoot() {
             busy = true
             err = null
             try {
-                val db = FirebaseFirestore.getInstance()
                 val mid = PosDeviceIdentity.getMerchantId(context).trim()
                 if (mid.isEmpty()) throw IllegalStateException("Merchant ID missing")
                 MerchantFirestore.init(mid)
-                val base = db.collection("Merchants").document(mid).collection("categories")
-                var snap = base.whereArrayContains("availableOrderTypes", "TO_GO").get().await()
-                if (snap.isEmpty) {
-                    snap = base.get().await()
+                val scheduleIds = try {
+                    fetchActiveScheduleIdsNow()
+                } catch (_: Exception) {
+                    emptySet()
                 }
+                activeScheduleIds = scheduleIds
+                val base = MerchantFirestore.col("Categories")
+                val snap = fetchCategoriesForChannel(base, orderChannel)
                 val list = snap.documents.mapNotNull { d -> parseCategory(d) }
                     .sortedBy { it.name.lowercase(Locale.US) }
                 categories = list
                 selectedCategoryId = list.firstOrNull()?.id
-                if (selectedCategoryId != null) {
-                    items = loadItemsForCategory(db, mid, selectedCategoryId!!)
+                val first = list.firstOrNull()
+                if (first != null) {
+                    items = loadItemsForCategory(
+                        mid,
+                        first.id,
+                        orderChannel,
+                        first.availableOrderTypes,
+                        scheduleIds,
+                    )
                 } else {
                     items = emptyList()
                 }
@@ -152,7 +165,7 @@ private fun MaxiRoot() {
         }
     }
 
-    LaunchedEffect(screen) {
+    LaunchedEffect(screen, orderChannel, contextTableId) {
         when (screen) {
             Screen.Menu -> loadCategories()
             Screen.Pin -> {
@@ -248,7 +261,7 @@ private fun MaxiRoot() {
                         }
                         employeeName = map["name"] as? String ?: "Staff"
                         MerchantFirestore.init(mid)
-                        screen = Screen.Menu
+                        screen = Screen.Hub
                     } catch (e: Exception) {
                         err = e.message ?: "Login failed"
                     } finally {
@@ -260,10 +273,81 @@ private fun MaxiRoot() {
         return
     }
 
+    if (screen == Screen.Hub) {
+        OrderModeHubScreen(
+            onDineIn = {
+                orderChannel = OrderChannel.DINE_IN
+                contextTableId = null
+                contextTableName = null
+                cart.clear()
+                searchQuery = ""
+                err = null
+                screen = Screen.TablePick
+            },
+            onToGo = {
+                orderChannel = OrderChannel.TO_GO
+                contextTableId = null
+                contextTableName = null
+                cart.clear()
+                searchQuery = ""
+                err = null
+                screen = Screen.Menu
+            },
+            onBar = {
+                orderChannel = OrderChannel.BAR
+                contextTableId = null
+                contextTableName = null
+                cart.clear()
+                searchQuery = ""
+                err = null
+                screen = Screen.BarSeatPick
+            },
+        )
+        return
+    }
+
+    if (screen == Screen.TablePick) {
+        TablePickScreen(
+            onBack = {
+                screen = Screen.Hub
+                err = null
+            },
+            onPick = { id, name ->
+                contextTableId = id
+                contextTableName = name
+                screen = Screen.Menu
+            },
+        )
+        return
+    }
+
+    if (screen == Screen.BarSeatPick) {
+        BarSeatPickScreen(
+            onBack = { screen = Screen.Hub },
+            onPick = { id, name ->
+                contextTableId = id
+                contextTableName = name
+                screen = Screen.Menu
+            },
+        )
+        return
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Maxi Mobile · To Go") },
+                title = { Text(menuTopBarTitle(orderChannel, contextTableName)) },
+                navigationIcon = {
+                    TextButton(
+                        onClick = {
+                            cart.clear()
+                            contextTableId = null
+                            contextTableName = null
+                            searchQuery = ""
+                            screen = Screen.Hub
+                        },
+                    ) { Text("Order type") }
+                },
             )
         },
     ) { padding ->
@@ -271,103 +355,78 @@ private fun MaxiRoot() {
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp),
+                .padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
             err?.let {
                 Text(it, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(8.dp))
             }
-            when (screen) {
-                Screen.Menu -> {
-                    if (busy && categories.isEmpty()) {
-                        CircularProgressIndicator()
-                        return@Column
-                    }
-                    Text("Categories", style = MaterialTheme.typography.titleMedium)
-                    LazyColumn(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                    ) {
-                        items(categories) { c ->
-                            val sel = c.id == selectedCategoryId
-                            Text(
-                                c.name + if (sel) "  ◀" else "",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        selectedCategoryId = c.id
-                                        scope.launch {
-                                            busy = true
-                                            try {
-                                                val db = FirebaseFirestore.getInstance()
-                                                val mid = PosDeviceIdentity.getMerchantId(context).trim()
-                                                items = loadItemsForCategory(db, mid, c.id)
-                                            } catch (e: Exception) {
-                                                err = e.message
-                                            } finally {
-                                                busy = false
-                                            }
-                                        }
-                                    }
-                                    .padding(vertical = 8.dp),
+            MaxiMenuOrderContent(
+                categories = categories,
+                selectedCategoryId = selectedCategoryId,
+                items = items,
+                cart = cart.toList(),
+                searchQuery = searchQuery,
+                busy = busy,
+                checkoutEnabled = when (orderChannel) {
+                    OrderChannel.TO_GO -> true
+                    OrderChannel.DINE_IN -> !contextTableId.isNullOrBlank()
+                    OrderChannel.BAR -> !contextTableId.isNullOrBlank()
+                } && cart.isNotEmpty() && !busy,
+                onCategorySelected = { cat ->
+                    selectedCategoryId = cat.id
+                    searchQuery = ""
+                    scope.launch {
+                        busy = true
+                        try {
+                            val mid = PosDeviceIdentity.getMerchantId(context).trim()
+                            items = emptyList()
+                            items = loadItemsForCategory(
+                                mid,
+                                cat.id,
+                                orderChannel,
+                                cat.availableOrderTypes,
+                                activeScheduleIds,
                             )
+                        } catch (e: Exception) {
+                            err = e.message
+                        } finally {
+                            busy = false
                         }
                     }
-                    HorizontalDivider()
-                    Text("Items (tap to add)", style = MaterialTheme.typography.titleMedium)
-                    LazyColumn(
-                        modifier = Modifier
-                            .weight(2f)
-                            .fillMaxWidth(),
-                    ) {
-                        items(items) { it ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        cart.add(
-                                            CartLine(
-                                                menuItemId = it.id,
-                                                name = it.name,
-                                                unitPriceDollars = it.priceDollars,
-                                                quantity = 1,
-                                            ),
-                                        )
-                                        Toast.makeText(context, "Added ${it.name}", Toast.LENGTH_SHORT).show()
-                                    }
-                                    .padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text(it.name, modifier = Modifier.weight(1f))
-                                Text("$${String.format(Locale.US, "%.2f", it.priceDollars)}")
-                            }
-                        }
+                },
+                onSearchQueryChange = { searchQuery = it },
+                onItemClick = { item ->
+                    cart.add(
+                        CartLine(
+                            menuItemId = item.id,
+                            name = item.name,
+                            unitPriceDollars = item.priceDollars,
+                            quantity = 1,
+                        ),
+                    )
+                },
+                onCheckoutClick = {
+                    val canPayChannel = when (orderChannel) {
+                        OrderChannel.TO_GO -> true
+                        OrderChannel.DINE_IN -> !contextTableId.isNullOrBlank()
+                        OrderChannel.BAR -> !contextTableId.isNullOrBlank()
                     }
-                    HorizontalDivider()
-                    Text("Cart: ${cart.size} line(s)", style = MaterialTheme.typography.titleSmall)
-                    Button(
-                        onClick = {
-                            if (cart.isEmpty()) {
-                                err = "Cart is empty"
-                                return@Button
-                            }
-                            if (!SpinClient.spinConfigured()) {
-                                err = "SPIn not configured. Add maxi-mobile/secrets.properties and rebuild."
-                                return@Button
-                            }
-                            payDialog = true
-                        },
-                        enabled = !busy && cart.isNotEmpty(),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Checkout & pay") }
-                }
-                else -> Unit
-            }
-            if (busy) {
-                Spacer(Modifier.height(8.dp))
-                CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
-            }
+                    if (!canPayChannel) {
+                        err = when (orderChannel) {
+                            OrderChannel.DINE_IN -> "Select a table first (Order type → Dine in)."
+                            OrderChannel.BAR -> "Select a bar seat first (Order type → Bar)."
+                            else -> "Cannot checkout"
+                        }
+                    } else if (cart.isEmpty()) {
+                        err = "Cart is empty"
+                    } else if (!SpinClient.spinConfigured()) {
+                        err = "SPIn not configured. Add maxi-mobile/secrets.properties and rebuild."
+                    } else {
+                        payDialog = true
+                    }
+                },
+            )
         }
     }
 
@@ -375,7 +434,7 @@ private fun MaxiRoot() {
         AlertDialog(
             onDismissRequest = { if (!busy) payDialog = false },
             title = { Text("Card type") },
-            text = { Text("Creates the To Go order, runs SPIn Sale on the terminal, then records payment.") },
+            text = { Text("Creates the order, runs SPIn Sale on the terminal, then records payment.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -383,12 +442,18 @@ private fun MaxiRoot() {
                             busy = true
                             try {
                                 val lines = cart.toList()
-                                checkoutToGo(
+                                checkoutOrder(
                                     employeeName = employeeName,
                                     lines = lines,
                                     paymentType = "Credit",
+                                    channel = orderChannel,
+                                    tableId = contextTableId,
+                                    tableName = contextTableName,
                                 )
                                 cart.clear()
+                                contextTableId = null
+                                contextTableName = null
+                                screen = Screen.Hub
                                 Toast.makeText(context, "Payment complete", Toast.LENGTH_LONG).show()
                             } catch (e: Exception) {
                                 Toast.makeText(context, e.message ?: "Checkout failed", Toast.LENGTH_LONG).show()
@@ -407,12 +472,18 @@ private fun MaxiRoot() {
                             busy = true
                             try {
                                 val lines = cart.toList()
-                                checkoutToGo(
+                                checkoutOrder(
                                     employeeName = employeeName,
                                     lines = lines,
                                     paymentType = "Debit",
+                                    channel = orderChannel,
+                                    tableId = contextTableId,
+                                    tableName = contextTableName,
                                 )
                                 cart.clear()
+                                contextTableId = null
+                                contextTableName = null
+                                screen = Screen.Hub
                                 Toast.makeText(context, "Payment complete", Toast.LENGTH_LONG).show()
                             } catch (e: Exception) {
                                 Toast.makeText(context, e.message ?: "Checkout failed", Toast.LENGTH_LONG).show()
@@ -428,51 +499,223 @@ private fun MaxiRoot() {
     }
 }
 
+private suspend fun fetchActiveScheduleIdsNow(): Set<String> = withContext(Dispatchers.IO) {
+    val cal = Calendar.getInstance()
+    val dayOfWeek = when (cal.get(Calendar.DAY_OF_WEEK)) {
+        Calendar.MONDAY -> "MON"
+        Calendar.TUESDAY -> "TUE"
+        Calendar.WEDNESDAY -> "WED"
+        Calendar.THURSDAY -> "THU"
+        Calendar.FRIDAY -> "FRI"
+        Calendar.SATURDAY -> "SAT"
+        Calendar.SUNDAY -> "SUN"
+        else -> ""
+    }
+    val currentTime = String.format(
+        Locale.US,
+        "%02d:%02d",
+        cal.get(Calendar.HOUR_OF_DAY),
+        cal.get(Calendar.MINUTE),
+    )
+    val snap = MerchantFirestore.col("menuSchedules").get().await()
+    val active = mutableSetOf<String>()
+    for (doc in snap.documents) {
+        @Suppress("UNCHECKED_CAST")
+        val days = doc.get("days") as? List<*> ?: continue
+        val startTime = doc.getString("startTime") ?: continue
+        val endTime = doc.getString("endTime") ?: continue
+        val dayStrings = days.mapNotNull { it?.toString() }
+        if (dayStrings.contains(dayOfWeek) && currentTime >= startTime && currentTime <= endTime) {
+            active.add(doc.id)
+        }
+    }
+    active
+}
+
+private fun menuTopBarTitle(channel: OrderChannel, tableOrSeatName: String?): String {
+    val label = tableOrSeatName?.trim().orEmpty()
+    return when (channel) {
+        OrderChannel.DINE_IN ->
+            if (label.isNotEmpty()) "Dine in · $label" else "Dine in"
+        OrderChannel.TO_GO -> "To go"
+        OrderChannel.BAR ->
+            if (label.isNotEmpty()) "Bar · $label" else "Bar"
+    }
+}
+
+private suspend fun fetchCategoriesForChannel(
+    base: CollectionReference,
+    channel: OrderChannel,
+): QuerySnapshot {
+    val types = when (channel) {
+        OrderChannel.DINE_IN -> listOf("DINE_IN")
+        OrderChannel.TO_GO -> listOf("TO_GO")
+        OrderChannel.BAR -> listOf("BAR", "BAR_TAB")
+    }
+    for (t in types) {
+        val s = base.whereArrayContains("availableOrderTypes", t).get().await()
+        if (!s.isEmpty) return s
+    }
+    return base.get().await()
+}
+
 private fun parseCategory(d: DocumentSnapshot): CatUi? {
     val id = d.id
     val name = d.getString("name")?.trim().orEmpty().ifBlank { id }
-    return CatUi(id, name)
-}
-
-private fun itemAllowedForToGo(d: DocumentSnapshot): Boolean {
     @Suppress("UNCHECKED_CAST")
-    val types = d.get("availableOrderTypes") as? List<*>
-    if (types.isNullOrEmpty()) return true
-    return types.any { it?.toString().equals("TO_GO", ignoreCase = true) }
+    val types = (d.get("availableOrderTypes") as? List<*>)?.mapNotNull { it?.toString()?.trim() }?.filter { it.isNotEmpty() }
+        ?: emptyList()
+    return CatUi(id, name, types)
 }
 
-private fun parseMenuItem(d: DocumentSnapshot): ItemUi? {
-    if (!itemAllowedForToGo(d)) return null
+private fun itemAllowedForChannel(
+    d: DocumentSnapshot,
+    channel: OrderChannel,
+    categoryFallbackTypes: List<String>,
+): Boolean {
+    @Suppress("UNCHECKED_CAST")
+    val itemTypesRaw = d.get("availableOrderTypes") as? List<*>
+    val effective: List<String> = if (!itemTypesRaw.isNullOrEmpty()) {
+        itemTypesRaw.mapNotNull { it?.toString()?.trim()?.uppercase(Locale.US) }
+    } else {
+        categoryFallbackTypes.map { it.trim().uppercase(Locale.US) }
+    }
+    if (effective.isEmpty()) return true
+    return when (channel) {
+        OrderChannel.DINE_IN -> effective.any { it == "DINE_IN" }
+        OrderChannel.TO_GO -> effective.any { it == "TO_GO" || it == "ONLINE_PICKUP" }
+        OrderChannel.BAR -> effective.any { it == "BAR" || it == "BAR_TAB" }
+    }
+}
+
+private fun resolveMenuItemPriceDollars(d: DocumentSnapshot): Double {
+    @Suppress("UNCHECKED_CAST")
+    val pricingRaw = d.get("pricing") as? Map<String, Any>
+    val pricingPos = (pricingRaw?.get("pos") as? Number)?.toDouble()
+    @Suppress("UNCHECKED_CAST")
+    val pricesRaw = d.get("prices") as? Map<String, Any>
+    val pricesMap = pricesRaw?.mapValues { (it.value as? Number)?.toDouble() ?: 0.0 } ?: emptyMap()
+    val legacy = d.getDouble("price")
+    val legacyLong = d.getLong("price")?.toDouble()
+    val cents1 = d.getLong("basePriceInCents")
+    val cents2 = d.getLong("unitPriceInCents")
+    return pricingPos
+        ?: if (pricesMap.isNotEmpty()) pricesMap.values.first()
+        else legacy
+        ?: legacyLong
+        ?: cents1?.let { it / 100.0 }
+        ?: cents2?.let { it / 100.0 }
+        ?: 0.0
+}
+
+private fun parseMenuItem(
+    d: DocumentSnapshot,
+    channel: OrderChannel,
+    categoryOrderTypes: List<String>,
+    activeScheduleIds: Set<String>,
+): ItemUi? {
+    @Suppress("UNCHECKED_CAST")
+    val channelsRaw = d.get("channels") as? Map<String, Any>
+    val channelPos = (channelsRaw?.get("pos") as? Boolean) ?: true
+    if (!channelPos) return null
+
+    val isScheduled = d.getBoolean("isScheduled") ?: false
+    if (isScheduled) {
+        @Suppress("UNCHECKED_CAST")
+        val scheduleIds = (d.get("scheduleIds") as? List<*>)?.mapNotNull { it?.toString()?.trim() }
+            ?.filter { it.isNotEmpty() } ?: emptyList()
+        if (scheduleIds.isNotEmpty() &&
+            (activeScheduleIds.isEmpty() || scheduleIds.none { it in activeScheduleIds })
+        ) {
+            return null
+        }
+    }
+
+    if (!itemAllowedForChannel(d, channel, categoryOrderTypes)) return null
+
     val id = d.id
     val name = d.getString("name")?.trim().orEmpty().ifBlank { return null }
     val cat = d.getString("categoryId")?.trim().orEmpty()
-    val cents = d.getLong("basePriceInCents") ?: d.getLong("unitPriceInCents") ?: return null
-    val dollars = cents / 100.0
+    val dollars = resolveMenuItemPriceDollars(d)
     return ItemUi(id, name, cat, dollars)
 }
 
-private suspend fun loadItemsForCategory(db: FirebaseFirestore, merchantId: String, categoryId: String): List<ItemUi> =
+private suspend fun loadItemsForCategory(
+    merchantId: String,
+    categoryId: String,
+    channel: OrderChannel,
+    categoryOrderTypes: List<String>,
+    activeScheduleIds: Set<String>,
+): List<ItemUi> =
     withContext(Dispatchers.IO) {
-        val snap = db.collection("Merchants").document(merchantId).collection("menuItems")
-            .whereEqualTo("categoryId", categoryId)
-            .get()
-            .await()
-        snap.documents.mapNotNull { parseMenuItem(it) }
+        MerchantFirestore.init(merchantId)
+        val col = MerchantFirestore.col("MenuItems")
+        val snap = col.where(
+            Filter.or(
+                Filter.equalTo("categoryId", categoryId),
+                Filter.arrayContains("categoryIds", categoryId),
+            ),
+        ).get().await()
+        snap.documents.mapNotNull { parseMenuItem(it, channel, categoryOrderTypes, activeScheduleIds) }
             .sortedBy { it.name.lowercase(Locale.US) }
     }
 
-private suspend fun checkoutToGo(
+private suspend fun checkoutOrder(
     employeeName: String,
     lines: List<CartLine>,
     paymentType: String,
+    channel: OrderChannel,
+    tableId: String?,
+    tableName: String?,
 ) {
     val (orderId, totalCents) = suspendCoroutine { cont ->
-        ToGoCheckout.createToGoOrderWithLines(
-            employeeName = employeeName,
-            lines = lines,
-            onSuccess = { oid, cents -> cont.resume(oid to cents) },
-            onFailure = { e -> cont.resumeWithException(e) },
-        )
+        when (channel) {
+            OrderChannel.TO_GO ->
+                ToGoCheckout.createToGoOrderWithLines(
+                    employeeName = employeeName,
+                    lines = lines,
+                    orderType = "TO_GO",
+                    onSuccess = { oid, cents -> cont.resume(oid to cents) },
+                    onFailure = { cont.resumeWithException(it) },
+                )
+            OrderChannel.DINE_IN -> {
+                val tid = tableId?.trim().orEmpty()
+                if (tid.isEmpty()) {
+                    cont.resumeWithException(IllegalStateException("No table selected"))
+                } else {
+                    val tn = tableName?.trim().orEmpty().ifBlank { null }
+                    ToGoCheckout.createToGoOrderWithLines(
+                        employeeName = employeeName,
+                        lines = lines,
+                        orderType = "DINE_IN",
+                        tableId = tid,
+                        tableName = tn,
+                        onSuccess = { oid, cents -> cont.resume(oid to cents) },
+                        onFailure = { cont.resumeWithException(it) },
+                    )
+                }
+            }
+            OrderChannel.BAR -> {
+                val tid = tableId?.trim().orEmpty()
+                if (tid.isEmpty()) {
+                    cont.resumeWithException(IllegalStateException("No bar seat selected"))
+                } else {
+                    val tn = tableName?.trim().orEmpty().ifBlank { tid }
+                    ToGoCheckout.createToGoOrderWithLines(
+                        employeeName = employeeName,
+                        lines = lines,
+                        orderType = "BAR_TAB",
+                        tableId = tid,
+                        tableName = tn,
+                        seatIds = listOf(tid),
+                        seatName = tn,
+                        area = "Bar",
+                        onSuccess = { oid, cents -> cont.resume(oid to cents) },
+                        onFailure = { cont.resumeWithException(it) },
+                    )
+                }
+            }
+        }
     }
     val totalDollars = totalCents / 100.0
     val clientRef = SpinClient.newClientReferenceId()

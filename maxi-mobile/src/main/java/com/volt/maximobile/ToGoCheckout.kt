@@ -19,6 +19,12 @@ object ToGoCheckout {
     fun createToGoOrderWithLines(
         employeeName: String,
         lines: List<CartLine>,
+        orderType: String,
+        tableId: String? = null,
+        tableName: String? = null,
+        seatIds: List<String>? = null,
+        seatName: String? = null,
+        area: String? = null,
         onSuccess: (orderId: String, totalCents: Long) -> Unit,
         onFailure: (Exception) -> Unit,
     ) {
@@ -41,9 +47,19 @@ object ToGoCheckout {
                     "totalInCents" to totalCents,
                     "totalPaidInCents" to 0L,
                     "remainingInCents" to totalCents,
-                    "orderType" to "TO_GO",
+                    "orderType" to orderType,
                     "itemsCount" to lines.size.toLong(),
                 )
+                if (!tableId.isNullOrBlank()) orderMap["tableId"] = tableId
+                if (!tableName.isNullOrBlank()) orderMap["tableName"] = tableName
+                if (!seatName.isNullOrBlank()) orderMap["seatName"] = seatName
+                val seats = seatIds?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct().orEmpty()
+                if (seats.isNotEmpty()) {
+                    orderMap["seatIds"] = seats
+                    orderMap["guestCount"] = seats.size.toLong()
+                }
+                if (!area.isNullOrBlank()) orderMap["area"] = area
+
                 MerchantFirestore.col("Orders")
                     .add(orderMap)
                     .addOnSuccessListener { doc ->
@@ -73,7 +89,25 @@ object ToGoCheckout {
                         }
                         batch.update(orderRef, "updatedAt", Date())
                         batch.commit()
-                            .addOnSuccessListener { onSuccess(oid, totalCents) }
+                            .addOnSuccessListener {
+                                if (orderType == "DINE_IN" && !tableId.isNullOrBlank()) {
+                                    TableFirestoreHelper.markDineInTableOccupied(db, tableId, null, oid)
+                                }
+                                if (orderType == "BAR_TAB" && seats.isNotEmpty()) {
+                                    val seatBatch = db.batch()
+                                    for (sid in seats) {
+                                        seatBatch.update(
+                                            MerchantFirestore.doc("Tables", sid),
+                                            mapOf("currentOrderId" to oid),
+                                        )
+                                    }
+                                    seatBatch.commit()
+                                        .addOnSuccessListener { onSuccess(oid, totalCents) }
+                                        .addOnFailureListener { e -> onFailure(e) }
+                                } else {
+                                    onSuccess(oid, totalCents)
+                                }
+                            }
                             .addOnFailureListener { e -> onFailure(e) }
                     }
                     .addOnFailureListener { e -> onFailure(e) }
