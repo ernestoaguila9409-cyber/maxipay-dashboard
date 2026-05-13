@@ -11,7 +11,6 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.SetOptions
-import java.util.concurrent.Executors
 
 /**
  * Writes a periodic heartbeat to Firestore [COLLECTION] while the POS app is in the foreground,
@@ -25,9 +24,6 @@ object PosDevicePresenceSync {
     private const val HEARTBEAT_INTERVAL_MS = 45_000L
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var heartbeatExecutor = Executors.newSingleThreadExecutor { r ->
-        Thread(r, "PosDeviceHeartbeat")
-    }
     private var app: Application? = null
     private var resolvedDocId: String? = null
     private var lifecycleObserver: DefaultLifecycleObserver? = null
@@ -72,10 +68,6 @@ object PosDevicePresenceSync {
         lifecycleObserver = null
         resolvedDocId = null
         app = null
-        heartbeatExecutor.shutdownNow()
-        heartbeatExecutor = Executors.newSingleThreadExecutor { r ->
-            Thread(r, "PosDeviceHeartbeat")
-        }
     }
 
     private fun scheduleHeartbeat() {
@@ -91,55 +83,39 @@ object PosDevicePresenceSync {
 
     private fun pushHeartbeat(application: Application) {
         val docId = resolvedDocId ?: return
-        val executor = heartbeatExecutor
-        executor.execute {
-            if (app == null || resolvedDocId != docId) return@execute
-            try {
-                val pm = application.packageManager
-                val pkg = application.packageName
-                val appVer = try {
-                    pm.getPackageInfo(pkg, 0).versionName ?: ""
-                } catch (_: Exception) {
-                    ""
-                }
-                val verCode = try {
-                    val pi = pm.getPackageInfo(pkg, 0)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pi.longVersionCode
-                    else @Suppress("DEPRECATION") pi.versionCode.toLong()
-                } catch (_: Exception) {
-                    0L
-                }
-
-                val deviceLabel = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
-                val deviceSerial = DeviceSerial.getBestEffort(application)
-                val deviceStableId = DeviceSerial.getStableAndroidId(application)
-                val data = hashMapOf<String, Any>(
-                    "platform" to "android",
-                    "deviceModel" to deviceLabel,
-                    "manufacturer" to Build.MANUFACTURER.orEmpty(),
-                    "model" to Build.MODEL.orEmpty(),
-                    "osVersion" to "Android ${Build.VERSION.RELEASE}",
-                    "sdkInt" to Build.VERSION.SDK_INT,
-                    "appVersion" to appVer,
-                    "appVersionCode" to verCode,
-                    FIELD_LAST_SEEN to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp(),
-                )
-                if (deviceStableId.isNotEmpty()) {
-                    data["deviceStableId"] = deviceStableId
-                }
-                if (deviceSerial.isNotEmpty()) {
-                    data["deviceSerial"] = deviceSerial
-                }
-
-                MerchantFirestore.doc(COLLECTION, docId)
-                    .set(data, SetOptions.merge())
-                    .addOnFailureListener { e ->
-                        Log.w(TAG, "Heartbeat failed: ${e.message}")
-                    }
-            } catch (e: Exception) {
-                Log.w(TAG, "Heartbeat worker failed: ${e.message}")
-            }
+        val pm = application.packageManager
+        val pkg = application.packageName
+        val appVer = try {
+            pm.getPackageInfo(pkg, 0).versionName ?: ""
+        } catch (_: Exception) {
+            ""
         }
+        val verCode = try {
+            val pi = pm.getPackageInfo(pkg, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pi.longVersionCode
+            else @Suppress("DEPRECATION") pi.versionCode.toLong()
+        } catch (_: Exception) {
+            0L
+        }
+
+        val deviceLabel = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
+        val data = hashMapOf<String, Any>(
+            "platform" to "android",
+            "deviceModel" to deviceLabel,
+            "manufacturer" to Build.MANUFACTURER.orEmpty(),
+            "model" to Build.MODEL.orEmpty(),
+            "osVersion" to "Android ${Build.VERSION.RELEASE}",
+            "sdkInt" to Build.VERSION.SDK_INT,
+            "appVersion" to appVer,
+            "appVersionCode" to verCode,
+            FIELD_LAST_SEEN to FieldValue.serverTimestamp(),
+            "updatedAt" to FieldValue.serverTimestamp(),
+        )
+
+        MerchantFirestore.doc(COLLECTION, docId)
+            .set(data, SetOptions.merge())
+            .addOnFailureListener { e ->
+                Log.w(TAG, "Heartbeat failed: ${e.message}")
+            }
     }
 }
