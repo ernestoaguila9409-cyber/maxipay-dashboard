@@ -245,10 +245,15 @@ export default function PosDevicesSettingsPage() {
   ).length;
 
   const runDeactivate = useCallback(async (row: PosDeviceRow) => {
+    const mid = merchantId.trim();
+    if (!mid) {
+      setError("Merchant is not loaded yet. Refresh the page and try again.");
+      return;
+    }
     setDeactivatingId(row.id);
     setError(null);
     try {
-      await deactivatePosDevice(merchantId, row.id);
+      await deactivatePosDevice(mid, row.id);
       setConfirmDeactivate(null);
     } catch (e) {
       console.error(e);
@@ -256,7 +261,7 @@ export default function PosDevicesSettingsPage() {
     } finally {
       setDeactivatingId(null);
     }
-  }, []);
+  }, [merchantId]);
 
   return (
     <>

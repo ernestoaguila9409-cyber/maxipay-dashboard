@@ -42,6 +42,14 @@ export function resolvedName(name: string): string {
   return NAME_MAP[name] ?? name;
 }
 
+function requireMerchantId(merchantId: string): string {
+  const mid = merchantId.trim();
+  if (!mid) {
+    throw new Error("merchantId is required for Merchants/{merchantId}/... paths");
+  }
+  return mid;
+}
+
 /**
  * Merchant-scoped collection (admin SDK): `Merchants/{merchantId}/{resolvedName}`.
  */
@@ -51,7 +59,8 @@ export function merchantCol(
 ): admin.firestore.CollectionReference {
   getFirebaseAdminApp();
   const db = admin.firestore();
-  return db.collection("Merchants").doc(merchantId).collection(resolvedName(name));
+  const mid = requireMerchantId(merchantId);
+  return db.collection("Merchants").doc(mid).collection(resolvedName(name));
 }
 
 /**

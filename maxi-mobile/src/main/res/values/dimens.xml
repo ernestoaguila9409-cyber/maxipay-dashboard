@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same names/values as main app drawables copied into maxi-mobile. -->
+    <dimen name="pos_key_corner_radius">14dp</dimen>
+    <dimen name="reservation_time_field_radius">12dp</dimen>
+    <dimen name="reservation_numeric_time_dialog_corner">18dp</dimen>
+</resources>

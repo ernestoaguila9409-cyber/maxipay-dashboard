@@ -48,6 +48,21 @@ export function resolvedName(name: string): string {
 }
 
 /**
+ * Non-empty merchant document id under `Merchants/{id}/`.
+ * Prevents invalid paths like `Merchants/posDevices/...` when [merchantId] is blank
+ * (e.g. stale closures or missing JWT `merchantId` after admin creates the store).
+ */
+function requireMerchantId(merchantId: string): string {
+  const mid = merchantId.trim();
+  if (!mid) {
+    throw new Error(
+      "Missing merchant id for this Firestore path. Refresh the page or sign out and back in. New stores need a login that includes merchantId on the token (set when the merchant is created in admin).",
+    );
+  }
+  return mid;
+}
+
+/**
  * Merchant-scoped collection: `Merchants/{merchantId}/{resolvedName}`.
  * Accepts either old root name (e.g. `"Orders"`) or new name (`"orders"`).
  */
@@ -55,7 +70,8 @@ export function merchantCol(
   merchantId: string,
   name: string
 ): CollectionReference {
-  return collection(db, "Merchants", merchantId, resolvedName(name));
+  const mid = requireMerchantId(merchantId);
+  return collection(db, "Merchants", mid, resolvedName(name));
 }
 
 /**
@@ -66,5 +82,6 @@ export function merchantDoc(
   collectionName: string,
   docId: string
 ): DocumentReference {
-  return doc(db, "Merchants", merchantId, resolvedName(collectionName), docId);
+  const mid = requireMerchantId(merchantId);
+  return doc(db, "Merchants", mid, resolvedName(collectionName), docId);
 }

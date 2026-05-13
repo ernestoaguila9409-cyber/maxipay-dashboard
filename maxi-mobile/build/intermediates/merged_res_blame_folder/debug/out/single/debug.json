@@ -1,0 +1,698 @@
+[
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_status_offline.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_status_offline.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_sandwich.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_sandwich.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_menu_item_card_disabled.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_menu_item_card_disabled.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_pos_keyboard_return.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_pos_keyboard_return.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_dashboard_grid.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_dashboard_grid.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_role_chip.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_role_chip.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_percent.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_percent.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_download.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_download.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_clock.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_clock.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_activity.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_activity.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_category_panel.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_category_panel.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_tip_option_selected.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_tip_option_selected.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_settings.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_settings.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable-anydpi-v24_ic_launcher_foreground.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-pngs-63:/drawable-anydpi-v24/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_assessment.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_assessment.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_tip_custom_selected.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_tip_custom_selected.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_pos_key_shift_active.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_pos_key_shift_active.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_keyboard_key.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_keyboard_key.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_launcher_background.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_launcher_background.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_key.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_key.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_login_gradient.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_login_gradient.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_bell.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_bell.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_message.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_message.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_split.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_split.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_flame.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_flame.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_section_selected.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_section_selected.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_pos_key_enter.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_pos_key_enter.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_status_badge_background.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/status_badge_background.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_coffee.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_coffee.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_discount.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_discount.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_rounded_assignment_24.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/rounded_assignment_24.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_cust_tip_option.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_cust_tip_option.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_to_go.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_to_go.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_hamburger.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_hamburger.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_apple.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_apple.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_category_default.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_category_default.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_pos_keyboard_shift.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_pos_keyboard_shift.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_qr_code.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_qr_code.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_keyboard_key_accent.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_keyboard_key_accent.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_pin_key_confirm.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/pin_key_confirm.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_edit.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_edit.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_plus.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_plus.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_cart_line.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_cart_line.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_cash.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_cash.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_gift.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_gift.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_pos_key_special.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_pos_key_special.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_globe.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_globe.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_check_filled.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_check_filled.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_stock_badge_red.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_stock_badge_red.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_item_card.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_item_card.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_pie_chart.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_pie_chart.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_store.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_store.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_bookmark.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_bookmark.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_transactions.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_transactions.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_avatar_placeholder.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_avatar_placeholder.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_pos_keyboard_panel.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_pos_keyboard_panel.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_pos_key.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_pos_key.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_badge.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_badge.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_arrow_back.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_arrow_back.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_keyboard_key_dark.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_keyboard_key_dark.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_button_dine_in.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_button_dine_in.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_piggy_bank.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_piggy_bank.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_repeat_suggestion_card.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_repeat_suggestion_card.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_customer_autocomplete_popup.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_customer_autocomplete_popup.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_heart.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_heart.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_payment.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_payment.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_menu_item_card.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_menu_item_card.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_reports.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_reports.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_stock_badge_green.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_stock_badge_green.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_local_shipping.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_local_shipping.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_trash.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_trash.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_category_button_selected.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_category_button_selected.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_delete_customer.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_delete_customer.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_power.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_power.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_refresh.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_refresh.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_hero_icon_ring.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_hero_icon_ring.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_tip_custom_button.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_tip_custom_button.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_delete.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_delete.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_dashboard_sales_sparkline.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_dashboard_sales_sparkline.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_modifiers.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_modifiers.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_reservation_time_field.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_reservation_time_field.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_upload.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_upload.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_menu_item_card_scheduled.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_menu_item_card_scheduled.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_left_panel.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_left_panel.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_sparkles.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_sparkles.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_eye.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_eye.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_status_badge_closed.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/status_badge_closed.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_calendar.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_calendar.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_dialog_reservation_numeric_time.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_dialog_reservation_numeric_time.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_split_guest_column_bg.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/split_guest_column_bg.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_dine_in.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_dine_in.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_table_join.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_table_join.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_rounded_logout_button.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/rounded_logout_button.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_zap.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_zap.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_settle_batch.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_settle_batch.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_mail.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_mail.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_local_dining.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_local_dining.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_menu.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_menu.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_coins.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_coins.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_bar.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_bar.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_button_to_go.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_button_to_go.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_filter_list.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_filter_list.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/mipmap-anydpi-v26/ic_launcher_round.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_stock_badge_yellow.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_stock_badge_yellow.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_tip_charge_button.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_tip_charge_button.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_check_empty.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_check_empty.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_order_type_button.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_order_type_button.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_category_button.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_category_button.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_phone.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_phone.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_orders.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_orders.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_search.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_search.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_shield.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_shield.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_cash_input_field.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_cash_input_field.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_numeric_time_digit_selected.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_numeric_time_digit_selected.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_email_receipt.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_email_receipt.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_inventory.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_inventory.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_map_pin.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_map_pin.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_award.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_award.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_wifi.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_wifi.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/mipmap-anydpi-v26/ic_launcher.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_beer.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_beer.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_split_guest_column_bg_highlight.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/split_guest_column_bg_highlight.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_pin_dot_filled.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/pin_dot_filled.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_expand_more.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_expand_more.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_pos_keyboard_backspace.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_pos_keyboard_backspace.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_numeric_time_digit.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_numeric_time_digit.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_user_plus.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_user_plus.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_none.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/none.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_customers.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_customers.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_pin_dot_empty.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/pin_dot_empty.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_attach_money.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_attach_money.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_pin_key_button.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/pin_key_button.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_split_guest_item_row_bg.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/split_guest_item_row_bg.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_restaurant.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_restaurant.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_reservation_filter_segment.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_reservation_filter_segment.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_printer.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_printer.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_home.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_home.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_minus.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_minus.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_fab_add.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_fab_add.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_receipt_long.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_receipt_long.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_shopping_cart.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_shopping_cart.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_target.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_target.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_timer.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_timer.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_wrench.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_wrench.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_list.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_list.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_badge_tip_added.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/badge_tip_added.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_cake.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_cake.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_tip_option_unselected.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_tip_option_unselected.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_center_glow.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_center_glow.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_account_balance.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_account_balance.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_employees.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_employees.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_lock.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_lock.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_status_online.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_status_online.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_building.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_building.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_folder.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_folder.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_line_chart.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_line_chart.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_category_selected.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_category_selected.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_keypad_button.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_keypad_button.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_circle_shape.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/circle_shape.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_item_tile.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/item_tile.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_credit_card.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_credit_card.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_fab_circle.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_fab_circle.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_star.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_star.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_button_bar.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_button_bar.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_search_field.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_search_field.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_search_bar.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_search_bar.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_warehouse.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_warehouse.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_crown.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_crown.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_split_guest_add_column_bg.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/split_guest_add_column_bg.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_pos_key_default.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_pos_key_default.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_bg_dashboard_compact.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/bg_dashboard_compact.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_pizza.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_pizza.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_trending_up.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_trending_up.xml"
+    },
+    {
+        "merged": "com.volt.maximobile.maxi-mobile-merged_res-67:/drawable_ic_tag.xml.flat",
+        "source": "com.volt.maximobile.maxi-mobile-main-69:/drawable/ic_tag.xml"
+    }
+]

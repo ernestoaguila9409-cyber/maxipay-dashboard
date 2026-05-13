@@ -4,10 +4,10 @@
     <selectionStates>
       <SelectionState runConfigName="app">
         <option name="selectionMode" value="DROPDOWN" />
-        <DropdownSelection timestamp="2026-05-07T23:29:01.681929100Z">
+        <DropdownSelection timestamp="2026-05-13T02:09:57.934641700Z">
           <Target type="DEFAULT_BOOT">
             <handle>
-              <DeviceId pluginId="PhysicalDevice" identifier="serial=256RCCM06543" />
+              <DeviceId pluginId="PhysicalDevice" identifier="serial=P8B3251125001280" />
             </handle>
           </Target>
         </DropdownSelection>
@@ -19,6 +19,17 @@
           <Target type="DEFAULT_BOOT">
             <handle>
               <DeviceId pluginId="PhysicalDevice" identifier="serial=A08D914P25481515" />
+            </handle>
+          </Target>
+        </DropdownSelection>
+        <DialogSelection />
+      </SelectionState>
+      <SelectionState runConfigName="maxi-mobile">
+        <option name="selectionMode" value="DROPDOWN" />
+        <DropdownSelection timestamp="2026-05-13T02:09:57.934641700Z">
+          <Target type="DEFAULT_BOOT">
+            <handle>
+              <DeviceId pluginId="PhysicalDevice" identifier="serial=P8B3251125001280" />
             </handle>
           </Target>
         </DropdownSelection>

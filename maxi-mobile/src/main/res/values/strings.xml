@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Maxi Mobile</string>
+
+    <string name="device_activation_title">Link device</string>
+    <string name="device_activation_instructions">Enter the 6-digit code from your dashboard (Settings → Devices). The code expires and can be used once.</string>
+    <string name="device_activation_hint">6-digit code</string>
+    <string name="device_activation_submit">Link this device</string>
+    <string name="device_activation_code_invalid">Enter the 6-digit code.</string>
+    <string name="device_activation_invalid_code">That code is not valid.</string>
+    <string name="device_activation_already_used">This code was already used.</string>
+    <string name="device_activation_expired">This code has expired. Generate a new one on the dashboard.</string>
+    <string name="device_activation_failed">Could not link device: %1$s</string>
+</resources>

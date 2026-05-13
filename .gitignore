@@ -15,6 +15,7 @@
 local.properties
 
 # Never commit secret keys
+maxi-mobile/secrets.properties
 functions/.env
 functions/.env.*
 !functions/.env.example

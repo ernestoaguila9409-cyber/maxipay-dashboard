@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Copied subset from main app: maxi-mobile drawables reference these @color names. -->
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <color name="brand_primary">#5E4085</color>
+
+    <color name="pos_key_fill">#FFFFFF</color>
+    <color name="pos_key_border">#E5E7EB</color>
+    <color name="pos_key_text_primary">#111827</color>
+    <color name="pos_key_ripple">#1A000000</color>
+    <color name="pos_key_enter_stroke">#C4B5FD</color>
+    <color name="pos_key_shift_active_fill">#DDD6FE</color>
+
+    <color name="reservation_time_field_bg">#F3F4F6</color>
+    <color name="reservation_time_field_stroke">#E5E7EB</color>
+
+    <color name="dashboard_sidebar_bg">#1A1D24</color>
+    <color name="dashboard_role_chip_stroke">#C5A059</color>
+</resources>

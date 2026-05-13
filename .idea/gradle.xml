@@ -12,6 +12,7 @@
             <option value="$PROJECT_DIR$" />
             <option value="$PROJECT_DIR$/app" />
             <option value="$PROJECT_DIR$/kds" />
+            <option value="$PROJECT_DIR$/maxi-mobile" />
           </set>
         </option>
       </GradleProjectSettings>
