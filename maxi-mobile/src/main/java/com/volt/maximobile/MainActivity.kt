@@ -4,6 +4,7 @@ import android.app.Application
 import android.graphics.Color as AndroidColor
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.Filter
@@ -63,6 +65,8 @@ private enum class OrderChannel { DINE_IN, TO_GO, BAR }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        // Keep content above the system navigation bar (readable back/home/recents).
+        WindowCompat.setDecorFitsSystemWindows(window, true)
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
@@ -176,15 +180,46 @@ private fun MaxiRoot() {
         }
     }
 
+    val activity = context as ComponentActivity
+    BackHandler(enabled = screen != Screen.Activation) {
+        if (payDialog) {
+            payDialog = false
+            return@BackHandler
+        }
+        when (screen) {
+            Screen.Pin -> activity.moveTaskToBack(false)
+            Screen.Hub -> {
+                screen = Screen.Pin
+                employeeName = ""
+            }
+            Screen.TablePick, Screen.BarSeatPick -> {
+                screen = Screen.Hub
+                err = null
+            }
+            Screen.Menu -> {
+                cart.clear()
+                contextTableId = null
+                contextTableName = null
+                searchQuery = ""
+                screen = Screen.Hub
+            }
+            else -> Unit
+        }
+    }
+
     SideEffect {
-        val act = context as? ComponentActivity ?: return@SideEffect
-        val w = act.window
+        val w = activity.window
+        val bars = WindowCompat.getInsetsController(w, w.decorView)
         if (screen == Screen.Pin) {
             w.statusBarColor = AndroidColor.parseColor("#12002F")
             w.navigationBarColor = AndroidColor.parseColor("#12002F")
+            bars.isAppearanceLightStatusBars = false
+            bars.isAppearanceLightNavigationBars = false
         } else {
             w.statusBarColor = AndroidColor.WHITE
-            w.navigationBarColor = AndroidColor.WHITE
+            w.navigationBarColor = AndroidColor.parseColor("#E8EAED")
+            bars.isAppearanceLightStatusBars = true
+            bars.isAppearanceLightNavigationBars = true
         }
     }
 
