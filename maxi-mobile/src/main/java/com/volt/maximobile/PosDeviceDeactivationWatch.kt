@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Source
 import java.util.concurrent.atomic.AtomicBoolean
@@ -68,7 +69,13 @@ object PosDeviceDeactivationWatch {
             MerchantFirestore.init(mid)
         }
 
-        PosDevicePresenceSync.start(application)
+        // Heartbeats require a signed-in Firebase user (anonymous is fine). Starting before auth
+        // completes yields permission-denied writes and a stale dashboard "Last seen".
+        if (FirebaseAuth.getInstance().currentUser != null) {
+            PosDevicePresenceSync.start(application)
+        } else {
+            PosDevicePresenceSync.stop()
+        }
 
         PosDeviceIdentity.resolveInstallationDocId(application) { docId ->
             if (PosDeviceIdentity.getMerchantId(application).trim().isEmpty()) {

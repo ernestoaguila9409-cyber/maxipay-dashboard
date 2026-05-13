@@ -21,7 +21,7 @@ android {
         minSdk = 23
         targetSdk = 34
         versionCode = 1
-        versionName = "0.1.0-maxi"
+        versionName = "0.1.1-maxi"
 
         val tpn = esc(secrets.getProperty("SPIN_TPN", ""))
         val reg = esc(secrets.getProperty("SPIN_REGISTER_ID", ""))
