@@ -22,7 +22,6 @@ object PosDeviceActivation {
     private const val DEVICES_COLLECTION = "PosDevices"
 
     const val FIELD_ENROLLED_FROM_DASHBOARD = "enrolledFromDashboard"
-    private const val FIELD_DEACTIVATED = "deactivated"
 
     private const val CODE_LEN = 6
 
@@ -137,6 +136,7 @@ object PosDeviceActivation {
                         0L
                     }
                     val deviceLabel = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
+                    val deviceSerial = DeviceSerial.getBestEffort(context)
 
                     if (actDoc.getBoolean("consumed") == true) {
                         onError(context.getString(R.string.device_activation_already_used))
@@ -168,10 +168,13 @@ object PosDeviceActivation {
                             "appVersionCode" to verCode,
                             "activatedAt" to FieldValue.serverTimestamp(),
                             FIELD_ENROLLED_FROM_DASHBOARD to true,
-                            FIELD_DEACTIVATED to false,
+                            PosDeviceDeactivationWatch.FIELD_DEACTIVATED to false,
                             "lastSeen" to FieldValue.serverTimestamp(),
                             "updatedAt" to FieldValue.serverTimestamp(),
                         )
+                        if (deviceSerial.isNotEmpty()) {
+                            devicePayload["deviceSerial"] = deviceSerial
+                        }
                         tx.set(devRef, devicePayload, SetOptions.merge())
                         tx.update(
                             actRef,
@@ -188,9 +191,9 @@ object PosDeviceActivation {
                     }.addOnSuccessListener {
                         PosDeviceIdentity.setMerchantId(appCtx, merchantId)
                         Log.d(TAG, "Activation success, merchantId=$merchantId")
-                        PosDeviceIdentity.syncMerchantBusinessNameFromFirestore(appCtx) {
-                            Handler(Looper.getMainLooper()).post { onSuccess() }
-                        }
+                        // Navigate immediately; do not block UI on optional business-name sync.
+                        Handler(Looper.getMainLooper()).post { onSuccess() }
+                        PosDeviceIdentity.syncMerchantBusinessNameFromFirestore(appCtx)
                     }.addOnFailureListener { e ->
                         Log.w(TAG, "Redeem tx failed: ${e.message}", e)
                         val chain = buildString {

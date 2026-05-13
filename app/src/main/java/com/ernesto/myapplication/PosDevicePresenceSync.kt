@@ -100,6 +100,7 @@ object PosDevicePresenceSync {
         }
 
         val deviceLabel = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
+        val deviceSerial = DeviceSerial.getBestEffort(application)
         val data = hashMapOf<String, Any>(
             "platform" to "android",
             "deviceModel" to deviceLabel,
@@ -112,6 +113,9 @@ object PosDevicePresenceSync {
             FIELD_LAST_SEEN to FieldValue.serverTimestamp(),
             "updatedAt" to FieldValue.serverTimestamp(),
         )
+        if (deviceSerial.isNotEmpty()) {
+            data["deviceSerial"] = deviceSerial
+        }
 
         MerchantFirestore.doc(COLLECTION, docId)
             .set(data, SetOptions.merge())

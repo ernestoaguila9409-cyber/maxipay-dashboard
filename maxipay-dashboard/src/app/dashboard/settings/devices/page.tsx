@@ -33,6 +33,7 @@ interface PosDeviceRow {
   id: string;
   platform: string;
   deviceModel: string;
+  deviceSerial: string;
   osVersion: string;
   appVersion: string;
   lastSeen: Date | null;
@@ -81,6 +82,7 @@ function parseDevice(id: string, data: Record<string, unknown>): PosDeviceRow {
     id,
     platform: String(data.platform ?? "").trim() || "—",
     deviceModel: String(data.deviceModel ?? "").trim() || "Unknown device",
+    deviceSerial: String(data.deviceSerial ?? "").trim(),
     osVersion: String(data.osVersion ?? "").trim() || "—",
     appVersion: String(data.appVersion ?? "").trim() || "—",
     lastSeen: parseFirestoreDate(data.lastSeen),
@@ -326,6 +328,7 @@ export default function PosDevicesSettingsPage() {
                   <tr className="border-b border-slate-100 bg-slate-50/80">
                     <th className="px-4 py-3 font-semibold text-slate-600">Status</th>
                     <th className="px-4 py-3 font-semibold text-slate-600">Device</th>
+                    <th className="px-4 py-3 font-semibold text-slate-600">Serial</th>
                     <th className="px-4 py-3 font-semibold text-slate-600">Enrolled</th>
                     <th className="px-4 py-3 font-semibold text-slate-600">OS</th>
                     <th className="px-4 py-3 font-semibold text-slate-600">App</th>
@@ -376,6 +379,13 @@ export default function PosDevicesSettingsPage() {
                               ? `${d.id.slice(0, 8)}…${d.id.slice(-6)}`
                               : d.id}
                           </div>
+                        </td>
+                        <td className="px-4 py-3.5 text-slate-600 font-mono text-xs">
+                          {d.deviceSerial ? (
+                            <span title={d.deviceSerial}>{d.deviceSerial}</span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3.5">
                           {d.enrolled ? (
