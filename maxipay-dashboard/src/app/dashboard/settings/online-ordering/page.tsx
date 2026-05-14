@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
-import { db } from "@/firebase/firebaseConfig";
 import {
   DEFAULT_ONLINE_ORDERING_SETTINGS,
   ONLINE_ORDERING_SETTINGS_DOC,
@@ -14,6 +13,7 @@ import {
 } from "@/lib/onlineOrderingShared";
 import { onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 import { merchantDoc } from "@/lib/merchantFirestore";
+import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import {
   ShoppingBag,
@@ -33,6 +33,7 @@ import {
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function OnlineOrderingSettingsPage() {
+  const { user, claims } = useAuth();
   const merchantId = useMerchantId();
   const [settings, setSettings] = useState<OnlineOrderingSettings>(DEFAULT_ONLINE_ORDERING_SETTINGS);
   const [businessName, setBusinessName] = useState("");
@@ -52,6 +53,10 @@ export default function OnlineOrderingSettingsPage() {
   }, []);
 
   useEffect(() => {
+    if (!user || !merchantId) {
+      return;
+    }
+
     const ooRef = merchantDoc(merchantId, "Settings", ONLINE_ORDERING_SETTINGS_DOC);
     const bizRef = merchantDoc(merchantId, "Settings", "businessInfo");
     const unsubs = [
@@ -66,7 +71,7 @@ export default function OnlineOrderingSettingsPage() {
       }),
     ];
     return () => unsubs.forEach((u) => u());
-  }, []);
+  }, [user, merchantId]);
 
   useEffect(() => {
     setHppTpnDraft(settings.iposHppTpn);
@@ -165,6 +170,22 @@ export default function OnlineOrderingSettingsPage() {
     <>
       <Header title="Online ordering" />
       <div className="p-6 max-w-3xl space-y-6">
+        {user && !merchantId && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 text-amber-950 text-sm px-4 py-3">
+            <p className="font-medium">No merchant selected for this login.</p>
+            <p className="mt-1 text-amber-900/90">
+              Sign out and sign back in with the store owner account created in MaxiPay Admin, or ask
+              your platform admin to sync merchant access on your account. Online ordering settings
+              are stored under your merchant in Firestore.
+            </p>
+            {claims.role === "super_admin" && (
+              <p className="mt-2 text-xs text-amber-900/80">
+                If this Firebase project has exactly one merchant, the dashboard can auto-select it.
+                Otherwise open the merchant in MaxiPay Admin or sign in as that store&apos;s owner.
+              </p>
+            )}
+          </div>
+        )}
         {/* Control center entry — links to /dashboard/online-ordering */}
         <Link
           href="/dashboard/online-ordering"

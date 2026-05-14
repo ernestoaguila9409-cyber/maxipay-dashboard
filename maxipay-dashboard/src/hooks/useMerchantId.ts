@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, getDocs, limit, query } from "firebase/firestore";
+import { collection, getDocs, limit, query, where } from "firebase/firestore";
 import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+
+function merchantIdsFromClaims(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => String(x)).filter(Boolean);
+}
 
 /**
  * Merchant Firestore document id for scoping dashboard data.
@@ -13,7 +18,7 @@ import { useAuth } from "@/context/AuthContext";
  */
 export function useMerchantId(): string {
   const { user, claims } = useAuth();
-  const fromClaims = (claims.merchantId as string | undefined) ?? "";
+  const fromClaims = (claims.merchantId as string | undefined)?.trim() ?? "";
   const [resolved, setResolved] = useState("");
 
   useEffect(() => {
@@ -30,15 +35,35 @@ export function useMerchantId(): string {
 
   useEffect(() => {
     if (!user || fromClaims) return;
-    if (claims.role !== "super_admin") return;
+    if (claims.role !== "super_admin" && claims.role !== "merchant_owner") return;
     let cancelled = false;
     (async () => {
       try {
-        const mq = query(collection(db, "Merchants"), limit(2));
-        const mset = await getDocs(mq);
+        if (claims.role === "super_admin") {
+          const mq = query(collection(db, "Merchants"), limit(2));
+          const mset = await getDocs(mq);
+          if (cancelled) return;
+          if (mset.size === 1) {
+            setResolved(mset.docs[0].id);
+          }
+          return;
+        }
+
+        const ownedQuery = query(
+          collection(db, "Merchants"),
+          where("ownerAuthUid", "==", user.uid),
+          limit(2)
+        );
+        const owned = await getDocs(ownedQuery);
         if (cancelled) return;
-        if (mset.size === 1) {
-          setResolved(mset.docs[0].id);
+        if (owned.size === 1) {
+          setResolved(owned.docs[0].id);
+          return;
+        }
+
+        const ids = merchantIdsFromClaims(claims.merchantIds);
+        if (ids.length > 0) {
+          setResolved(ids[0]);
         }
       } catch {
         /* ignore */
@@ -47,7 +72,7 @@ export function useMerchantId(): string {
     return () => {
       cancelled = true;
     };
-  }, [user, fromClaims, claims.role]);
+  }, [user, fromClaims, claims.role, claims.merchantIds, user?.uid]);
 
-  return resolved;
+  return fromClaims || resolved;
 }

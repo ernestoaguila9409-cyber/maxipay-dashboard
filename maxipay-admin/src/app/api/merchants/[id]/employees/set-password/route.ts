@@ -2,6 +2,7 @@ import admin from "firebase-admin";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp, verifyIdToken } from "@/lib/firebaseAdmin";
 import { normalizeMerchantEmail } from "@/lib/merchantWelcomeEmail";
+import { syncMerchantOwnerClaimsForMerchant } from "@/lib/syncMerchantOwnerClaims";
 
 export const runtime = "nodejs";
 
@@ -144,6 +145,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
 
     await auth.updateUser(uidToUpdate, { password: newPassword.trim() });
+    if (target === "owner") {
+      await syncMerchantOwnerClaimsForMerchant(auth, db, merchantId);
+    }
     return NextResponse.json({ ok: true, uid: uidToUpdate, createdAuthUser: false });
   } catch (e) {
     return handleError(e);

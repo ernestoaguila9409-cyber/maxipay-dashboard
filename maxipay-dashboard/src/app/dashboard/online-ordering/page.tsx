@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { doc, onSnapshot } from "firebase/firestore";
+import { onSnapshot } from "firebase/firestore";
 import {
   ArrowLeft,
   ExternalLink,
@@ -12,8 +12,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Header from "@/components/Header";
-import { db } from "@/firebase/firebaseConfig";
 import { useAuth } from "@/context/AuthContext";
+import { useMerchantId } from "@/hooks/useMerchantId";
+import { merchantDoc } from "@/lib/merchantFirestore";
 import {
   BUSINESS_INFO_DOC,
   DEFAULT_ONLINE_ORDERING_SETTINGS,
@@ -43,6 +44,7 @@ const TABS: TabSpec[] = [
 
 export default function OnlineOrderingDashboardPage() {
   const { user } = useAuth();
+  const merchantId = useMerchantId();
   const [activeTab, setActiveTab] = useState<TabId>("picture");
 
   const [settings, setSettings] = useState<OnlineOrderingSettings>(DEFAULT_ONLINE_ORDERING_SETTINGS);
@@ -54,19 +56,22 @@ export default function OnlineOrderingDashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !merchantId) return;
     const unsubs = [
-      onSnapshot(doc(db, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC), (snap) => {
-        setSettings(
-          parseOnlineOrderingSettings(snap.data() as Record<string, unknown> | undefined)
-        );
-      }),
-      onSnapshot(doc(db, SETTINGS_COLLECTION, BUSINESS_INFO_DOC), (snap) => {
+      onSnapshot(
+        merchantDoc(merchantId, SETTINGS_COLLECTION, ONLINE_ORDERING_SETTINGS_DOC),
+        (snap) => {
+          setSettings(
+            parseOnlineOrderingSettings(snap.data() as Record<string, unknown> | undefined)
+          );
+        }
+      ),
+      onSnapshot(merchantDoc(merchantId, SETTINGS_COLLECTION, BUSINESS_INFO_DOC), (snap) => {
         setBusinessName((snap.get("businessName") as string) ?? "");
       }),
     ];
     return () => unsubs.forEach((u) => u());
-  }, [user]);
+  }, [user, merchantId]);
 
   const slug = settings.onlineOrderingSlug || slugify(businessName);
   const orderUrl = `${origin || ""}/order${slug ? `/${slug}` : ""}`;

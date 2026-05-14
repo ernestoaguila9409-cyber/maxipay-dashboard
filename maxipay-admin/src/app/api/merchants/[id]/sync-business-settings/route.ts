@@ -2,6 +2,7 @@ import admin from "firebase-admin";
 import { NextResponse } from "next/server";
 import { getFirebaseAdminApp, verifyIdToken } from "@/lib/firebaseAdmin";
 import { syncSettingsBusinessInfoFromMerchant } from "@/lib/syncMerchantBusinessInfo";
+import { syncMerchantOwnerClaimsForMerchant } from "@/lib/syncMerchantOwnerClaims";
 
 export const runtime = "nodejs";
 
@@ -33,6 +34,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ ok: false, error: "not_found" }, { status: 404 });
     }
     await syncSettingsBusinessInfoFromMerchant(db, id, snap.data()!);
+    const authAdmin = admin.auth();
+    await syncMerchantOwnerClaimsForMerchant(authAdmin, db, id);
     return NextResponse.json({ ok: true });
   } catch (e) {
     return handleError(e);

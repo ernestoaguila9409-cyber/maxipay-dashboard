@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getFirebaseAdminApp, verifyIdToken } from "@/lib/firebaseAdmin";
 import { normalizeMerchantEmail } from "@/lib/merchantWelcomeEmail";
 import { syncSettingsBusinessInfoFromMerchant } from "@/lib/syncMerchantBusinessInfo";
+import { syncMerchantOwnerClaimsForMerchant } from "@/lib/syncMerchantOwnerClaims";
 
 export const runtime = "nodejs";
 
@@ -235,6 +236,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const fresh = await ref.get();
       if (fresh.exists) {
         await syncSettingsBusinessInfoFromMerchant(db, id, fresh.data()!);
+        const authAdmin = admin.auth();
+        await syncMerchantOwnerClaimsForMerchant(authAdmin, db, id);
       }
     } catch (syncErr) {
       console.error("[merchants/[id]] Settings/businessInfo sync failed:", syncErr);
