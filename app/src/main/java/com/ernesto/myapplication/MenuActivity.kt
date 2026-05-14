@@ -1336,8 +1336,8 @@ class MenuActivity : AppCompatActivity() {
                         ?: if (pricesMap.isNotEmpty()) pricesMap.values.first()
                         else doc.getDouble("price") ?: 0.0
                     val stock = doc.getLong("stock") ?: 0L
-                    val itemTaxMode = doc.getString("taxMode") ?: "INHERIT"
-                    val itemTaxIds = (doc.get("taxIds") as? List<String>) ?: emptyList()
+                    val itemTaxMode = MerchantFirestore.menuItemTaxModeFromDoc(doc)
+                    val itemTaxIds = MerchantFirestore.mergeMenuItemTaxIds(doc)
 
                     val itemAvailability = doc.get("availableOrderTypes") as? List<String>
                     if (orderType.isNotBlank() && itemAvailability != null &&
@@ -1439,9 +1439,9 @@ class MenuActivity : AppCompatActivity() {
                         ?: if (pricesMap.isNotEmpty()) pricesMap.values.first()
                         else doc.getDouble("price") ?: 0.0
                     val stock = doc.getLong("stock") ?: 0L
-                    val itemTaxMode = doc.getString("taxMode") ?: "INHERIT"
+                    val itemTaxMode = MerchantFirestore.menuItemTaxModeFromDoc(doc)
                     @Suppress("UNCHECKED_CAST")
-                    val itemTaxIds = (doc.get("taxIds") as? List<String>) ?: emptyList()
+                    val itemTaxIds = MerchantFirestore.mergeMenuItemTaxIds(doc)
 
                     @Suppress("UNCHECKED_CAST")
                     val itemAvailability =
@@ -4251,9 +4251,9 @@ class MenuActivity : AppCompatActivity() {
                 val stock = itemDoc.getLong("stock") ?: 0L
                 val effectiveStock = if (stockCountingEnabled) stock else Long.MAX_VALUE
 
-                val taxMode = itemDoc.getString("taxMode") ?: "INHERIT"
+                val taxMode = MerchantFirestore.menuItemTaxModeFromDoc(itemDoc)
                 @Suppress("UNCHECKED_CAST")
-                val taxIds = (itemDoc.get("taxIds") as? List<String>) ?: emptyList()
+                val taxIds = MerchantFirestore.mergeMenuItemTaxIds(itemDoc)
 
                 val itemLabel = MenuItemRoutingLabel.fromMenuItemDoc(itemDoc)
                 val itemSubId = itemDoc.getString("subcategoryId").orEmpty()
@@ -4363,9 +4363,9 @@ class MenuActivity : AppCompatActivity() {
                 val stock = itemDoc.getLong("stock") ?: 0L
                 val effectiveStock = if (stockCountingEnabled) stock else Long.MAX_VALUE
 
-                val taxMode = itemDoc.getString("taxMode") ?: "INHERIT"
+                val taxMode = MerchantFirestore.menuItemTaxModeFromDoc(itemDoc)
                 @Suppress("UNCHECKED_CAST")
-                val taxIds = (itemDoc.get("taxIds") as? List<String>) ?: emptyList()
+                val taxIds = MerchantFirestore.mergeMenuItemTaxIds(itemDoc)
 
                 val itemLabel = MenuItemRoutingLabel.fromMenuItemDoc(itemDoc)
                 val itemSubId = itemDoc.getString("subcategoryId").orEmpty()

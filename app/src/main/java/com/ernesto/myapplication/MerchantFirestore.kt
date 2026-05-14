@@ -115,4 +115,38 @@ object MerchantFirestore {
         }
         return out.toList()
     }
+
+    /**
+     * Dashboard stores item tax links as **taxIds**; legacy Android inventory used **assignedTaxIds**.
+     * Merge both (deduped, dashboard order first) for POS and inventory.
+     */
+    fun mergeMenuItemTaxIds(doc: DocumentSnapshot): List<String> {
+        @Suppress("UNCHECKED_CAST")
+        val fromDashboard = (doc.get("taxIds") as? List<*>)
+            ?.mapNotNull { it as? String } ?: emptyList()
+        @Suppress("UNCHECKED_CAST")
+        val fromLegacy = (doc.get("assignedTaxIds") as? List<*>)
+            ?.mapNotNull { it as? String } ?: emptyList()
+        val out = LinkedHashSet<String>()
+        for (id in fromDashboard) {
+            val t = id.trim()
+            if (t.isNotEmpty()) out.add(t)
+        }
+        for (id in fromLegacy) {
+            val t = id.trim()
+            if (t.isNotEmpty()) out.add(t)
+        }
+        return out.toList()
+    }
+
+    /** Matches web dashboard / [MenuOnlyActivity] when persisting item tax links. */
+    fun menuItemTaxModeForIds(taxIds: Collection<String>): String =
+        if (taxIds.any { it.trim().isNotEmpty() }) "FORCE_APPLY" else "INHERIT"
+
+    /** Reads [taxMode] or infers it from merged item tax ids (dashboard + legacy inventory). */
+    fun menuItemTaxModeFromDoc(doc: DocumentSnapshot): String {
+        val raw = doc.getString("taxMode")?.trim().orEmpty()
+        if (raw == "FORCE_APPLY" || raw == "INHERIT") return raw
+        return menuItemTaxModeForIds(mergeMenuItemTaxIds(doc))
+    }
 }

@@ -269,8 +269,7 @@ class ItemDetailActivity : AppCompatActivity() {
                 itemCategoryId = doc.getString("categoryId").orEmpty()
                 itemPlacementCategoryIds = KdsStationRouting.placementCategoryIdsFromMenuItemDoc(doc)
                 itemSubcategoryId = subcategoryIdForItem(doc, itemCategoryId)
-                @Suppress("UNCHECKED_CAST")
-                assignedTaxIds = (doc.get("assignedTaxIds") as? List<String>) ?: emptyList()
+                assignedTaxIds = MerchantFirestore.mergeMenuItemTaxIds(doc)
                 assignedModifierGroupIds = MerchantFirestore.mergeMenuItemModifierGroupIds(doc)
                 @Suppress("UNCHECKED_CAST")
                 val labelsField = (doc.get("labels") as? List<*>)?.mapNotNull { it as? String }?.map { it.trim() }
@@ -643,14 +642,23 @@ class ItemDetailActivity : AppCompatActivity() {
     }
 
     private fun saveAssignedTaxIds(ids: List<String>) {
-        val updates: Map<String, Any> = if (ids.isEmpty()) {
-            mapOf("assignedTaxIds" to FieldValue.delete())
+        val cleaned = ids.map { it.trim() }.filter { it.isNotEmpty() }
+        val updates: Map<String, Any> = if (cleaned.isEmpty()) {
+            mapOf(
+                "taxIds" to FieldValue.delete(),
+                "taxMode" to MerchantFirestore.menuItemTaxModeForIds(emptyList()),
+                "assignedTaxIds" to FieldValue.delete(),
+            )
         } else {
-            mapOf("assignedTaxIds" to ids)
+            mapOf(
+                "taxIds" to cleaned,
+                "taxMode" to MerchantFirestore.menuItemTaxModeForIds(cleaned),
+                "assignedTaxIds" to FieldValue.delete(),
+            )
         }
         MerchantFirestore.col("MenuItems").document(itemId).update(updates)
             .addOnSuccessListener {
-                assignedTaxIds = ids
+                assignedTaxIds = cleaned
                 loadAssignedTaxes()
                 Toast.makeText(this, R.string.item_detail_saved, Toast.LENGTH_SHORT).show()
             }
