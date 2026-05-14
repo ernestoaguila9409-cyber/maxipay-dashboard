@@ -258,9 +258,10 @@ class ItemDetailActivity : AppCompatActivity() {
 
                 itemName = doc.getString("name").orEmpty()
                 itemImageUrl = doc.getString("imageUrl")?.trim()?.takeIf { it.isNotEmpty() }
-                itemPrice = doc.getDouble("price") ?: 0.0
+                itemPrice = doc.getDouble("price") ?: doc.getLong("price")?.toDouble() ?: 0.0
                 @Suppress("UNCHECKED_CAST")
-                itemPrices = (doc.get("prices") as? Map<String, Double>) ?: emptyMap()
+                val pricesRaw = doc.get("prices") as? Map<String, Any>
+                itemPrices = pricesRaw?.mapValues { (it.value as? Number)?.toDouble() ?: 0.0 } ?: emptyMap()
                 itemVariablePrice = doc.getBoolean("variablePrice") ?: false
                 suppressVariablePriceSwitch = true
                 switchVariablePrice.isChecked = itemVariablePrice
@@ -304,7 +305,7 @@ class ItemDetailActivity : AppCompatActivity() {
 
     private fun bindHeader() {
         txtName.text = itemName
-        val suggested = itemPrices.values.firstOrNull() ?: itemPrice
+        val suggested = itemPrices.values.firstOrNull()?.toDouble() ?: itemPrice
         val suggestedFmt = String.format(Locale.US, "%.2f", suggested)
         txtPrice.text = if (itemVariablePrice) {
             "${getString(R.string.menu_grid_price_variable)}\n${getString(R.string.item_detail_price_suggested_line, suggestedFmt)}"
@@ -504,7 +505,7 @@ class ItemDetailActivity : AppCompatActivity() {
             hint = getString(R.string.item_detail_price_hint)
             prefixText = "$"
         }
-        val currentDisplay = itemPrices.values.firstOrNull() ?: itemPrice
+        val currentDisplay = itemPrices.values.firstOrNull()?.toDouble() ?: itemPrice
         val edit = TextInputEditText(til.context).apply {
             setText(String.format(java.util.Locale.US, "%.2f", currentDisplay))
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
