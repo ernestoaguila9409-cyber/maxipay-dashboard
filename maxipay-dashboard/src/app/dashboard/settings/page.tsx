@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/context/AuthContext";
-import { Store, Bell, Shield, Palette, Smartphone, ChevronRight, type LucideIcon } from "lucide-react";
+import { Store, Bell, Shield, Palette, CreditCard, ChevronRight, type LucideIcon } from "lucide-react";
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -21,10 +21,10 @@ export default function SettingsPage() {
       href: "/dashboard/settings/business",
     },
     {
-      icon: Smartphone,
-      title: "Devices",
-      description: "See POS tablets and phones using the app and whether they are online",
-      href: "/dashboard/settings/devices",
+      icon: CreditCard,
+      title: "Payments & Devices",
+      description: "Manage payment terminals (PIN pads), POS tablets, and mobile devices",
+      href: "/dashboard/settings/payments-devices",
     },
     {
       icon: Bell,

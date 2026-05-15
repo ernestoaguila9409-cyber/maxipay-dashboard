@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-/** Avoids some hosts/WAFs that block paths containing the word "payments". */
+/** Redirects old /payments path to the unified Payments & Devices page. */
 export default function PaymentsRedirectPage() {
-  redirect("/dashboard/payment-terminals");
+  redirect("/dashboard/settings/payments-devices");
 }

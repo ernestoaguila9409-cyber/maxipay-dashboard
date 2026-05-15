@@ -12,7 +12,7 @@
  * URLs need to change once the catalog grows.
  */
 
-export type PaymentProviderId = "SPIN" | "SPIN_Z" | "SPIN_P";
+export type PaymentProviderId = "SPIN" | "SPIN_Z" | "SPIN_P" | "DVPAYLITE";
 
 export interface PaymentCredentialField {
   key: string;
@@ -118,6 +118,17 @@ const SPIN_P_CAPABILITIES: PaymentCapabilities = {
   supportsStatusCheck: true,
 };
 
+const DVPAYLITE_CAPABILITIES: PaymentCapabilities = {
+  supportsPreAuth: false,
+  supportsCapture: false,
+  supportsTipAdjust: true,
+  supportsSale: true,
+  supportsVoid: true,
+  supportsRefund: true,
+  supportsSettle: false,
+  supportsStatusCheck: false,
+};
+
 const SPIN_ENDPOINTS_Z: PaymentEndpointMap = {
   auth: "/Payment/Auth",
   capture: "/Payment/Capture",
@@ -176,15 +187,31 @@ export const PAYMENT_PROVIDERS: Record<PaymentProviderId, PaymentProviderCatalog
     capabilities: SPIN_P_CAPABILITIES,
     credentialSchema: SPIN_P_CREDENTIAL_SCHEMA,
   },
+  DVPAYLITE: {
+    id: "DVPAYLITE",
+    displayName: "DvPayLite (Deeplink)",
+    description:
+      "On-device DvPayLite deep-linking for Dejavoo P8. No SPIn credentials needed — the terminal is provisioned with its TPN directly on the device.",
+    deviceModels: ["Dejavoo P8"],
+    baseUrl: "",
+    endpoints: {},
+    capabilities: DVPAYLITE_CAPABILITIES,
+    credentialSchema: [],
+  },
 };
 
 /** Only Z and P appear in the "add terminal" dropdown; legacy SPIN is kept
  *  for rendering/editing existing docs but is not offered for new terminals. */
-export const PAYMENT_PROVIDER_IDS: PaymentProviderId[] = ["SPIN_Z", "SPIN_P"];
+export const PAYMENT_PROVIDER_IDS: PaymentProviderId[] = ["SPIN_Z", "SPIN_P", "DVPAYLITE"];
 
 /** Returns true for any SPIn-family provider id (legacy SPIN, SPIN_Z, SPIN_P). */
 export function isSpinProvider(provider: string): boolean {
   return provider === "SPIN" || provider === "SPIN_Z" || provider === "SPIN_P";
+}
+
+/** Returns true when the provider is the on-device DvPayLite deep-linking integration (P8). */
+export function isDvPayLiteProvider(provider: string): boolean {
+  return provider === "DVPAYLITE";
 }
 
 /**
