@@ -21,7 +21,6 @@ import { merchantCol } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import {
-  batchUpdateLayoutTables,
   createTableLayout,
   DEFAULT_CANVAS,
   DEFAULT_TABLE_SIZE,
@@ -269,9 +268,11 @@ export default function TableLayoutEditorClient() {
       if (row) {
         setSaveState("saving");
         try {
-          await batchUpdateLayoutTables(db, merchantId, layoutId, [
-            { id: d.id, data: { x: row.data.x, y: row.data.y } },
-          ]);
+          await upsertLayoutTable(db, merchantId, layoutId, d.id, {
+            ...row.data,
+            x: row.data.x,
+            y: row.data.y,
+          });
           setSaveState("saved");
           setTimeout(() => setSaveState("idle"), 1200);
         } catch {
