@@ -7,10 +7,17 @@ import { ArrowLeft, Store, Loader2 } from "lucide-react";
 import Link from "next/link";
 
 type ProviderType = "SPIN_Z" | "SPIN_P";
+type DeviceType = "pos" | "mobile" | "none";
 
 const PROVIDER_OPTIONS: { id: ProviderType; label: string }[] = [
   { id: "SPIN_Z", label: "SPIn Z-series (Z8, QD3, QD4)" },
   { id: "SPIN_P", label: "SPIn P-series (P17, P20)" },
+];
+
+const DEVICE_TYPE_OPTIONS: { id: DeviceType; label: string; description: string }[] = [
+  { id: "none", label: "Skip for now", description: "Set up devices later from the merchant dashboard" },
+  { id: "pos", label: "POS App", description: "Tablet (e.g. Landi C20 Pro) + external PIN pad (e.g. Dejavoo P17)" },
+  { id: "mobile", label: "Mobile App", description: "MaxiMobile on Dejavoo P8 — no external PIN pad needed" },
 ];
 
 interface FormState {
@@ -24,6 +31,7 @@ interface FormState {
   city: string;
   state: string;
   zip: string;
+  deviceType: DeviceType;
   payProvider: ProviderType;
   payDeviceModel: string;
   payTerminalName: string;
@@ -44,6 +52,7 @@ const initialForm: FormState = {
   city: "",
   state: "",
   zip: "",
+  deviceType: "none",
   payProvider: "SPIN_Z",
   payDeviceModel: "",
   payTerminalName: "",
@@ -80,7 +89,7 @@ export default function CreateMerchantPage() {
       }
 
       const token = await user.getIdToken();
-      const hasPayment = form.payTpn.trim().length > 0;
+      const hasPayment = form.deviceType === "pos" && form.payTpn.trim().length > 0;
       const payload: Record<string, unknown> = {
         merchantNumber: form.merchantNumber,
         businessName: form.businessName,
@@ -271,49 +280,92 @@ export default function CreateMerchantPage() {
 
           <div className="bg-white rounded-2xl border border-slate-200 p-6 mb-6">
             <h3 className="text-sm font-semibold text-slate-800 uppercase tracking-wider mb-4">
-              Payment Information
+              Device Setup
             </h3>
             <p className="text-xs text-slate-500 mb-4 -mt-1">
-              Optional. Leave blank to finish later — you can add a payment terminal from the merchant
-              detail page anytime.
+              Choose how this merchant will process payments. You can always add or change devices later
+              from <strong>Settings → Payments &amp; Devices</strong> in the merchant dashboard.
             </p>
-            <Field label="Terminal Name" name="payTerminalName" value={form.payTerminalName} onChange={handleChange} placeholder="e.g. Main Register" />
-            <div className="grid grid-cols-2 gap-4 mt-4">
-              <div>
-                <label htmlFor="payProvider" className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Provider
-                </label>
-                <select
-                  id="payProvider"
-                  name="payProvider"
-                  value={form.payProvider}
-                  onChange={handleChange}
-                  className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+
+            <div className="space-y-2 mb-4">
+              {DEVICE_TYPE_OPTIONS.map((opt) => (
+                <label
+                  key={opt.id}
+                  className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                    form.deviceType === opt.id
+                      ? "border-blue-400 bg-blue-50/30"
+                      : "border-slate-200 hover:border-slate-300"
+                  }`}
                 >
-                  {PROVIDER_OPTIONS.map((p) => (
-                    <option key={p.id} value={p.id}>{p.label}</option>
-                  ))}
-                </select>
-              </div>
-              <Field
-                label="Device model"
-                name="payDeviceModel"
-                value={form.payDeviceModel}
-                onChange={handleChange}
-                placeholder="e.g. Dejavoo P17, Z8, QD4"
-              />
+                  <input
+                    type="radio"
+                    name="deviceType"
+                    value={opt.id}
+                    checked={form.deviceType === opt.id}
+                    onChange={handleChange}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <div className="text-sm font-medium text-slate-800">{opt.label}</div>
+                    <div className="text-xs text-slate-500">{opt.description}</div>
+                  </div>
+                </label>
+              ))}
             </div>
-            <div className="my-5 border-t border-slate-200" aria-hidden />
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="TPN" name="payTpn" value={form.payTpn} onChange={handleChange} placeholder="e.g. 11881706541A" />
-              <Field label="Register ID" name="payRegisterId" value={form.payRegisterId} onChange={handleChange} placeholder="e.g. 134909005" />
-            </div>
-            <div className="mt-4">
-              <Field label="Auth Key" name="payAuthKey" value={form.payAuthKey} onChange={handleChange} placeholder="e.g. Qt9N7CxhDs" />
-            </div>
-            {form.payProvider === "SPIN_P" && (
-              <div className="mt-4">
-                <Field label="iPOS Transact Auth Token" name="payIposTransactToken" value={form.payIposTransactToken} onChange={handleChange} placeholder="Optional — for card-not-present refunds" />
+
+            {form.deviceType === "pos" && (
+              <>
+                <div className="my-5 border-t border-slate-200" aria-hidden />
+                <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-3">
+                  PIN pad / SPIn credentials
+                </h4>
+                <Field label="Terminal Name" name="payTerminalName" value={form.payTerminalName} onChange={handleChange} placeholder="e.g. Main Register" />
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                  <div>
+                    <label htmlFor="payProvider" className="block text-sm font-medium text-slate-700 mb-1.5">
+                      Provider
+                    </label>
+                    <select
+                      id="payProvider"
+                      name="payProvider"
+                      value={form.payProvider}
+                      onChange={handleChange}
+                      className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                    >
+                      {PROVIDER_OPTIONS.map((p) => (
+                        <option key={p.id} value={p.id}>{p.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <Field
+                    label="Device model"
+                    name="payDeviceModel"
+                    value={form.payDeviceModel}
+                    onChange={handleChange}
+                    placeholder="e.g. Dejavoo P17, Z8, QD4"
+                  />
+                </div>
+                <div className="my-5 border-t border-slate-200" aria-hidden />
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="TPN" name="payTpn" value={form.payTpn} onChange={handleChange} placeholder="e.g. 11881706541A" />
+                  <Field label="Register ID" name="payRegisterId" value={form.payRegisterId} onChange={handleChange} placeholder="e.g. 134909005" />
+                </div>
+                <div className="mt-4">
+                  <Field label="Auth Key" name="payAuthKey" value={form.payAuthKey} onChange={handleChange} placeholder="e.g. Qt9N7CxhDs" />
+                </div>
+                {form.payProvider === "SPIN_P" && (
+                  <div className="mt-4">
+                    <Field label="iPOS Transact Auth Token" name="payIposTransactToken" value={form.payIposTransactToken} onChange={handleChange} placeholder="Optional — for card-not-present refunds" />
+                  </div>
+                )}
+              </>
+            )}
+
+            {form.deviceType === "mobile" && (
+              <div className="mt-4 rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 text-sm text-blue-800">
+                No payment credentials needed. The Dejavoo P8 uses DvPayLite (deeplink) — it is provisioned
+                directly on the device. After creating the merchant, generate an activation code from
+                <strong> Settings → Payments &amp; Devices → Add Device → Mobile App</strong> in the dashboard.
               </div>
             )}
           </div>
