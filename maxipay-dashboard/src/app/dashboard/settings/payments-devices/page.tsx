@@ -6,30 +6,23 @@ import {
   deleteDoc,
   deleteField,
   getDoc,
-  getDocs,
   onSnapshot,
   serverTimestamp,
   setDoc,
   Timestamp,
   updateDoc,
-  writeBatch,
 } from "firebase/firestore";
-import { db } from "@/firebase/firebaseConfig";
 import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
 import {
   Plus,
-  Trash2,
   X,
   AlertTriangle,
-  ToggleLeft,
-  ToggleRight,
   CreditCard,
   Eye,
   EyeOff,
-  Download,
   Copy,
   Loader2,
   Smartphone,
@@ -43,7 +36,6 @@ import {
   type PaymentProviderId,
   type PaymentProviderCatalogEntry,
   type PaymentTerminalDoc,
-  isDvPayLiteProvider,
   isSpinProvider,
 } from "@/lib/paymentProviders";
 import {
@@ -91,29 +83,18 @@ function timestampToMillis(ts: unknown): number | null {
   return null;
 }
 
-function formatAgo(ms: number): string {
-  const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 48) return `${hr}h ago`;
-  return `${Math.floor(hr / 24)}d ago`;
-}
-
-function posReachabilityDisplay(
+function pinpadStatusLabel(
   posLastSeen: unknown,
   posConnectionStatus?: string,
-): { title: string; line: string; dotClass: string } {
+): { text: string; dotClass: string } {
   const ms = timestampToMillis(posLastSeen);
-  if (ms == null) return { title: "No signal", line: "POS not reporting yet", dotClass: "bg-slate-300" };
+  if (ms == null) return { text: "No signal", dotClass: "bg-slate-300" };
   const age = Date.now() - ms;
-  const fresh = age < POS_HEARTBEAT_STALE_MS;
-  if (fresh && posConnectionStatus !== "OFFLINE")
-    return { title: "Online", line: `POS ${formatAgo(ms)}`, dotClass: "bg-emerald-500" };
+  if (age < POS_HEARTBEAT_STALE_MS && posConnectionStatus !== "OFFLINE")
+    return { text: "Online", dotClass: "bg-emerald-500" };
   if (posConnectionStatus === "OFFLINE")
-    return { title: "Offline", line: `Last POS OK ${formatAgo(ms)}`, dotClass: "bg-rose-500" };
-  return { title: "Stale", line: `Last POS OK ${formatAgo(ms)}`, dotClass: "bg-amber-500" };
+    return { text: "Offline", dotClass: "bg-rose-500" };
+  return { text: "Stale", dotClass: "bg-amber-500" };
 }
 
 function parseFirestoreDate(value: unknown): Date | null {
@@ -123,7 +104,7 @@ function parseFirestoreDate(value: unknown): Date | null {
 }
 
 type LiveStatus = "online" | "offline" | "locked";
-function getLiveStatus(lastSeen: Date | null, nowMs: number, deactivated: boolean): LiveStatus {
+function getLiveStatus(lastSeen: Date | null, _nowMs: number, deactivated: boolean): LiveStatus {
   if (deactivated) return "locked";
   if (!lastSeen) return "offline";
   return Date.now() - lastSeen.getTime() < POS_DEVICE_ONLINE_THRESHOLD_MS ? "online" : "offline";
@@ -189,7 +170,7 @@ function formatCountdown(msRemaining: number): string {
 // ── Page Component ─────────────────────────────────────────────────
 
 export default function PaymentsAndDevicesPage() {
-  const { user, claims } = useAuth();
+  const { user } = useAuth();
   const merchantId = useMerchantId();
 
   // ── Payment terminals state ──
@@ -217,21 +198,17 @@ export default function PaymentsAndDevicesPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // ── Activation code state (shown after save for POS, or as main step for mobile) ──
+  // ── Activation code state ──
   const [activationCode, setActivationCode] = useState<string | null>(null);
   const [activationExpiresAtMs, setActivationExpiresAtMs] = useState<number | null>(null);
   const [creatingCode, setCreatingCode] = useState(false);
   const [copyDone, setCopyDone] = useState(false);
 
-  // ── Delete/deactivate state ──
-  const [deleteTarget, setDeleteTarget] = useState<TerminalRow | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  // ── Deactivate state ──
   const [confirmDeactivate, setConfirmDeactivate] = useState<PosDeviceRow | null>(null);
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
 
-  // ── Legacy migration ──
-  const [migrationBusy, setMigrationBusy] = useState(false);
-  const [migrationMsg, setMigrationMsg] = useState<string | null>(null);
+  // ── Legacy sync ref ──
   const lastLegacySyncKey = useRef<string>("");
 
   const provider: PaymentProviderCatalogEntry = PAYMENT_PROVIDERS[providerId];
@@ -308,7 +285,7 @@ export default function PaymentsAndDevicesPage() {
     return () => unsub();
   }, [user, merchantId]);
 
-  // ── Legacy sync: keep Terminals.active in sync with payment_terminals.active ──
+  // ── Legacy sync: keep Terminals.active in sync ──
   useEffect(() => {
     if (!user || terminalsLoading || terminals.length === 0) return;
     const key = terminals.filter((t) => t.legacyTerminalId?.trim()).map((t) => `${String(t.legacyTerminalId).trim()}:${t.active ? 1 : 0}`).sort().join("|");
@@ -341,6 +318,9 @@ export default function PaymentsAndDevicesPage() {
     }, (e) => console.error("activation code listen:", e));
     return () => unsub();
   }, [addModalOpen, activationCode, merchantId]);
+
+  // ── Resolve the first active terminal for the PIN pad column ──
+  const activeTerminal = useMemo(() => terminals.find((t) => t.active) ?? null, [terminals]);
 
   // ── Add Device wizard helpers ──
 
@@ -450,30 +430,6 @@ export default function PaymentsAndDevicesPage() {
     } catch { setError("Could not copy to clipboard"); }
   }, [activationCode]);
 
-  // ── Terminal actions ──
-
-  const handleToggle = async (t: TerminalRow) => {
-    try {
-      const next = !t.active;
-      await updateDoc(merchantDoc(merchantId, PAYMENTS_COLLECTION, t.id), { active: next, updatedAt: Timestamp.now() });
-      const legacyId = t.legacyTerminalId?.trim();
-      if (legacyId) {
-        try { await updateDoc(merchantDoc(merchantId, LEGACY_COLLECTION, legacyId), { active: next }); }
-        catch (legacyErr) { console.error("Failed to sync legacy Terminals.active:", legacyErr); }
-      }
-    } catch (err) { console.error("Failed to toggle terminal:", err); }
-  };
-
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      await deleteDoc(merchantDoc(merchantId, PAYMENTS_COLLECTION, deleteTarget.id));
-      setDeleteTarget(null);
-    } catch (err) { console.error("Failed to delete terminal:", err); }
-    finally { setDeleting(false); }
-  };
-
   // ── Device deactivation ──
 
   const runDeactivate = useCallback(async (row: PosDeviceRow) => {
@@ -490,47 +446,6 @@ export default function PaymentsAndDevicesPage() {
     } finally { setDeactivatingId(null); }
   }, [merchantId]);
 
-  // ── Legacy migration ──
-
-  const runLegacyMigration = async () => {
-    setMigrationBusy(true);
-    setMigrationMsg(null);
-    try {
-      const mid = merchantId;
-      if (!mid) { setMigrationMsg("Sign in as the store owner."); return; }
-      const [legacySnap, newSnap] = await Promise.all([getDocs(merchantCol(mid, LEGACY_COLLECTION)), getDocs(merchantCol(mid, PAYMENTS_COLLECTION))]);
-      const alreadyMigrated = new Set<string>();
-      newSnap.forEach((d) => { const data = d.data() as Partial<PaymentTerminalDoc>; if (data.legacyTerminalId) alreadyMigrated.add(data.legacyTerminalId); });
-      if (legacySnap.empty) { setMigrationMsg("No legacy `Terminals` documents found."); return; }
-      const batch = writeBatch(db);
-      let queued = 0;
-      legacySnap.forEach((legacyDoc) => {
-        if (alreadyMigrated.has(legacyDoc.id)) return;
-        const src = legacyDoc.data() as Record<string, unknown>;
-        const newRef = merchantCol(mid, PAYMENTS_COLLECTION);
-        const payload: PaymentTerminalDoc = {
-          name: (src.name as string) || (src.terminalName as string) || `Terminal ${legacyDoc.id.slice(0, 6)}`,
-          provider: "SPIN_Z",
-          deviceModel: ((src.deviceModel as string) || "").trim(),
-          active: (src.active as boolean) ?? true,
-          baseUrl: PAYMENT_PROVIDERS.SPIN_Z.baseUrl,
-          endpoints: PAYMENT_PROVIDERS.SPIN_Z.endpoints,
-          capabilities: PAYMENT_PROVIDERS.SPIN_Z.capabilities,
-          config: { tpn: (src.tpn as string) || "", registerId: (src.registerId as string) || "", authKey: (src.authKey as string) || "" },
-          legacyTerminalId: legacyDoc.id,
-        };
-        const ref = addDoc(newRef, { ...payload, createdAt: Timestamp.now(), updatedAt: Timestamp.now() });
-        queued++;
-      });
-      if (queued === 0) { setMigrationMsg(`Nothing to migrate — ${legacySnap.size} legacy terminal(s) already imported.`); return; }
-      await batch.commit();
-      setMigrationMsg(`Imported ${queued} terminal(s) from the legacy \`Terminals\` collection.`);
-    } catch (err) {
-      console.error("Legacy migration failed:", err);
-      setMigrationMsg(`Migration failed: ${(err as Error)?.message ?? "unknown error"}`);
-    } finally { setMigrationBusy(false); }
-  };
-
   const hasSecretsVisible = useMemo(() => provider.credentialSchema.some((f) => f.secret), [provider]);
   const loading = terminalsLoading || devicesLoading;
 
@@ -541,7 +456,7 @@ export default function PaymentsAndDevicesPage() {
   return (
     <>
       <Header title="Payments & Devices" />
-      <div className="p-6 space-y-8">
+      <div className="p-6 space-y-6">
         {snapshotError && (
           <div className="rounded-xl border border-red-200 bg-red-50 text-red-800 text-sm px-4 py-3">{snapshotError}</div>
         )}
@@ -558,83 +473,100 @@ export default function PaymentsAndDevicesPage() {
         )}
 
         {/* ─── Action bar ─── */}
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div>{migrationMsg && <p className="text-xs text-slate-500">{migrationMsg}</p>}</div>
-          <div className="flex items-center gap-2">
-            <button onClick={runLegacyMigration} disabled={migrationBusy} className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50" title="Copy legacy Terminals docs into payment_terminals">
-              <Download size={16} />
-              {migrationBusy ? "Importing…" : "Import legacy"}
-            </button>
-            <button onClick={openAddModal} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors">
-              <Plus size={16} />
-              Add Device
-            </button>
-          </div>
+        <div className="flex items-center justify-end">
+          <button onClick={openAddModal} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors">
+            <Plus size={16} />
+            Add Device
+          </button>
         </div>
 
-        {/* ─── Payment Terminals (PIN pads) section ─── */}
-        <section>
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <CreditCard size={16} /> Payment Terminals (PIN pads)
-          </h2>
+        {/* ─── Unified Devices table ─── */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+              <Smartphone size={16} /> Devices
+            </h2>
+            <span className="text-xs text-slate-400">
+              <span className="font-semibold text-emerald-600">{onlineDevices}</span> online · <span className="font-semibold text-slate-700">{devices.length}</span> total
+            </span>
+          </div>
+
           {loading ? (
-            <div className="flex items-center justify-center py-8">
+            <div className="flex items-center justify-center py-12">
               <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin" />
             </div>
-          ) : terminals.length === 0 ? (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-10 text-center">
-              <CreditCard size={36} className="mx-auto text-slate-300" />
-              <p className="text-slate-400 text-lg mt-2">No terminals configured</p>
-              <p className="text-slate-400 text-sm mt-1">Add a POS App device to configure a payment terminal.</p>
+          ) : devices.length === 0 ? (
+            <div className="p-10 text-center">
+              <Smartphone size={36} className="mx-auto text-slate-300" />
+              <p className="text-slate-400 text-lg mt-2">No devices have reported in yet</p>
+              <p className="text-slate-400 text-sm mt-1">Use <strong>Add Device</strong> to link a terminal with a one-time activation code.</p>
             </div>
           ) : (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <table className="w-full">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
                 <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4">Name</th>
-                    <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-40">Provider</th>
-                    <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-32">Device</th>
-                    <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-44">POS</th>
-                    <th className="text-center text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-24">Enabled</th>
-                    <th className="text-right text-xs font-medium text-slate-400 uppercase tracking-wider px-6 py-4 w-28">Actions</th>
+                  <tr className="border-b border-slate-100 bg-slate-50/80">
+                    <th className="px-5 py-3 font-semibold text-slate-600">Status</th>
+                    <th className="px-5 py-3 font-semibold text-slate-600">Device</th>
+                    <th className="px-5 py-3 font-semibold text-slate-600">PIN pad</th>
+                    <th className="px-5 py-3 font-semibold text-slate-600">OS</th>
+                    <th className="px-5 py-3 font-semibold text-slate-600">App</th>
+                    <th className="px-5 py-3 font-semibold text-slate-600">Last seen</th>
+                    <th className="px-5 py-3 font-semibold text-slate-600 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {terminals.map((t) => {
-                    const providerEntry = PAYMENT_PROVIDERS[t.provider];
-                    const pos = posReachabilityDisplay(t.posLastSeen, t.posConnectionStatus);
+                  {devices.map((d) => {
+                    const live = getLiveStatus(d.lastSeen, nowMs, d.deactivated);
+                    const ago = formatLastSeenAgo(d.lastSeen, nowMs);
+
+                    const isP8 = d.deviceModel.toLowerCase().includes("p8");
+                    const pinpad = isP8 ? null : activeTerminal;
+
                     return (
-                      <tr key={t.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group/row">
-                        <td className="px-6 py-4">
-                          <span className={`text-sm font-medium ${t.active ? "text-slate-800" : "text-slate-400"}`}>{t.name}</span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="text-xs px-2 py-1 rounded-full font-medium bg-blue-50 text-blue-600">
-                            {providerEntry?.displayName ?? t.provider}
+                      <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                        <td className="px-5 py-3.5">
+                          <span className={live === "locked" ? "inline-flex items-center gap-1.5 text-amber-800 font-medium" : live === "online" ? "inline-flex items-center gap-1.5 text-emerald-700 font-medium" : "inline-flex items-center gap-1.5 text-slate-500"}>
+                            {live === "locked" ? (
+                              <><Lock size={12} className="text-amber-700" /> Locked</>
+                            ) : (
+                              <><Circle size={10} className={live === "online" ? "fill-emerald-500 text-emerald-500" : "fill-slate-300 text-slate-300"} /> {live === "online" ? "Online" : "Offline"}</>
+                            )}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-sm text-slate-600">{t.deviceModel || "—"}</td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-start gap-2" title="SPIn reachability as seen from a signed-in POS (heartbeat).">
-                            <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${pos.dotClass}`} />
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium text-slate-800">{pos.title}</div>
-                              <div className="text-xs text-slate-500 truncate max-w-[11rem]">{pos.line}</div>
+                        <td className="px-5 py-3.5">
+                          <div className="font-medium text-slate-800">{d.deviceModel}</div>
+                          <div className="text-xs text-slate-400 font-mono truncate max-w-[220px]" title={d.id}>
+                            {d.id.length > 18 ? `${d.id.slice(0, 8)}…${d.id.slice(-6)}` : d.id}
+                          </div>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          {isP8 ? (
+                            <span className="text-xs text-slate-400 italic">DvPayLite (built-in)</span>
+                          ) : pinpad ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className={`w-2 h-2 rounded-full shrink-0 ${pinpadStatusLabel(pinpad.posLastSeen, pinpad.posConnectionStatus).dotClass}`} />
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium text-slate-800">{pinpad.name}</div>
+                                <div className="text-xs text-slate-500">{pinpad.deviceModel || pinpad.provider}</div>
+                              </div>
                             </div>
-                          </div>
+                          ) : (
+                            <span className="text-xs text-slate-400">No PIN pad configured</span>
+                          )}
                         </td>
-                        <td className="px-6 py-4 text-center">
-                          <button onClick={() => handleToggle(t)} className="inline-flex items-center" title={t.active ? "Disable" : "Enable"}>
-                            {t.active ? <ToggleRight size={28} className="text-emerald-500" /> : <ToggleLeft size={28} className="text-slate-300" />}
+                        <td className="px-5 py-3.5 text-slate-600">{d.osVersion}</td>
+                        <td className="px-5 py-3.5 text-slate-600">{d.appVersion}</td>
+                        <td className="px-5 py-3.5 text-slate-600">{ago}</td>
+                        <td className="px-5 py-3.5 text-right">
+                          <button
+                            type="button"
+                            disabled={deactivatingId === d.id}
+                            onClick={() => setConfirmDeactivate(d)}
+                            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-45 disabled:pointer-events-none"
+                          >
+                            {deactivatingId === d.id ? "Working…" : "Deactivate"}
                           </button>
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
-                            <button onClick={() => setDeleteTarget(t)} className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" title="Delete terminal">
-                              <Trash2 size={15} />
-                            </button>
-                          </div>
                         </td>
                       </tr>
                     );
@@ -643,76 +575,7 @@ export default function PaymentsAndDevicesPage() {
               </table>
             </div>
           )}
-        </section>
-
-        {/* ─── POS Devices section ─── */}
-        <section>
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <Smartphone size={16} /> POS Devices
-            <span className="ml-2 text-xs font-normal normal-case text-slate-400">
-              <span className="font-semibold text-emerald-600">{onlineDevices}</span> online · <span className="font-semibold text-slate-700">{devices.length}</span> total
-            </span>
-          </h2>
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin" />
-            </div>
-          ) : devices.length === 0 ? (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-10 text-center">
-              <Smartphone size={36} className="mx-auto text-slate-300" />
-              <p className="text-slate-400 text-lg mt-2">No devices have reported in yet</p>
-              <p className="text-slate-400 text-sm mt-1">Use <strong>Add Device</strong> to link a terminal with a one-time activation code.</p>
-            </div>
-          ) : (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50/80">
-                      <th className="px-4 py-3 font-semibold text-slate-600">Status</th>
-                      <th className="px-4 py-3 font-semibold text-slate-600">Device</th>
-                      <th className="px-4 py-3 font-semibold text-slate-600">Enrolled</th>
-                      <th className="px-4 py-3 font-semibold text-slate-600">OS</th>
-                      <th className="px-4 py-3 font-semibold text-slate-600">App</th>
-                      <th className="px-4 py-3 font-semibold text-slate-600">Last seen</th>
-                      <th className="px-4 py-3 font-semibold text-slate-600 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {devices.map((d) => {
-                      const live = getLiveStatus(d.lastSeen, nowMs, d.deactivated);
-                      const ago = formatLastSeenAgo(d.lastSeen, nowMs);
-                      return (
-                        <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50/50">
-                          <td className="px-4 py-3.5">
-                            <span className={live === "locked" ? "inline-flex items-center gap-1.5 text-amber-800 font-medium" : live === "online" ? "inline-flex items-center gap-1.5 text-emerald-700 font-medium" : "inline-flex items-center gap-1.5 text-slate-500"}>
-                              {live === "locked" ? (<><Lock size={12} className="text-amber-700" /> Locked</>) : (<><Circle size={10} className={live === "online" ? "fill-emerald-500 text-emerald-500" : "fill-slate-300 text-slate-300"} /> {live === "online" ? "Online" : "Offline"}</>)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="font-medium text-slate-800">{d.deviceModel}</div>
-                            <div className="text-xs text-slate-400 font-mono truncate max-w-[220px]" title={d.id}>
-                              {d.id.length > 18 ? `${d.id.slice(0, 8)}…${d.id.slice(-6)}` : d.id}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">{d.enrolled ? <span className="text-emerald-700 font-medium">Yes</span> : <span className="text-slate-400">—</span>}</td>
-                          <td className="px-4 py-3.5 text-slate-600">{d.osVersion}</td>
-                          <td className="px-4 py-3.5 text-slate-600">{d.appVersion}</td>
-                          <td className="px-4 py-3.5 text-slate-600">{ago}</td>
-                          <td className="px-4 py-3.5 text-right">
-                            <button type="button" disabled={deactivatingId === d.id} onClick={() => setConfirmDeactivate(d)} className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-45 disabled:pointer-events-none">
-                              {deactivatingId === d.id ? "Working…" : "Deactivate"}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </section>
+        </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════
@@ -829,7 +692,7 @@ export default function PaymentsAndDevicesPage() {
                 </div>
               )}
 
-              {/* ─── Step 3 (or Step 2 for Mobile): Activation Code ─── */}
+              {/* ─── Activation Code step ─── */}
               {addStep === "code" && activationCode && (
                 <div className="space-y-4">
                   <p className="text-sm text-slate-500">
@@ -855,37 +718,12 @@ export default function PaymentsAndDevicesPage() {
                 </div>
               )}
 
-              {/* Loading state for code generation (Mobile App path) */}
               {addStep === "code" && !activationCode && creatingCode && (
                 <div className="flex flex-col items-center gap-3 py-8">
                   <Loader2 size={32} className="animate-spin text-blue-600" />
                   <p className="text-sm text-slate-500">Generating activation code…</p>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Delete terminal confirm ── */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deleting && setDeleteTarget(null)} />
-          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 overflow-hidden">
-            <div className="px-6 py-5 space-y-4">
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center"><AlertTriangle size={24} className="text-red-500" /></div>
-                <h3 className="text-lg font-semibold text-slate-800">Delete Terminal</h3>
-              </div>
-              <p className="text-sm text-slate-500 text-center">
-                Are you sure you want to delete <strong className="text-slate-700">{deleteTarget.name}</strong>? The POS using this terminal will stop processing cards until it selects a different one.
-              </p>
-              <div className="flex gap-3 pt-1">
-                <button onClick={() => setDeleteTarget(null)} disabled={deleting} className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50">Cancel</button>
-                <button onClick={handleDelete} disabled={deleting} className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-                  {deleting ? (<><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Deleting…</>) : "Delete"}
-                </button>
-              </div>
             </div>
           </div>
         </div>
