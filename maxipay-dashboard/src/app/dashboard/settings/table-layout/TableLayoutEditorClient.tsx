@@ -78,6 +78,36 @@ function shapeStyle(shape: TableShape): React.CSSProperties {
 
 type SectionRow = { id: string; name: string };
 
+/** 0–359 for stable Firestore / UI. */
+function normalizeRotationDeg(deg: number): number {
+  const n = Math.round(deg);
+  return ((n % 360) + 360) % 360;
+}
+
+function wrapRotationDeg(deg: number): number {
+  return ((deg % 360) + 360) % 360;
+}
+
+type CanvasInteraction =
+  | {
+      kind: "move";
+      id: string;
+      startX: number;
+      startY: number;
+      origX: number;
+      origY: number;
+      tableW: number;
+      tableH: number;
+    }
+  | {
+      kind: "rotate";
+      id: string;
+      centerClientX: number;
+      centerClientY: number;
+      startPointerAngle: number;
+      origRotation: number;
+    };
+
 export default function TableLayoutEditorClient() {
   const { user } = useAuth();
   const merchantId = useMerchantId();
@@ -95,13 +125,7 @@ export default function TableLayoutEditorClient() {
   const [importing, setImporting] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   const tablesRef = useRef<TableRow[]>([]);
-  const dragRef = useRef<{
-    id: string;
-    startX: number;
-    startY: number;
-    origX: number;
-    origY: number;
-  } | null>(null);
+  const interactionRef = useRef<CanvasInteraction | null>(null);
 
   useEffect(() => {
     tablesRef.current = tables;
@@ -232,46 +256,91 @@ export default function TableLayoutEditorClient() {
       setSelectedId(id);
       const row = tables.find((t) => t.id === id);
       if (!row) return;
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
-      dragRef.current = {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      interactionRef.current = {
+        kind: "move",
         id,
         startX: e.clientX,
         startY: e.clientY,
         origX: row.data.x,
         origY: row.data.y,
+        tableW: row.data.width,
+        tableH: row.data.height,
       };
     },
     [tables, layout]
   );
 
+  const handleRotatePointerDown = useCallback(
+    (e: React.PointerEvent, id: string) => {
+      if (!canvasRef.current || !layout) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setSelectedId(id);
+      const row = tables.find((t) => t.id === id);
+      if (!row) return;
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      const rect = canvasRef.current.getBoundingClientRect();
+      const cxCanvas = row.data.x + row.data.width / 2;
+      const cyCanvas = row.data.y + row.data.height / 2;
+      const centerClientX = rect.left + (cxCanvas / canvasW) * rect.width;
+      const centerClientY = rect.top + (cyCanvas / canvasH) * rect.height;
+      const startPointerAngle = Math.atan2(
+        e.clientY - centerClientY,
+        e.clientX - centerClientX
+      );
+      interactionRef.current = {
+        kind: "rotate",
+        id,
+        centerClientX,
+        centerClientY,
+        startPointerAngle,
+        origRotation: row.data.rotation,
+      };
+    },
+    [tables, layout, canvasW, canvasH]
+  );
+
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
-      const d = dragRef.current;
+      const d = interactionRef.current;
       if (!d || !canvasRef.current || !layout) return;
       const rect = canvasRef.current.getBoundingClientRect();
-      const dx = ((e.clientX - d.startX) / rect.width) * canvasW;
-      const dy = ((e.clientY - d.startY) / rect.height) * canvasH;
-      updateTableLocal(d.id, {
-        x: Math.round(
-          Math.max(0, Math.min(canvasW - DEFAULT_TABLE_SIZE.width, d.origX + dx))
-        ),
-        y: Math.round(
-          Math.max(0, Math.min(canvasH - DEFAULT_TABLE_SIZE.height, d.origY + dy))
-        ),
-      });
+      if (d.kind === "move") {
+        const dx = ((e.clientX - d.startX) / rect.width) * canvasW;
+        const dy = ((e.clientY - d.startY) / rect.height) * canvasH;
+        updateTableLocal(d.id, {
+          x: Math.round(Math.max(0, Math.min(canvasW - d.tableW, d.origX + dx))),
+          y: Math.round(Math.max(0, Math.min(canvasH - d.tableH, d.origY + dy))),
+        });
+        return;
+      }
+      const now = Math.atan2(
+        e.clientY - d.centerClientY,
+        e.clientX - d.centerClientX
+      );
+      let delta = now - d.startPointerAngle;
+      while (delta > Math.PI) delta -= 2 * Math.PI;
+      while (delta < -Math.PI) delta += 2 * Math.PI;
+      const rotation = wrapRotationDeg(
+        d.origRotation + (delta * 180) / Math.PI
+      );
+      updateTableLocal(d.id, { rotation });
     };
     const onUp = async () => {
-      const d = dragRef.current;
-      if (!d || !layoutId) return;
-      dragRef.current = null;
+      const d = interactionRef.current;
+      if (!d) return;
+      interactionRef.current = null;
+      if (!layoutId) return;
       const row = tablesRef.current.find((t) => t.id === d.id);
       if (row) {
         setSaveState("saving");
         try {
           await upsertLayoutTable(db, merchantId, layoutId, d.id, {
             ...row.data,
-            x: row.data.x,
-            y: row.data.y,
+            ...(d.kind === "move"
+              ? { x: row.data.x, y: row.data.y }
+              : { rotation: row.data.rotation }),
           });
           setSaveState("saved");
           setTimeout(() => setSaveState("idle"), 1200);
@@ -288,7 +357,7 @@ export default function TableLayoutEditorClient() {
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [canvasW, canvasH, layout, layoutId, updateTableLocal]);
+  }, [canvasW, canvasH, layout, layoutId, merchantId, updateTableLocal]);
 
   const addLayout = async () => {
     const name = window.prompt("Layout name", "Main Dining");
@@ -613,12 +682,33 @@ export default function TableLayoutEditorClient() {
           <label className="mb-1 block text-xs font-medium text-slate-500">Rotation (°)</label>
           <input
             type="number"
+            step={1}
             className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-            value={d.rotation}
+            value={Math.round(d.rotation)}
             onChange={(e) =>
-              updateTableLocal(selected.id, { rotation: Number(e.target.value) || 0 })
+              updateTableLocal(selected.id, {
+                rotation: wrapRotationDeg(Number(e.target.value) || 0),
+              })
             }
           />
+          <p className="mt-1 text-xs text-slate-500">
+            With a table selected, drag the blue dot under the table on the canvas to rotate (e.g.
+            diagonal).
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {[0, 45, 90, 135, 180, 270].map((deg) => (
+              <button
+                key={deg}
+                type="button"
+                onClick={() =>
+                  updateTableLocal(selected.id, { rotation: normalizeRotationDeg(deg) })
+                }
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                {deg}°
+              </button>
+            ))}
+          </div>
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-slate-500">Section / zone</label>
@@ -808,7 +898,8 @@ export default function TableLayoutEditorClient() {
                 {saveState === "saving" && "Saving…"}
                 {saveState === "saved" && "Saved"}
                 {saveState === "error" && "Error saving"}
-                {saveState === "idle" && "Drag tables on the canvas; positions save on release."}
+                {saveState === "idle" &&
+                  "Drag tables to move; drag the blue dot to rotate. Changes save when you release."}
               </span>
             </div>
           )}
@@ -943,7 +1034,7 @@ export default function TableLayoutEditorClient() {
                   </div>
                   <div
                     ref={canvasRef}
-                    className="relative mx-auto w-full max-w-5xl overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+                    className="relative mx-auto w-full max-w-5xl overflow-visible rounded-xl border border-slate-200 bg-slate-50"
                     style={{
                       aspectRatio: `${canvasW} / ${canvasH}`,
                       backgroundImage:
@@ -965,7 +1056,7 @@ export default function TableLayoutEditorClient() {
                             tabIndex={0}
                             onPointerDown={(e) => handlePointerDown(e, t.id)}
                             onClick={(e) => e.stopPropagation()}
-                            className={`absolute flex flex-col items-center justify-center p-1 transition-shadow ${
+                            className={`absolute touch-none transition-shadow ${
                               selectedId === t.id ? "ring-2 ring-blue-500 ring-offset-2" : ""
                             }`}
                             style={{
@@ -973,17 +1064,38 @@ export default function TableLayoutEditorClient() {
                               top: `${topPct}%`,
                               width: `${wPct}%`,
                               height: `${hPct}%`,
-                              ...shapeStyle(data.shape),
-                              transform: `rotate(${data.rotation}deg)`,
                               zIndex: selectedId === t.id ? 5 : 1,
                             }}
                           >
-                            <span className="truncate px-0.5 text-center leading-tight">
-                              {data.name}
-                            </span>
-                            <span className="text-[9px] font-normal text-slate-500">
-                              {data.capacity} seats
-                            </span>
+                            <div
+                              className="relative flex h-full w-full flex-col items-center justify-center p-1"
+                              style={{
+                                transform: `rotate(${data.rotation}deg)`,
+                                transformOrigin: "50% 50%",
+                                ...shapeStyle(data.shape),
+                              }}
+                            >
+                              <span className="truncate px-0.5 text-center leading-tight">
+                                {data.name}
+                              </span>
+                              <span className="text-[9px] font-normal text-slate-500">
+                                {data.capacity} seats
+                              </span>
+                              {selectedId === t.id && (
+                                <div
+                                  role="slider"
+                                  aria-label="Rotate table"
+                                  aria-valuenow={Math.round(data.rotation)}
+                                  aria-valuemin={0}
+                                  aria-valuemax={359}
+                                  tabIndex={0}
+                                  className="absolute left-1/2 top-full z-10 mt-1 h-3.5 w-3.5 -translate-x-1/2 cursor-grab rounded-full border-2 border-blue-600 bg-white shadow-md active:cursor-grabbing"
+                                  title="Drag to rotate"
+                                  onPointerDown={(e) => handleRotatePointerDown(e, t.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              )}
+                            </div>
                           </div>
                         );
                       })}
