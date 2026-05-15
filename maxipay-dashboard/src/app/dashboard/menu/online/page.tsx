@@ -15,6 +15,7 @@ import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import Header from "@/components/Header";
+import { MenuQrOnlineMenuCard } from "@/components/MenuQrCodeTool";
 import {
   DEFAULT_ONLINE_ORDERING_SETTINGS,
   ONLINE_ORDERING_SETTINGS_DOC,
@@ -305,6 +306,8 @@ export default function OnlineMenuPage() {
             </p>
           </div>
         </div>
+
+        <MenuQrOnlineMenuCard />
 
         {loading ? (
           <div className="flex items-center gap-2 text-slate-500">

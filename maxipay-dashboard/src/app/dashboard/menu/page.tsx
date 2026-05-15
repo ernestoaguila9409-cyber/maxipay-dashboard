@@ -37,6 +37,7 @@ import {
   resolveMenuItemKitchenRoutingLabel,
 } from "@/lib/kitchenRoutingLabel";
 import Header from "@/components/Header";
+import { MenuQrMenuToolbarButton } from "@/components/MenuQrCodeTool";
 import MenuUploadModal from "@/components/MenuUploadModal";
 import { ItemImageSection } from "@/components/menu-item-image/ItemImageSection";
 import {
@@ -2612,6 +2613,7 @@ export default function MenuPage() {
                   <Download size={14} />
                   <span className="hidden lg:inline">Download</span>
                 </button>
+                <MenuQrMenuToolbarButton />
                 <button
                   type="button"
                   onClick={() => setUploadOpen(true)}
