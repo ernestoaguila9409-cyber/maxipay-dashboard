@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     }
     const [menu, bestSellerItemIds] = await Promise.all([
       loadOnlineMenu(db, merchantId),
-      loadBestSellerItemIds(db, 5),
+      loadBestSellerItemIds(db, merchantId, 5),
     ]);
     return NextResponse.json({ ...menu, bestSellerItemIds }, {
       headers: { "Cache-Control": "no-store" },

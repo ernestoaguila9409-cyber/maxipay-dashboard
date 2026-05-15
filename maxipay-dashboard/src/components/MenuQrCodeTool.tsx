@@ -90,9 +90,10 @@ function usePublicMenuOrderUrl(): {
   );
 
   const orderUrl = useMemo(() => {
-    if (!origin) return "";
-    return `${origin}/order${effectiveSlug ? `/${effectiveSlug}` : ""}`;
-  }, [origin, effectiveSlug]);
+    if (!origin || !merchantId) return "";
+    const path = `${origin}/order${effectiveSlug ? `/${effectiveSlug}` : ""}`;
+    return `${path}?merchantId=${encodeURIComponent(merchantId)}`;
+  }, [origin, effectiveSlug, merchantId]);
 
   const ready = Boolean(user && merchantId && origin && snapshotsReady);
 

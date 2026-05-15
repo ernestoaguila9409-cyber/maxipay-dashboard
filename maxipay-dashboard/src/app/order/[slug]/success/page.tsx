@@ -105,6 +105,7 @@ function staffOutcomeFromApi(data: {
 function SuccessInner() {
   const { slug } = useParams<{ slug: string }>();
   const sp = useSearchParams();
+  const merchantId = sp.get("merchantId")?.trim() || "";
   const orderNumber = cleanParam(sp.get("orderNumber"));
   const orderId = cleanParam(sp.get("orderId"));
   const paymentParam = (sp.get("payment") || "").trim().toUpperCase();
@@ -127,8 +128,12 @@ function SuccessInner() {
 
   useEffect(() => {
     void (async () => {
+      if (!merchantId) return;
       try {
-        const res = await fetch("/api/online-ordering/config", { cache: "no-store" });
+        const res = await fetch(
+          `/api/online-ordering/config?merchantId=${encodeURIComponent(merchantId)}`,
+          { cache: "no-store" },
+        );
         const data = await res.json();
         if (data.businessName) setBusinessName(data.businessName as string);
         const rawLogo = typeof data.logoUrl === "string" ? data.logoUrl.trim() : "";
@@ -139,15 +144,19 @@ function SuccessInner() {
         /* ignore */
       }
     })();
-  }, []);
+  }, [merchantId]);
 
   useEffect(() => {
-    if (!orderId || !orderNumber) return;
+    if (!orderId || !orderNumber || !merchantId) return;
 
     let cancelled = false;
     const poll = async () => {
       try {
-        const qs = new URLSearchParams({ orderId, orderNumber: String(orderNumber) });
+        const qs = new URLSearchParams({
+          orderId,
+          orderNumber: String(orderNumber),
+          merchantId,
+        });
         const res = await fetch(`/api/online-ordering/order-status?${qs.toString()}`, { cache: "no-store" });
         const data = await res.json();
         if (cancelled || !data.ok) return;
@@ -180,10 +189,10 @@ function SuccessInner() {
       cancelled = true;
       window.clearInterval(t);
     };
-  }, [orderId, orderNumber]);
+  }, [orderId, orderNumber, merchantId]);
 
   useEffect(() => {
-    if (!orderId || confirmedRef.current || isPayAtStore) return;
+    if (!orderId || confirmedRef.current || isPayAtStore || !merchantId) return;
     confirmedRef.current = true;
 
     let attempts = 0;
@@ -192,14 +201,17 @@ function SuccessInner() {
 
     const tryConfirm = async () => {
       try {
-        const res = await fetch("/api/online-ordering/confirm-hpp-payment", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            orderId,
-            ...(iposRedirectParams ? { iposRedirect: iposRedirectParams } : {}),
-          }),
-        });
+        const res = await fetch(
+          `/api/online-ordering/confirm-hpp-payment?merchantId=${encodeURIComponent(merchantId)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              orderId,
+              ...(iposRedirectParams ? { iposRedirect: iposRedirectParams } : {}),
+            }),
+          },
+        );
         const data = await res.json();
         if (data.status === "PAID") {
           setPaymentStatus("confirmed");
@@ -222,7 +234,7 @@ function SuccessInner() {
     };
 
     void tryConfirm();
-  }, [orderId, iposRedirectParams, isPayAtStore]);
+  }, [orderId, iposRedirectParams, isPayAtStore, merchantId]);
 
   const legacyNumberOnly = !orderId && !!orderNumber;
 
@@ -398,7 +410,7 @@ function SuccessInner() {
         {description}
 
         <a
-          href={`/order/${slug}`}
+          href={`/order/${slug}${merchantId ? `?merchantId=${encodeURIComponent(merchantId)}` : ""}`}
           className="inline-flex items-center justify-center h-12 px-8 rounded-xl bg-black text-white font-semibold text-sm hover:bg-neutral-800 active:scale-[0.98] transition-all no-underline"
         >
           Order again

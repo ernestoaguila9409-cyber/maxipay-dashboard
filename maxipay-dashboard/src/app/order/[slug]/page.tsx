@@ -1031,9 +1031,63 @@ function TrustBar({ prepTimeLabel }: { prepTimeLabel: string }) {
    ═══════════════════════════════════════════ */
 
 function PublicOrderPageInner() {
-  const { slug } = useParams<{ slug: string }>();
+  const params = useParams<{ slug: string | string[] }>();
+  const slugStr = useMemo(() => {
+    const s = params.slug;
+    if (typeof s === "string") return s.trim();
+    if (Array.isArray(s) && s[0]) return String(s[0]).trim();
+    return "";
+  }, [params.slug]);
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const spMerchantId = useMemo(
+    () => searchParams.get("merchantId")?.trim() || null,
+    [searchParams],
+  );
+  const [resolvedMerchantId, setResolvedMerchantId] = useState<string | null>(null);
+  const [merchantLookup, setMerchantLookup] = useState<"pending" | "ready" | "failed">(() =>
+    spMerchantId ? "ready" : "pending",
+  );
+
+  useEffect(() => {
+    if (spMerchantId) {
+      setResolvedMerchantId(null);
+      setMerchantLookup("ready");
+      return;
+    }
+    if (!slugStr) {
+      setResolvedMerchantId(null);
+      setMerchantLookup("failed");
+      return;
+    }
+    let cancelled = false;
+    setMerchantLookup("pending");
+    setResolvedMerchantId(null);
+    void (async () => {
+      try {
+        const r = await fetch(
+          `/api/online-ordering/resolve-merchant?slug=${encodeURIComponent(slugStr)}`,
+          { cache: "no-store" },
+        );
+        const j = (await r.json()) as { merchantId?: string; error?: string };
+        if (cancelled) return;
+        if (r.ok && typeof j.merchantId === "string" && j.merchantId.trim()) {
+          setResolvedMerchantId(j.merchantId.trim());
+          setMerchantLookup("ready");
+        } else {
+          setMerchantLookup("failed");
+        }
+      } catch {
+        if (!cancelled) setMerchantLookup("failed");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [spMerchantId, slugStr]);
+
+  const merchantIdForApi = spMerchantId ?? resolvedMerchantId;
 
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
   const [storefront, setStorefront] = useState<PublicStorefront | null>(null);
@@ -1065,19 +1119,44 @@ function PublicOrderPageInner() {
   /* ── Data loading ── */
 
   const loadConfig = useCallback(async () => {
-    const res = await fetch("/api/online-ordering/storefront", { cache: "no-store" });
+    const mid = merchantIdForApi?.trim();
+    if (!mid) return;
+    const q = encodeURIComponent(mid);
+    const res = await fetch(`/api/online-ordering/storefront?merchantId=${q}`, { cache: "no-store" });
     const data = (await res.json()) as PublicStorefront & { error?: string };
-    if (!res.ok) { setLoadError(data.error || "Could not load store."); setCfg(null); return; }
-    if (data.slug && data.slug !== slug) { router.replace(`/order/${data.slug}`); return; }
+    if (!res.ok) {
+      setLoadError(data.error || "Could not load store.");
+      setCfg(null);
+      return;
+    }
+    if (data.slug && data.slug !== slugStr) {
+      const next = new URLSearchParams();
+      next.set("merchantId", mid);
+      router.replace(`/order/${data.slug}?${next.toString()}`);
+      return;
+    }
     setLoadError(null);
     setStorefront(data);
-    setCfg({ enabled: data.enabled, businessName: data.businessName, logoUrl: data.logoUrl, slug: data.slug, isOpen: data.isOpen, prepTimeLabel: data.prepTimeLabel, allowPayInStore: data.allowPayInStore, allowPayOnlineHpp: data.allowPayOnlineHpp });
-  }, [slug, router]);
+    setCfg({
+      enabled: data.enabled,
+      businessName: data.businessName,
+      logoUrl: data.logoUrl,
+      slug: data.slug,
+      isOpen: data.isOpen,
+      prepTimeLabel: data.prepTimeLabel,
+      allowPayInStore: data.allowPayInStore,
+      allowPayOnlineHpp: data.allowPayOnlineHpp,
+    });
+  }, [slugStr, router, merchantIdForApi]);
 
   const loadMenu = useCallback(async () => {
+    const mid = merchantIdForApi?.trim();
+    if (!mid) return;
     setMenuLoading(true);
     try {
-      const res = await fetch("/api/online-ordering/menu", { cache: "no-store" });
+      const res = await fetch(`/api/online-ordering/menu?merchantId=${encodeURIComponent(mid)}`, {
+        cache: "no-store",
+      });
       const data = (await res.json()) as {
         categories?: MenuCategory[];
         items?: MenuItem[];
@@ -1086,7 +1165,11 @@ function PublicOrderPageInner() {
         bestSellerItemIds?: string[];
         error?: string;
       };
-      if (!res.ok) { setMenu(null); setLoadError(data.error || "Menu unavailable."); return; }
+      if (!res.ok) {
+        setMenu(null);
+        setLoadError(data.error || "Menu unavailable.");
+        return;
+      }
       const rawItems = Array.isArray(data.items) ? data.items : [];
       const items: MenuItem[] = rawItems.map((it) => ({
         ...it,
@@ -1118,11 +1201,25 @@ function PublicOrderPageInner() {
         bestSellerItemIds: Array.isArray(data.bestSellerItemIds) ? data.bestSellerItemIds : [],
       });
       setLoadError(null);
-    } finally { setMenuLoading(false); }
-  }, []);
+    } finally {
+      setMenuLoading(false);
+    }
+  }, [merchantIdForApi]);
 
-  useEffect(() => { void loadConfig(); const id = setInterval(() => void loadConfig(), 45_000); return () => clearInterval(id); }, [loadConfig]);
-  useEffect(() => { if (!cfg?.enabled) { setMenu(null); return; } void loadMenu(); }, [cfg?.enabled, loadMenu]);
+  useEffect(() => {
+    if (!merchantIdForApi) return;
+    void loadConfig();
+    const id = setInterval(() => void loadConfig(), 45_000);
+    return () => clearInterval(id);
+  }, [loadConfig, merchantIdForApi]);
+
+  useEffect(() => {
+    if (!merchantIdForApi || !cfg?.enabled) {
+      setMenu(null);
+      return;
+    }
+    void loadMenu();
+  }, [cfg?.enabled, loadMenu, merchantIdForApi]);
 
   /* ── Derived ── */
 
@@ -1219,12 +1316,21 @@ function PublicOrderPageInner() {
   const submitOrder = async (data: { customerName: string; customerPhone: string; customerEmail: string; paymentChoice: "PAY_AT_STORE" | "PAY_ONLINE_HPP" }) => {
     setSubmitError(null);
     if (!cfg?.enabled) return;
+    const mid = merchantIdForApi?.trim();
+    if (!mid) {
+      setSubmitError("Store session is missing. Refresh the page and try again.");
+      return;
+    }
     const lines = cartLines.map((l) => ({ itemId: l.itemId, quantity: l.quantity, modifierSelections: l.selections.length > 0 ? l.selections : undefined }));
     if (lines.length === 0) { setSubmitError("Your cart is empty."); return; }
     if (!data.customerName.trim()) { setSubmitError("Please enter your name."); return; }
     setSubmitting(true);
     try {
-      const res = await fetch("/api/online-ordering/order", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines, ...data }) });
+      const res = await fetch(`/api/online-ordering/order?merchantId=${encodeURIComponent(mid)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lines, ...data }),
+      });
       const result = await res.json();
       if (!res.ok) { setSubmitError(result.error || result.detail || "Order failed."); return; }
       if (data.paymentChoice === "PAY_ONLINE_HPP" && result.paymentUrl) { window.location.href = result.paymentUrl; return; }
@@ -1233,11 +1339,37 @@ function PublicOrderPageInner() {
       setCartRows([]);
       const pay = encodeURIComponent(String(result.paymentChoice ?? ""));
       const oid = encodeURIComponent(String(result.orderId ?? ""));
-      router.push(`/order/${slug}/success?orderNumber=${result.orderNumber}&orderId=${oid}&payment=${pay}`);
+      const mq = encodeURIComponent(mid);
+      router.push(`/order/${slugStr}/success?orderNumber=${result.orderNumber}&orderId=${oid}&payment=${pay}&merchantId=${mq}`);
     } finally { setSubmitting(false); }
   };
 
   /* ── Loading / error / disabled states ── */
+
+  if (merchantLookup === "pending" && !merchantIdForApi) {
+    return (
+      <div className={`min-h-screen ${O.bg} flex items-center justify-center p-6`}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-neutral-200 border-t-[#EA580C] rounded-full animate-spin" />
+          <p className="text-neutral-500 text-sm">Finding your store…</p>
+        </div>
+      </div>
+    );
+  }
+  if (merchantLookup === "failed" && !merchantIdForApi) {
+    return (
+      <div className={`min-h-screen ${O.bg} flex items-center justify-center p-6`}>
+        <div className="text-center max-w-sm">
+          <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center mx-auto mb-4 shadow-sm">
+            <IconStore size={28} />
+          </div>
+          <p className="text-neutral-600 text-sm">
+            We could not find a menu for this link. Ask the restaurant for an updated QR code or link, or open the menu from their website.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (loadError && !cfg) {
     return (<div className={`min-h-screen ${O.bg} flex items-center justify-center p-6`}><div className="text-center"><div className="w-16 h-16 rounded-full bg-white flex items-center justify-center mx-auto mb-4 shadow-sm"><IconStore size={28} /></div><p className="text-neutral-600 text-sm">{loadError}</p></div></div>);

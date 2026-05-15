@@ -155,8 +155,12 @@ export default function OnlineOrderingSettingsPage() {
 
   const effectiveSlug = settings.onlineOrderingSlug || slugify(businessName);
   const orderUrl = origin
-    ? `${origin}/order${effectiveSlug ? `/${effectiveSlug}` : ""}`
-    : `/order${effectiveSlug ? `/${effectiveSlug}` : ""}`;
+    ? `${origin}/order${effectiveSlug ? `/${effectiveSlug}` : ""}${
+        merchantId ? `?merchantId=${encodeURIComponent(merchantId)}` : ""
+      }`
+    : `/order${effectiveSlug ? `/${effectiveSlug}` : ""}${
+        merchantId ? `?merchantId=${encodeURIComponent(merchantId)}` : ""
+      }`;
 
   const copyUrl = async () => {
     try {

@@ -74,7 +74,9 @@ export default function OnlineOrderingDashboardPage() {
   }, [user, merchantId]);
 
   const slug = settings.onlineOrderingSlug || slugify(businessName);
-  const orderUrl = `${origin || ""}/order${slug ? `/${slug}` : ""}`;
+  const orderUrl = `${origin || ""}/order${slug ? `/${slug}` : ""}${
+    merchantId ? `?merchantId=${encodeURIComponent(merchantId)}` : ""
+  }`;
 
   if (!user) return null;
 

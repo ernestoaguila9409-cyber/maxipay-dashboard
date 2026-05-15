@@ -299,6 +299,51 @@ export async function loadPublicOnlineOrderingConfig(
   };
 }
 
+const MERCHANT_ONLINE_ORDERING_PATH_RE = /^Merchants\/([^/]+)\/settings\/onlineOrdering$/;
+
+/**
+ * Resolves `Merchants/{id}` from the public ordering URL slug stored on
+ * `Settings/onlineOrdering` (`onlineOrderingSlug`).
+ */
+export async function resolveMerchantIdFromOnlineOrderingSlug(
+  db: Firestore,
+  rawSlug: string,
+): Promise<{ merchantId: string } | { error: string }> {
+  const slug = rawSlug.trim().toLowerCase();
+  if (!slug) {
+    return { error: "slug is required." };
+  }
+  try {
+    const snap = await db
+      .collectionGroup("settings")
+      .where("onlineOrderingSlug", "==", slug)
+      .limit(15)
+      .get();
+
+    const mids: string[] = [];
+    for (const d of snap.docs) {
+      if (d.id !== ONLINE_ORDERING_SETTINGS_DOC) continue;
+      const m = MERCHANT_ONLINE_ORDERING_PATH_RE.exec(d.ref.path);
+      if (m?.[1]) mids.push(m[1]);
+    }
+
+    if (mids.length === 0) {
+      return { error: "No store found for that menu link." };
+    }
+    if (mids.length > 1) {
+      console.warn("[resolveMerchantIdFromOnlineOrderingSlug] multiple merchants share slug", {
+        slug,
+        count: mids.length,
+      });
+    }
+    return { merchantId: mids[0]! };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[resolveMerchantIdFromOnlineOrderingSlug]", msg);
+    return { error: "Could not look up store." };
+  }
+}
+
 /** Lists hero slides ordered by `order ASC`, capped to [HERO_SLIDES_MAX]. */
 export async function loadHeroSlides(db: Firestore, merchantId: string): Promise<HeroSlide[]> {
   const snap = await merchantCol(merchantId, HERO_SLIDES_COLLECTION).get();
@@ -421,8 +466,10 @@ export async function loadOnlineMenu(
  */
 export async function loadBestSellerItemIds(
   db: Firestore,
+  merchantId: string,
   limit = 5,
 ): Promise<string[]> {
+  const pathPrefix = `Merchants/${merchantId}/orders/`;
   try {
     const snap = await db
       .collectionGroup("items")
@@ -431,6 +478,7 @@ export async function loadBestSellerItemIds(
       .get();
     const counts = new Map<string, number>();
     for (const doc of snap.docs) {
+      if (!doc.ref.path.startsWith(pathPrefix)) continue;
       const itemId = doc.get("itemId") as string | undefined;
       if (itemId) {
         const qty = (doc.get("quantity") as number | undefined) ?? 1;
