@@ -30,8 +30,6 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.QuerySnapshot
 import kotlin.math.abs
-import kotlin.math.max
-
 class TableLayoutActivity : AppCompatActivity() {
 
     private fun rectsOverlap(
@@ -71,7 +69,10 @@ class TableLayoutActivity : AppCompatActivity() {
     private lateinit var canvasScroll: HorizontalScrollView
     private lateinit var canvas: FrameLayout
     private lateinit var chipGroup: ChipGroup
-    /** Scrollable canvas size in pixels (may be wider than the viewport). */
+    /** Visible floor-plan area in pixels (used for coord mapping and canvas size). */
+    private var editorViewportWidthPx = 1f
+    private var editorViewportHeightPx = 1f
+    /** Canvas size in pixels — matches viewport so layout fits on screen. */
     private var editorContentWidthPx = 1f
     private var editorContentHeightPx = 1f
     private val tableLayoutCoords = mutableMapOf<String, Pair<Double, Double>>()
@@ -586,10 +587,11 @@ class TableLayoutActivity : AppCompatActivity() {
     private fun saveTablePosition(tableId: String, x: Float, y: Float) {
         lastSaveTimeMs = System.currentTimeMillis()
         if (useTableLayouts && activeLayoutId.isNotBlank()) {
-            val cw = editorContentWidthPx.coerceAtLeast(1f)
-            val ch = editorContentHeightPx.coerceAtLeast(1f)
             val (xL, yL) = TableLayoutMobileScale.screenToLayout(
-                x, y, cw, ch, layoutCanvasW, layoutCanvasH,
+                x, y,
+                editorViewportWidthPx.coerceAtLeast(1f),
+                editorViewportHeightPx.coerceAtLeast(1f),
+                layoutCanvasW, layoutCanvasH,
             )
             tableLayoutCoords[tableId] = Pair(xL, yL)
             MerchantFirestore.col("tableLayouts").document(activeLayoutId)
@@ -903,27 +905,20 @@ class TableLayoutActivity : AppCompatActivity() {
     }
 
     /**
-     * Fit layout height to the viewport; widen canvas horizontally when the layout is
-     * wider than the screen (enables [canvasScroll]).
-     * Only touches [canvas.layoutParams] when dimensions actually changed to avoid
-     * triggering unnecessary layout passes that disrupt touch handling.
+     * Canvas matches the visible viewport so logical coords map to what you see on screen
+     * (avoids spreading tables across a 1200px-wide canvas on a narrow P8).
      */
     private fun updateEditorCanvasDimensions() {
         val viewportW = canvasScroll.width.coerceAtLeast(1)
         val viewportH = canvasScroll.height.coerceAtLeast(1)
 
-        if (!useTableLayouts || layoutCanvasW <= 0 || layoutCanvasH <= 0) {
-            editorContentWidthPx = viewportW.toFloat()
-            editorContentHeightPx = viewportH.toFloat()
-        } else {
-            editorContentHeightPx = viewportH.toFloat()
-            val heightScale = viewportH / layoutCanvasH.toFloat()
-            val layoutWidthPx = (layoutCanvasW * heightScale).toFloat()
-            editorContentWidthPx = max(viewportW.toFloat(), layoutWidthPx)
-        }
+        editorViewportWidthPx = viewportW.toFloat()
+        editorViewportHeightPx = viewportH.toFloat()
+        editorContentWidthPx = editorViewportWidthPx
+        editorContentHeightPx = editorViewportHeightPx
 
         val newW = editorContentWidthPx.toInt()
-        val newH = viewportH
+        val newH = editorContentHeightPx.toInt()
         val lp = canvas.layoutParams
         if (lp != null && lp.width == newW && lp.height == newH) return
         val params = lp ?: FrameLayout.LayoutParams(newW, newH)
@@ -946,7 +941,7 @@ class TableLayoutActivity : AppCompatActivity() {
     private fun layoutCoordsToScreen(xL: Double, yL: Double): Pair<Float, Float> {
         return TableLayoutMobileScale.layoutToScreen(
             xL, yL,
-            editorContentWidthPx, editorContentHeightPx,
+            editorViewportWidthPx, editorViewportHeightPx,
             layoutCanvasW, layoutCanvasH,
         )
     }
