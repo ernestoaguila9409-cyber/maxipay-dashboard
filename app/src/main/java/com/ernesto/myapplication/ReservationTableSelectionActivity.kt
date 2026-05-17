@@ -19,6 +19,7 @@ import com.google.android.material.chip.ChipGroup
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.QuerySnapshot
+import com.volt.shared.TableLayoutCoords
 import java.util.LinkedHashSet
 
 /**
@@ -167,10 +168,11 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
                 sectionsAdded = true
             }
 
-            val posX = (xL * cw / layoutCanvasW).toFloat()
-            val posY = (yL * ch / layoutCanvasH).toFloat()
             val wPx = TableShapeView.defaultMeasuredWidthPx(this, shape)
             val hPx = TableShapeView.defaultMeasuredHeightPx(this, shape)
+            val (posX, posY) = TableLayoutCoords.layoutToScreen(
+                xL, yL, cw, ch, layoutCanvasW, layoutCanvasH, wPx, hPx,
+            )
             tableRects[doc.id] = TableRect(posX, posY, wPx, hPx)
             ids.add(doc.id)
         }
@@ -692,7 +694,7 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
                 tableShape = shape,
                 posX = px,
                 posY = py,
-                customSize = null,
+                customSize = Pair(rect.w, rect.h),
                 highlighted = highlighted,
                 animateMerge = false,
             )

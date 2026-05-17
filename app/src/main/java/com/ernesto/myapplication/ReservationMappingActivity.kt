@@ -13,6 +13,7 @@ import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.volt.shared.TableLayoutCoords
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -247,10 +248,11 @@ class ReservationMappingActivity : AppCompatActivity() {
                     sectionsAdded = true
                 }
 
-                val posX = (xL * cw / layoutCanvasW).toFloat()
-                val posY = (yL * ch / layoutCanvasH).toFloat()
                 val wPx = TableShapeView.defaultMeasuredWidthPx(this, shape)
                 val hPx = TableShapeView.defaultMeasuredHeightPx(this, shape)
+                val (posX, posY) = TableLayoutCoords.layoutToScreen(
+                    xL, yL, cw, ch, layoutCanvasW, layoutCanvasH, wPx, hPx,
+                )
                 tableRects[doc.id] = TableRect(posX, posY, wPx, hPx)
                 ids.add(doc.id)
             }
@@ -357,7 +359,10 @@ class ReservationMappingActivity : AppCompatActivity() {
             val norm = mapUiNormByTableId[tableId]
             val posX = if (norm != null) norm.first * cw else rect.x
             val posY = if (norm != null) norm.second * ch else rect.y
-            addShapeView(tableId, name, seats, shape, posX, posY, null, highlight = highlight)
+            addShapeView(
+                tableId, name, seats, shape, posX, posY,
+                Pair(rect.w, rect.h), highlight = highlight,
+            )
         }
     }
 

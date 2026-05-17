@@ -24,6 +24,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.ernesto.myapplication.engine.OrderEngine
+import com.volt.shared.TableLayoutCoords
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -155,10 +156,11 @@ class TableSelectionActivity : AppCompatActivity() {
                 sectionsAdded = true
             }
 
-            val posX = (xL * cw / layoutCanvasW).toFloat()
-            val posY = (yL * ch / layoutCanvasH).toFloat()
             val wPx = TableShapeView.defaultMeasuredWidthPx(this, shape)
             val hPx = TableShapeView.defaultMeasuredHeightPx(this, shape)
+            val (posX, posY) = TableLayoutCoords.layoutToScreen(
+                xL, yL, cw, ch, layoutCanvasW, layoutCanvasH, wPx, hPx,
+            )
             tableLayoutScreenRect[doc.id] = TableScreenRect(posX, posY, wPx, hPx)
             visibleIds.add(doc.id)
         }
@@ -599,7 +601,7 @@ class TableSelectionActivity : AppCompatActivity() {
                 val name = tableNames[tableId] ?: "Table"
                 val seats = tableSeats[tableId] ?: 4
                 val shape = tableShapes[tableId] ?: TableShapeView.Shape.SQUARE
-                addTableToCanvas(tableId, name, seats, shape, rect.x, rect.y, null)
+                addTableToCanvas(tableId, name, seats, shape, rect.x, rect.y, Pair(rect.w, rect.h))
             }
         }
     }

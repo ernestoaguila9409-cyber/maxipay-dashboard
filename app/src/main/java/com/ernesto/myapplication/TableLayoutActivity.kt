@@ -28,6 +28,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.QuerySnapshot
+import com.volt.shared.TableLayoutCoords
 import kotlin.math.abs
 
 class TableLayoutActivity : AppCompatActivity() {
@@ -309,10 +310,9 @@ class TableLayoutActivity : AppCompatActivity() {
             val rotation = wrapRotationDeg((doc.getDouble("rotation") ?: 0.0).toFloat())
             val tw = TableShapeView.defaultMeasuredWidthPx(this@TableLayoutActivity, shape)
             val th = TableShapeView.defaultMeasuredHeightPx(this@TableLayoutActivity, shape)
-            val fracX = (xL / layoutCanvasW).toFloat().coerceIn(0f, 1f)
-            val fracY = (yL / layoutCanvasH).toFloat().coerceIn(0f, 1f)
-            val posX = fracX * (cw - tw).coerceAtLeast(0f)
-            val posY = fracY * (ch - th).coerceAtLeast(0f)
+            val (posX, posY) = TableLayoutCoords.layoutToScreen(
+                xL, yL, cw, ch, layoutCanvasW, layoutCanvasH, tw, th,
+            )
             out.add(EditorTableRow(doc.id, name, seats, shape, posX, posY, section, rotation))
         }
         return out
@@ -553,10 +553,9 @@ class TableLayoutActivity : AppCompatActivity() {
             val shape = (tv as? TableShapeView)?.shape ?: TableShapeView.Shape.SQUARE
             val tw = TableShapeView.defaultMeasuredWidthPx(this, shape)
             val th = TableShapeView.defaultMeasuredHeightPx(this, shape)
-            val fracX = (x / (cw - tw).coerceAtLeast(1f)).toDouble().coerceIn(0.0, 1.0)
-            val fracY = (y / (ch - th).coerceAtLeast(1f)).toDouble().coerceIn(0.0, 1.0)
-            val xL = fracX * layoutCanvasW
-            val yL = fracY * layoutCanvasH
+            val (xL, yL) = TableLayoutCoords.screenToLayout(
+                x, y, cw, ch, layoutCanvasW, layoutCanvasH, tw, th,
+            )
             MerchantFirestore.col("tableLayouts").document(activeLayoutId)
                 .collection("tables").document(tableId)
                 .update(
@@ -657,10 +656,9 @@ class TableLayoutActivity : AppCompatActivity() {
                     val ch = canvas.height.toFloat().coerceAtLeast(1f)
                     val tw = TableShapeView.defaultMeasuredWidthPx(this, shape)
                     val th = TableShapeView.defaultMeasuredHeightPx(this, shape)
-                    val fracX = (newX / (cw - tw).coerceAtLeast(1f)).toDouble().coerceIn(0.0, 1.0)
-                    val fracY = (newY / (ch - th).coerceAtLeast(1f)).toDouble().coerceIn(0.0, 1.0)
-                    val xL = fracX * layoutCanvasW
-                    val yL = fracY * layoutCanvasH
+                    val (xL, yL) = TableLayoutCoords.screenToLayout(
+                        newX, newY, cw, ch, layoutCanvasW, layoutCanvasH, tw, th,
+                    )
                     val data = hashMapOf(
                         "name" to name,
                         "capacity" to seats,

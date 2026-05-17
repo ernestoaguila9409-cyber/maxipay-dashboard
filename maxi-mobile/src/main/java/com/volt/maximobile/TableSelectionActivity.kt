@@ -645,7 +645,9 @@ class TableSelectionActivity : AppCompatActivity() {
                         tableReservationIds[doc.id] = doc.getString("reservationId")?.trim().orEmpty()
                         joinedTableIdsByTableId[doc.id] = TableJoinGroupFirestore.parseJoinedIds(doc, doc.id)
 
-                        addTableToCanvas(doc.id, name, seats, shape, posX, posY, null)
+                        val wPx = TableShapeView.dineInMeasuredWidthPx(this, shape)
+                        val hPx = TableShapeView.dineInMeasuredHeightPx(this, shape)
+                        addTableToCanvas(doc.id, name, seats, shape, posX, posY, Pair(wPx, hPx))
                     }
                     filterTablesBySection()
                     applyOccupiedState()

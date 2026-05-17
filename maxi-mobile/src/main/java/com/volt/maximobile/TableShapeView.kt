@@ -211,8 +211,8 @@ class TableShapeView(context: Context) : View(context) {
             detailStatusLabel.isNotBlank() ||
             statusPill != StatusPill.NONE
 
-    /** Hide "Seats: N" for busy tables (occupied / reserved / structured floor state). */
-    private fun showSeatsRow(): Boolean = !isOccupied && !isReserved && !usesStructuredDetail() && guestInfo.isBlank()
+    /** Seat count is not drawn on maxi-mobile — it overlapped table names on small POS screens. */
+    private fun showSeatsRow(): Boolean = false
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -647,19 +647,12 @@ class TableShapeView(context: Context) : View(context) {
                 .coerceAtLeast(minPx)
         }
 
-        fun dineInMeasuredWidthPx(context: Context, shape: Shape): Int {
-            val d = context.resources.displayMetrics.density
-            val minPx = (44f * d).toInt()
-            return (defaultMeasuredWidthPx(context, shape) * TableLayoutMobileScale.DINE_IN_TABLE_SIZE_SCALE).toInt()
-                .coerceAtLeast(minPx)
-        }
+        /** Same size as the floor-plan editor so Dine-In matches Table Layout on maxi-mobile. */
+        fun dineInMeasuredWidthPx(context: Context, shape: Shape): Int =
+            editorMeasuredWidthPx(context, shape)
 
-        fun dineInMeasuredHeightPx(context: Context, shape: Shape): Int {
-            val d = context.resources.displayMetrics.density
-            val minPx = (46f * d).toInt()
-            return (defaultMeasuredHeightPx(context, shape) * TableLayoutMobileScale.DINE_IN_TABLE_SIZE_SCALE).toInt()
-                .coerceAtLeast(minPx)
-        }
+        fun dineInMeasuredHeightPx(context: Context, shape: Shape): Int =
+            editorMeasuredHeightPx(context, shape)
 
         fun shapeFromString(value: String?): Shape {
             return when (value?.uppercase()) {
