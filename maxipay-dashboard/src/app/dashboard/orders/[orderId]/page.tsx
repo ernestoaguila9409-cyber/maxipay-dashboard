@@ -172,14 +172,14 @@ function refundTxnAmountCentsAbs(rd: Record<string, unknown>): number {
   return 0;
 }
 
-/** Matches Android `RefundAttributionFormat` â€” web refunds use `Dashboard: email|uid`. */
+/** Matches Android `RefundAttributionFormat` — web refunds use `Dashboard: email|uid`. */
 function formatRefundAttributionForDisplay(refundedByFirestore: string): string {
   const raw = refundedByFirestore.trim();
   if (!raw) return raw;
   const m = /^Dashboard:\s*/i.exec(raw);
   if (!m) return raw;
   const detail = raw.slice(m[0].length).trim();
-  return detail ? `Dashboard â€” ${detail}` : "Dashboard";
+  return detail ? `Dashboard — ${detail}` : "Dashboard";
 }
 
 function buildRefundStrikeIndex(
@@ -199,7 +199,7 @@ function buildRefundStrikeIndex(
     const rawBy = String(rd.refundedBy ?? "").trim();
     const employee = rawBy
       ? formatRefundAttributionForDisplay(rawBy)
-      : "â€”";
+      : "—";
     const dateStr = formatFirestoreTimestamp(rd.createdAt) ?? "";
     const lk = String(rd.refundedLineKey ?? "").trim();
     const itemName = String(rd.refundedItemName ?? "").trim();
@@ -569,7 +569,7 @@ export default function OrderDetailPage() {
                   id: d.id,
                   refundedBy: rawRb
                     ? formatRefundAttributionForDisplay(rawRb)
-                    : "â€”",
+                    : "—",
                   amountInCents,
                   createdAtLabel: formatFirestoreTimestamp(rd.createdAt),
                 };
@@ -691,7 +691,7 @@ export default function OrderDetailPage() {
   const totalInCents = Number(orderData?.totalInCents ?? 0);
   const totalPaidInCents = Number(orderData?.totalPaidInCents ?? 0);
   const totalRefundedInCents = Number(orderData?.totalRefundedInCents ?? 0);
-  const employeeName = String(orderData?.employeeName ?? "â€”");
+  const employeeName = String(orderData?.employeeName ?? "—");
   const customerName = String(orderData?.customerName ?? "");
   const orderTypeRaw = String(orderData?.orderType ?? "");
   const tableName = String(orderData?.tableName ?? "");
@@ -885,7 +885,7 @@ export default function OrderDetailPage() {
                         : "text-slate-500 font-normal"
                     }
                   >
-                    Ã—{line.quantity}
+                    × {line.quantity}
                   </span>
                 </p>
                 {line.modifiers.length > 0 && (
@@ -895,7 +895,7 @@ export default function OrderDetailPage() {
                         {m.action === "ADD"
                           ? "+"
                           : m.action === "NO"
-                            ? "âˆ’"
+                            ? "−"
                             : ""}{" "}
                         {m.name}
                         {m.price != null && m.price !== 0
@@ -910,7 +910,7 @@ export default function OrderDetailPage() {
                     <p className="text-xs font-bold uppercase tracking-wide text-red-600">
                       Refunded
                     </p>
-                    {strike.by && strike.by !== "â€”" ? (
+                    {strike.by && strike.by !== "—" ? (
                       <p className="text-xs text-red-600/90">
                         Refunded by {strike.by}
                       </p>
@@ -964,7 +964,7 @@ export default function OrderDetailPage() {
         {loading && (
           <div className="flex items-center gap-2 text-slate-500 py-12 justify-center">
             <Loader2 className="animate-spin" size={22} />
-            Loading orderâ€¦
+            Loading order…
           </div>
         )}
 
@@ -1019,7 +1019,7 @@ export default function OrderDetailPage() {
                     <dt className="text-slate-500">Guests</dt>
                     <dd className="font-medium text-slate-800">
                       {guestCount}
-                      {guestNames.length > 0 ? ` â€” ${guestNames.join(", ")}` : null}
+                      {guestNames.length > 0 ? ` — ${guestNames.join(", ")}` : null}
                     </dd>
                   </div>
                 ) : null}
@@ -1064,7 +1064,7 @@ export default function OrderDetailPage() {
                     <dt className="text-slate-500">Payment void</dt>
                     <dd className="font-medium text-slate-800">
                       Voided by {saleVoidedBy}
-                      {saleVoidedAtLabel ? ` Â· ${saleVoidedAtLabel}` : ""}
+                      {saleVoidedAtLabel ? ` · ${saleVoidedAtLabel}` : ""}
                     </dd>
                   </div>
                 ) : null}
@@ -1082,7 +1082,7 @@ export default function OrderDetailPage() {
                           {r.createdAtLabel ? (
                             <span className="text-slate-500">
                               {" "}
-                              Â· {r.createdAtLabel}
+                              · {r.createdAtLabel}
                             </span>
                           ) : null}
                         </div>
@@ -1148,7 +1148,7 @@ export default function OrderDetailPage() {
                             className="flex justify-between gap-4"
                           >
                             <span>
-                              â€¢{" "}
+                              •{" "}
                               {formatDiscountReceiptLabel(
                                 gd.name,
                                 gd.type,
@@ -1160,7 +1160,7 @@ export default function OrderDetailPage() {
                         ))
                       ) : (
                         <div className="flex justify-between gap-4">
-                          <span>â€¢ Discount</span>
+                          <span>• Discount</span>
                           <span>-${centsToMoney(discountInCents)}</span>
                         </div>
                       )}
@@ -1289,7 +1289,7 @@ export default function OrderDetailPage() {
                   }}
                   className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-amber-700 text-white text-sm font-semibold hover:bg-amber-800 disabled:opacity-60"
                 >
-                  {voidSubmitting ? "Processingâ€¦" : "Void"}
+                  {voidSubmitting ? "Processing…" : "Void"}
                 </button>
                 {voidErr ? (
                   <p className="text-xs text-red-700 break-words">{voidErr}</p>
@@ -1373,7 +1373,7 @@ export default function OrderDetailPage() {
                   }}
                   className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-teal-700 text-white text-sm font-semibold hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {tipSubmitting ? "Processingâ€¦" : "Apply tip"}
+                  {tipSubmitting ? "Processing…" : "Apply tip"}
                 </button>
                 {tipSubmitErr ? (
                   <p className="text-xs text-red-700 break-words">{tipSubmitErr}</p>
@@ -1560,7 +1560,7 @@ export default function OrderDetailPage() {
                       }}
                       className="px-4 py-2 rounded-xl bg-indigo-700 text-white text-sm font-semibold hover:bg-indigo-800 disabled:opacity-60"
                     >
-                      {directRefundSubmitting ? "Processingâ€¦" : "Refund"}
+                      {directRefundSubmitting ? "Processing…" : "Refund"}
                     </button>
                   </div>
                 </div>
