@@ -178,7 +178,7 @@ function MenuQrBody({
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Public menu link</p>
           <p className="text-sm font-mono text-slate-800 break-all mt-0.5">{orderUrl}</p>
           <p className="text-xs text-slate-500 mt-1.5">
-            Scanning opens a view-only menu—no cart or checkout. Use a separate ordering QR when you want guests to pay online.
+            Scanning opens your public menu with a preview cart (no payment). Use a separate ordering link when you enable online checkout.
           </p>
         </div>
         {onClose ? (
@@ -297,7 +297,7 @@ export function MenuQrOnlineMenuCard() {
         <div>
           <h2 className="font-semibold text-slate-900">Customer menu QR</h2>
           <p className="text-sm text-slate-500 mt-1">
-            Print or share a view-only menu QR—guests can browse items without cart or checkout.
+            Print or share a menu QR—guests browse items and can build an order list (no online payment).
           </p>
         </div>
       </div>
