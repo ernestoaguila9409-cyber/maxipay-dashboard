@@ -197,6 +197,7 @@ class MenuActivity : AppCompatActivity() {
     private var orderType: String = ""
     private var currentOrderId: String? = null
     private var isCreatingOrder = false
+    private val deferredCartAdds = ArrayDeque<() -> Unit>()
     private var tableId: String? = null
     private var tableLayoutId: String? = null
     private var tableName: String? = null
@@ -2149,15 +2150,24 @@ class MenuActivity : AppCompatActivity() {
                     selectedOptionsPerGroup, visibleGroupIds
                 )
                 val units = quantityOverride.coerceAtLeast(1)
-                repeat(units) {
+                var remainingUnits = units
+                fun addNextUnit() {
                     addToCart(
                         itemId, name, basePrice, stock, modifiers,
                         taxMode, taxIds, printerLabel, imageUrl = imageUrl,
-                    )
+                    ) { added ->
+                        if (!added) return@addToCart
+                        remainingUnits--
+                        if (remainingUnits > 0) {
+                            addNextUnit()
+                        } else {
+                            confirmedOnce = true
+                            dialog.dismiss()
+                            onConfirmed?.invoke()
+                        }
+                    }
                 }
-                confirmedOnce = true
-                dialog.dismiss()
-                onConfirmed?.invoke()
+                addNextUnit()
             }
         }
 
@@ -3211,6 +3221,14 @@ class MenuActivity : AppCompatActivity() {
         return guestNames.toList()
     }
 
+    private fun runDeferredCartAdds() {
+        while (deferredCartAdds.isNotEmpty()) {
+            val next = deferredCartAdds.removeFirst()
+            next()
+            if (currentOrderId == null && isCreatingOrder) break
+        }
+    }
+
     private fun addToCart(
         itemId: String,
         name: String,
@@ -3222,11 +3240,17 @@ class MenuActivity : AppCompatActivity() {
         printerLabel: String? = null,
         imageUrl: String? = null,
         courseId: String? = null,
+        onComplete: ((added: Boolean) -> Unit)? = null,
     ) {
         val resolvedCourseId = courseId ?: menuItemCourseIds[itemId]
 
         if (currentOrderId == null && isCreatingOrder) {
-            Toast.makeText(this, "Creating order, please wait…", Toast.LENGTH_SHORT).show()
+            deferredCartAdds.addLast {
+                addToCart(
+                    itemId, name, basePrice, stock, modifiers,
+                    taxMode, taxIds, printerLabel, imageUrl, courseId, onComplete,
+                )
+            }
             return
         }
 
@@ -3263,11 +3287,15 @@ class MenuActivity : AppCompatActivity() {
                 if (stockCountingEnabled) {
                     if (stock <= 0) {
                         Toast.makeText(this, "Out of stock", Toast.LENGTH_SHORT).show()
+                        onComplete?.invoke(false)
+                        runDeferredCartAdds()
                         return@ensureOrder
                     }
 
                     if (currentQtyInCart + 1 > stock) {
                         Toast.makeText(this, "Only $stock in stock", Toast.LENGTH_SHORT).show()
+                        onComplete?.invoke(false)
+                        runDeferredCartAdds()
                         return@ensureOrder
                     }
                 }
@@ -3294,13 +3322,22 @@ class MenuActivity : AppCompatActivity() {
 
                 refreshCart()
 
-                val cartItem = cartMap[lineKey] ?: return@ensureOrder
+                val cartItem = cartMap[lineKey]
+                if (cartItem == null) {
+                    onComplete?.invoke(false)
+                    runDeferredCartAdds()
+                    return@ensureOrder
+                }
                 val isNew = existingItem == null
 
                 syncLineToFirestore(lineKey, cartItem, isNew, kitchenQuantityDelta = 1)
+                onComplete?.invoke(true)
+                runDeferredCartAdds()
             },
             onFailure = {
                 isCreatingOrder = false
+                deferredCartAdds.clear()
+                onComplete?.invoke(false)
                 Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
             }
         )
@@ -4455,6 +4492,7 @@ class MenuActivity : AppCompatActivity() {
         discountTotalCents = 0L
         appliedDiscounts = emptyList()
         isCreatingOrder = false
+        deferredCartAdds.clear()
         customerId = null
         customerName = null
         customerPhone = null

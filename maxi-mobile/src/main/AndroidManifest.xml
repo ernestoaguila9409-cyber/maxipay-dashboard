@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-sdk tools:overrideLibrary="com.starmicronics.stario10" />
 
     <application
         android:name=".MaxiApplication"
@@ -21,5 +25,86 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity android:name=".OrdersActivity" android:exported="false" />
+        <activity android:name=".OrderDetailActivity" android:exported="false" />
+
+        <activity android:name=".MenuActivity" android:exported="false" android:windowSoftInputMode="adjustNothing" />
+        <activity android:name=".MenuOnlyActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".ItemDetailActivity" android:exported="false" />
+
+        <activity android:name=".PaymentActivity" android:exported="false" />
+        <activity android:name=".CashPaymentActivity" android:exported="false" />
+        <activity android:name=".SplitPaymentActivity" android:exported="false" />
+        <activity android:name=".TipActivity" android:exported="false" />
+        <activity android:name=".TipAdjustmentActivity" android:exported="false" />
+        <activity android:name=".ReceiptOptionsActivity" android:exported="false" />
+
+        <activity android:name=".TransactionActivity" android:exported="false" />
+        <activity android:name=".BatchManagementActivity" android:exported="false" />
+        <activity android:name=".BatchDetailsActivity" android:exported="false" />
+
+        <activity android:name=".ReportsActivity" android:exported="false" />
+        <activity android:name=".ReportPreviewActivity" android:exported="false" />
+        <activity android:name=".TodaySalesActivity" android:exported="false" />
+        <activity android:name=".MenuPerformanceActivity" android:exported="false" />
+        <activity android:name=".ItemSalesReportActivity" android:exported="false" />
+        <activity android:name=".CategorySalesReportActivity" android:exported="false" />
+        <activity android:name=".ModifierSalesReportActivity" android:exported="false" />
+
+        <activity android:name=".TableSelectionActivity" android:exported="false" />
+        <activity android:name=".TableLayoutActivity" android:exported="false" />
+        <activity android:name=".TableMappingActivity" android:exported="false" />
+        <activity android:name=".BarTabsActivity" android:exported="false" />
+        <activity android:name=".BarSeatConfigActivity" android:exported="false" />
+        <activity android:name=".BarTabConfigActivity" android:exported="false" />
+
+        <activity android:name=".CashFlowActivity" android:exported="false" />
+        <activity android:name=".CustomersActivity" android:exported="false" />
+        <activity android:name=".CustomerProfileActivity" android:exported="false" />
+        <activity android:name=".EmployeesActivity" android:exported="false" />
+
+        <activity android:name=".ReservationActivity" android:exported="false" />
+        <activity android:name=".ReservationMappingActivity" android:exported="false" />
+        <activity android:name=".ReservationTableSelectionActivity" android:exported="false" />
+
+        <activity android:name=".ModifierManagementActivity" android:exported="false" />
+        <activity android:name=".GlobalModifierActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".AssignModifierToItemActivity" android:exported="false" />
+        <activity android:name=".SelectModifiersActivity" android:exported="false" />
+        <activity android:name=".SelectTaxesActivity" android:exported="false" />
+        <activity android:name=".SelectPrinterLabelActivity" android:exported="false" />
+
+        <activity android:name=".TaxesAndFeesActivity" android:exported="false" />
+        <activity android:name=".AddTaxActivity" android:exported="false" />
+        <activity android:name=".DiscountsActivity" android:exported="false" />
+        <activity android:name=".AddDiscountActivity" android:exported="false" />
+        <activity android:name=".TipsAndDiscountsHubActivity" android:exported="false" />
+        <activity android:name=".TipConfigActivity" android:exported="false" />
+
+        <activity android:name=".ConfigurationActivity" android:exported="false" />
+        <activity android:name=".SideMenuActivity" android:exported="false" />
+        <activity android:name=".DeviceActivationActivity" android:exported="false" />
+        <activity android:name=".PaymentMethodsActivity" android:exported="false" />
+        <activity android:name=".OrderConfigurationActivity" android:exported="false" />
+        <activity android:name=".KitchenOrderConfigurationActivity" android:exported="false" />
+        <activity android:name=".OrderTypesConfigureActivity" android:exported="false" />
+        <activity android:name=".ToGoConfigureActivity" android:exported="false" />
+        <activity android:name=".DineInConfigureActivity" android:exported="false" />
+        <activity android:name=".BarTabConfigureActivity" android:exported="false" />
+        <activity android:name=".OnlineOrderingConfigureActivity" android:exported="false" />
+        <activity android:name=".OnlineOrderingBusinessHoursActivity" android:exported="false" />
+        <activity android:name=".InventoryConfigActivity" android:exported="false" />
+        <activity android:name=".ReceiptDisplayConfigActivity" android:exported="false" />
+        <activity android:name=".ViewEditReceiptActivity" android:exported="false" />
+        <activity android:name=".SignatureSettingsActivity" android:exported="false" />
+        <activity android:name=".ItemSelectorActivity" android:exported="false" />
+
+        <activity android:name=".PrintersActivity" android:exported="false" />
+        <activity android:name=".PrinterDetailActivity" android:exported="false" />
+        <activity android:name=".PrinterListActivity" android:exported="false" />
+        <activity android:name=".AddPrinterActivity" android:exported="false" />
+
     </application>
+
 </manifest>

@@ -6,10 +6,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.CheckBox
 import android.widget.ImageButton
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import coil.load
@@ -170,26 +168,9 @@ class ModifierOptionAdapter(
         }
 
         val dialogRoot = ModifierOptionKeypadHost.wrap(context, form)
-        val removeStyleCb = CheckBox(context).apply {
-            text = context.getString(R.string.modifier_option_remove_style_checkbox)
-            visibility =
-                if (groupType.trim().uppercase(Locale.US) == "REMOVE") View.GONE else View.VISIBLE
-            isChecked = option.action.trim().uppercase(Locale.US) == "REMOVE"
-        }
-        val shell = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            if (groupType.trim().uppercase(Locale.US) != "REMOVE") addView(removeStyleCb)
-            addView(
-                dialogRoot,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-        }
         val dialog = MaterialAlertDialogBuilder(context, R.style.ThemeOverlay_MyApplication_MaterialAlertDialog)
             .setTitle("Edit Option")
-            .setView(shell)
+            .setView(dialogRoot)
             .setPositiveButton("Save", null)
             .setNegativeButton("Cancel", null)
             .create()
@@ -205,7 +186,6 @@ class ModifierOptionAdapter(
                 form.tilName.error = null
                 val newAction = when {
                     groupType.trim().uppercase(Locale.US) == "REMOVE" -> "REMOVE"
-                    removeStyleCb.isChecked -> "REMOVE"
                     else -> "ADD"
                 }
                 val newPrice = if (newAction == "REMOVE") {

@@ -1,0 +1,12 @@
+R_DEF: Internal format may change without notice
+local
+string device_activation_already_used
+string device_activation_code_invalid
+string device_activation_expired
+string device_activation_failed
+string device_activation_forced_instructions
+string device_activation_hint
+string device_activation_instructions
+string device_activation_invalid_code
+string device_activation_submit
+string device_activation_title

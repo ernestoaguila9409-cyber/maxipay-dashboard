@@ -1,0 +1,361 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:orientation="horizontal"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F5F5F5">
+
+    <!-- Categories + catalog (hidden for unpaid web online until staff taps Update). -->
+    <LinearLayout
+        android:id="@+id/menuBrowsePanel"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="3.6"
+        android:orientation="horizontal">
+
+        <!-- LEFT PANEL – Compact Category Sidebar (~18%) -->
+        <ScrollView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="0.85"
+            android:fillViewport="true"
+            android:background="#FFFFFF"
+            android:elevation="2dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/categoryContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:paddingHorizontal="4dp"/>
+        </ScrollView>
+
+        <!-- CENTER PANEL – Search + Item Grid (~57%) -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="2.75"
+            android:orientation="vertical"
+            android:background="#F5F5F5">
+
+        <!-- Search bar -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="10dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp">
+
+            <EditText
+                android:id="@+id/editItemSearch"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:hint="Search items..."
+                android:textColorHint="#94A3B8"
+                android:textColor="#333333"
+                android:textSize="14sp"
+                android:singleLine="true"
+                android:imeOptions="actionSearch"
+                android:inputType="text"
+                android:paddingStart="38dp"
+                android:paddingEnd="38dp"
+                android:background="@drawable/bg_search_bar"/>
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_gravity="start|center_vertical"
+                android:layout_marginStart="12dp"
+                android:src="@android:drawable/ic_menu_search"
+                android:contentDescription="Search"
+                android:importantForAccessibility="no"/>
+
+            <ImageView
+                android:id="@+id/btnClearSearch"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_gravity="end|center_vertical"
+                android:layout_marginEnd="8dp"
+                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:contentDescription="Clear search"
+                android:padding="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:visibility="gone"/>
+        </FrameLayout>
+
+        <!-- Subcategory chip row (populated programmatically) -->
+        <FrameLayout
+            android:id="@+id/subcategoryChipHost"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="10dp"/>
+
+        <!-- Item grid -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/itemGrid"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:paddingHorizontal="6dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="8dp"
+            android:clipToPadding="false"/>
+
+        <!-- Empty state -->
+        <LinearLayout
+            android:id="@+id/emptyState"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/txtEmptyMessage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="No items match your search"
+                android:textSize="15sp"
+                android:textColor="#94A3B8"/>
+        </LinearLayout>
+
+        <!-- Embedded POS keyboard -->
+        <LinearLayout
+            android:id="@+id/keyboardContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#D5D8DC"
+            android:paddingHorizontal="6dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="8dp"
+            android:visibility="gone" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- RIGHT PANEL – Cart (~25%) -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1.2"
+        android:orientation="vertical"
+        android:background="#FFFFFF"
+        android:elevation="2dp">
+
+        <!-- Cart header area -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="12dp"
+            android:paddingTop="8dp">
+
+            <TextView
+                android:id="@+id/txtTableHeader"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="#6A4FB3"
+                android:textStyle="bold"
+                android:visibility="gone"
+                android:paddingBottom="2dp"/>
+
+            <TextView
+                android:text="Cart"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+
+            <!-- Customer section -->
+            <LinearLayout
+                android:id="@+id/customerSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp">
+
+                <TextView
+                    android:id="@+id/txtCustomerLabel"
+                    android:text="Customer: "
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="#5D4E7B"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+
+                <TextView
+                    android:id="@+id/txtCustomerValue"
+                    android:text="+ Add Customer"
+                    android:textSize="13sp"
+                    android:textColor="#6A4FB3"
+                    android:padding="4dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <include layout="@layout/view_same_as_usual"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="4dp"
+                android:paddingTop="6dp">
+
+                <TextView
+                    android:id="@+id/txtCartItemsLabel"
+                    android:text="Cart Items"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="#5D4E7B"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"/>
+
+                <TextView
+                    android:id="@+id/btnKitchenNotes"
+                    android:text="Notes"
+                    android:textSize="13sp"
+                    android:textColor="@color/brand_primary"
+                    android:textStyle="bold"
+                    android:padding="4dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Scrollable area: cart items + tax/discount details -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:paddingHorizontal="12dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:id="@+id/cartContainer"
+                    android:orientation="vertical"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"/>
+
+                <LinearLayout
+                    android:id="@+id/cartTaxDetails"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingTop="8dp"/>
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- Fixed bottom: subtotal / total / checkout -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#E0E0E0"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="8dp"
+            android:background="#FFFFFF"
+            android:elevation="4dp">
+
+            <LinearLayout
+                android:id="@+id/cartTaxSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"/>
+
+            <TextView
+                android:id="@+id/txtTotal"
+                android:text="Total: $0.00"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingTop="4dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnUpdate"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:visibility="gone"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="@string/cart_update_order"
+                android:textAllCaps="false"
+                android:textColor="@color/brand_primary"
+                android:textSize="15sp"
+                app:strokeColor="@color/brand_primary"
+                app:strokeWidth="1.5dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSendKitchen"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="140dp"
+                    android:layout_height="52dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:minWidth="0dp"
+                    android:paddingHorizontal="8dp"
+                    android:text="@string/cart_send_to_kitchen"
+                    android:textAllCaps="false"
+                    android:textColor="@color/brand_primary"
+                    android:textSize="13sp"
+                    app:icon="@android:drawable/ic_menu_send"
+                    app:iconGravity="textStart"
+                    app:iconPadding="6dp"
+                    app:iconSize="18dp"
+                    app:iconTint="@color/brand_primary"
+                    app:strokeColor="@color/brand_primary"
+                    app:strokeWidth="1.5dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnCheckout"
+                    android:layout_width="0dp"
+                    android:layout_height="52dp"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="@string/cart_checkout"
+                    android:textAllCaps="false"
+                    android:textSize="15sp"
+                    app:backgroundTint="@color/brand_primary" />
+            </LinearLayout>
+        </LinearLayout>
+
+    </LinearLayout>
+
+</LinearLayout>

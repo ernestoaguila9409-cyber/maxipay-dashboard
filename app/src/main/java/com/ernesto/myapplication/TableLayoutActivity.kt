@@ -3,6 +3,7 @@ package com.ernesto.myapplication
 import android.content.res.ColorStateList
 import android.os.Bundle
 import android.text.InputType
+import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
@@ -19,6 +20,7 @@ import com.google.android.material.floatingactionbutton.ExtendedFloatingActionBu
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.QuerySnapshot
 import kotlin.math.abs
 
 class TableLayoutActivity : AppCompatActivity() {
@@ -70,6 +72,9 @@ class TableLayoutActivity : AppCompatActivity() {
     private var layoutCanvasW: Double = 1200.0
     private var layoutCanvasH: Double = 800.0
     private var layoutTablesListener: ListenerRegistration? = null
+
+    /** Skips stale [canvas.post] runnables after rapid Firestore updates. */
+    private var layoutCanvasApplyGeneration = 0
 
     private val shapeLabels = arrayOf("Square", "Round", "Rectangle", "Booth")
     private val shapeValues = arrayOf(
@@ -255,6 +260,41 @@ class TableLayoutActivity : AppCompatActivity() {
         tableSections.clear()
     }
 
+    private data class EditorTableRow(
+        val id: String,
+        val name: String,
+        val seats: Int,
+        val shape: TableShapeView.Shape,
+        val posX: Float,
+        val posY: Float,
+        val section: String,
+    )
+
+    private fun parseEditorTableRowsFromSnapshot(snap: QuerySnapshot, cw: Float, ch: Float): List<EditorTableRow> {
+        val out = ArrayList<EditorTableRow>()
+        for (doc in snap.documents) {
+            val isActive: Boolean = when {
+                doc.contains("isActive") -> doc.getBoolean("isActive") ?: true
+                doc.contains("active") -> doc.getBoolean("active") ?: true
+                else -> true
+            }
+            if (!isActive) continue
+            val areaType = doc.getString("areaType") ?: "DINING_TABLE"
+            if (areaType == "BAR_SEAT") continue
+
+            val name = doc.getString("name") ?: "Table"
+            val seats = (doc.getLong("capacity") ?: doc.getLong("seats"))?.toInt() ?: 0
+            val shape = TableShapeView.shapeFromString(doc.getString("shape"))
+            val xL = doc.getDouble("x") ?: doc.getDouble("posX") ?: 50.0
+            val yL = doc.getDouble("y") ?: doc.getDouble("posY") ?: 50.0
+            val section = doc.getString("section") ?: ""
+            val posX = (xL * cw / layoutCanvasW).toFloat()
+            val posY = (yL * ch / layoutCanvasH).toFloat()
+            out.add(EditorTableRow(doc.id, name, seats, shape, posX, posY, section))
+        }
+        return out
+    }
+
     private fun loadTablesPreferred() {
         MerchantFirestore.col("tableLayouts").get()
             .addOnSuccessListener { layoutSnap ->
@@ -285,44 +325,49 @@ class TableLayoutActivity : AppCompatActivity() {
             .addOnFailureListener { loadTablesLegacy() }
     }
 
-    private fun applyLayoutTablesSnapshotForEditor(snap: com.google.firebase.firestore.QuerySnapshot) {
-        clearEditorCanvas()
-        var sectionsAdded = false
+    private fun applyLayoutTablesSnapshotForEditor(snap: QuerySnapshot) {
+        val gen = ++layoutCanvasApplyGeneration
         canvas.post {
+            if (gen != layoutCanvasApplyGeneration) return@post
+            var sectionsAdded = false
             val cw = canvas.width.toFloat().coerceAtLeast(1f)
             val ch = canvas.height.toFloat().coerceAtLeast(1f)
 
-            for (doc in snap.documents) {
-                val isActive: Boolean = when {
-                    doc.contains("isActive") -> doc.getBoolean("isActive") ?: true
-                    doc.contains("active") -> doc.getBoolean("active") ?: true
-                    else -> true
-                }
-                if (!isActive) continue
-                val areaType = doc.getString("areaType") ?: "DINING_TABLE"
-                if (areaType == "BAR_SEAT") continue
+            val rows = parseEditorTableRowsFromSnapshot(snap, cw, ch)
+            val newIds = rows.map { it.id }.toSet()
+            val currentIds = tableViews.keys.toSet()
 
-                val name = doc.getString("name") ?: "Table"
-                val seats = (doc.getLong("capacity") ?: doc.getLong("seats"))?.toInt() ?: 0
-                val shapeStr = doc.getString("shape")
-                val shape = TableShapeView.shapeFromString(shapeStr)
-                val xL = doc.getDouble("x") ?: doc.getDouble("posX") ?: 50.0
-                val yL = doc.getDouble("y") ?: doc.getDouble("posY") ?: 50.0
-                val section = doc.getString("section") ?: ""
-
-                tableSections[doc.id] = section
-                if (section.isNotBlank() && section !in knownSections) {
-                    knownSections.add(section)
-                    MerchantFirestore.col("Sections").document(section)
-                        .set(hashMapOf("name" to section))
+            for (row in rows) {
+                if (row.section.isNotBlank() && row.section !in knownSections) {
+                    knownSections.add(row.section)
+                    MerchantFirestore.col("Sections").document(row.section)
+                        .set(hashMapOf("name" to row.section))
                     sectionsAdded = true
                 }
-
-                val posX = (xL * cw / layoutCanvasW).toFloat()
-                val posY = (yL * ch / layoutCanvasH).toFloat()
-                addTableToCanvas(doc.id, name, seats, shape, posX, posY)
             }
 
+            if (newIds == currentIds && currentIds.isNotEmpty()) {
+                for (row in rows) {
+                    tableSections[row.id] = row.section
+                    val tv = tableViews[row.id] as? TableShapeView ?: continue
+                    tv.translationX = 0f
+                    tv.translationY = 0f
+                    tv.x = row.posX
+                    tv.y = row.posY
+                    tv.tableName = row.name
+                    tv.seatCount = row.seats
+                    tv.shape = row.shape
+                }
+                if (sectionsAdded) rebuildSectionChips()
+                filterTablesBySection()
+                return@post
+            }
+
+            clearEditorCanvas()
+            for (row in rows) {
+                tableSections[row.id] = row.section
+                addTableToCanvas(row.id, row.name, row.seats, row.shape, row.posX, row.posY)
+            }
             if (sectionsAdded) rebuildSectionChips()
             filterTablesBySection()
         }
@@ -373,23 +418,23 @@ class TableLayoutActivity : AppCompatActivity() {
         id: String, name: String, seats: Int,
         tableShape: TableShapeView.Shape, posX: Float, posY: Float
     ) {
+        tableViews.remove(id)?.let { canvas.removeView(it) }
+
         val tableView = TableShapeView(this).apply {
             tableName = name
             seatCount = seats
             shape = tableShape
         }
 
-        val params = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT
-        )
+        val w = TableShapeView.defaultMeasuredWidthPx(this, tableShape)
+        val h = TableShapeView.defaultMeasuredHeightPx(this, tableShape)
+        val params = FrameLayout.LayoutParams(w, h)
         tableView.layoutParams = params
         canvas.addView(tableView)
-
-        tableView.post {
-            tableView.x = posX
-            tableView.y = posY
-        }
+        tableView.translationX = 0f
+        tableView.translationY = 0f
+        tableView.x = posX
+        tableView.y = posY
 
         setupDragAndLongPress(tableView, id)
         tableViews[id] = tableView
@@ -405,12 +450,17 @@ class TableLayoutActivity : AppCompatActivity() {
         var isDragging = false
 
         view.isLongClickable = true
-        view.setOnLongClickListener {
-            showEditDeleteDialog(tableId)
-            true
-        }
+        val gestureDetector = GestureDetector(
+            this,
+            object : GestureDetector.SimpleOnGestureListener() {
+                override fun onLongPress(e: MotionEvent) {
+                    showEditDeleteDialog(tableId)
+                }
+            },
+        )
 
         view.setOnTouchListener { v, event ->
+            gestureDetector.onTouchEvent(event)
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     dX = v.x - event.rawX
@@ -418,7 +468,7 @@ class TableLayoutActivity : AppCompatActivity() {
                     startRawX = event.rawX
                     startRawY = event.rawY
                     isDragging = false
-                    v.elevation = 16f
+                    v.elevation = 0f
                     v.scaleX = 1.05f
                     v.scaleY = 1.05f
                     v.alpha = 0.85f
@@ -445,7 +495,7 @@ class TableLayoutActivity : AppCompatActivity() {
                     isDragging
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    v.elevation = 4f
+                    v.elevation = 0f
                     v.scaleX = 1f
                     v.scaleY = 1f
                     v.alpha = 1f
@@ -591,8 +641,6 @@ class TableLayoutActivity : AppCompatActivity() {
                         .addOnSuccessListener { ref ->
                             tableSections[ref.id] = section
                             ensureSection(section)
-                            addTableToCanvas(ref.id, name, seats, shape, newX, newY)
-                            filterTablesBySection()
                             Toast.makeText(this, "\"$name\" added", Toast.LENGTH_SHORT).show()
                         }
                         .addOnFailureListener {
@@ -613,8 +661,6 @@ class TableLayoutActivity : AppCompatActivity() {
                         .addOnSuccessListener { ref ->
                             tableSections[ref.id] = section
                             ensureSection(section)
-                            addTableToCanvas(ref.id, name, seats, shape, newX, newY)
-                            filterTablesBySection()
                             Toast.makeText(this, "\"$name\" added", Toast.LENGTH_SHORT).show()
                         }
                         .addOnFailureListener {
@@ -653,6 +699,9 @@ class TableLayoutActivity : AppCompatActivity() {
                         }
                     }
                     .show()
+            }
+            .addOnFailureListener {
+                Toast.makeText(this, "Could not load table: ${it.message}", Toast.LENGTH_LONG).show()
             }
     }
 
@@ -747,11 +796,16 @@ class TableLayoutActivity : AppCompatActivity() {
                     MerchantFirestore.col("Tables").document(tableId).update("active", false)
                 }
                 del.addOnSuccessListener {
+                    ++layoutCanvasApplyGeneration
                     tableViews[tableId]?.let { canvas.removeView(it) }
                     tableViews.remove(tableId)
                     tableSections.remove(tableId)
+                    filterTablesBySection()
                     Toast.makeText(this, "\"$name\" deleted", Toast.LENGTH_SHORT).show()
                 }
+                    .addOnFailureListener {
+                        Toast.makeText(this, "Failed to delete: ${it.message}", Toast.LENGTH_LONG).show()
+                    }
             }
             .setNegativeButton("Cancel", null)
             .show()

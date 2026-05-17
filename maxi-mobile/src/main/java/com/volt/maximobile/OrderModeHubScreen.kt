@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -33,9 +33,12 @@ private val DineInGreen = Color(0xFF2E7D32)
 private val ToGoOrange = Color(0xFFE65100)
 private val BarTeal = Color(0xFF00897B)
 
+private val TabHeight = 52.dp
+private val TabIconSize = 20.dp
+private val TabIconCircle = 30.dp
+
 /**
- * Portrait-first: three stacked hero tiles with [Modifier.weight] so narrow vertical screens
- * (e.g. Dejavoo P8) get large tap targets like the main POS dashboard order-type row.
+ * Post-PIN hub: compact **horizontal** order-type control at the top (Dejavoo P8–friendly).
  */
 @Composable
 fun OrderModeHubScreen(
@@ -46,75 +49,75 @@ fun OrderModeHubScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Text(
             text = "Maxi Mobile",
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
         )
         Text(
             text = "Choose order type",
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 4.dp),
+            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp),
         )
 
-        OrderHeroTile(
-            label = "DINE IN",
-            background = DineInGreen,
-            iconRes = R.drawable.ic_dine_in,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            onClick = onDineIn,
-        )
-        OrderHeroTile(
-            label = "TO-GO",
-            background = ToGoOrange,
-            iconRes = R.drawable.ic_to_go,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            onClick = onToGo,
-        )
-        OrderHeroTile(
-            label = "BAR",
-            background = BarTeal,
-            iconRes = R.drawable.ic_bar,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            onClick = onBar,
-        )
-        Spacer(Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OrderTypeTab(
+                label = "DINE IN",
+                background = DineInGreen,
+                iconRes = R.drawable.ic_dine_in,
+                onClick = onDineIn,
+                modifier = Modifier.weight(1f),
+            )
+            OrderTypeTab(
+                label = "TO-GO",
+                background = ToGoOrange,
+                iconRes = R.drawable.ic_to_go,
+                onClick = onToGo,
+                modifier = Modifier.weight(1f),
+            )
+            OrderTypeTab(
+                label = "BAR",
+                background = BarTeal,
+                iconRes = R.drawable.ic_bar,
+                onClick = onBar,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 
 @Composable
-private fun OrderHeroTile(
+private fun OrderTypeTab(
     label: String,
     background: Color,
     iconRes: Int,
-    modifier: Modifier = Modifier,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(20.dp))
+            .height(TabHeight)
+            .clip(RoundedCornerShape(12.dp))
             .background(background)
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(horizontal = 20.dp),
+            modifier = Modifier.fillMaxWidth(),
         ) {
             Box(
                 modifier = Modifier
-                    .size(56.dp)
+                    .size(TabIconCircle)
                     .clip(CircleShape)
                     .background(Color.White.copy(alpha = 0.22f)),
                 contentAlignment = Alignment.Center,
@@ -122,17 +125,20 @@ private fun OrderHeroTile(
                 Image(
                     painter = painterResource(iconRes),
                     contentDescription = null,
-                    modifier = Modifier.size(32.dp),
+                    modifier = Modifier.size(TabIconSize),
                 )
             }
             Text(
                 text = label,
                 color = Color.White,
-                fontSize = 22.sp,
+                fontSize = 11.sp,
+                lineHeight = 12.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp,
+                letterSpacing = 0.3.sp,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.padding(start = 16.dp),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 4.dp),
             )
         }
     }

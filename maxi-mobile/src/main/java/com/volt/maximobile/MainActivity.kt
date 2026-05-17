@@ -7,17 +7,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -59,15 +55,19 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-private enum class Screen { Activation, Pin, Hub, TablePick, BarSeatPick, Menu }
+private enum class Screen { Activation, Pin, Dashboard, Hub, TablePick, BarSeatPick, Menu, PaymentProcessing }
 
 private enum class OrderChannel { DINE_IN, TO_GO, BAR }
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
-        // Keep content above the system navigation bar (readable back/home/recents).
         WindowCompat.setDecorFitsSystemWindows(window, true)
         super.onCreate(savedInstanceState)
+
+        com.volt.maximobile.dvpaylite.DvPayLiteClient.init(this)
+        com.volt.maximobile.dvpaylite.P8ReceiptPrinter.init(this)
+
         setContent {
             MaterialTheme {
                 MaxiRoot()
@@ -188,12 +188,15 @@ private fun MaxiRoot() {
         }
         when (screen) {
             Screen.Pin -> activity.moveTaskToBack(false)
-            Screen.Hub -> {
+            Screen.Dashboard -> {
                 screen = Screen.Pin
                 employeeName = ""
             }
+            Screen.Hub -> {
+                screen = Screen.Dashboard
+            }
             Screen.TablePick, Screen.BarSeatPick -> {
-                screen = Screen.Hub
+                screen = Screen.Dashboard
                 err = null
             }
             Screen.Menu -> {
@@ -201,7 +204,7 @@ private fun MaxiRoot() {
                 contextTableId = null
                 contextTableName = null
                 searchQuery = ""
-                screen = Screen.Hub
+                screen = Screen.Dashboard
             }
             else -> Unit
         }
@@ -296,13 +299,56 @@ private fun MaxiRoot() {
                         }
                         employeeName = map["name"] as? String ?: "Staff"
                         MerchantFirestore.init(mid)
-                        screen = Screen.Hub
+                        screen = Screen.Dashboard
                     } catch (e: Exception) {
                         err = e.message ?: "Login failed"
                     } finally {
                         busy = false
                     }
                 }
+            },
+        )
+        return
+    }
+
+    if (screen == Screen.Dashboard) {
+        DashboardScreen(
+            employeeName = employeeName,
+            employeeRole = "Staff",
+            onNewOrder = { orderType ->
+                when (orderType) {
+                    "DINE_IN" -> {
+                        orderChannel = OrderChannel.DINE_IN
+                        contextTableId = null
+                        contextTableName = null
+                        cart.clear()
+                        searchQuery = ""
+                        err = null
+                        screen = Screen.TablePick
+                    }
+                    "TO_GO" -> {
+                        orderChannel = OrderChannel.TO_GO
+                        contextTableId = null
+                        contextTableName = null
+                        cart.clear()
+                        searchQuery = ""
+                        err = null
+                        screen = Screen.Menu
+                    }
+                    "BAR" -> {
+                        orderChannel = OrderChannel.BAR
+                        contextTableId = null
+                        contextTableName = null
+                        cart.clear()
+                        searchQuery = ""
+                        err = null
+                        screen = Screen.BarSeatPick
+                    }
+                }
+            },
+            onLogout = {
+                screen = Screen.Pin
+                employeeName = ""
             },
         )
         return
@@ -344,7 +390,7 @@ private fun MaxiRoot() {
     if (screen == Screen.TablePick) {
         TablePickScreen(
             onBack = {
-                screen = Screen.Hub
+                screen = Screen.Dashboard
                 err = null
             },
             onPick = { id, name ->
@@ -358,7 +404,7 @@ private fun MaxiRoot() {
 
     if (screen == Screen.BarSeatPick) {
         BarSeatPickScreen(
-            onBack = { screen = Screen.Hub },
+            onBack = { screen = Screen.Dashboard },
             onPick = { id, name ->
                 contextTableId = id
                 contextTableName = name
@@ -368,35 +414,18 @@ private fun MaxiRoot() {
         return
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(menuTopBarTitle(orderChannel, contextTableName)) },
-                navigationIcon = {
-                    TextButton(
-                        onClick = {
-                            cart.clear()
-                            contextTableId = null
-                            contextTableName = null
-                            searchQuery = ""
-                            screen = Screen.Hub
-                        },
-                    ) { Text("Order type") }
-                },
-            )
-        },
-    ) { padding ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-        ) {
+    if (screen == Screen.Menu) {
+        Column(Modifier.fillMaxSize()) {
             err?.let {
-                Text(it, color = MaterialTheme.colorScheme.error)
-                Spacer(Modifier.height(8.dp))
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
             }
             MaxiMenuOrderContent(
+                orderTitle = orderScreenTitle(orderChannel),
+                orderSubtitle = orderScreenSubtitle(employeeName, contextTableName),
                 categories = categories,
                 selectedCategoryId = selectedCategoryId,
                 items = items,
@@ -408,6 +437,13 @@ private fun MaxiRoot() {
                     OrderChannel.DINE_IN -> !contextTableId.isNullOrBlank()
                     OrderChannel.BAR -> !contextTableId.isNullOrBlank()
                 } && cart.isNotEmpty() && !busy,
+                onBack = {
+                    cart.clear()
+                    contextTableId = null
+                    contextTableName = null
+                    searchQuery = ""
+                    screen = Screen.Dashboard
+                },
                 onCategorySelected = { cat ->
                     selectedCategoryId = cat.id
                     searchQuery = ""
@@ -432,14 +468,37 @@ private fun MaxiRoot() {
                 },
                 onSearchQueryChange = { searchQuery = it },
                 onItemClick = { item ->
-                    cart.add(
-                        CartLine(
-                            menuItemId = item.id,
-                            name = item.name,
-                            unitPriceDollars = item.priceDollars,
-                            quantity = 1,
-                        ),
-                    )
+                    val existingIndex = cart.indexOfFirst { it.menuItemId == item.id }
+                    if (existingIndex >= 0) {
+                        val line = cart[existingIndex]
+                        cart[existingIndex] = line.copy(quantity = line.quantity + 1)
+                    } else {
+                        cart.add(
+                            CartLine(
+                                menuItemId = item.id,
+                                name = item.name,
+                                unitPriceDollars = item.priceDollars,
+                                quantity = 1,
+                            ),
+                        )
+                    }
+                },
+                onIncreaseLine = { index ->
+                    if (index in cart.indices) {
+                        val line = cart[index]
+                        cart[index] = line.copy(quantity = line.quantity + 1)
+                    }
+                },
+                onDecreaseLine = { index ->
+                    if (index in cart.indices) {
+                        val line = cart[index]
+                        val newQty = line.quantity - 1
+                        if (newQty <= 0) {
+                            cart.removeAt(index)
+                        } else {
+                            cart[index] = line.copy(quantity = newQty)
+                        }
+                    }
                 },
                 onCheckoutClick = {
                     val canPayChannel = when (orderChannel) {
@@ -463,74 +522,75 @@ private fun MaxiRoot() {
                 },
             )
         }
-    }
 
-    if (payDialog) {
-        AlertDialog(
-            onDismissRequest = { if (!busy) payDialog = false },
-            title = { Text("Card type") },
-            text = { Text("Creates the order, runs SPIn Sale on the terminal, then records payment.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            busy = true
-                            try {
-                                val lines = cart.toList()
-                                checkoutOrder(
-                                    employeeName = employeeName,
-                                    lines = lines,
-                                    paymentType = "Credit",
-                                    channel = orderChannel,
-                                    tableId = contextTableId,
-                                    tableName = contextTableName,
-                                )
-                                cart.clear()
-                                contextTableId = null
-                                contextTableName = null
-                                screen = Screen.Hub
-                                Toast.makeText(context, "Payment complete", Toast.LENGTH_LONG).show()
-                            } catch (e: Exception) {
-                                Toast.makeText(context, e.message ?: "Checkout failed", Toast.LENGTH_LONG).show()
-                            } finally {
-                                busy = false
-                                payDialog = false
+        if (payDialog) {
+            AlertDialog(
+                onDismissRequest = { if (!busy) payDialog = false },
+                title = { Text("Card type") },
+                text = { Text("Creates the order, runs SPIn Sale on the terminal, then records payment.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                busy = true
+                                try {
+                                    val lines = cart.toList()
+                                    checkoutOrder(
+                                        employeeName = employeeName,
+                                        lines = lines,
+                                        paymentType = "Credit",
+                                        channel = orderChannel,
+                                        tableId = contextTableId,
+                                        tableName = contextTableName,
+                                    )
+                                    cart.clear()
+                                    contextTableId = null
+                                    contextTableName = null
+                                    screen = Screen.Dashboard
+                                    Toast.makeText(context, "Payment complete", Toast.LENGTH_LONG).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, e.message ?: "Checkout failed", Toast.LENGTH_LONG).show()
+                                } finally {
+                                    busy = false
+                                    payDialog = false
+                                }
                             }
-                        }
-                    },
-                ) { Text("Credit") }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            busy = true
-                            try {
-                                val lines = cart.toList()
-                                checkoutOrder(
-                                    employeeName = employeeName,
-                                    lines = lines,
-                                    paymentType = "Debit",
-                                    channel = orderChannel,
-                                    tableId = contextTableId,
-                                    tableName = contextTableName,
-                                )
-                                cart.clear()
-                                contextTableId = null
-                                contextTableName = null
-                                screen = Screen.Hub
-                                Toast.makeText(context, "Payment complete", Toast.LENGTH_LONG).show()
-                            } catch (e: Exception) {
-                                Toast.makeText(context, e.message ?: "Checkout failed", Toast.LENGTH_LONG).show()
-                            } finally {
-                                busy = false
-                                payDialog = false
+                        },
+                    ) { Text("Credit") }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                busy = true
+                                try {
+                                    val lines = cart.toList()
+                                    checkoutOrder(
+                                        employeeName = employeeName,
+                                        lines = lines,
+                                        paymentType = "Debit",
+                                        channel = orderChannel,
+                                        tableId = contextTableId,
+                                        tableName = contextTableName,
+                                    )
+                                    cart.clear()
+                                    contextTableId = null
+                                    contextTableName = null
+                                    screen = Screen.Dashboard
+                                    Toast.makeText(context, "Payment complete", Toast.LENGTH_LONG).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, e.message ?: "Checkout failed", Toast.LENGTH_LONG).show()
+                                } finally {
+                                    busy = false
+                                    payDialog = false
+                                }
                             }
-                        }
-                    },
-                ) { Text("Debit") }
-            },
-        )
+                        },
+                    ) { Text("Debit") }
+                },
+            )
+        }
+        return
     }
 }
 
@@ -567,15 +627,17 @@ private suspend fun fetchActiveScheduleIdsNow(): Set<String> = withContext(Dispa
     active
 }
 
-private fun menuTopBarTitle(channel: OrderChannel, tableOrSeatName: String?): String {
-    val label = tableOrSeatName?.trim().orEmpty()
-    return when (channel) {
-        OrderChannel.DINE_IN ->
-            if (label.isNotEmpty()) "Dine in · $label" else "Dine in"
-        OrderChannel.TO_GO -> "To go"
-        OrderChannel.BAR ->
-            if (label.isNotEmpty()) "Bar · $label" else "Bar"
-    }
+private fun orderScreenTitle(channel: OrderChannel): String = when (channel) {
+    OrderChannel.DINE_IN -> "Dine in"
+    OrderChannel.TO_GO -> "To go"
+    OrderChannel.BAR -> "Bar"
+}
+
+private fun orderScreenSubtitle(employeeName: String, tableOrSeatName: String?): String {
+    return buildList {
+        if (employeeName.isNotBlank()) add(employeeName)
+        tableOrSeatName?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
+    }.joinToString(" • ")
 }
 
 private suspend fun fetchCategoriesForChannel(

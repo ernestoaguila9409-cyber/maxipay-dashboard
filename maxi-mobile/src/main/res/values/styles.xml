@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="KeyButton">
+        <item name="android:layout_width">80dp</item>
+        <item name="android:layout_height">80dp</item>
+        <item name="android:layout_margin">8dp</item>
+        <item name="android:textSize">22sp</item>
+        <item name="android:backgroundTint">#673AB7</item>
+        <item name="android:textColor">#FFFFFF</item>
+    </style>
+
+    <style name="PinKeyButton">
+        <item name="android:layout_width">72dp</item>
+        <item name="android:layout_height">72dp</item>
+        <item name="android:layout_margin">10dp</item>
+        <item name="android:background">@drawable/pin_key_button</item>
+        <item name="android:textColor">@android:color/white</item>
+        <item name="android:textSize">26sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:gravity">center</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:padding">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:elevation">8dp</item>
+    </style>
+
+    <style name="PinKeyConfirm" parent="PinKeyButton">
+        <item name="android:background">@drawable/pin_key_confirm</item>
+        <item name="android:elevation">10dp</item>
+    </style>
+
+    <style name="DashboardToolbarTitle" parent="TextAppearance.MaterialComponents.Headline6">
+        <item name="android:textSize">14sp</item>
+    </style>
+
+    <style name="OnlineOrderAlertDialogTheme" parent="Theme.AppCompat.Light.Dialog">
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowMinWidthMajor">0%</item>
+        <item name="android:windowMinWidthMinor">0%</item>
+    </style>
+
+    <style name="ThemeOverlay.MyApplication.TextInputBrand" parent="ThemeOverlay.MaterialComponents.TextInputEditText.OutlinedBox">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorControlActivated">@color/brand_primary</item>
+    </style>
+
+    <style name="Widget.MyApplication.TextInputLayout.Dialog" parent="Widget.Material3.TextInputLayout.OutlinedBox">
+        <item name="boxStrokeColor">@color/box_stroke_text_input</item>
+        <item name="hintTextColor">@color/hint_text_input</item>
+        <item name="boxCornerRadiusTopStart">22dp</item>
+        <item name="boxCornerRadiusTopEnd">22dp</item>
+        <item name="boxCornerRadiusBottomStart">22dp</item>
+        <item name="boxCornerRadiusBottomEnd">22dp</item>
+        <item name="boxStrokeWidth">1dp</item>
+        <item name="boxStrokeWidthFocused">2dp</item>
+        <item name="android:theme">@style/ThemeOverlay.MyApplication.TextInputBrand</item>
+    </style>
+
+</resources>

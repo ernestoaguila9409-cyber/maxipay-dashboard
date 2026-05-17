@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/dashboard_main_bg"
+    android:orientation="horizontal">
+
+    <LinearLayout
+        android:id="@+id/leftDashboardPanel"
+        android:layout_width="268dp"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_left_panel"
+        android:orientation="vertical"
+        android:paddingStart="18dp"
+        android:paddingTop="20dp"
+        android:paddingEnd="18dp"
+        android:paddingBottom="16dp">
+
+        <ImageView
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:layout_gravity="center_horizontal"
+            android:background="@drawable/bg_avatar_placeholder"
+            android:contentDescription="@null"
+            android:scaleType="centerInside" />
+
+        <TextView
+            android:id="@+id/txtLoggedUser"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center_horizontal"
+            android:textColor="@color/white"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/txtEmployeeRole"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_role_chip"
+            android:letterSpacing="0.08"
+            android:paddingStart="12dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="4dp"
+            android:textAllCaps="true"
+            android:textColor="@color/dashboard_role_chip_text"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="16dp"
+            android:background="#33FFFFFF" />
+
+        <LinearLayout
+            android:id="@+id/todaySalesArea"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:orientation="vertical"
+            android:paddingBottom="8dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/dashboard_today_sales_label"
+                android:textColor="@color/dashboard_sidebar_muted"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/txtTodayTotal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="$0.00"
+                android:textColor="@color/white"
+                android:textSize="30sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/txtTodayCount"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="0 transactions"
+                android:textColor="@color/dashboard_sidebar_muted"
+                android:textSize="13sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:layout_width="match_parent"
+                    android:layout_height="8dp"
+                    android:contentDescription="@null"
+                    android:scaleType="fitXY"
+                    android:src="@drawable/ic_dashboard_sales_sparkline" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="start"
+                        android:text="12 AM"
+                        android:textColor="@color/dashboard_sidebar_muted"
+                        android:textSize="9sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:text="6 AM"
+                        android:textColor="@color/dashboard_sidebar_muted"
+                        android:textSize="9sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:text="12 PM"
+                        android:textColor="@color/dashboard_sidebar_muted"
+                        android:textSize="9sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:text="6 PM"
+                        android:textColor="@color/dashboard_sidebar_muted"
+                        android:textSize="9sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="end"
+                        android:text="12 AM"
+                        android:textColor="@color/dashboard_sidebar_muted"
+                        android:textSize="9sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnLogout"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginBottom="4dp"
+            android:text="@string/dashboard_log_out"
+            android:textAllCaps="false"
+            android:textColor="@color/dashboard_logout_stroke"
+            android:textSize="14sp"
+            app:backgroundTint="@android:color/transparent"
+            app:cornerRadius="12dp"
+            app:icon="@android:drawable/ic_lock_power_off"
+            app:iconGravity="textStart"
+            app:iconPadding="8dp"
+            app:iconTint="@color/dashboard_logout_stroke"
+            app:rippleColor="#33FFFFFF"
+            app:strokeColor="@color/dashboard_logout_stroke"
+            app:strokeWidth="1dp" />
+    </LinearLayout>
+
+    <View
+        android:id="@+id/sidebarDivider"
+        android:layout_width="1dp"
+        android:layout_height="match_parent"
+        android:background="#DDDDDD" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <include layout="@layout/view_pending_online_order_sign" />
+
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/dashboardPager"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <LinearLayout
+            android:id="@+id/pageIndicator"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/dashboard_main_bg"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingTop="6dp"
+            android:paddingBottom="8dp" />
+    </LinearLayout>
+
+</LinearLayout>

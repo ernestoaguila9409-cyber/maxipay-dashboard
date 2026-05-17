@@ -1,0 +1,1115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F5F5F5">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingBottom="20dp">
+
+            <ImageButton
+                android:id="@+id/btnBack"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_arrow_back"
+                android:contentDescription="Back"
+                app:tint="#333333"
+                android:padding="4dp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:paddingStart="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Reports"
+                    android:textSize="22sp"
+                    android:textStyle="bold"
+                    android:textColor="#212121" />
+
+                <LinearLayout
+                    android:id="@+id/rowDateFilter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:paddingEnd="4dp">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/txtReportDateFrom"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="13sp"
+                            android:textColor="#757575"
+                            android:paddingEnd="4dp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="–"
+                            android:textSize="13sp"
+                            android:textColor="#9E9E9E"
+                            android:paddingHorizontal="2dp" />
+
+                        <TextView
+                            android:id="@+id/txtReportDateTo"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="13sp"
+                            android:textColor="#757575"
+                            android:paddingEnd="8dp" />
+
+                        <ImageView
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:src="@drawable/ic_calendar"
+                            android:contentDescription="Filter by date range"
+                            app:tint="#757575" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ==================== Employee Filter ==================== -->
+
+        <LinearLayout
+            android:id="@+id/rowEmployeeFilter"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Employee:"
+                android:textSize="14sp"
+                android:textColor="#757575"
+                android:paddingEnd="10dp" />
+
+            <Spinner
+                android:id="@+id/spinnerEmployeeFilter"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@android:drawable/btn_dropdown"
+                android:popupBackground="#FFFFFF" />
+        </LinearLayout>
+
+        <!-- ==================== Daily Sales Summary ==================== -->
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginTop="48dp"
+            android:visibility="gone" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardDailySummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="2dp"
+            app:strokeWidth="0dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- Header (tappable) -->
+                <LinearLayout
+                    android:id="@+id/headerDailySummary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingHorizontal="20dp"
+                    android:paddingVertical="16dp">
+
+                    <TextView
+                        android:id="@+id/arrowDailySummary"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="▶"
+                        android:textSize="12sp"
+                        android:textColor="#757575"
+                        android:paddingEnd="10dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Daily Sales Summary"
+                        android:textSize="17sp"
+                        android:textStyle="bold"
+                        android:textColor="#212121" />
+                </LinearLayout>
+
+                <!-- Content (collapsed by default) -->
+                <LinearLayout
+                    android:id="@+id/contentDailySummary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="20dp"
+                    android:paddingBottom="20dp"
+                    android:visibility="gone">
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="#E0E0E0" />
+
+                    <!-- Gross Sales -->
+                    <LinearLayout style="@style/Base.TextAppearance.AppCompat.Body1"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingVertical="12dp">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Gross Sales"
+                            android:textSize="15sp"
+                            android:textColor="#424242" />
+                        <TextView
+                            android:id="@+id/valGrossSales"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="$0.00"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#212121" />
+                    </LinearLayout>
+
+                    <!-- Discounts (expandable) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout
+                            android:id="@+id/rowDiscounts"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:paddingVertical="12dp"
+                            android:background="?attr/selectableItemBackground">
+                            <TextView
+                                android:id="@+id/arrowDiscount"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="▶"
+                                android:textSize="11sp"
+                                android:textColor="#9E9E9E"
+                                android:paddingEnd="8dp"
+                                android:visibility="gone" />
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Discounts"
+                                android:textSize="15sp"
+                                android:textColor="#424242" />
+                            <TextView
+                                android:id="@+id/valDiscounts"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="−$0.00"
+                                android:textSize="15sp"
+                                android:textStyle="bold"
+                                android:textColor="#E65100" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/contentDiscountBreakdown"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:paddingStart="16dp"
+                            android:visibility="gone" />
+
+                    </LinearLayout>
+
+                    <!-- Tax Collected (expandable) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout
+                            android:id="@+id/rowTaxCollected"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:paddingVertical="12dp"
+                            android:background="?attr/selectableItemBackground"
+                            android:clickable="true"
+                            android:focusable="true">
+
+                            <TextView
+                                android:id="@+id/arrowTax"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="▶"
+                                android:textSize="11sp"
+                                android:textColor="#9E9E9E"
+                                android:paddingEnd="8dp"
+                                android:visibility="gone" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Tax Collected"
+                                android:textSize="15sp"
+                                android:textColor="#424242" />
+
+                            <TextView
+                                android:id="@+id/valTaxCollected"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="$0.00"
+                                android:textSize="15sp"
+                                android:textStyle="bold"
+                                android:textColor="#212121" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/contentTaxBreakdown"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:visibility="gone"
+                            android:paddingStart="16dp"
+                            android:paddingBottom="8dp" />
+                    </LinearLayout>
+
+                    <!-- Tips -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingVertical="12dp">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Tips"
+                            android:textSize="15sp"
+                            android:textColor="#424242" />
+                        <TextView
+                            android:id="@+id/valTips"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="$0.00"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#212121" />
+                    </LinearLayout>
+
+                    <!-- Net Sales (highlighted) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingVertical="14dp"
+                        android:paddingHorizontal="12dp"
+                        android:layout_marginVertical="4dp"
+                        android:background="#E8F5E9">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Net Sales"
+                            android:textSize="17sp"
+                            android:textStyle="bold"
+                            android:textColor="#1B5E20" />
+                        <TextView
+                            android:id="@+id/valNetSales"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="$0.00"
+                            android:textSize="17sp"
+                            android:textStyle="bold"
+                            android:textColor="#1B5E20" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="#E0E0E0"
+                        android:layout_marginTop="4dp" />
+
+                    <!-- Transactions -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingVertical="12dp">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Transactions"
+                            android:textSize="15sp"
+                            android:textColor="#424242" />
+                        <TextView
+                            android:id="@+id/valTransactions"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="0"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#212121" />
+                    </LinearLayout>
+
+                    <!-- Average Ticket -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingVertical="12dp">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Average Ticket"
+                            android:textSize="15sp"
+                            android:textColor="#424242" />
+                        <TextView
+                            android:id="@+id/valAvgTicket"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="$0.00"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#212121" />
+                    </LinearLayout>
+
+                    <!-- Items Sold -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingVertical="12dp">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Items Sold"
+                            android:textSize="15sp"
+                            android:textColor="#424242" />
+                        <TextView
+                            android:id="@+id/valItemsSold"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="0"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#212121" />
+                    </LinearLayout>
+
+                    <!-- Refunds -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingVertical="12dp">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Refunds"
+                            android:textSize="15sp"
+                            android:textColor="#424242" />
+                        <TextView
+                            android:id="@+id/valRefunds"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="$0.00"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#C62828" />
+                    </LinearLayout>
+
+                    <!-- Voided Items -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingVertical="12dp">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Voided Items"
+                            android:textSize="15sp"
+                            android:textColor="#424242" />
+                        <TextView
+                            android:id="@+id/valVoidedItems"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="0"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#C62828" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="#E0E0E0"
+                        android:layout_marginTop="4dp" />
+
+                    <!-- Payment Breakdown header -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Payment Breakdown"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:textColor="#757575"
+                        android:textAllCaps="true"
+                        android:letterSpacing="0.05"
+                        android:paddingTop="14dp"
+                        android:paddingBottom="6dp" />
+
+                    <!-- Cash -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingVertical="10dp">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Cash"
+                            android:textSize="15sp"
+                            android:textColor="#424242" />
+                        <TextView
+                            android:id="@+id/valCashPayments"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="$0.00"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#212121" />
+                    </LinearLayout>
+
+                    <!-- Credit -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingVertical="10dp">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Credit"
+                            android:textSize="15sp"
+                            android:textColor="#424242" />
+                        <TextView
+                            android:id="@+id/valCreditPayments"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="$0.00"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#212121" />
+                    </LinearLayout>
+
+                    <!-- Debit -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingVertical="10dp">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Debit"
+                            android:textSize="15sp"
+                            android:textColor="#424242" />
+                        <TextView
+                            android:id="@+id/valDebitPayments"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="$0.00"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#212121" />
+                    </LinearLayout>
+
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ==================== Sales by Order Type ==================== -->
+
+        <ProgressBar
+            android:id="@+id/progressOrderType"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginTop="24dp"
+            android:visibility="gone" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardSalesByOrderType"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="2dp"
+            app:strokeWidth="0dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- Header (tappable) -->
+                <LinearLayout
+                    android:id="@+id/headerOrderType"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingHorizontal="20dp"
+                    android:paddingVertical="16dp">
+
+                    <TextView
+                        android:id="@+id/arrowOrderType"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="▶"
+                        android:textSize="12sp"
+                        android:textColor="#757575"
+                        android:paddingEnd="10dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Sales by Order Type"
+                        android:textSize="17sp"
+                        android:textStyle="bold"
+                        android:textColor="#212121" />
+                </LinearLayout>
+
+                <!-- Content (collapsed by default) -->
+                <LinearLayout
+                    android:id="@+id/contentOrderType"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="20dp"
+                    android:paddingBottom="20dp"
+                    android:visibility="gone">
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="#E0E0E0" />
+
+                    <!-- Dine-In (expandable row with table breakdown) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout
+                            android:id="@+id/rowDineIn"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:paddingVertical="12dp"
+                            android:background="?attr/selectableItemBackground"
+                            android:clickable="true"
+                            android:focusable="true">
+
+                            <TextView
+                                android:id="@+id/arrowDineIn"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="▶"
+                                android:textSize="11sp"
+                                android:textColor="#9E9E9E"
+                                android:paddingEnd="8dp"
+                                android:visibility="gone" />
+
+                            <View
+                                android:layout_width="10dp"
+                                android:layout_height="10dp"
+                                android:background="#1565C0"
+                                android:layout_marginEnd="10dp" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Dine-In"
+                                android:textSize="15sp"
+                                android:textColor="#424242" />
+
+                            <TextView
+                                android:id="@+id/valDineInPct"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text=""
+                                android:textSize="13sp"
+                                android:textColor="#757575"
+                                android:paddingEnd="8dp" />
+
+                            <TextView
+                                android:id="@+id/valDineIn"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="$0.00"
+                                android:textSize="15sp"
+                                android:textStyle="bold"
+                                android:textColor="#212121" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/contentDineInTables"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:visibility="gone"
+                            android:paddingStart="28dp"
+                            android:paddingEnd="0dp"
+                            android:paddingBottom="8dp" />
+                    </LinearLayout>
+
+                    <!-- To-Go -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:paddingVertical="12dp">
+
+                        <View
+                            android:layout_width="10dp"
+                            android:layout_height="10dp"
+                            android:background="#E65100"
+                            android:layout_marginEnd="10dp" />
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="To-Go"
+                            android:textSize="15sp"
+                            android:textColor="#424242" />
+
+                        <TextView
+                            android:id="@+id/valToGoPct"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text=""
+                            android:textSize="13sp"
+                            android:textColor="#757575"
+                            android:paddingEnd="8dp" />
+
+                        <TextView
+                            android:id="@+id/valToGo"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="$0.00"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#212121" />
+                    </LinearLayout>
+
+                    <!-- Bar -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:paddingVertical="12dp">
+
+                        <View
+                            android:layout_width="10dp"
+                            android:layout_height="10dp"
+                            android:background="#6A1B9A"
+                            android:layout_marginEnd="10dp" />
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Bar"
+                            android:textSize="15sp"
+                            android:textColor="#424242" />
+
+                        <TextView
+                            android:id="@+id/valBarPct"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text=""
+                            android:textSize="13sp"
+                            android:textColor="#757575"
+                            android:paddingEnd="8dp" />
+
+                        <TextView
+                            android:id="@+id/valBar"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="$0.00"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#212121" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="#E0E0E0"
+                        android:layout_marginTop="4dp" />
+
+                    <!-- Total -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingVertical="12dp"
+                        android:background="#FAFAFA">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Total"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#212121" />
+
+                        <TextView
+                            android:id="@+id/valOrderTypeTotal"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="$0.00"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="#2E7D32" />
+                    </LinearLayout>
+
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ==================== Hourly Sales by Order Type ==================== -->
+
+        <ProgressBar
+            android:id="@+id/progressHourlySales"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginTop="24dp"
+            android:visibility="gone" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardHourlySales"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="2dp"
+            app:strokeWidth="0dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:id="@+id/headerHourlySales"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingHorizontal="20dp"
+                    android:paddingVertical="16dp">
+
+                    <TextView
+                        android:id="@+id/arrowHourlySales"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="▶"
+                        android:textSize="12sp"
+                        android:textColor="#757575"
+                        android:paddingEnd="10dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Hourly Sales by Order Type"
+                        android:textSize="17sp"
+                        android:textStyle="bold"
+                        android:textColor="#212121" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/contentHourlySales"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="20dp"
+                    android:paddingBottom="20dp"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ==================== Sales by Card Brand ==================== -->
+
+        <ProgressBar
+            android:id="@+id/progressCardBrand"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginTop="24dp"
+            android:visibility="gone" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardCardBrand"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="2dp"
+            app:strokeWidth="0dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:id="@+id/headerCardBrand"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingHorizontal="20dp"
+                    android:paddingVertical="16dp">
+
+                    <TextView
+                        android:id="@+id/arrowCardBrand"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="▶"
+                        android:textSize="12sp"
+                        android:textColor="#757575"
+                        android:paddingEnd="10dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Sales by Card Brand"
+                        android:textSize="17sp"
+                        android:textStyle="bold"
+                        android:textColor="#212121" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/contentCardBrand"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="20dp"
+                    android:paddingBottom="20dp"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ==================== Menu Performance ==================== -->
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardMenuPerformance"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="2dp"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:id="@+id/headerMenuPerformance"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingHorizontal="20dp"
+                    android:paddingVertical="16dp">
+
+                    <TextView
+                        android:id="@+id/arrowMenuPerformance"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="▶"
+                        android:textSize="12sp"
+                        android:textColor="#757575"
+                        android:paddingEnd="10dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Menu Performance"
+                        android:textSize="17sp"
+                        android:textStyle="bold"
+                        android:textColor="#212121" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/contentMenuPerformance"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="20dp"
+                    android:paddingBottom="20dp"
+                    android:visibility="gone">
+
+                    <ProgressBar
+                        android:id="@+id/progressMenuPerf"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:layout_marginVertical="16dp" />
+
+                    <LinearLayout
+                        android:id="@+id/containerMenuPerf"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone" />
+
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ==================== Employee Report ==================== -->
+
+        <ProgressBar
+            android:id="@+id/progressEmployee"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginTop="24dp"
+            android:visibility="gone" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardEmployee"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="24dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="2dp"
+            app:strokeWidth="0dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:id="@+id/headerEmployee"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingHorizontal="20dp"
+                    android:paddingVertical="16dp">
+
+                    <TextView
+                        android:id="@+id/arrowEmployee"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="▶"
+                        android:textSize="12sp"
+                        android:textColor="#757575"
+                        android:paddingEnd="10dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Employee Report"
+                        android:textSize="17sp"
+                        android:textStyle="bold"
+                        android:textColor="#212121" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/contentEmployee"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="20dp"
+                    android:paddingBottom="20dp"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+    </LinearLayout>
+</ScrollView>

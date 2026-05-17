@@ -2,51 +2,26 @@ package com.volt.maximobile
 
 import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.DocumentReference
-import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.DocumentSnapshot
 
-/** Same merchant-scoped paths as the main POS app. */
+/**
+ * Maxi-mobile entry point for merchant-scoped Firestore paths.
+ * Delegates to [:shared] [com.volt.shared.MerchantFirestore].
+ */
 object MerchantFirestore {
+    private val shared get() = com.volt.shared.MerchantFirestore
 
-    private val db: FirebaseFirestore get() = FirebaseFirestore.getInstance()
+    val merchantId: String get() = shared.merchantId
+    val isInitialized: Boolean get() = shared.isInitialized
 
-    @Volatile
-    var merchantId: String = ""
-        private set
-
-    val isInitialized: Boolean get() = merchantId.isNotBlank()
-
-    private val NAME_MAP: Map<String, String> = mapOf(
-        "Orders" to "orders",
-        "Categories" to "categories",
-        "MenuItems" to "menuItems",
-        "Batches" to "batches",
-        "Transactions" to "transactions",
-        "Counters" to "counters",
-        "Tables" to "tables",
-        "tableLayouts" to "tableLayouts",
-        "PosDevices" to "posDevices",
-        "DeviceActivations" to "deviceActivations",
-    )
-
-    fun init(merchantId: String) {
-        require(merchantId.isNotBlank()) { "merchantId must not be blank" }
-        this.merchantId = merchantId
-    }
-
-    fun reset() {
-        merchantId = ""
-    }
-
-    private fun merchantDoc(): DocumentReference =
-        db.collection("Merchants").document(merchantId)
-
-    fun resolvedName(name: String): String = NAME_MAP[name] ?: name
-
-    fun col(name: String): CollectionReference {
-        check(isInitialized) { "MerchantFirestore.init() not called" }
-        return merchantDoc().collection(resolvedName(name))
-    }
-
-    fun doc(collectionName: String, docId: String): DocumentReference =
-        col(collectionName).document(docId)
+    fun init(merchantId: String) = shared.init(merchantId)
+    fun reset() = shared.reset()
+    fun resolvedName(name: String): String = shared.resolvedName(name)
+    fun col(name: String): CollectionReference = shared.col(name)
+    fun doc(collectionName: String, docId: String): DocumentReference = shared.doc(collectionName, docId)
+    fun mergeMenuItemModifierGroupIds(doc: DocumentSnapshot): List<String> =
+        shared.mergeMenuItemModifierGroupIds(doc)
+    fun mergeMenuItemTaxIds(doc: DocumentSnapshot): List<String> = shared.mergeMenuItemTaxIds(doc)
+    fun menuItemTaxModeForIds(taxIds: Collection<String>): String = shared.menuItemTaxModeForIds(taxIds)
+    fun menuItemTaxModeFromDoc(doc: DocumentSnapshot): String = shared.menuItemTaxModeFromDoc(doc)
 }

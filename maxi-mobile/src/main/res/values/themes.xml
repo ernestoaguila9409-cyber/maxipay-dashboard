@@ -1,10 +1,28 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Opaque system bars so the 3-button nav row stays visible (transparent bars + white UI hid icons). -->
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Existing maxi-mobile theme -->
     <style name="Theme.MaxiMobile" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:statusBarColor">@android:color/white</item>
         <item name="android:navigationBarColor">#E8EAED</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
     </style>
+
+    <!-- Themes from app module -->
+    <style name="Base.Theme.MyApplication" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorControlActivated">@color/brand_primary</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <style name="Theme.MyApplication" parent="Base.Theme.MyApplication" />
+
+    <style name="ThemeOverlay.MyApplication.MaterialAlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorOnSurface">@color/pos_primary_text</item>
+        <item name="android:colorAccent">@color/brand_primary</item>
+    </style>
+
 </resources>

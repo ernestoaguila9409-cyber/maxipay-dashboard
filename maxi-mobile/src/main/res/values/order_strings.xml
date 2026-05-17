@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="order_back">Back</string>
+    <string name="order_search_hint">Search items…</string>
+    <string name="order_add_item">Add item</string>
+    <string name="order_cart_title">Your order</string>
+    <string name="order_cart_empty">No items yet — add something from the menu</string>
+    <string name="order_subtotal">Subtotal</string>
+    <string name="order_total">Total</string>
+    <string name="order_checkout">Checkout &amp; pay</string>
+    <string name="order_decrease_quantity">Decrease quantity</string>
+    <string name="order_increase_quantity">Increase quantity</string>
+    <string name="order_review_empty">Review Order</string>
+    <string name="order_review_summary">Review Order (%1$d items • %2$s)</string>
+    <string name="order_cart_unit_price">%1$s each</string>
+    <string name="order_item_added">Added %1$s</string>
+</resources>

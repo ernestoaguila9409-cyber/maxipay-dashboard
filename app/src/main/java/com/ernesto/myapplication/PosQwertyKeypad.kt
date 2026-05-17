@@ -22,7 +22,7 @@ object PosQwertyKeypad {
     enum class Variant {
         EMAIL,
         GUEST_NAME,
-        /** Name-style keys + prominent Enter (next field). */
+        /** Name-style keys; 123 shows digits plus - , . ; Space + Enter. */
         MODIFIER_OPTION,
     }
 
@@ -33,8 +33,12 @@ object PosQwertyKeypad {
         onEnter: (() -> Unit)? = null,
     ): LinearLayout {
         val res = context.resources
-        val marginH = res.getDimensionPixelSize(R.dimen.pos_key_margin_h)
-        val marginV = res.getDimensionPixelSize(R.dimen.pos_key_margin_v)
+        var marginH = res.getDimensionPixelSize(R.dimen.pos_key_margin_h)
+        var marginV = res.getDimensionPixelSize(R.dimen.pos_key_margin_v)
+        if (variant == Variant.MODIFIER_OPTION) {
+            marginH = (marginH * 0.68f).toInt().coerceAtLeast(2)
+            marginV = (marginV * 0.88f).toInt().coerceAtLeast(2)
+        }
         val minH = res.getDimensionPixelSize(R.dimen.pos_key_min_height)
         val pad = res.getDimensionPixelSize(R.dimen.pos_keyboard_panel_padding)
         val labelSp = res.getDimension(R.dimen.pos_key_label_sp) / res.displayMetrics.scaledDensity
@@ -64,7 +68,7 @@ object PosQwertyKeypad {
             ImageViewCompat.setImageTintList(btn, android.content.res.ColorStateList.valueOf(tint))
         }
 
-        fun addTextRow(keys: List<String>) {
+        fun addTextRow(parent: LinearLayout, keys: List<String>) {
             val row = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(
@@ -96,7 +100,7 @@ object PosQwertyKeypad {
                     }
                     setOnClickListener {
                         when (k) {
-                            "⌫" -> onInsert("⌫")
+                            "?" -> onInsert("?")
                             else -> {
                                 val ch = if (isLetter && capsOn) k.uppercase() else k
                                 onInsert(ch)
@@ -107,7 +111,7 @@ object PosQwertyKeypad {
                 if (isLetter) letterButtons.add(tv)
                 row.addView(tv)
             }
-            panel.addView(row)
+            parent.addView(row)
         }
 
         fun iconButton(
@@ -134,78 +138,152 @@ object PosQwertyKeypad {
             }
         }
 
-        addTextRow(listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0"))
-        addTextRow(listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"))
-        addTextRow(listOf("a", "s", "d", "f", "g", "h", "j", "k", "l"))
-
-        val zRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            )
-        }
-        val shiftBtn = AppCompatImageButton(context).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f).apply {
-                setMargins(marginH, marginV, marginH, marginV)
+        fun attachZRow(parent: LinearLayout) {
+            val zRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                )
             }
-            minimumHeight = minH
-            setBackgroundResource(R.drawable.bg_pos_key_special)
-            setImageDrawable(AppCompatResources.getDrawable(context, R.drawable.ic_pos_keyboard_shift))
-            ImageViewCompat.setImageTintList(
-                this,
-                android.content.res.ColorStateList.valueOf(context.getColor(R.color.pos_key_text_primary)),
-            )
-            scaleType = ImageView.ScaleType.CENTER
-            contentDescription = "Shift"
-            setOnClickListener {
-                capsOn = !capsOn
-                refreshCapsLabels()
-                updateShiftButton(this)
-            }
-        }
-        zRow.addView(shiftBtn)
-
-        for (k in listOf("z", "x", "c", "v", "b", "n", "m")) {
-            val btn = TextView(context).apply {
-                text = if (capsOn) k.uppercase() else k
-                tag = k
-                gravity = Gravity.CENTER
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, labelSp)
-                setTextColor(context.getColor(R.color.pos_key_text_primary))
-                background = AppCompatResources.getDrawable(context, R.drawable.bg_pos_key_default)
-                minimumHeight = minH
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            val shiftBtn = AppCompatImageButton(context).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f).apply {
                     setMargins(marginH, marginV, marginH, marginV)
                 }
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                    typeface = android.graphics.Typeface.create(
-                        android.graphics.Typeface.SANS_SERIF,
-                        500,
-                        false,
-                    )
-                }
+                minimumHeight = minH
+                setBackgroundResource(R.drawable.bg_pos_key_special)
+                setImageDrawable(AppCompatResources.getDrawable(context, R.drawable.ic_pos_keyboard_shift))
+                ImageViewCompat.setImageTintList(
+                    this,
+                    android.content.res.ColorStateList.valueOf(context.getColor(R.color.pos_key_text_primary)),
+                )
+                scaleType = ImageView.ScaleType.CENTER
+                contentDescription = "Shift"
                 setOnClickListener {
-                    val ch = if (capsOn) k.uppercase() else k
-                    onInsert(ch)
+                    capsOn = !capsOn
+                    refreshCapsLabels()
+                    updateShiftButton(this)
                 }
             }
-            letterButtons.add(btn)
-            zRow.addView(btn)
+            zRow.addView(shiftBtn)
+
+            for (k in listOf("z", "x", "c", "v", "b", "n", "m")) {
+                val btn = TextView(context).apply {
+                    text = if (capsOn) k.uppercase() else k
+                    tag = k
+                    gravity = Gravity.CENTER
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, labelSp)
+                    setTextColor(context.getColor(R.color.pos_key_text_primary))
+                    background = AppCompatResources.getDrawable(context, R.drawable.bg_pos_key_default)
+                    minimumHeight = minH
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        setMargins(marginH, marginV, marginH, marginV)
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        typeface = android.graphics.Typeface.create(
+                            android.graphics.Typeface.SANS_SERIF,
+                            500,
+                            false,
+                        )
+                    }
+                    setOnClickListener {
+                        val ch = if (capsOn) k.uppercase() else k
+                        onInsert(ch)
+                    }
+                }
+                letterButtons.add(btn)
+                zRow.addView(btn)
+            }
+
+            val backBtn = iconButton(
+                R.drawable.ic_pos_keyboard_backspace,
+                R.drawable.bg_pos_key_special,
+                1.15f,
+                "Backspace",
+            ) { onInsert("?") }
+            zRow.addView(backBtn)
+            parent.addView(zRow)
         }
 
-        val backBtn = iconButton(
-            R.drawable.ic_pos_keyboard_backspace,
-            R.drawable.bg_pos_key_special,
-            1.15f,
-            "Backspace",
-        ) { onInsert("⌫") }
-        zRow.addView(backBtn)
-        panel.addView(zRow)
+        var lettersLayer: LinearLayout? = null
+        var numbersLayer: LinearLayout? = null
+        var numbersMode = false
+
+        if (variant == Variant.MODIFIER_OPTION) {
+            val lettersColumn = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                )
+            }
+            addTextRow(lettersColumn, listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"))
+            addTextRow(lettersColumn, listOf("a", "s", "d", "f", "g", "h", "j", "k", "l"))
+            attachZRow(lettersColumn)
+
+            val numbersColumn = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                )
+                visibility = View.GONE
+            }
+            val numbersDigitRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                )
+            }
+            val wDigit = 1f / 10f
+            for (k in listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")) {
+                numbersDigitRow.addView(
+                    TextView(context).apply {
+                        text = k
+                        gravity = Gravity.CENTER
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, labelSp)
+                        setTextColor(context.getColor(R.color.pos_key_text_primary))
+                        background = AppCompatResources.getDrawable(context, R.drawable.bg_pos_key_default)
+                        minimumHeight = minH
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, wDigit).apply {
+                            setMargins(marginH, marginV, marginH, marginV)
+                        }
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                            typeface = android.graphics.Typeface.create(
+                                android.graphics.Typeface.SANS_SERIF,
+                                500,
+                                false,
+                            )
+                        }
+                        setOnClickListener { onInsert(k) }
+                    },
+                )
+            }
+            numbersColumn.addView(numbersDigitRow)
+            addTextRow(numbersColumn, listOf("-", ",", "."))
+
+            val modeHost = FrameLayout(context).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                )
+            }
+            modeHost.addView(lettersColumn)
+            modeHost.addView(numbersColumn)
+            panel.addView(modeHost)
+            lettersLayer = lettersColumn
+            numbersLayer = numbersColumn
+        } else {
+            addTextRow(panel, listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0"))
+            addTextRow(panel, listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"))
+            addTextRow(panel, listOf("a", "s", "d", "f", "g", "h", "j", "k", "l"))
+            attachZRow(panel)
+        }
 
         when (variant) {
             Variant.EMAIL -> {
-                addTextRow(listOf("@", ".", "_", "-", "+"))
+                addTextRow(panel, listOf("@", ".", "_", "-", "+"))
                 val bottomRow = LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     layoutParams = LinearLayout.LayoutParams(
@@ -220,12 +298,12 @@ object PosQwertyKeypad {
                     textAuxKey(context, "Space", 1.2f, minH, marginH, marginV, compactSp) { onInsert("SPACE") },
                 )
                 bottomRow.addView(
-                    textAuxKey(context, "⌫", 0.9f, minH, marginH, marginV, labelSp) { onInsert("⌫") },
+                    textAuxKey(context, "?", 0.9f, minH, marginH, marginV, labelSp) { onInsert("?") },
                 )
                 panel.addView(bottomRow)
             }
             Variant.GUEST_NAME -> {
-                addTextRow(listOf("-", "'", "."))
+                addTextRow(panel, listOf("-", "'", "."))
                 val bottomRow = LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     layoutParams = LinearLayout.LayoutParams(
@@ -240,7 +318,6 @@ object PosQwertyKeypad {
                 panel.addView(bottomRow)
             }
             Variant.MODIFIER_OPTION -> {
-                addTextRow(listOf("-", "'", "."))
                 val bottomRow = LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     layoutParams = LinearLayout.LayoutParams(
@@ -248,8 +325,26 @@ object PosQwertyKeypad {
                         ViewGroup.LayoutParams.WRAP_CONTENT,
                     )
                 }
+                lateinit var modeToggle: TextView
+                modeToggle = textAuxKey(
+                    context,
+                    context.getString(R.string.pos_keypad_mode_numbers),
+                    0.88f,
+                    minH,
+                    marginH,
+                    marginV,
+                    compactSp,
+                ) {
+                    numbersMode = !numbersMode
+                    lettersLayer?.visibility = if (numbersMode) View.GONE else View.VISIBLE
+                    numbersLayer?.visibility = if (numbersMode) View.VISIBLE else View.GONE
+                    modeToggle.text = context.getString(
+                        if (numbersMode) R.string.pos_keypad_mode_letters else R.string.pos_keypad_mode_numbers,
+                    )
+                }
+                bottomRow.addView(modeToggle)
                 bottomRow.addView(
-                    textAuxKey(context, "Space", 2f, minH, marginH, marginV, compactSp) { onInsert("SPACE") },
+                    textAuxKey(context, "Space", 1.42f, minH, marginH, marginV, compactSp) { onInsert("SPACE") },
                 )
                 val enterWrap = FrameLayout(context).apply {
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -279,7 +374,7 @@ object PosQwertyKeypad {
     }
 
     /**
-     * Phone fields: digits 0–9 and backspace only (no +, ., etc.).
+     * Phone fields: digits 0�9 and backspace only (no +, ., etc.).
      * Visual system matches [build] (EMAIL / receipt keypad).
      */
     fun buildPhoneDigitsKeypad(
@@ -367,7 +462,7 @@ object PosQwertyKeypad {
                 )
                 scaleType = ImageView.ScaleType.CENTER
                 contentDescription = "Backspace"
-                setOnClickListener { onInsert("⌫") }
+                setOnClickListener { onInsert("?") }
             },
         )
         panel.addView(bottomRow)

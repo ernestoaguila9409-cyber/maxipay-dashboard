@@ -10,11 +10,11 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 dependencyResolutionManagement {
-    // Allow subprojects to declare repositories too (some IDE/Gradle setups resolve Firebase more reliably).
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
+        flatDir { dirs("maxi-mobile/libs") }
     }
 }
 
@@ -22,3 +22,4 @@ rootProject.name = "My Application"
 include(":app")
 include(":kds")
 include(":maxi-mobile")
+include(":shared")

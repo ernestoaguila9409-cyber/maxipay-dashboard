@@ -78,10 +78,27 @@ object ModifierOptionFormHelper {
         val chevron = formRoot.findViewById<TextView>(R.id.chevronTriggers)
         val container = formRoot.findViewById<LinearLayout>(R.id.containerTriggers)
         if (otherGroups.isEmpty()) {
-            section.visibility = View.GONE
+            section.visibility = View.VISIBLE
+            chevron.visibility = View.GONE
+            header.isClickable = false
+            header.isFocusable = false
+            container.removeAllViews()
+            val emptyMsg = TextView(context).apply {
+                text = context.getString(R.string.modifier_dialog_triggers_empty)
+                textSize = 14f
+                setTextColor(context.getColor(R.color.pos_secondary_text))
+                val density = context.resources.displayMetrics.density
+                setPadding((4 * density).toInt(), (8 * density).toInt(), (4 * density).toInt(), (4 * density).toInt())
+            }
+            container.addView(emptyMsg)
+            container.visibility = View.VISIBLE
             return EmptyTriggers
         }
+
         section.visibility = View.VISIBLE
+        chevron.visibility = View.VISIBLE
+        header.isClickable = true
+        header.isFocusable = true
 
         val checkById = linkedMapOf<String, CheckBox>()
         val density = context.resources.displayMetrics.density

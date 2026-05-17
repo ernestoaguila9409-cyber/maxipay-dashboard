@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Refund Options"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        android:gravity="center"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Maximum refund available"
+        android:textSize="13sp"
+        android:textColor="#777777"
+        android:gravity="center"
+        android:layout_marginTop="4dp"/>
+
+    <TextView
+        android:id="@+id/txtMaxRefundAmount"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:textColor="#1976D2"
+        android:gravity="center"
+        android:layout_marginTop="4dp"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#E0E0E0"
+        android:layout_marginTop="20dp"
+        android:layout_marginBottom="16dp"/>
+
+    <RadioGroup
+        android:id="@+id/radioGroupRefundType"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <RadioButton
+            android:id="@+id/radioFullRefund"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:textColor="#333333"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="14dp"
+            android:background="?attr/selectableItemBackground"
+            android:checked="true"/>
+
+        <RadioButton
+            android:id="@+id/radioCustomAmount"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Custom Amount"
+            android:textSize="16sp"
+            android:textColor="#333333"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="14dp"
+            android:background="?attr/selectableItemBackground"/>
+
+        <RadioButton
+            android:id="@+id/radioPercentage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Percentage"
+            android:textSize="16sp"
+            android:textColor="#333333"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="14dp"
+            android:background="?attr/selectableItemBackground"/>
+
+    </RadioGroup>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnContinueRefund"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="Continue"
+        android:textSize="16sp"
+        android:layout_marginTop="20dp"
+        app:cornerRadius="12dp"/>
+
+</LinearLayout>

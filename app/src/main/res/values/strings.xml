@@ -87,6 +87,8 @@
     <string name="printer_save_failed">Could not save printer. %1$s</string>
     <string name="printers_no_selection_yet">Tap + to add a receipt or kitchen printer.</string>
     <string name="pos_keypad_done">Done</string>
+    <string name="pos_keypad_mode_numbers">123</string>
+    <string name="pos_keypad_mode_letters">ABC</string>
     <string name="pos_keyboard_hide">Hide keyboard</string>
     <string name="pos_keyboard_show">Show keyboard</string>
     <string name="printer_test_print">Test print</string>
@@ -239,6 +241,7 @@
     <string name="modifier_dialog_price_hint">Price adjustment</string>
     <string name="modifier_dialog_triggers_title">Triggers modifier groups</string>
     <string name="modifier_dialog_triggers_hint">When this option is selected, these groups become required choices. Tap to expand.</string>
+    <string name="modifier_dialog_triggers_empty">You need at least one other modifier group (besides this one) to chain choices. Add another group first, then return here to select which groups this option should open.</string>
     <string name="modifier_trigger_checkbox_line">%1$s  %2$s</string>
     <string name="modifier_option_remove_style_checkbox">Remove-style (no charge; shows as “No …” on cart and receipts)</string>
 

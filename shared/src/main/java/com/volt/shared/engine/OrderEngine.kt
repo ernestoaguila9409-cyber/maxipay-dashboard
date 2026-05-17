@@ -1,0 +1,396 @@
+package com.volt.shared.engine
+
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.QuerySnapshot
+import com.google.firebase.firestore.SetOptions
+import com.volt.shared.MerchantFirestore
+import com.volt.shared.data.OrderLineKdsStatus
+import com.volt.shared.data.OrderModifier
+import com.volt.shared.helpers.TableFirestoreHelper
+import java.util.Date
+import java.util.Locale
+
+class OrderEngine(private val db: FirebaseFirestore) {
+
+    private var pendingWrites = 0
+    private val flushCallbacks = mutableListOf<() -> Unit>()
+
+    data class LineItemInput(
+        val itemId: String,
+        val name: String,
+        val quantity: Int,
+        val basePrice: Double,
+        val modifiers: List<OrderModifier>,
+        val guestNumber: Int = 0,
+        val taxMode: String = "INHERIT",
+        val taxIds: List<String> = emptyList(),
+        val printerLabel: String? = null,
+        val imageUrl: String? = null,
+        val courseId: String? = null,
+    )
+
+    fun ensureOrder(
+        currentOrderId: String?,
+        employeeName: String,
+        orderType: String = "",
+        tableId: String? = null,
+        tableLayoutId: String? = null,
+        joinedTableIds: List<String>? = null,
+        tableName: String? = null,
+        sectionId: String? = null,
+        sectionName: String? = null,
+        guestCount: Int? = null,
+        guestNames: List<String>? = null,
+        seatName: String? = null,
+        area: String? = null,
+        customerId: String? = null,
+        customerName: String? = null,
+        customerPhone: String? = null,
+        customerEmail: String? = null,
+        onSuccess: (orderId: String) -> Unit,
+        onFailure: (Exception) -> Unit,
+    ) {
+        if (!currentOrderId.isNullOrBlank()) {
+            onSuccess(currentOrderId)
+            return
+        }
+
+        com.volt.shared.helpers.OrderNumberGenerator.nextOrderNumber(
+            onSuccess = { orderNumber ->
+                val orderMap = hashMapOf<String, Any>(
+                    "orderNumber" to orderNumber,
+                    "employeeName" to employeeName,
+                    "status" to "OPEN",
+                    "createdAt" to Date(),
+                    "updatedAt" to Date(),
+                    "totalInCents" to 0L,
+                    "totalPaidInCents" to 0L,
+                    "remainingInCents" to 0L,
+                    "orderType" to orderType,
+                    "itemsCount" to 0L,
+                )
+
+                if (!tableId.isNullOrBlank()) orderMap["tableId"] = tableId
+                if (!tableLayoutId.isNullOrBlank()) orderMap["tableLayoutId"] = tableLayoutId
+                if (!joinedTableIds.isNullOrEmpty()) orderMap["joinedTableIds"] = joinedTableIds
+                if (!tableName.isNullOrBlank()) orderMap["tableName"] = tableName
+                if (!sectionId.isNullOrBlank()) orderMap["sectionId"] = sectionId
+                if (!sectionName.isNullOrBlank()) orderMap["sectionName"] = sectionName
+                if (guestCount != null && guestCount > 0) orderMap["guestCount"] = guestCount
+                if (!guestNames.isNullOrEmpty()) orderMap["guestNames"] = guestNames
+                if (!seatName.isNullOrBlank()) orderMap["seatName"] = seatName
+                if (!area.isNullOrBlank()) orderMap["area"] = area
+                if (!customerId.isNullOrBlank()) orderMap["customerId"] = customerId
+                if (!customerName.isNullOrBlank()) orderMap["customerName"] = customerName
+                if (!customerPhone.isNullOrBlank()) orderMap["customerPhone"] = customerPhone
+                if (!customerEmail.isNullOrBlank()) orderMap["customerEmail"] = customerEmail
+
+                MerchantFirestore.col("Orders")
+                    .add(orderMap)
+                    .addOnSuccessListener { doc ->
+                        if (orderType == "DINE_IN" && !tableId.isNullOrBlank()) {
+                            val joined = joinedTableIds?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct()
+                            if (!joined.isNullOrEmpty() && joined.size > 1) {
+                                TableFirestoreHelper.markDineInJoinedTablesOccupied(db, joined, tableLayoutId, doc.id)
+                            } else {
+                                TableFirestoreHelper.markDineInTableOccupied(db, tableId, tableLayoutId, doc.id)
+                            }
+                        }
+                        onSuccess(doc.id)
+                    }
+                    .addOnFailureListener { e -> onFailure(e) }
+            },
+            onFailure = { e -> onFailure(e) },
+        )
+    }
+
+    fun updateOrderCustomer(
+        orderId: String,
+        customerId: String? = null,
+        customerName: String,
+        customerPhone: String = "",
+        customerEmail: String = "",
+        onSuccess: () -> Unit,
+        onFailure: (Exception) -> Unit,
+    ) {
+        val updates = hashMapOf<String, Any>(
+            "customerName" to customerName,
+            "customerPhone" to customerPhone,
+            "customerEmail" to customerEmail,
+            "updatedAt" to Date(),
+        )
+        if (!customerId.isNullOrBlank()) updates["customerId"] = customerId
+        MerchantFirestore.col("Orders").document(orderId)
+            .update(updates)
+            .addOnSuccessListener { onSuccess() }
+            .addOnFailureListener { e -> onFailure(e) }
+    }
+
+    private fun flattenModifiers(mods: List<OrderModifier>): List<OrderModifier> {
+        return mods.flatMap { listOf(it) + flattenModifiers(it.children) }
+    }
+
+    private fun serializeModifier(mod: OrderModifier): HashMap<String, Any> {
+        val map = hashMapOf<String, Any>(
+            "name" to mod.name,
+            "action" to mod.action,
+            "price" to mod.price,
+        )
+        if (mod.groupId.isNotEmpty()) map["groupId"] = mod.groupId
+        if (mod.groupName.isNotEmpty()) map["groupName"] = mod.groupName
+        if (mod.children.isNotEmpty()) {
+            map["children"] = mod.children.map { serializeModifier(it) }
+        }
+        return map
+    }
+
+    fun upsertLineItem(
+        orderId: String,
+        lineKey: String,
+        input: LineItemInput,
+        isNewLine: Boolean = false,
+        onSuccess: () -> Unit,
+        onFailure: (Exception) -> Unit,
+    ) {
+        val allModifiers = flattenModifiers(input.modifiers)
+        val modifiersTotalInCents = allModifiers.filter { it.action == "ADD" }.sumOf { (it.price * 100).toLong() }
+        val basePriceInCents = (input.basePrice * 100).toLong()
+        val unitPriceInCents = basePriceInCents + modifiersTotalInCents
+        val lineTotalInCents = unitPriceInCents * input.quantity
+        val modifierMaps = input.modifiers.map { mod -> serializeModifier(mod) }
+
+        val itemMap = hashMapOf<String, Any>(
+            "itemId" to input.itemId,
+            "name" to input.name,
+            "quantity" to input.quantity,
+            "basePriceInCents" to basePriceInCents,
+            "modifiersTotalInCents" to modifiersTotalInCents,
+            "unitPriceInCents" to unitPriceInCents,
+            "lineTotalInCents" to lineTotalInCents,
+            "modifiers" to modifierMaps,
+            "taxMode" to input.taxMode,
+            "updatedAt" to Date(),
+        )
+        if (input.taxIds.isNotEmpty()) itemMap["taxIds"] = input.taxIds
+        if (input.guestNumber > 0) itemMap["guestNumber"] = input.guestNumber
+        val pl = input.printerLabel?.trim()
+        if (!pl.isNullOrEmpty()) itemMap["printerLabel"] = pl
+        val img = input.imageUrl?.trim()
+        if (!img.isNullOrEmpty()) itemMap["imageUrl"] = img
+        val cid = input.courseId?.trim()
+        if (!cid.isNullOrEmpty()) itemMap["courseId"] = cid
+
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
+        val lineRef = orderRef.collection("items").document(lineKey)
+
+        if (!isNewLine) {
+            pendingWrites++
+            fun finishOk() { pendingWrites--; drainFlushCallbacks(); onSuccess() }
+            fun finishErr(e: Exception) { pendingWrites--; drainFlushCallbacks(); onFailure(e) }
+            lineRef.get()
+                .addOnSuccessListener { snap ->
+                    val merged = LinkedHashMap(itemMap)
+                    if (snap.exists()) {
+                        val oldQty = snap.getLong("quantity") ?: 0L
+                        val kds = snap.getString(OrderLineKdsStatus.FIELD)?.trim()?.uppercase(Locale.US).orEmpty()
+                        if (input.quantity > oldQty && kds == OrderLineKdsStatus.READY) {
+                            val existingCovered = snap.getLong(OrderLineKdsStatus.FIELD_READY_COVERS_QTY)
+                            if (existingCovered == null) {
+                                merged[OrderLineKdsStatus.FIELD_READY_COVERS_QTY] = oldQty
+                            }
+                        }
+                    }
+                    lineRef.set(merged, SetOptions.merge())
+                        .addOnSuccessListener {
+                            orderRef.update("updatedAt", Date())
+                                .addOnSuccessListener { finishOk() }
+                                .addOnFailureListener { e -> finishErr(e) }
+                        }
+                        .addOnFailureListener { e -> finishErr(e) }
+                }
+                .addOnFailureListener { e -> finishErr(e) }
+            return
+        }
+
+        pendingWrites++
+        db.runTransaction { tx ->
+            val snap = tx.get(orderRef)
+            val count = snap.getLong("itemsCount") ?: 0L
+            val orderUpdates = hashMapOf<String, Any>(
+                "itemsCount" to FieldValue.increment(1),
+                "updatedAt" to Date(),
+            )
+            if (count == 0L) {
+                orderUpdates["createdAt"] = Date()
+                orderUpdates["kitchenStartedAt"] = FieldValue.delete()
+                orderUpdates["kitchenStatus"] = FieldValue.delete()
+                orderUpdates["lastKitchenSentAt"] = FieldValue.delete()
+            }
+            tx.update(orderRef, orderUpdates)
+            val newLinePayload = LinkedHashMap(itemMap).apply {
+                put("createdAt", Date())
+            }
+            tx.set(lineRef, newLinePayload, SetOptions.merge())
+            null
+        }
+            .addOnSuccessListener { pendingWrites--; drainFlushCallbacks(); onSuccess() }
+            .addOnFailureListener { e -> pendingWrites--; drainFlushCallbacks(); onFailure(e) }
+    }
+
+    fun deleteLineItem(
+        orderId: String, lineKey: String,
+        onSuccess: () -> Unit, onFailure: (Exception) -> Unit,
+    ) {
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
+        orderRef.update("itemsCount", FieldValue.increment(-1))
+        pendingWrites++
+        orderRef.collection("items").document(lineKey).delete()
+            .addOnSuccessListener { pendingWrites--; drainFlushCallbacks(); onSuccess() }
+            .addOnFailureListener { e -> pendingWrites--; drainFlushCallbacks(); onFailure(e) }
+    }
+
+    fun waitForPendingWrites(callback: () -> Unit) {
+        if (pendingWrites <= 0) { pendingWrites = 0; callback() }
+        else flushCallbacks.add(callback)
+    }
+
+    private fun drainFlushCallbacks() {
+        if (pendingWrites <= 0) {
+            pendingWrites = 0
+            val callbacks = flushCallbacks.toList()
+            flushCallbacks.clear()
+            callbacks.forEach { it() }
+        }
+    }
+
+    fun recomputeOrderTotals(
+        orderId: String,
+        onSuccess: () -> Unit,
+        onFailure: (Exception) -> Unit,
+    ) {
+        val orderRef = MerchantFirestore.col("Orders").document(orderId)
+        var itemsResult: QuerySnapshot? = null
+        var taxesResult: QuerySnapshot? = null
+        var parallelError: Exception? = null
+        var completedCount = 0
+        val lock = Any()
+
+        fun onParallelDone() {
+            val items: QuerySnapshot; val taxes: QuerySnapshot
+            synchronized(lock) {
+                completedCount++; if (completedCount < 2) return
+                if (parallelError != null) { onFailure(parallelError!!); return }
+                items = itemsResult!!; taxes = taxesResult!!
+            }
+            continueRecomputeWithSnapshots(orderRef, items, taxes, onSuccess, onFailure)
+        }
+
+        orderRef.collection("items").get()
+            .addOnSuccessListener { snap -> synchronized(lock) { itemsResult = snap }; onParallelDone() }
+            .addOnFailureListener { e -> synchronized(lock) { parallelError = parallelError ?: e }; onParallelDone() }
+
+        MerchantFirestore.col("Taxes").get()
+            .addOnSuccessListener { snap -> synchronized(lock) { taxesResult = snap }; onParallelDone() }
+            .addOnFailureListener { e -> synchronized(lock) { parallelError = parallelError ?: e }; onParallelDone() }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun continueRecomputeWithSnapshots(
+        orderRef: com.google.firebase.firestore.DocumentReference,
+        itemsSnap: QuerySnapshot, taxesSnap: QuerySnapshot,
+        onSuccess: () -> Unit, onFailure: (Exception) -> Unit,
+    ) {
+        data class LineInfo(val lineKey: String, val lineTotalInCents: Long, val taxMode: String, val taxIds: List<String>)
+        var subtotalInCents = 0L
+        val lineInfos = mutableListOf<LineInfo>()
+
+        for (doc in itemsSnap.documents) {
+            val basePriceInCents = doc.getLong("basePriceInCents") ?: 0L
+            val modifiersTotalInCents = doc.getLong("modifiersTotalInCents") ?: 0L
+            val qty = (doc.getLong("quantity") ?: doc.getLong("qty") ?: 1L)
+            val recomputedLineTotal = (basePriceInCents + modifiersTotalInCents) * qty
+            val lineTotal = if (recomputedLineTotal > 0) recomputedLineTotal else doc.getLong("lineTotalInCents") ?: 0L
+            subtotalInCents += lineTotal
+            val mode = doc.getString("taxMode") ?: "INHERIT"
+            val ids = (doc.get("taxIds") as? List<String>) ?: emptyList()
+            lineInfos.add(LineInfo(doc.id, lineTotal, mode, ids))
+        }
+
+        orderRef.get().addOnSuccessListener { orderDoc ->
+            val discountInCents = orderDoc.getLong("discountInCents") ?: 0L
+            val discountedSubtotalInCents = (subtotalInCents - discountInCents).coerceAtLeast(0L)
+            val orderSource = orderDoc.getString("orderSource") ?: ""
+            var newTotalInCents = discountedSubtotalInCents
+            val taxBreakdown = mutableListOf<Map<String, Any>>()
+            val perItemTaxCents = mutableMapOf<String, Long>()
+            val perItemTaxBreakdown = mutableMapOf<String, MutableList<Map<String, Any>>>()
+            lineInfos.forEach { perItemTaxCents[it.lineKey] = 0L; perItemTaxBreakdown[it.lineKey] = mutableListOf() }
+
+            for (taxDoc in taxesSnap.documents) {
+                val taxId = taxDoc.id
+                val name = taxDoc.getString("name") ?: continue
+                val type = taxDoc.getString("type") ?: continue
+                val amount = taxDoc.getDouble("amount") ?: taxDoc.getLong("amount")?.toDouble() ?: continue
+                val enabledApp = taxDoc.getBoolean("enabled") ?: true
+                val enabledOnline = taxDoc.getBoolean("enabledOnline") ?: false
+                val taxActiveForOrder = if (orderSource == "online_ordering") enabledApp || enabledOnline else enabledApp
+                var taxableBaseCents = 0L
+                val taxableItems = mutableListOf<Pair<String, Long>>()
+                for (li in lineInfos) {
+                    val effectiveLineCents = if (subtotalInCents > 0) (li.lineTotalInCents.toDouble() / subtotalInCents * discountedSubtotalInCents).toLong() else 0L
+                    val isTaxable = if (li.taxMode == "FORCE_APPLY") li.taxIds.contains(taxId) else taxActiveForOrder
+                    if (isTaxable) { taxableBaseCents += effectiveLineCents; taxableItems.add(li.lineKey to effectiveLineCents) }
+                }
+                if (taxableBaseCents <= 0L) continue
+                val taxCents = if (type == "PERCENTAGE") ((taxableBaseCents / 100.0) * amount / 100.0 * 100).toLong() else (amount * 100).toLong()
+                newTotalInCents += taxCents
+                taxBreakdown.add(mapOf("name" to name, "rate" to amount, "taxType" to type, "amountInCents" to taxCents))
+                if (taxCents > 0 && taxableBaseCents > 0 && taxableItems.isNotEmpty()) {
+                    var distributed = 0L
+                    for ((idx, pair) in taxableItems.withIndex()) {
+                        val (itemKey, effectiveCents) = pair
+                        val share = if (idx == taxableItems.size - 1) taxCents - distributed else Math.round(taxCents.toDouble() * effectiveCents / taxableBaseCents)
+                        perItemTaxCents[itemKey] = (perItemTaxCents[itemKey] ?: 0L) + share
+                        perItemTaxBreakdown.getOrPut(itemKey) { mutableListOf() }.add(mapOf("name" to name, "rate" to amount, "amountInCents" to share))
+                        distributed += share
+                    }
+                }
+            }
+
+            db.runTransaction { trx ->
+                val orderSnap = trx.get(orderRef)
+                val totalPaidInCents = orderSnap.getLong("totalPaidInCents") ?: 0L
+                val priorTotalInCents = orderSnap.getLong("totalInCents") ?: 0L
+                val priorStatus = orderSnap.getString("status") ?: "OPEN"
+                val orderSrc = orderSnap.getString("orderSource") ?: ""
+                val onlinePaidTaxCatchUp = orderSrc == "online_ordering" && priorStatus == "CLOSED" && totalPaidInCents > 0L && newTotalInCents > totalPaidInCents && totalPaidInCents >= priorTotalInCents
+                val effectivePaidInCents = if (onlinePaidTaxCatchUp) newTotalInCents else totalPaidInCents
+                val remainingInCents = (newTotalInCents - effectivePaidInCents).coerceAtLeast(0L)
+                val newStatus = when {
+                    remainingInCents > 0L -> "OPEN"
+                    effectivePaidInCents > 0L -> "CLOSED"
+                    else -> orderSnap.getString("status") ?: "OPEN"
+                }
+                val updates = mutableMapOf<String, Any>("totalInCents" to newTotalInCents, "remainingInCents" to remainingInCents, "status" to newStatus, "updatedAt" to Date())
+                if (onlinePaidTaxCatchUp) updates["totalPaidInCents"] = effectivePaidInCents
+                if (taxBreakdown.isNotEmpty()) updates["taxBreakdown"] = taxBreakdown
+                trx.update(orderRef, updates)
+            }
+                .addOnSuccessListener {
+                    val itemBatch = db.batch()
+                    for (li in lineInfos) {
+                        val taxAmount = perItemTaxCents[li.lineKey] ?: 0L
+                        val effectiveLineCents = if (subtotalInCents > 0) Math.round(li.lineTotalInCents.toDouble() / subtotalInCents * discountedSubtotalInCents) else 0L
+                        val ref = orderRef.collection("items").document(li.lineKey)
+                        val itemTaxBreakdown = perItemTaxBreakdown[li.lineKey] ?: emptyList<Map<String, Any>>()
+                        itemBatch.update(ref, mapOf("lineTaxInCents" to taxAmount, "lineTotalWithTaxInCents" to effectiveLineCents + taxAmount, "taxBreakdown" to itemTaxBreakdown))
+                    }
+                    if (lineInfos.isNotEmpty()) {
+                        itemBatch.commit().addOnSuccessListener { onSuccess() }.addOnFailureListener { onSuccess() }
+                    } else onSuccess()
+                }
+                .addOnFailureListener { e -> onFailure(e) }
+        }.addOnFailureListener { e -> onFailure(e) }
+    }
+}

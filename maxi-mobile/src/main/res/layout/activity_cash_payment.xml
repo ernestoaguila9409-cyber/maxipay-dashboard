@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#F5F5F5">
+
+    <!-- Scroll so "Remaining/Change" never overflows onto EXACT; fillViewport centers when content is short -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:clipToPadding="true"
+        android:scrollbars="none"
+        android:overScrollMode="ifContentScrolls">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="20dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Amount Due"
+                android:textSize="13sp"
+                android:textColor="#757575"
+                android:gravity="center" />
+
+            <TextView
+                android:id="@+id/txtAmountDue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textSize="36sp"
+                android:textStyle="bold"
+                android:textColor="#212121"
+                android:gravity="center" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
+                android:text="Cash Received"
+                android:textSize="14sp"
+                android:textColor="#5D4E7B"
+                android:textStyle="bold"
+                android:gravity="center" />
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_cash_input_field"
+                android:paddingVertical="18dp"
+                android:paddingHorizontal="16dp">
+
+                <TextView
+                    android:id="@+id/txtCashReceivedInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="44dp"
+                    android:gravity="center"
+                    android:textSize="32sp"
+                    android:textStyle="bold"
+                    android:textColor="#212121"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:importantForAccessibility="yes" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/txtChangeOrRemaining"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:paddingBottom="4dp"
+                android:minHeight="48dp"
+                android:gravity="center"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </ScrollView>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnExactCash"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="2dp"
+        android:text="EXACT"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:textAllCaps="true"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        app:cornerRadius="12dp"
+        app:strokeColor="#6A4FB3"
+        app:strokeWidth="1dp"
+        android:textColor="#6A4FB3" />
+
+    <LinearLayout
+        android:id="@+id/keyboardContainerCash"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="10dp"
+        android:paddingBottom="4dp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnComplete"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="2dp"
+        android:text="Complete Payment"
+        android:textSize="16sp"
+        android:textAllCaps="false"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        app:cornerRadius="12dp"
+        app:backgroundTint="@color/brand_primary"
+        android:textColor="@android:color/white"
+        android:enabled="false" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnCancelCash"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:layout_marginHorizontal="12dp"
+        android:layout_marginBottom="0dp"
+        android:text="Cancel"
+        android:textSize="14sp"
+        android:textAllCaps="false"
+        android:textColor="#C62828"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        app:cornerRadius="12dp"
+        app:rippleColor="#33C62828" />
+
+</LinearLayout>

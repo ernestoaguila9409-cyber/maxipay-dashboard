@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#F5F5F5"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Signature Settings"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:paddingBottom="8dp"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Choose how customer signatures are captured after a sale."
+        android:textSize="14sp"
+        android:textColor="@android:color/darker_gray"
+        android:paddingBottom="24dp"/>
+
+    <RadioGroup
+        android:id="@+id/rgSignatureMode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <RadioButton
+            android:id="@+id/rbSignatureNone"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="None (disabled)"
+            android:textSize="16sp"
+            android:padding="12dp"
+            android:background="@android:color/white"
+            android:layout_marginBottom="8dp"/>
+
+        <RadioButton
+            android:id="@+id/rbSignatureReceipt"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Signature on the receipt"
+            android:textSize="16sp"
+            android:padding="12dp"
+            android:background="@android:color/white"
+            android:layout_marginBottom="8dp"/>
+
+        <RadioButton
+            android:id="@+id/rbSignatureCustomerDisplay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Signature in the customer display"
+            android:textSize="16sp"
+            android:padding="12dp"
+            android:background="@android:color/white"
+            android:layout_marginBottom="8dp"/>
+
+    </RadioGroup>
+
+    <TextView
+        android:id="@+id/txtSignatureDescription"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="@android:color/darker_gray"
+        android:paddingTop="16dp"/>
+
+</LinearLayout>

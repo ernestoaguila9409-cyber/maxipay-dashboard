@@ -331,24 +331,9 @@ class GlobalModifierActivity : AppCompatActivity() {
         )
 
         val dialogRoot = ModifierOptionKeypadHost.wrap(this, form)
-        val removeStyleCb = CheckBox(this).apply {
-            text = getString(R.string.modifier_option_remove_style_checkbox)
-            visibility = if (group.groupType == "REMOVE") View.GONE else View.VISIBLE
-        }
-        val shell = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            if (group.groupType != "REMOVE") addView(removeStyleCb)
-            addView(
-                dialogRoot,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-        }
         val dialog = MaterialAlertDialogBuilder(this, R.style.ThemeOverlay_MyApplication_MaterialAlertDialog)
             .setTitle("Add Option")
-            .setView(shell)
+            .setView(dialogRoot)
             .setPositiveButton("Save", null)
             .setNegativeButton("Cancel", null)
             .create()
@@ -372,7 +357,6 @@ class GlobalModifierActivity : AppCompatActivity() {
                 val optId = "opt_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(5)}"
                 val optAction = when {
                     group.groupType == "REMOVE" -> "REMOVE"
-                    removeStyleCb.isChecked -> "REMOVE"
                     else -> "ADD"
                 }
                 val option = hashMapOf<String, Any>(
