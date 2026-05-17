@@ -279,15 +279,7 @@ function CategoryTabs({ categories, active, onSelect }: { categories: MenuCatego
 /**
  * Horizontal Popular strip with visible scrollbar (Android-style scroll) and optional arrows.
  */
-function PopularRow({
-  items,
-  onItemAction,
-  viewOnly,
-}: {
-  items: MenuItem[];
-  onItemAction: (it: MenuItem) => void;
-  viewOnly?: boolean;
-}) {
+function PopularRow({ items, onItemAction }: { items: MenuItem[]; onItemAction: (it: MenuItem) => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollBy = (delta: number) => scrollRef.current?.scrollBy({ left: delta, behavior: "smooth" });
 
@@ -314,14 +306,14 @@ function PopularRow({
         className="popular-strip-scroll flex gap-3 overflow-x-auto pb-2 pt-0.5 px-1 sm:px-10 -mx-1"
       >
         {items.map((it) => (
-          <PopularCard key={it.id} item={it} onAction={() => onItemAction(it)} viewOnly={viewOnly} />
+          <PopularCard key={it.id} item={it} onAction={() => onItemAction(it)} />
         ))}
       </div>
     </div>
   );
 }
 
-function PopularCard({ item, onAction, viewOnly }: { item: MenuItem; onAction: () => void; viewOnly?: boolean }) {
+function PopularCard({ item, onAction }: { item: MenuItem; onAction: () => void }) {
   return (
     <div className="shrink-0 w-[180px] bg-white rounded-2xl overflow-hidden shadow-sm border border-neutral-100 hover:shadow-md transition-shadow">
       <div className="relative w-full h-[140px] bg-neutral-100">
@@ -336,15 +328,13 @@ function PopularCard({ item, onAction, viewOnly }: { item: MenuItem; onAction: (
         <p className="text-sm font-semibold text-neutral-900 line-clamp-1">{item.name}</p>
         <div className="flex items-center justify-between mt-2">
           <span className={`text-sm font-bold ${O.primaryText}`}>{fmt(item.unitPriceCents)}</span>
-          {!viewOnly ? (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onAction(); }}
-              className={`w-8 h-8 rounded-full ${O.primary} ${O.primaryHover} text-white grid place-items-center shadow-sm active:scale-95 transition-transform`}
-            >
-              <IconPlus size={16} />
-            </button>
-          ) : null}
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onAction(); }}
+            className={`w-8 h-8 rounded-full ${O.primary} ${O.primaryHover} text-white grid place-items-center shadow-sm active:scale-95 transition-transform`}
+          >
+            <IconPlus size={16} />
+          </button>
         </div>
       </div>
     </div>
@@ -356,11 +346,10 @@ function PopularCard({ item, onAction, viewOnly }: { item: MenuItem; onAction: (
    ═══════════════════════════════════════════ */
 
 function MenuItemCard({
-  item, qtySimple, hasModifiers, onAddSimple, onOpenCustomize, onDecSimple, viewOnly,
+  item, qtySimple, hasModifiers, onAddSimple, onOpenCustomize, onDecSimple,
 }: {
   item: MenuItem; qtySimple: number; hasModifiers: boolean;
   onAddSimple: () => void; onOpenCustomize: () => void; onDecSimple: () => void;
-  viewOnly?: boolean;
 }) {
   const hasImage = item.imageUrl.trim().length > 0;
 
@@ -375,7 +364,7 @@ function MenuItemCard({
         </div>
         <div className="flex items-center gap-2 mt-2">
           <span className={`text-sm font-bold ${O.primaryText}`}>{fmt(item.unitPriceCents)}</span>
-          {viewOnly ? null : hasModifiers ? (
+          {hasModifiers ? (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onOpenCustomize(); }}
@@ -420,14 +409,17 @@ function MenuItemCard({
    ═══════════════════════════════════════════ */
 
 function CartSidebar({
-  lines, subtotal, taxBreakdown, grandTotal, groupMap, onAdd, onDec, onCheckout,
+  lines, subtotal, taxBreakdown, grandTotal, groupMap, onAdd, onDec, onCheckout, previewOnly,
 }: {
   lines: CartLine[];
   subtotal: number;
   taxBreakdown: OnlineOrderTaxBreakdownEntry[];
   grandTotal: number;
   groupMap: Map<string, ModifierGroup>;
-  onAdd: (lineId: string) => void; onDec: (lineId: string) => void; onCheckout: () => void;
+  onAdd: (lineId: string) => void;
+  onDec: (lineId: string) => void;
+  onCheckout: () => void;
+  previewOnly?: boolean;
 }) {
   const itemCount = lines.reduce((s, l) => s + l.quantity, 0);
 
@@ -440,7 +432,9 @@ function CartSidebar({
               <IconBag size={17} />
             </div>
             <div>
-              <h2 className="font-bold text-base text-neutral-900">Your Cart</h2>
+              <h2 className="font-bold text-base text-neutral-900">
+                {previewOnly ? "Your order so far" : "Your Cart"}
+              </h2>
               {itemCount > 0 && <p className="text-xs text-neutral-500">{itemCount} item{itemCount !== 1 ? "s" : ""}</p>}
             </div>
           </div>
@@ -451,8 +445,12 @@ function CartSidebar({
             <div className={`w-14 h-14 rounded-full ${O.primaryBg10} flex items-center justify-center mb-3`}>
               <IconBag size={24} />
             </div>
-            <p className="text-sm font-medium text-neutral-500">Your cart is empty</p>
-            <p className="text-xs text-neutral-400 mt-1">Add items to get started</p>
+            <p className="text-sm font-medium text-neutral-500">
+              {previewOnly ? "No items selected yet" : "Your cart is empty"}
+            </p>
+            <p className="text-xs text-neutral-400 mt-1">
+              {previewOnly ? "Tap + on menu items to build your order" : "Add items to get started"}
+            </p>
           </div>
         ) : (
           <>
@@ -499,13 +497,19 @@ function CartSidebar({
                 <span>Total</span>
                 <span className="tabular-nums">{fmt(grandTotal)}</span>
               </div>
-              <button
-                type="button"
-                onClick={onCheckout}
-                className={`w-full h-12 mt-2 rounded-xl ${O.primary} ${O.primaryHover} text-white font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}
-              >
-                Checkout <IconArrowRight size={16} />
-              </button>
+              {previewOnly ? (
+                <p className="text-xs text-neutral-500 text-center pt-2 leading-relaxed">
+                  For reference only — show your server when ordering. Payment is not available on this menu.
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onCheckout}
+                  className={`w-full h-12 mt-2 rounded-xl ${O.primary} ${O.primaryHover} text-white font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}
+                >
+                  Checkout <IconArrowRight size={16} />
+                </button>
+              )}
             </div>
           </>
         )}
@@ -518,7 +522,17 @@ function CartSidebar({
    MobileCartBar (sticky bottom on mobile)
    ═══════════════════════════════════════════ */
 
-function MobileCartBar({ count, grandTotal, onOpen }: { count: number; grandTotal: number; onOpen: () => void }) {
+function MobileCartBar({
+  count,
+  grandTotal,
+  onOpen,
+  previewOnly,
+}: {
+  count: number;
+  grandTotal: number;
+  onOpen: () => void;
+  previewOnly?: boolean;
+}) {
   if (count === 0) return null;
   return (
     <div className="fixed bottom-0 inset-x-0 z-30 p-3 lg:hidden">
@@ -529,7 +543,7 @@ function MobileCartBar({ count, grandTotal, onOpen }: { count: number; grandTota
       >
         <span className="flex items-center gap-2">
           <span className="bg-white/20 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center tabular-nums">{count}</span>
-          <span className="font-semibold text-[15px]">View cart</span>
+          <span className="font-semibold text-[15px]">{previewOnly ? "View order" : "View cart"}</span>
         </span>
         <span className="font-semibold text-[15px] tabular-nums">{fmt(grandTotal)}</span>
       </button>
@@ -542,7 +556,17 @@ function MobileCartBar({ count, grandTotal, onOpen }: { count: number; grandTota
    ═══════════════════════════════════════════ */
 
 function MobileCartSheet({
-  open, lines, subtotal, taxBreakdown, grandTotal, groupMap, onClose, onAdd, onDec, onCheckout,
+  open,
+  lines,
+  subtotal,
+  taxBreakdown,
+  grandTotal,
+  groupMap,
+  onClose,
+  onAdd,
+  onDec,
+  onCheckout,
+  previewOnly,
 }: {
   open: boolean;
   lines: CartLine[];
@@ -550,7 +574,11 @@ function MobileCartSheet({
   taxBreakdown: OnlineOrderTaxBreakdownEntry[];
   grandTotal: number;
   groupMap: Map<string, ModifierGroup>;
-  onClose: () => void; onAdd: (lineId: string) => void; onDec: (lineId: string) => void; onCheckout: () => void;
+  onClose: () => void;
+  onAdd: (lineId: string) => void;
+  onDec: (lineId: string) => void;
+  onCheckout: () => void;
+  previewOnly?: boolean;
 }) {
   if (!open) return null;
   return (
@@ -559,7 +587,7 @@ function MobileCartSheet({
       <div className="absolute bottom-0 inset-x-0 bg-white rounded-t-3xl max-h-[85vh] flex flex-col animate-slide-up">
         <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 rounded-full bg-neutral-300" /></div>
         <div className="flex items-center justify-between px-5 pb-3 border-b border-neutral-100">
-          <h2 className="font-bold text-lg">Your cart</h2>
+          <h2 className="font-bold text-lg">{previewOnly ? "Your order so far" : "Your cart"}</h2>
           <button type="button" onClick={onClose} className="p-1.5 rounded-full hover:bg-neutral-100 transition-colors"><IconX size={20} /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
@@ -600,13 +628,19 @@ function MobileCartSheet({
           <div className="flex justify-between text-sm font-bold text-neutral-900 pt-1 border-t border-neutral-100">
             <span>Total</span><span className="tabular-nums">{fmt(grandTotal)}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => { onClose(); onCheckout(); }}
-            className={`w-full h-14 rounded-2xl ${O.primary} ${O.primaryHover} text-white font-semibold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}
-          >
-            Checkout <IconArrowRight size={16} />
-          </button>
+          {previewOnly ? (
+            <p className="text-xs text-neutral-500 text-center leading-relaxed">
+              For reference only — show your server when ordering. Payment is not available on this menu.
+            </p>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { onClose(); onCheckout(); }}
+              className={`w-full h-14 rounded-2xl ${O.primary} ${O.primaryHover} text-white font-semibold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}
+            >
+              Checkout <IconArrowRight size={16} />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1411,7 +1445,6 @@ function PublicOrderPageInner() {
       onAddSimple={() => addSimpleToCart(it.id)}
       onOpenCustomize={() => setCustomizeItemId(it.id)}
       onDecSimple={() => { const line = cartRows.find((r) => r.itemId === it.id && r.selections.length === 0); if (line) decLine(line.lineId); }}
-      viewOnly={viewOnly}
     />
   );
 
@@ -1457,26 +1490,23 @@ function PublicOrderPageInner() {
               </div>
             )}
 
+            <button
+              type="button"
+              onClick={() => setMobileCartOpen(true)}
+              className={`lg:hidden flex items-center gap-2 h-10 px-4 rounded-full bg-white border border-neutral-200 text-neutral-900 text-sm font-semibold shrink-0 ${cartCount === 0 ? "opacity-50" : ""}`}
+            >
+              {viewOnly ? "Order" : "Cart"}
+              <span className={`w-5 h-5 rounded-full ${O.primary} text-white text-[11px] font-bold grid place-items-center`}>{cartCount}</span>
+            </button>
             {!viewOnly ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => cartCount > 0 ? setMobileCartOpen(true) : undefined}
-                  className="lg:hidden flex items-center gap-2 h-10 px-4 rounded-full bg-white border border-neutral-200 text-neutral-900 text-sm font-semibold shrink-0"
-                  style={{ visibility: cartCount > 0 ? "visible" : "hidden" }}
-                >
-                  Cart
-                  <span className={`w-5 h-5 rounded-full ${O.primary} text-white text-[11px] font-bold grid place-items-center`}>{cartCount}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSubmitError(null); setCheckoutOpen(true); }}
-                  className={`hidden lg:flex items-center gap-2 h-10 px-5 rounded-full bg-white border border-neutral-200 text-neutral-900 text-sm font-semibold shrink-0 ${cartCount === 0 ? "invisible" : ""}`}
-                >
-                  Cart
-                  <span className={`w-5 h-5 rounded-full ${O.primary} text-white text-[11px] font-bold grid place-items-center`}>{cartCount}</span>
-                </button>
-              </>
+              <button
+                type="button"
+                onClick={() => { setSubmitError(null); setCheckoutOpen(true); }}
+                className={`hidden lg:flex items-center gap-2 h-10 px-5 rounded-full bg-white border border-neutral-200 text-neutral-900 text-sm font-semibold shrink-0 ${cartCount === 0 ? "invisible" : ""}`}
+              >
+                Cart
+                <span className={`w-5 h-5 rounded-full ${O.primary} text-white text-[11px] font-bold grid place-items-center`}>{cartCount}</span>
+              </button>
             ) : null}
           </div>
         </div>
@@ -1514,7 +1544,6 @@ function PublicOrderPageInner() {
                 </div>
                 <PopularRow
                   items={popularItems}
-                  viewOnly={viewOnly}
                   onItemAction={(it) => {
                     if (it.modifierGroupIds.length > 0) setCustomizeItemId(it.id);
                     else addSimpleToCart(it.id);
@@ -1558,22 +1587,21 @@ function PublicOrderPageInner() {
             )}
           </main>
 
-          {!viewOnly ? (
-            <aside className="hidden lg:block w-[340px] shrink-0">
-              <div className="sticky top-[120px]">
-                <CartSidebar
-                  lines={cartLines}
-                  subtotal={subtotalCents}
-                  taxBreakdown={orderTax.taxBreakdown}
-                  grandTotal={grandTotalCents}
-                  groupMap={groupMap}
-                  onAdd={incLine}
-                  onDec={decLine}
-                  onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}
-                />
-              </div>
-            </aside>
-          ) : null}
+          <aside className="hidden lg:block w-[340px] shrink-0">
+            <div className="sticky top-[120px]">
+              <CartSidebar
+                lines={cartLines}
+                subtotal={subtotalCents}
+                taxBreakdown={orderTax.taxBreakdown}
+                grandTotal={grandTotalCents}
+                groupMap={groupMap}
+                onAdd={incLine}
+                onDec={decLine}
+                onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}
+                previewOnly={viewOnly}
+              />
+            </div>
+          </aside>
         </div>
       </div>
 
@@ -1584,49 +1612,53 @@ function PublicOrderPageInner() {
 
       {/* ── Footer ── */}
       <footer className="border-t border-neutral-200/60 py-6">
-        <p className="text-center text-xs font-semibold tracking-widest text-neutral-400 uppercase">
+        <p className="text-center text-sm font-bold tracking-widest text-neutral-500 uppercase">
           Powered by Volt Merchant Solutions
         </p>
       </footer>
 
+      <MobileCartBar
+        count={cartCount}
+        grandTotal={grandTotalCents}
+        onOpen={() => setMobileCartOpen(true)}
+        previewOnly={viewOnly}
+      />
+      <MobileCartSheet
+        open={mobileCartOpen}
+        lines={cartLines}
+        subtotal={subtotalCents}
+        taxBreakdown={orderTax.taxBreakdown}
+        grandTotal={grandTotalCents}
+        groupMap={groupMap}
+        onClose={() => setMobileCartOpen(false)}
+        onAdd={incLine}
+        onDec={decLine}
+        onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}
+        previewOnly={viewOnly}
+      />
       {!viewOnly ? (
-        <>
-          <MobileCartBar count={cartCount} grandTotal={grandTotalCents} onOpen={() => setMobileCartOpen(true)} />
-          <MobileCartSheet
-            open={mobileCartOpen}
-            lines={cartLines}
-            subtotal={subtotalCents}
-            taxBreakdown={orderTax.taxBreakdown}
-            grandTotal={grandTotalCents}
-            groupMap={groupMap}
-            onClose={() => setMobileCartOpen(false)}
-            onAdd={incLine}
-            onDec={decLine}
-            onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}
-          />
-          <CheckoutModal
-            open={checkoutOpen}
-            cfg={cfg}
-            lines={cartLines}
-            subtotal={subtotalCents}
-            taxBreakdown={orderTax.taxBreakdown}
-            grandTotal={grandTotalCents}
-            groupMap={groupMap}
-            onClose={() => setCheckoutOpen(false)}
-            onSubmit={(d) => void submitOrder(d)}
-            submitting={submitting}
-            submitError={submitError}
-          />
-          <CustomizeSheet
-            open={customizeItemId != null && customizeItem != null && customizeItem.modifierGroupIds.length > 0}
-            item={customizeItem}
-            groupMap={groupMap}
-            onClose={() => setCustomizeItemId(null)}
-            onConfirm={(selections) => { if (customizeItemId) addCustomizedLine(customizeItemId, selections); setCustomizeItemId(null); }}
-          />
-          {cartCount > 0 && <div className="h-24 lg:hidden" />}
-        </>
+        <CheckoutModal
+          open={checkoutOpen}
+          cfg={cfg}
+          lines={cartLines}
+          subtotal={subtotalCents}
+          taxBreakdown={orderTax.taxBreakdown}
+          grandTotal={grandTotalCents}
+          groupMap={groupMap}
+          onClose={() => setCheckoutOpen(false)}
+          onSubmit={(d) => void submitOrder(d)}
+          submitting={submitting}
+          submitError={submitError}
+        />
       ) : null}
+      <CustomizeSheet
+        open={customizeItemId != null && customizeItem != null && customizeItem.modifierGroupIds.length > 0}
+        item={customizeItem}
+        groupMap={groupMap}
+        onClose={() => setCustomizeItemId(null)}
+        onConfirm={(selections) => { if (customizeItemId) addCustomizedLine(customizeItemId, selections); setCustomizeItemId(null); }}
+      />
+      {cartCount > 0 && <div className="h-24 lg:hidden" />}
 
       <style jsx global>{`
         .scrollbar-hide::-webkit-scrollbar { display: none; }
