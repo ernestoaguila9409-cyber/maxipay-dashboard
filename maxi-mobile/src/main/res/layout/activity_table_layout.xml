@@ -34,7 +34,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Drag tables to arrange your floor plan. Long-press to edit or delete."
+                android:text="Drag tables to move. Scroll sideways for wide layouts. Long-press for edit, rotate, or delete."
                 android:textSize="13sp"
                 android:textColor="#777777"
                 android:paddingStart="16dp"
@@ -63,15 +63,27 @@
 
         </LinearLayout>
 
-        <!-- Canvas area for draggable tables -->
-        <FrameLayout
-            android:id="@+id/tableCanvas"
+        <!-- Wide floor plans scroll horizontally on small screens -->
+        <HorizontalScrollView
+            android:id="@+id/tableCanvasScroll"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
+            android:fillViewport="true"
+            android:scrollbars="horizontal"
             android:background="#F0F0F0"
             android:clipChildren="false"
-            android:clipToPadding="false"/>
+            android:clipToPadding="false">
+
+            <FrameLayout
+                android:id="@+id/tableCanvas"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:background="#F0F0F0"
+                android:clipChildren="false"
+                android:clipToPadding="false"/>
+
+        </HorizontalScrollView>
 
     </LinearLayout>
 

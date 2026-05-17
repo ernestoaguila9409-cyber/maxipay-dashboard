@@ -34,7 +34,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Drag tables to arrange your floor plan. Long-press to edit or delete."
+                android:text="Drag tables to move. Long-press a table, choose Rotate, then use the arrows. Tap empty space when done."
                 android:textSize="13sp"
                 android:textColor="#777777"
                 android:paddingStart="16dp"

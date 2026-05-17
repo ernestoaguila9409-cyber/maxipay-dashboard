@@ -80,4 +80,30 @@
         android:padding="12dp"
         android:minHeight="48dp"/>
 
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Rotation (degrees)"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        android:paddingBottom="4dp"
+        android:layout_marginTop="16dp"/>
+
+    <TextView
+        android:id="@+id/txtRotationValue"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="0°"
+        android:textSize="13sp"
+        android:textColor="#616161"
+        android:paddingBottom="4dp"/>
+
+    <SeekBar
+        android:id="@+id/seekRotation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="359"
+        android:progress="0"/>
+
 </LinearLayout>

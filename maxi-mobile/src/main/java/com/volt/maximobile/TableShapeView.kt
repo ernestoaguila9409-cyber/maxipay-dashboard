@@ -5,7 +5,11 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.drawable.Drawable
 import android.view.View
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.DrawableCompat
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 
@@ -114,11 +118,11 @@ class TableShapeView(context: Context) : View(context) {
 
     private val dp = context.resources.displayMetrics.density
 
-    /** Vertical gap between lines (6–8 dp). */
-    private val detailLineGap = 7f * dp
+    /** Vertical gap between name and seat badge / detail rows. */
+    private val detailLineGap = 5f * dp
 
-    /** Inner padding for label block inside the card (12–16 dp). */
-    private val contentPadding = 14f * dp
+    /** Inner padding for label block inside the card. */
+    private val contentPadding = 8f * dp
 
     private val tablePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.TRANSPARENT
@@ -135,16 +139,23 @@ class TableShapeView(context: Context) : View(context) {
         strokeWidth = 2f * dp
     }
     private val namePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF212121.toInt()
+        color = Color.BLACK
         textAlign = Paint.Align.CENTER
-        textSize = 13f * dp
+        textSize = 15f * dp
         isFakeBoldText = true
     }
-    private val seatsPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF616161.toInt()
-        textAlign = Paint.Align.CENTER
-        textSize = 10f * dp
+    private val seatBadgeFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFE8E8E8.toInt()
+        style = Paint.Style.FILL
     }
+    private val seatBadgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF616161.toInt()
+        textAlign = Paint.Align.LEFT
+        textSize = 10.5f * dp
+        isFakeBoldText = true
+    }
+    private val seatBadgeIconTint = 0xFF757575.toInt()
+    private var seatPersonIcon: Drawable? = null
     private val partyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFF424242.toInt()
         textAlign = Paint.Align.CENTER
@@ -247,7 +258,7 @@ class TableShapeView(context: Context) : View(context) {
         canvas.drawCircle(cx, cy, tableRadius, tablePaint)
         canvas.drawCircle(cx, cy, tableRadius, tableBorderPaint)
         // Square inscribed in circle for text (keeps labels inside the round card)
-        val side = tableRadius * sqrt(2f) * 0.92f
+        val side = tableRadius * sqrt(2f) * 0.98f
         val textRect = RectF(cx - side / 2f, cy - side / 2f, cx + side / 2f, cy + side / 2f)
         drawTextInCard(canvas, textRect)
     }
@@ -298,6 +309,41 @@ class TableShapeView(context: Context) : View(context) {
         return fm.descent - fm.ascent
     }
 
+    private fun seatBadgeBlockHeight(): Float {
+        if (seatCount <= 0) return 0f
+        val padV = 4f * dp
+        val iconSize = 11f * dp
+        val fm = seatBadgeTextPaint.fontMetrics
+        return padV * 2f + max(iconSize, fm.descent - fm.ascent)
+    }
+
+    /** Scale [paint.textSize] down so [text] fits [maxWidth]; restores size in [finally]. */
+    private inline fun withFittedTextSize(
+        paint: Paint,
+        text: String,
+        maxWidth: Float,
+        minSizePx: Float,
+        maxSizePx: Float,
+        block: () -> Unit,
+    ) {
+        if (text.isBlank()) {
+            block()
+            return
+        }
+        val saved = paint.textSize
+        var size = maxSizePx.coerceAtMost(saved)
+        paint.textSize = size
+        while (size > minSizePx && paint.measureText(text) > maxWidth) {
+            size -= 0.5f * dp
+            paint.textSize = size
+        }
+        try {
+            block()
+        } finally {
+            paint.textSize = saved
+        }
+    }
+
     private fun ellipsize(text: String, paint: Paint, maxWidth: Float): String {
         if (text.isEmpty()) return text
         if (paint.measureText(text) <= maxWidth) return text
@@ -324,10 +370,70 @@ class TableShapeView(context: Context) : View(context) {
         centerY: Float,
         paint: Paint,
         maxW: Float,
+        fitToWidth: Boolean = false,
+        minFitSizePx: Float = 9f * dp,
     ) {
         if (text.isBlank()) return
-        val line = ellipsize(text, paint, maxW)
-        canvas.drawText(line, cx, baselineForCenterY(centerY, paint), paint)
+        if (fitToWidth) {
+            withFittedTextSize(paint, text, maxW, minFitSizePx, paint.textSize) {
+                val line = ellipsize(text, paint, maxW)
+                canvas.drawText(line, cx, baselineForCenterY(centerY, paint), paint)
+            }
+        } else {
+            val line = ellipsize(text, paint, maxW)
+            canvas.drawText(line, cx, baselineForCenterY(centerY, paint), paint)
+        }
+    }
+
+    /** Grey pill with person icon + seat count (floor-plan editor / dine-in picker). */
+    private fun drawSeatCountBadge(
+        canvas: Canvas,
+        inner: RectF,
+        cx: Float,
+        centerY: Float,
+        maxW: Float,
+    ) {
+        if (seatCount <= 0) return
+        val countText = seatCount.toString()
+        val padH = 7f * dp
+        val padV = 4f * dp
+        val iconSize = 11f * dp
+        val iconGap = 3f * dp
+        val textW = seatBadgeTextPaint.measureText(countText)
+        val contentW = iconSize + iconGap + textW
+        var badgeW = padH * 2f + contentW
+        badgeW = badgeW.coerceAtMost(maxW.coerceAtMost(inner.width()))
+        val badgeH = seatBadgeBlockHeight()
+        val left = (cx - badgeW / 2f).coerceIn(inner.left, inner.right - badgeW)
+        val top = (centerY - badgeH / 2f).coerceIn(inner.top, inner.bottom - badgeH)
+        val rect = RectF(left, top, left + badgeW, top + badgeH)
+        val corner = badgeH / 2f
+        canvas.drawRoundRect(rect, corner, corner, seatBadgeFillPaint)
+
+        val contentLeft = rect.centerX() - contentW / 2f
+        val iconLeft = contentLeft
+        val iconTop = rect.centerY() - iconSize / 2f
+        val icon = seatPersonIcon ?: ContextCompat.getDrawable(context, R.drawable.ic_table_person)?.also {
+            seatPersonIcon = it
+        }
+        icon?.let { drawable ->
+            val tinted = DrawableCompat.wrap(drawable.mutate())
+            DrawableCompat.setTint(tinted, seatBadgeIconTint)
+            tinted.setBounds(
+                iconLeft.toInt(),
+                iconTop.toInt(),
+                (iconLeft + iconSize).toInt(),
+                (iconTop + iconSize).toInt(),
+            )
+            tinted.draw(canvas)
+        }
+        val textX = contentLeft + iconSize + iconGap
+        canvas.drawText(
+            countText,
+            textX,
+            baselineForCenterY(rect.centerY(), seatBadgeTextPaint),
+            seatBadgeTextPaint,
+        )
     }
 
     private fun pillColors(pill: StatusPill): Pair<Int, Int> {
@@ -387,7 +493,7 @@ class TableShapeView(context: Context) : View(context) {
 
         if (usesStructuredDetail()) {
             val nameH = lineBlockHeight(namePaint, tableName)
-            val seatsH = if (showSeatsRow()) lineBlockHeight(seatsPaint, "Seats: $seatCount") else 0f
+            val seatsH = if (showSeatsRow()) seatBadgeBlockHeight() else 0f
             val partyH = lineBlockHeight(partyPaint, detailPartyOf)
             val pillH = if (detailStatusLabel.isNotBlank() && statusPill != StatusPill.NONE) {
                 val fm = statusLabelPaint.fontMetrics
@@ -403,11 +509,11 @@ class TableShapeView(context: Context) : View(context) {
             val yOffset = if (block <= innerH) (innerH - block) / 2f else 0f
             var y = inner.top + yOffset
 
-            drawCenteredLine(canvas, tableName, cx, y + nameH / 2f, namePaint, maxW)
+            drawCenteredLine(canvas, tableName, cx, y + nameH / 2f, namePaint, maxW, fitToWidth = true)
             y += nameH
             if (seatsH > 0f) {
                 y += detailLineGap
-                drawCenteredLine(canvas, "Seats: $seatCount", cx, y + seatsH / 2f, seatsPaint, maxW)
+                drawSeatCountBadge(canvas, inner, cx, y + seatsH / 2f, maxW)
                 y += seatsH
             }
             if (detailPartyOf.isNotBlank()) {
@@ -425,7 +531,7 @@ class TableShapeView(context: Context) : View(context) {
 
         if (guestInfo.isNotBlank()) {
             val nameH = lineBlockHeight(namePaint, tableName)
-            val seatsH = if (showSeatsRow()) lineBlockHeight(seatsPaint, "Seats: $seatCount") else 0f
+            val seatsH = if (showSeatsRow()) seatBadgeBlockHeight() else 0f
             val pill = when {
                 guestInfo.contains("Reserved", ignoreCase = true) -> StatusPill.RESERVED
                 guestInfo.contains("Occupied", ignoreCase = true) -> StatusPill.OCCUPIED
@@ -442,11 +548,11 @@ class TableShapeView(context: Context) : View(context) {
             val innerH = inner.height()
             val yOffset = if (block <= innerH) (innerH - block) / 2f else 0f
             var y = inner.top + yOffset
-            drawCenteredLine(canvas, tableName, cx, y + nameH / 2f, namePaint, maxW)
+            drawCenteredLine(canvas, tableName, cx, y + nameH / 2f, namePaint, maxW, fitToWidth = true)
             y += nameH
             if (seatsH > 0f) {
                 y += detailLineGap
-                drawCenteredLine(canvas, "Seats: $seatCount", cx, y + seatsH / 2f, seatsPaint, maxW)
+                drawSeatCountBadge(canvas, inner, cx, y + seatsH / 2f, maxW)
                 y += seatsH
             }
             y += detailLineGap
@@ -460,7 +566,7 @@ class TableShapeView(context: Context) : View(context) {
         }
 
         val nameH = lineBlockHeight(namePaint, tableName)
-        val seatsH = if (showSeatsRow()) lineBlockHeight(seatsPaint, "Seats: $seatCount") else 0f
+        val seatsH = if (showSeatsRow()) seatBadgeBlockHeight() else 0f
         val pillH = if (isWaitingForOrder) {
             lineBlockHeight(statusLabelPaint, "Waiting for order") + 10f * dp
         } else 0f
@@ -470,11 +576,11 @@ class TableShapeView(context: Context) : View(context) {
         val innerH = inner.height()
         val yOffset = if (block <= innerH) (innerH - block) / 2f else 0f
         var y = inner.top + yOffset
-        drawCenteredLine(canvas, tableName, cx, y + nameH / 2f, namePaint, maxW)
+        drawCenteredLine(canvas, tableName, cx, y + nameH / 2f, namePaint, maxW, fitToWidth = true)
         y += nameH
         if (seatsH > 0f) {
             y += detailLineGap
-            drawCenteredLine(canvas, "Seats: $seatCount", cx, y + seatsH / 2f, seatsPaint, maxW)
+            drawSeatCountBadge(canvas, inner, cx, y + seatsH / 2f, maxW)
             y += seatsH
         }
         if (isWaitingForOrder && pillH > 0f) {
@@ -502,7 +608,7 @@ class TableShapeView(context: Context) : View(context) {
                 boothCushionPaint.color = 0xFFF9A825.toInt()
             }
             else -> {
-                tablePaint.color = 0xE6FFFFFF.toInt()
+                tablePaint.color = 0xFFFFFFFF.toInt()
                 tableBorderPaint.color = 0xFF5D4037.toInt()
                 boothCushionPaint.color = 0xFF8D6E63.toInt()
             }
