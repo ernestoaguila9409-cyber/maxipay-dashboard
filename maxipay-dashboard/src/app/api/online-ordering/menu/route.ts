@@ -9,7 +9,7 @@ import {
 
 export const runtime = "nodejs";
 
-/** Public menu: items with `channels.online === true` and categories for grouping. */
+/** Public menu: online-channel items; view-only (`mode=view`) also includes POS menu items. */
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Online ordering is disabled." }, { status: 403 });
     }
     const [menu, bestSellerItemIds] = await Promise.all([
-      loadOnlineMenu(db, merchantId),
+      loadOnlineMenu(db, merchantId, { viewOnly }),
       loadBestSellerItemIds(db, merchantId, 5),
     ]);
     return NextResponse.json({ ...menu, bestSellerItemIds }, {

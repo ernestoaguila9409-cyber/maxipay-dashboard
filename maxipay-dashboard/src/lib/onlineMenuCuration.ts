@@ -41,3 +41,15 @@ export function isMenuItemVisibleOnOnlineChannel(
   }
   return isOnlineChannelOnData(data);
 }
+
+/** View-only menu QR: show online items plus the full POS menu (most items default to POS-only). */
+export function isMenuItemVisibleForViewOnlyBrowse(
+  itemDocId: string,
+  data: Record<string, unknown>,
+  oo: OnlineOrderingSettings,
+): boolean {
+  if (isMenuItemVisibleOnOnlineChannel(itemDocId, data, oo)) return true;
+  const ch = data.channels as Record<string, unknown> | undefined;
+  if (!ch || typeof ch !== "object") return true;
+  return ch.pos !== false;
+}

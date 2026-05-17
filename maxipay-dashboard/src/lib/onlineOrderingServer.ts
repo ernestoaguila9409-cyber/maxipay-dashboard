@@ -24,6 +24,7 @@ import {
   type PublicStorefront,
 } from "@/lib/storefrontShared";
 import {
+  isMenuItemVisibleForViewOnlyBrowse,
   isMenuItemVisibleOnOnlineChannel,
   menuItemPlacementCategoryIds,
 } from "@/lib/onlineMenuCuration";
@@ -383,6 +384,7 @@ export async function loadPublicStorefront(db: Firestore, merchantId: string): P
 export async function loadOnlineMenu(
   db: Firestore,
   merchantId: string,
+  options?: { viewOnly?: boolean },
 ): Promise<{
   categories: OnlineMenuCategory[];
   items: OnlineMenuItem[];
@@ -416,12 +418,16 @@ export async function loadOnlineMenu(
   }
 
   const featuredSet = new Set(oo.featuredItemIds);
+  const viewOnly = options?.viewOnly === true;
+  const itemVisible = viewOnly
+    ? (id: string, rec: Record<string, unknown>) => isMenuItemVisibleForViewOnlyBrowse(id, rec, oo)
+    : (id: string, rec: Record<string, unknown>) => isMenuItemVisibleOnOnlineChannel(id, rec, oo);
   const items: OnlineMenuItem[] = [];
   const modifierGroupIdSet = new Set<string>();
   for (const d of itemSnap.docs) {
     const data = d.data();
     const rec = asRecord(data);
-    if (!isMenuItemVisibleOnOnlineChannel(d.id, rec, oo)) continue;
+    if (!itemVisible(d.id, rec)) continue;
     const unitPriceCents = menuItemOnlinePriceCents(data);
     const rawCategoryIds = menuItemPlacementCategoryIds(rec);
     const categoryId =
