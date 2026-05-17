@@ -20,8 +20,9 @@ export async function GET(request: Request) {
 
     getFirebaseAdminApp();
     const db = admin.firestore();
+    const viewOnly = searchParams.get("mode") === "view";
     const cfg = await loadPublicOnlineOrderingConfig(db, merchantId);
-    if (!cfg.enabled) {
+    if (!cfg.enabled && !viewOnly) {
       return NextResponse.json({ error: "Online ordering is disabled." }, { status: 403 });
     }
     const [menu, bestSellerItemIds] = await Promise.all([

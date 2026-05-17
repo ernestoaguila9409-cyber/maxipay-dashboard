@@ -92,7 +92,11 @@ function usePublicMenuOrderUrl(): {
   const orderUrl = useMemo(() => {
     if (!origin || !merchantId) return "";
     const path = `${origin}/order${effectiveSlug ? `/${effectiveSlug}` : ""}`;
-    return `${path}?merchantId=${encodeURIComponent(merchantId)}`;
+    const params = new URLSearchParams({
+      merchantId,
+      mode: "view",
+    });
+    return `${path}?${params.toString()}`;
   }, [origin, effectiveSlug, merchantId]);
 
   const ready = Boolean(user && merchantId && origin && snapshotsReady);
@@ -174,7 +178,7 @@ function MenuQrBody({
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Public menu link</p>
           <p className="text-sm font-mono text-slate-800 break-all mt-0.5">{orderUrl}</p>
           <p className="text-xs text-slate-500 mt-1.5">
-            Scanning opens your storefront so guests can browse the menu (and order, if online ordering is on).
+            Scanning opens a view-only menu—no cart or checkout. Use a separate ordering QR when you want guests to pay online.
           </p>
         </div>
         {onClose ? (
@@ -293,7 +297,7 @@ export function MenuQrOnlineMenuCard() {
         <div>
           <h2 className="font-semibold text-slate-900">Customer menu QR</h2>
           <p className="text-sm text-slate-500 mt-1">
-            Print or share a QR code that sends guests straight to your public menu page.
+            Print or share a view-only menu QR—guests can browse items without cart or checkout.
           </p>
         </div>
       </div>

@@ -279,7 +279,15 @@ function CategoryTabs({ categories, active, onSelect }: { categories: MenuCatego
 /**
  * Horizontal Popular strip with visible scrollbar (Android-style scroll) and optional arrows.
  */
-function PopularRow({ items, onItemAction }: { items: MenuItem[]; onItemAction: (it: MenuItem) => void }) {
+function PopularRow({
+  items,
+  onItemAction,
+  viewOnly,
+}: {
+  items: MenuItem[];
+  onItemAction: (it: MenuItem) => void;
+  viewOnly?: boolean;
+}) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollBy = (delta: number) => scrollRef.current?.scrollBy({ left: delta, behavior: "smooth" });
 
@@ -306,14 +314,14 @@ function PopularRow({ items, onItemAction }: { items: MenuItem[]; onItemAction: 
         className="popular-strip-scroll flex gap-3 overflow-x-auto pb-2 pt-0.5 px-1 sm:px-10 -mx-1"
       >
         {items.map((it) => (
-          <PopularCard key={it.id} item={it} onAction={() => onItemAction(it)} />
+          <PopularCard key={it.id} item={it} onAction={() => onItemAction(it)} viewOnly={viewOnly} />
         ))}
       </div>
     </div>
   );
 }
 
-function PopularCard({ item, onAction }: { item: MenuItem; onAction: () => void }) {
+function PopularCard({ item, onAction, viewOnly }: { item: MenuItem; onAction: () => void; viewOnly?: boolean }) {
   return (
     <div className="shrink-0 w-[180px] bg-white rounded-2xl overflow-hidden shadow-sm border border-neutral-100 hover:shadow-md transition-shadow">
       <div className="relative w-full h-[140px] bg-neutral-100">
@@ -328,13 +336,15 @@ function PopularCard({ item, onAction }: { item: MenuItem; onAction: () => void 
         <p className="text-sm font-semibold text-neutral-900 line-clamp-1">{item.name}</p>
         <div className="flex items-center justify-between mt-2">
           <span className={`text-sm font-bold ${O.primaryText}`}>{fmt(item.unitPriceCents)}</span>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onAction(); }}
-            className={`w-8 h-8 rounded-full ${O.primary} ${O.primaryHover} text-white grid place-items-center shadow-sm active:scale-95 transition-transform`}
-          >
-            <IconPlus size={16} />
-          </button>
+          {!viewOnly ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onAction(); }}
+              className={`w-8 h-8 rounded-full ${O.primary} ${O.primaryHover} text-white grid place-items-center shadow-sm active:scale-95 transition-transform`}
+            >
+              <IconPlus size={16} />
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -346,10 +356,11 @@ function PopularCard({ item, onAction }: { item: MenuItem; onAction: () => void 
    ═══════════════════════════════════════════ */
 
 function MenuItemCard({
-  item, qtySimple, hasModifiers, onAddSimple, onOpenCustomize, onDecSimple,
+  item, qtySimple, hasModifiers, onAddSimple, onOpenCustomize, onDecSimple, viewOnly,
 }: {
   item: MenuItem; qtySimple: number; hasModifiers: boolean;
   onAddSimple: () => void; onOpenCustomize: () => void; onDecSimple: () => void;
+  viewOnly?: boolean;
 }) {
   const hasImage = item.imageUrl.trim().length > 0;
 
@@ -364,7 +375,7 @@ function MenuItemCard({
         </div>
         <div className="flex items-center gap-2 mt-2">
           <span className={`text-sm font-bold ${O.primaryText}`}>{fmt(item.unitPriceCents)}</span>
-          {hasModifiers ? (
+          {viewOnly ? null : hasModifiers ? (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onOpenCustomize(); }}
@@ -1004,11 +1015,11 @@ function CustomizeSheet({
    TrustBar
    ═══════════════════════════════════════════ */
 
-function TrustBar({ prepTimeLabel }: { prepTimeLabel: string }) {
+function TrustBar({ prepTimeLabel, viewOnly }: { prepTimeLabel: string; viewOnly?: boolean }) {
   const items = [
     { icon: <IconTruck size={22} />, title: "Fast Delivery", desc: prepTimeLabel || "20\u201330 min" },
     { icon: <IconLeaf size={22} />, title: "Fresh & Tasty", desc: "Made with love" },
-    { icon: <IconShield size={22} />, title: "Secure Payment", desc: "100% safe" },
+    ...(!viewOnly ? [{ icon: <IconShield size={22} />, title: "Secure Payment", desc: "100% safe" }] : []),
     { icon: <IconStar size={22} />, title: "Best Quality", desc: "Premium ingredients" },
   ];
   return (
@@ -1113,6 +1124,7 @@ function PublicOrderPageInner() {
   const categoryRefs = useRef<Record<string, HTMLElement | null>>({});
   const setCategoryRef = useCallback((id: string, el: HTMLElement | null) => { categoryRefs.current[id] = el; }, []);
 
+  const viewOnly = searchParams.get("mode") === "view";
   const paymentFailed = searchParams.get("paymentFailed") === "1";
   const paymentCancelled = searchParams.get("paymentCancelled") === "1";
 
@@ -1132,6 +1144,7 @@ function PublicOrderPageInner() {
     if (data.slug && data.slug !== slugStr) {
       const next = new URLSearchParams();
       next.set("merchantId", mid);
+      if (viewOnly) next.set("mode", "view");
       router.replace(`/order/${data.slug}?${next.toString()}`);
       return;
     }
@@ -1147,14 +1160,16 @@ function PublicOrderPageInner() {
       allowPayInStore: data.allowPayInStore,
       allowPayOnlineHpp: data.allowPayOnlineHpp,
     });
-  }, [slugStr, router, merchantIdForApi]);
+  }, [slugStr, router, merchantIdForApi, viewOnly]);
 
   const loadMenu = useCallback(async () => {
     const mid = merchantIdForApi?.trim();
     if (!mid) return;
     setMenuLoading(true);
     try {
-      const res = await fetch(`/api/online-ordering/menu?merchantId=${encodeURIComponent(mid)}`, {
+      const menuQs = new URLSearchParams({ merchantId: mid });
+      if (viewOnly) menuQs.set("mode", "view");
+      const res = await fetch(`/api/online-ordering/menu?${menuQs.toString()}`, {
         cache: "no-store",
       });
       const data = (await res.json()) as {
@@ -1204,7 +1219,7 @@ function PublicOrderPageInner() {
     } finally {
       setMenuLoading(false);
     }
-  }, [merchantIdForApi]);
+  }, [merchantIdForApi, viewOnly]);
 
   useEffect(() => {
     if (!merchantIdForApi) return;
@@ -1214,12 +1229,16 @@ function PublicOrderPageInner() {
   }, [loadConfig, merchantIdForApi]);
 
   useEffect(() => {
-    if (!merchantIdForApi || !cfg?.enabled) {
+    if (!merchantIdForApi) {
       setMenu(null);
       return;
     }
-    void loadMenu();
-  }, [cfg?.enabled, loadMenu, merchantIdForApi]);
+    if (!viewOnly && !cfg?.enabled) {
+      setMenu(null);
+      return;
+    }
+    if (viewOnly || cfg?.enabled) void loadMenu();
+  }, [cfg?.enabled, loadMenu, merchantIdForApi, viewOnly]);
 
   /* ── Derived ── */
 
@@ -1377,7 +1396,7 @@ function PublicOrderPageInner() {
   if (!cfg) {
     return (<div className={`min-h-screen ${O.bg} flex items-center justify-center p-6`}><div className="flex flex-col items-center gap-3"><div className="w-8 h-8 border-2 border-neutral-200 border-t-[#EA580C] rounded-full animate-spin" /><p className="text-neutral-500 text-sm">Loading\u2026</p></div></div>);
   }
-  if (!cfg.enabled) {
+  if (!cfg.enabled && !viewOnly) {
     return (<div className={`min-h-screen ${O.bg} flex flex-col items-center justify-center p-6 gap-4`}><div className="w-16 h-16 rounded-full bg-white flex items-center justify-center shadow-sm"><IconStore size={28} /></div><h1 className="text-2xl font-bold text-neutral-900">{cfg.businessName}</h1><p className="text-neutral-500 text-center max-w-sm text-sm">Online ordering is not available right now.</p></div>);
   }
 
@@ -1392,6 +1411,7 @@ function PublicOrderPageInner() {
       onAddSimple={() => addSimpleToCart(it.id)}
       onOpenCustomize={() => setCustomizeItemId(it.id)}
       onDecSimple={() => { const line = cartRows.find((r) => r.itemId === it.id && r.selections.length === 0); if (line) decLine(line.lineId); }}
+      viewOnly={viewOnly}
     />
   );
 
@@ -1399,7 +1419,7 @@ function PublicOrderPageInner() {
 
   return (
     <div className={`min-h-screen ${O.bg} text-neutral-900`}>
-      {(paymentFailed || paymentCancelled) && (
+      {!viewOnly && (paymentFailed || paymentCancelled) && (
         <div className={`px-4 py-3 text-center text-sm font-medium ${paymentFailed ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>
           {paymentFailed ? "Payment was declined or failed. Please try again." : "Payment was cancelled. Your order is still saved."}
         </div>
@@ -1437,24 +1457,27 @@ function PublicOrderPageInner() {
               </div>
             )}
 
-            {/* Cart badge */}
-            <button
-              type="button"
-              onClick={() => cartCount > 0 ? setMobileCartOpen(true) : undefined}
-              className="lg:hidden flex items-center gap-2 h-10 px-4 rounded-full bg-white border border-neutral-200 text-neutral-900 text-sm font-semibold shrink-0"
-              style={{ visibility: cartCount > 0 ? "visible" : "hidden" }}
-            >
-              Cart
-              <span className={`w-5 h-5 rounded-full ${O.primary} text-white text-[11px] font-bold grid place-items-center`}>{cartCount}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setSubmitError(null); setCheckoutOpen(true); }}
-              className={`hidden lg:flex items-center gap-2 h-10 px-5 rounded-full bg-white border border-neutral-200 text-neutral-900 text-sm font-semibold shrink-0 ${cartCount === 0 ? "invisible" : ""}`}
-            >
-              Cart
-              <span className={`w-5 h-5 rounded-full ${O.primary} text-white text-[11px] font-bold grid place-items-center`}>{cartCount}</span>
-            </button>
+            {!viewOnly ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => cartCount > 0 ? setMobileCartOpen(true) : undefined}
+                  className="lg:hidden flex items-center gap-2 h-10 px-4 rounded-full bg-white border border-neutral-200 text-neutral-900 text-sm font-semibold shrink-0"
+                  style={{ visibility: cartCount > 0 ? "visible" : "hidden" }}
+                >
+                  Cart
+                  <span className={`w-5 h-5 rounded-full ${O.primary} text-white text-[11px] font-bold grid place-items-center`}>{cartCount}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSubmitError(null); setCheckoutOpen(true); }}
+                  className={`hidden lg:flex items-center gap-2 h-10 px-5 rounded-full bg-white border border-neutral-200 text-neutral-900 text-sm font-semibold shrink-0 ${cartCount === 0 ? "invisible" : ""}`}
+                >
+                  Cart
+                  <span className={`w-5 h-5 rounded-full ${O.primary} text-white text-[11px] font-bold grid place-items-center`}>{cartCount}</span>
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
 
@@ -1491,6 +1514,7 @@ function PublicOrderPageInner() {
                 </div>
                 <PopularRow
                   items={popularItems}
+                  viewOnly={viewOnly}
                   onItemAction={(it) => {
                     if (it.modifierGroupIds.length > 0) setCustomizeItemId(it.id);
                     else addSimpleToCart(it.id);
@@ -1534,27 +1558,28 @@ function PublicOrderPageInner() {
             )}
           </main>
 
-          {/* RIGHT: cart sidebar (desktop) */}
-          <aside className="hidden lg:block w-[340px] shrink-0">
-            <div className="sticky top-[120px]">
-              <CartSidebar
-                lines={cartLines}
-                subtotal={subtotalCents}
-                taxBreakdown={orderTax.taxBreakdown}
-                grandTotal={grandTotalCents}
-                groupMap={groupMap}
-                onAdd={incLine}
-                onDec={decLine}
-                onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}
-              />
-            </div>
-          </aside>
+          {!viewOnly ? (
+            <aside className="hidden lg:block w-[340px] shrink-0">
+              <div className="sticky top-[120px]">
+                <CartSidebar
+                  lines={cartLines}
+                  subtotal={subtotalCents}
+                  taxBreakdown={orderTax.taxBreakdown}
+                  grandTotal={grandTotalCents}
+                  groupMap={groupMap}
+                  onAdd={incLine}
+                  onDec={decLine}
+                  onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}
+                />
+              </div>
+            </aside>
+          ) : null}
         </div>
       </div>
 
       {/* ── Trust bar ── */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-6">
-        <TrustBar prepTimeLabel={cfg.prepTimeLabel} />
+        <TrustBar prepTimeLabel={cfg.prepTimeLabel} viewOnly={viewOnly} />
       </div>
 
       {/* ── Footer ── */}
@@ -1564,45 +1589,44 @@ function PublicOrderPageInner() {
         </p>
       </footer>
 
-      {/* Mobile bottom bar + sheet */}
-      <MobileCartBar count={cartCount} grandTotal={grandTotalCents} onOpen={() => setMobileCartOpen(true)} />
-      <MobileCartSheet
-        open={mobileCartOpen}
-        lines={cartLines}
-        subtotal={subtotalCents}
-        taxBreakdown={orderTax.taxBreakdown}
-        grandTotal={grandTotalCents}
-        groupMap={groupMap}
-        onClose={() => setMobileCartOpen(false)}
-        onAdd={incLine}
-        onDec={decLine}
-        onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}
-      />
-
-      {/* Checkout modal */}
-      <CheckoutModal
-        open={checkoutOpen}
-        cfg={cfg}
-        lines={cartLines}
-        subtotal={subtotalCents}
-        taxBreakdown={orderTax.taxBreakdown}
-        grandTotal={grandTotalCents}
-        groupMap={groupMap}
-        onClose={() => setCheckoutOpen(false)}
-        onSubmit={(d) => void submitOrder(d)}
-        submitting={submitting}
-        submitError={submitError}
-      />
-
-      <CustomizeSheet
-        open={customizeItemId != null && customizeItem != null && customizeItem.modifierGroupIds.length > 0}
-        item={customizeItem}
-        groupMap={groupMap}
-        onClose={() => setCustomizeItemId(null)}
-        onConfirm={(selections) => { if (customizeItemId) addCustomizedLine(customizeItemId, selections); setCustomizeItemId(null); }}
-      />
-
-      {cartCount > 0 && <div className="h-24 lg:hidden" />}
+      {!viewOnly ? (
+        <>
+          <MobileCartBar count={cartCount} grandTotal={grandTotalCents} onOpen={() => setMobileCartOpen(true)} />
+          <MobileCartSheet
+            open={mobileCartOpen}
+            lines={cartLines}
+            subtotal={subtotalCents}
+            taxBreakdown={orderTax.taxBreakdown}
+            grandTotal={grandTotalCents}
+            groupMap={groupMap}
+            onClose={() => setMobileCartOpen(false)}
+            onAdd={incLine}
+            onDec={decLine}
+            onCheckout={() => { setSubmitError(null); setCheckoutOpen(true); }}
+          />
+          <CheckoutModal
+            open={checkoutOpen}
+            cfg={cfg}
+            lines={cartLines}
+            subtotal={subtotalCents}
+            taxBreakdown={orderTax.taxBreakdown}
+            grandTotal={grandTotalCents}
+            groupMap={groupMap}
+            onClose={() => setCheckoutOpen(false)}
+            onSubmit={(d) => void submitOrder(d)}
+            submitting={submitting}
+            submitError={submitError}
+          />
+          <CustomizeSheet
+            open={customizeItemId != null && customizeItem != null && customizeItem.modifierGroupIds.length > 0}
+            item={customizeItem}
+            groupMap={groupMap}
+            onClose={() => setCustomizeItemId(null)}
+            onConfirm={(selections) => { if (customizeItemId) addCustomizedLine(customizeItemId, selections); setCustomizeItemId(null); }}
+          />
+          {cartCount > 0 && <div className="h-24 lg:hidden" />}
+        </>
+      ) : null}
 
       <style jsx global>{`
         .scrollbar-hide::-webkit-scrollbar { display: none; }
