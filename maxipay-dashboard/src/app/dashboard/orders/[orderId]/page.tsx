@@ -1,7 +1,8 @@
-"use client";
+﻿"use client";
 
 import {
   useEffect,
+  useMemo,
   useState,
   useRef,
   type PointerEvent,
@@ -49,9 +50,80 @@ interface LineItem {
   quantity: number;
   unitPriceInCents: number;
   lineTotalInCents: number;
+  /** Dine-in seat (1-based), from Firestore `items.guestNumber`. */
+  guestNumber?: number;
   /** Menu item photo on the line doc (POS / online ordering). */
   imageUrl?: string;
   modifiers: { name: string; action?: string; price?: number }[];
+}
+
+type GuestLineGroup = { key: number; label: string; lines: LineItem[] };
+
+function parseGuestNames(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x) => (typeof x === "string" ? x.trim() : ""))
+    .filter((name) => name.length > 0);
+}
+
+function parseGuestCount(
+  order: Record<string, unknown>,
+  lines: LineItem[],
+): number {
+  const fromOrder = Number(order.guestCount ?? 0);
+  if (Number.isFinite(fromOrder) && fromOrder > 0) {
+    return Math.floor(fromOrder);
+  }
+  const nums = lines.map((l) => l.guestNumber ?? 0).filter((n) => n > 0);
+  if (nums.length === 0) return 0;
+  return Math.max(...nums);
+}
+
+/** When multiple guests, group line items by seat (matches POS / Android kitchen grouping). */
+function buildGuestLineGroups(
+  lines: LineItem[],
+  guestCount: number,
+  guestNames: string[],
+): GuestLineGroup[] | null {
+  const distinctGuests = new Set(
+    lines.map((l) => l.guestNumber ?? 0).filter((n) => n > 0),
+  );
+  const multiGuest = guestCount > 1 || distinctGuests.size > 1;
+  if (!multiGuest) return null;
+
+  const byGuest = new Map<number, LineItem[]>();
+  for (const line of lines) {
+    const g = (line.guestNumber ?? 0) > 0 ? (line.guestNumber as number) : 0;
+    const list = byGuest.get(g) ?? [];
+    list.push(line);
+    byGuest.set(g, list);
+  }
+
+  const orderedKeys: number[] = [];
+  if (guestCount > 0) {
+    for (let g = 1; g <= guestCount; g++) {
+      if (byGuest.has(g)) orderedKeys.push(g);
+    }
+    for (const k of [...byGuest.keys()].sort((a, b) => a - b)) {
+      if (k > guestCount && k > 0 && !orderedKeys.includes(k)) {
+        orderedKeys.push(k);
+      }
+    }
+  } else {
+    orderedKeys.push(
+      ...[...byGuest.keys()].filter((k) => k > 0).sort((a, b) => a - b),
+    );
+  }
+  if (byGuest.has(0)) orderedKeys.push(0);
+
+  return orderedKeys.map((key) => ({
+    key,
+    label:
+      key === 0
+        ? "Shared"
+        : guestNames[key - 1]?.trim() || `Guest ${key}`,
+    lines: byGuest.get(key) ?? [],
+  }));
 }
 
 function centsToMoney(c: number): string {
@@ -100,14 +172,14 @@ function refundTxnAmountCentsAbs(rd: Record<string, unknown>): number {
   return 0;
 }
 
-/** Matches Android `RefundAttributionFormat` — web refunds use `Dashboard: email|uid`. */
+/** Matches Android `RefundAttributionFormat` â€” web refunds use `Dashboard: email|uid`. */
 function formatRefundAttributionForDisplay(refundedByFirestore: string): string {
   const raw = refundedByFirestore.trim();
   if (!raw) return raw;
   const m = /^Dashboard:\s*/i.exec(raw);
   if (!m) return raw;
   const detail = raw.slice(m[0].length).trim();
-  return detail ? `Dashboard — ${detail}` : "Dashboard";
+  return detail ? `Dashboard â€” ${detail}` : "Dashboard";
 }
 
 function buildRefundStrikeIndex(
@@ -127,7 +199,7 @@ function buildRefundStrikeIndex(
     const rawBy = String(rd.refundedBy ?? "").trim();
     const employee = rawBy
       ? formatRefundAttributionForDisplay(rawBy)
-      : "—";
+      : "â€”";
     const dateStr = formatFirestoreTimestamp(rd.createdAt) ?? "";
     const lk = String(rd.refundedLineKey ?? "").trim();
     const itemName = String(rd.refundedItemName ?? "").trim();
@@ -497,7 +569,7 @@ export default function OrderDetailPage() {
                   id: d.id,
                   refundedBy: rawRb
                     ? formatRefundAttributionForDisplay(rawRb)
-                    : "—",
+                    : "â€”",
                   amountInCents,
                   createdAtLabel: formatFirestoreTimestamp(rd.createdAt),
                 };
@@ -545,12 +617,20 @@ export default function OrderDetailPage() {
             typeof rawImg === "string" && rawImg.trim().length > 0
               ? rawImg.trim()
               : undefined;
+          const rawGuest = x.guestNumber;
+          const guestNumber =
+            typeof rawGuest === "number" && Number.isFinite(rawGuest)
+              ? Math.floor(rawGuest)
+              : typeof rawGuest === "string"
+                ? Math.floor(Number(rawGuest)) || undefined
+                : undefined;
           parsed.push({
             id: d.id,
             name: String(x.name ?? x.itemName ?? "Item"),
             quantity: Number.isFinite(qty) ? qty : 1,
             unitPriceInCents: unit,
             lineTotalInCents: lineTotal,
+            ...(guestNumber != null && guestNumber > 0 ? { guestNumber } : {}),
             imageUrl,
             modifiers,
           });
@@ -570,6 +650,13 @@ export default function OrderDetailPage() {
       cancelled = true;
     };
   }, [user, merchantId, orderId, orderRefreshNonce]);
+
+  const guestLineGroups = useMemo(() => {
+    if (!orderData) return null;
+    const names = parseGuestNames(orderData.guestNames);
+    const count = parseGuestCount(orderData as Record<string, unknown>, lines);
+    return buildGuestLineGroups(lines, count, names);
+  }, [orderData, lines]);
 
   if (!user) {
     return (
@@ -604,7 +691,7 @@ export default function OrderDetailPage() {
   const totalInCents = Number(orderData?.totalInCents ?? 0);
   const totalPaidInCents = Number(orderData?.totalPaidInCents ?? 0);
   const totalRefundedInCents = Number(orderData?.totalRefundedInCents ?? 0);
-  const employeeName = String(orderData?.employeeName ?? "—");
+  const employeeName = String(orderData?.employeeName ?? "â€”");
   const customerName = String(orderData?.customerName ?? "");
   const orderTypeRaw = String(orderData?.orderType ?? "");
   const tableName = String(orderData?.tableName ?? "");
@@ -734,6 +821,11 @@ export default function OrderDetailPage() {
     return null;
   }
 
+  const guestNames = orderData ? parseGuestNames(orderData.guestNames) : [];
+  const guestCount = orderData
+    ? parseGuestCount(orderData as Record<string, unknown>, lines)
+    : 0;
+
   const voidedByOrder = String(orderData?.voidedBy ?? "").trim();
   const voidedAtOrderLabel = formatFirestoreTimestamp(orderData?.voidedAt);
   const saleVoided = saleTransactionData?.voided === true;
@@ -741,6 +833,120 @@ export default function OrderDetailPage() {
   const saleVoidedAtLabel = formatFirestoreTimestamp(
     saleTransactionData?.voidedAt
   );
+
+  function renderOrderLine(line: LineItem) {
+    const strike = lineRefundStrike(line);
+    const isRefunded = strike != null;
+    const swipeRow = lineSwipeRefundEnabled && !isRefunded;
+    const rowShell = isRefunded ? "bg-[#FFF5F5]" : "";
+    return (
+      <SwipeableOrderLine
+        key={line.id}
+        lineId={line.id}
+        swipeEnabled={swipeRow}
+        isOpen={openSwipeLineId === line.id}
+        rowClassName={rowShell}
+        onOpenChange={setOpenSwipeLineId}
+        onDirectRefund={() => {
+          setDirectRefundTargetLine(line);
+          setDirectRefundModalErr(null);
+          const maxC = Math.min(line.lineTotalInCents, refundableCapacityCents);
+          setDirectRefundModalAmount(maxC > 0 ? (maxC / 100).toFixed(2) : "");
+          setDirectRefundModalOpen(true);
+        }}
+      >
+        <div className="px-6 py-4">
+          <p className="sr-only">
+            Swipe right on this row to show direct refund for this line only.
+          </p>
+          <div className="flex justify-between gap-4">
+            <div className="flex min-w-0 flex-1 gap-3">
+              {line.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={line.imageUrl}
+                  alt=""
+                  className="h-14 w-14 shrink-0 rounded-lg border border-slate-100 object-cover bg-slate-50"
+                />
+              ) : null}
+              <div className="min-w-0 flex-1">
+                <p
+                  className={`font-medium ${
+                    isRefunded
+                      ? "text-[#999999] line-through decoration-[#999999]"
+                      : "text-slate-800"
+                  }`}
+                >
+                  {line.name}{" "}
+                  <span
+                    className={
+                      isRefunded
+                        ? "text-[#999999] font-normal"
+                        : "text-slate-500 font-normal"
+                    }
+                  >
+                    Ã—{line.quantity}
+                  </span>
+                </p>
+                {line.modifiers.length > 0 && (
+                  <ul className="mt-1 text-xs text-slate-600 space-y-0.5">
+                    {line.modifiers.map((m, i) => (
+                      <li key={i}>
+                        {m.action === "ADD"
+                          ? "+"
+                          : m.action === "NO"
+                            ? "âˆ’"
+                            : ""}{" "}
+                        {m.name}
+                        {m.price != null && m.price !== 0
+                          ? ` ($${Number(m.price).toFixed(2)})`
+                          : ""}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {isRefunded ? (
+                  <div className="mt-2 space-y-0.5">
+                    <p className="text-xs font-bold uppercase tracking-wide text-red-600">
+                      Refunded
+                    </p>
+                    {strike.by && strike.by !== "â€”" ? (
+                      <p className="text-xs text-red-600/90">
+                        Refunded by {strike.by}
+                      </p>
+                    ) : null}
+                    {strike.at ? (
+                      <p className="text-xs text-red-600/90">{strike.at}</p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <p
+                className={`text-sm font-semibold ${
+                  isRefunded
+                    ? "text-[#999999] line-through decoration-[#999999]"
+                    : "text-slate-800"
+                }`}
+              >
+                ${centsToMoney(line.lineTotalInCents)}
+              </p>
+              <p
+                className={`text-xs ${
+                  isRefunded
+                    ? "text-[#999999] line-through"
+                    : "text-slate-400"
+                }`}
+              >
+                @ ${centsToMoney(line.unitPriceInCents)} each
+              </p>
+            </div>
+          </div>
+        </div>
+      </SwipeableOrderLine>
+    );
+  }
 
   return (
     <>
@@ -758,7 +964,7 @@ export default function OrderDetailPage() {
         {loading && (
           <div className="flex items-center gap-2 text-slate-500 py-12 justify-center">
             <Loader2 className="animate-spin" size={22} />
-            Loading order…
+            Loading orderâ€¦
           </div>
         )}
 
@@ -808,6 +1014,15 @@ export default function OrderDetailPage() {
                     <dd className="font-medium text-slate-800">{tableName}</dd>
                   </div>
                 ) : null}
+                {guestCount > 0 ? (
+                  <div>
+                    <dt className="text-slate-500">Guests</dt>
+                    <dd className="font-medium text-slate-800">
+                      {guestCount}
+                      {guestNames.length > 0 ? ` â€” ${guestNames.join(", ")}` : null}
+                    </dd>
+                  </div>
+                ) : null}
                 {createdAt && (
                   <div>
                     <dt className="text-slate-500">Created</dt>
@@ -849,7 +1064,7 @@ export default function OrderDetailPage() {
                     <dt className="text-slate-500">Payment void</dt>
                     <dd className="font-medium text-slate-800">
                       Voided by {saleVoidedBy}
-                      {saleVoidedAtLabel ? ` · ${saleVoidedAtLabel}` : ""}
+                      {saleVoidedAtLabel ? ` Â· ${saleVoidedAtLabel}` : ""}
                     </dd>
                   </div>
                 ) : null}
@@ -867,7 +1082,7 @@ export default function OrderDetailPage() {
                           {r.createdAtLabel ? (
                             <span className="text-slate-500">
                               {" "}
-                              · {r.createdAtLabel}
+                              Â· {r.createdAtLabel}
                             </span>
                           ) : null}
                         </div>
@@ -888,128 +1103,28 @@ export default function OrderDetailPage() {
                 <p className="px-6 py-8 text-sm text-slate-500 text-center">
                   No line items on this order.
                 </p>
+              ) : guestLineGroups ? (
+                <div className="divide-y divide-slate-100">
+                  {guestLineGroups.map((group) => (
+                    <section key={group.key}>
+                      <div className="px-6 py-2.5 bg-slate-50 border-b border-slate-100">
+                        <p className="text-xs font-bold uppercase tracking-wide text-slate-700">
+                          {group.label}
+                          <span className="ml-2 font-normal normal-case text-slate-500">
+                            ({group.lines.length} item
+                            {group.lines.length !== 1 ? "s" : ""})
+                          </span>
+                        </p>
+                      </div>
+                      <ul className="divide-y divide-slate-50">
+                        {group.lines.map((line) => renderOrderLine(line))}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
               ) : (
                 <ul className="divide-y divide-slate-50">
-                  {lines.map((line) => {
-                    const strike = lineRefundStrike(line);
-                    const isRefunded = strike != null;
-                    const swipeRow =
-                      lineSwipeRefundEnabled && !isRefunded;
-                    const rowShell = isRefunded ? "bg-[#FFF5F5]" : "";
-                    return (
-                      <SwipeableOrderLine
-                        key={line.id}
-                        lineId={line.id}
-                        swipeEnabled={swipeRow}
-                        isOpen={openSwipeLineId === line.id}
-                        rowClassName={rowShell}
-                        onOpenChange={setOpenSwipeLineId}
-                        onDirectRefund={() => {
-                          setDirectRefundTargetLine(line);
-                          setDirectRefundModalErr(null);
-                          const maxC = Math.min(
-                            line.lineTotalInCents,
-                            refundableCapacityCents
-                          );
-                          setDirectRefundModalAmount(
-                            maxC > 0 ? (maxC / 100).toFixed(2) : ""
-                          );
-                          setDirectRefundModalOpen(true);
-                        }}
-                      >
-                        <div className="px-6 py-4">
-                          <p className="sr-only">
-                            Swipe right on this row to show direct refund for this
-                            line only.
-                          </p>
-                          <div className="flex justify-between gap-4">
-                            <div className="flex min-w-0 flex-1 gap-3">
-                              {line.imageUrl ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={line.imageUrl}
-                                  alt=""
-                                  className="h-14 w-14 shrink-0 rounded-lg border border-slate-100 object-cover bg-slate-50"
-                                />
-                              ) : null}
-                              <div className="min-w-0 flex-1">
-                                <p
-                                  className={`font-medium ${
-                                    isRefunded
-                                      ? "text-[#999999] line-through decoration-[#999999]"
-                                      : "text-slate-800"
-                                  }`}
-                                >
-                                  {line.name}{" "}
-                                  <span
-                                    className={
-                                      isRefunded
-                                        ? "text-[#999999] font-normal"
-                                        : "text-slate-500 font-normal"
-                                    }
-                                  >
-                                    ×{line.quantity}
-                                  </span>
-                                </p>
-                                {line.modifiers.length > 0 && (
-                                  <ul className="mt-1 text-xs text-slate-600 space-y-0.5">
-                                    {line.modifiers.map((m, i) => (
-                                      <li key={i}>
-                                        {m.action === "ADD"
-                                          ? "+"
-                                          : m.action === "NO"
-                                            ? "−"
-                                            : ""}{" "}
-                                        {m.name}
-                                        {m.price != null && m.price !== 0
-                                          ? ` ($${Number(m.price).toFixed(2)})`
-                                          : ""}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )}
-                                {isRefunded ? (
-                                  <div className="mt-2 space-y-0.5">
-                                    <p className="text-xs font-bold uppercase tracking-wide text-red-600">
-                                      Refunded
-                                    </p>
-                                    {strike.by && strike.by !== "—" ? (
-                                      <p className="text-xs text-red-600/90">
-                                        Refunded by {strike.by}
-                                      </p>
-                                    ) : null}
-                                    {strike.at ? (
-                                      <p className="text-xs text-red-600/90">{strike.at}</p>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <p
-                                className={`text-sm font-semibold ${
-                                  isRefunded
-                                    ? "text-[#999999] line-through decoration-[#999999]"
-                                    : "text-slate-800"
-                                }`}
-                              >
-                                ${centsToMoney(line.lineTotalInCents)}
-                              </p>
-                              <p
-                                className={`text-xs ${
-                                  isRefunded
-                                    ? "text-[#999999] line-through"
-                                    : "text-slate-400"
-                                }`}
-                              >
-                                @ ${centsToMoney(line.unitPriceInCents)} each
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </SwipeableOrderLine>
-                    );
-                  })}
+                  {lines.map((line) => renderOrderLine(line))}
                 </ul>
               )}
 
@@ -1033,7 +1148,7 @@ export default function OrderDetailPage() {
                             className="flex justify-between gap-4"
                           >
                             <span>
-                              •{" "}
+                              â€¢{" "}
                               {formatDiscountReceiptLabel(
                                 gd.name,
                                 gd.type,
@@ -1045,7 +1160,7 @@ export default function OrderDetailPage() {
                         ))
                       ) : (
                         <div className="flex justify-between gap-4">
-                          <span>• Discount</span>
+                          <span>â€¢ Discount</span>
                           <span>-${centsToMoney(discountInCents)}</span>
                         </div>
                       )}
@@ -1174,7 +1289,7 @@ export default function OrderDetailPage() {
                   }}
                   className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-amber-700 text-white text-sm font-semibold hover:bg-amber-800 disabled:opacity-60"
                 >
-                  {voidSubmitting ? "Processing…" : "Void"}
+                  {voidSubmitting ? "Processingâ€¦" : "Void"}
                 </button>
                 {voidErr ? (
                   <p className="text-xs text-red-700 break-words">{voidErr}</p>
@@ -1258,7 +1373,7 @@ export default function OrderDetailPage() {
                   }}
                   className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-teal-700 text-white text-sm font-semibold hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {tipSubmitting ? "Processing…" : "Apply tip"}
+                  {tipSubmitting ? "Processingâ€¦" : "Apply tip"}
                 </button>
                 {tipSubmitErr ? (
                   <p className="text-xs text-red-700 break-words">{tipSubmitErr}</p>
@@ -1445,7 +1560,7 @@ export default function OrderDetailPage() {
                       }}
                       className="px-4 py-2 rounded-xl bg-indigo-700 text-white text-sm font-semibold hover:bg-indigo-800 disabled:opacity-60"
                     >
-                      {directRefundSubmitting ? "Processing…" : "Refund"}
+                      {directRefundSubmitting ? "Processingâ€¦" : "Refund"}
                     </button>
                   </div>
                 </div>
