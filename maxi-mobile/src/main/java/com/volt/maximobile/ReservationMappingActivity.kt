@@ -247,10 +247,11 @@ class ReservationMappingActivity : AppCompatActivity() {
                     sectionsAdded = true
                 }
 
-                val posX = (xL * cw / layoutCanvasW).toFloat()
-                val posY = (yL * ch / layoutCanvasH).toFloat()
-                val wPx = TableShapeView.defaultMeasuredWidthPx(this, shape)
-                val hPx = TableShapeView.defaultMeasuredHeightPx(this, shape)
+                val (posX, posY) = TableLayoutMobileScale.layoutToScreen(
+                    xL, yL, cw, ch, layoutCanvasW, layoutCanvasH,
+                )
+                val wPx = TableShapeView.dineInMeasuredWidthPx(this, shape)
+                val hPx = TableShapeView.dineInMeasuredHeightPx(this, shape)
                 tableRects[doc.id] = TableRect(posX, posY, wPx, hPx)
                 ids.add(doc.id)
             }
@@ -285,8 +286,8 @@ class ReservationMappingActivity : AppCompatActivity() {
                         tableSeats[doc.id] = seats
                         tableShapes[doc.id] = shape
 
-                        val wPx = TableShapeView.defaultMeasuredWidthPx(this, shape)
-                        val hPx = TableShapeView.defaultMeasuredHeightPx(this, shape)
+                        val wPx = TableShapeView.dineInMeasuredWidthPx(this, shape)
+                        val hPx = TableShapeView.dineInMeasuredHeightPx(this, shape)
                         tableRects[doc.id] = TableRect(posX, posY, wPx, hPx)
                         ids.add(doc.id)
                     }
@@ -334,10 +335,10 @@ class ReservationMappingActivity : AppCompatActivity() {
                 avgY = rects.map { it.y }.average().toFloat()
             }
             val totalW = group.sumOf {
-                TableShapeView.defaultMeasuredWidthPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE)
+                TableShapeView.dineInMeasuredWidthPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE)
             }
             val totalH = group.maxOf {
-                TableShapeView.defaultMeasuredHeightPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE)
+                TableShapeView.dineInMeasuredHeightPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE)
             }
             val seats = group.sumOf { tableSeats[it] ?: 4 }
             val label = mergedLabelFromReservation.ifBlank {
@@ -357,7 +358,11 @@ class ReservationMappingActivity : AppCompatActivity() {
             val norm = mapUiNormByTableId[tableId]
             val posX = if (norm != null) norm.first * cw else rect.x
             val posY = if (norm != null) norm.second * ch else rect.y
-            addShapeView(tableId, name, seats, shape, posX, posY, null, highlight = highlight)
+            val sizePx = Pair(
+                TableShapeView.dineInMeasuredWidthPx(this, shape),
+                TableShapeView.dineInMeasuredHeightPx(this, shape),
+            )
+            addShapeView(tableId, name, seats, shape, posX, posY, sizePx, highlight = highlight)
         }
     }
 

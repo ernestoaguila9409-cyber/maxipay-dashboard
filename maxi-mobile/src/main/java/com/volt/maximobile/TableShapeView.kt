@@ -64,6 +64,13 @@ class TableShapeView(context: Context) : View(context) {
             invalidate()
         }
 
+    /** Floor-plan editor selection (rotate handle visible). */
+    var isEditorSelected: Boolean = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     /**
      * When set, [onMeasure] uses this exact pixel size instead of the default for [shape].
      * Used for linked tables that render as one combined rectangle.
@@ -156,6 +163,11 @@ class TableShapeView(context: Context) : View(context) {
         style = Paint.Style.STROKE
         strokeWidth = 4f * dp
     }
+    private val editorRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF1565C0.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 3f * dp
+    }
 
     /** Inset from view edge to the filled table shape (stroke sits inside view). */
     private val tableInset = 10f * dp
@@ -200,26 +212,29 @@ class TableShapeView(context: Context) : View(context) {
             Shape.BOOTH -> drawBooth(canvas)
         }
         if (isJoinLinkSelected) {
-            drawJoinSelectionRing(canvas)
+            drawJoinSelectionRing(canvas, joinRingPaint)
+        }
+        if (isEditorSelected) {
+            drawJoinSelectionRing(canvas, editorRingPaint)
         }
     }
 
-    private fun drawJoinSelectionRing(canvas: Canvas) {
+    private fun drawJoinSelectionRing(canvas: Canvas, ringPaint: Paint) {
         val inset = 4f * dp
         when (shape) {
             Shape.ROUND -> {
                 val cx = width / 2f
                 val cy = height / 2f
                 val r = min(width, height) / 2f - inset
-                canvas.drawCircle(cx, cy, r, joinRingPaint)
+                canvas.drawCircle(cx, cy, r, ringPaint)
             }
             Shape.SQUARE, Shape.RECTANGLE -> {
                 val rect = RectF(inset, inset, width - inset, height - inset)
-                canvas.drawRoundRect(rect, 8f * dp, 8f * dp, joinRingPaint)
+                canvas.drawRoundRect(rect, 8f * dp, 8f * dp, ringPaint)
             }
             Shape.BOOTH -> {
                 val rect = RectF(inset, inset, width - inset, height - inset)
-                canvas.drawRoundRect(rect, 10f * dp, 10f * dp, joinRingPaint)
+                canvas.drawRoundRect(rect, 10f * dp, 10f * dp, ringPaint)
             }
         }
     }
@@ -510,6 +525,34 @@ class TableShapeView(context: Context) : View(context) {
         fun defaultMeasuredHeightPx(context: Context, shape: Shape): Int {
             val d = context.resources.displayMetrics.density
             return (sizeDpForShape(shape).second * d).toInt()
+        }
+
+        fun editorMeasuredWidthPx(context: Context, shape: Shape): Int {
+            val d = context.resources.displayMetrics.density
+            val minPx = (40f * d).toInt()
+            return (defaultMeasuredWidthPx(context, shape) * TableLayoutMobileScale.EDITOR_TABLE_SIZE_SCALE).toInt()
+                .coerceAtLeast(minPx)
+        }
+
+        fun editorMeasuredHeightPx(context: Context, shape: Shape): Int {
+            val d = context.resources.displayMetrics.density
+            val minPx = (42f * d).toInt()
+            return (defaultMeasuredHeightPx(context, shape) * TableLayoutMobileScale.EDITOR_TABLE_SIZE_SCALE).toInt()
+                .coerceAtLeast(minPx)
+        }
+
+        fun dineInMeasuredWidthPx(context: Context, shape: Shape): Int {
+            val d = context.resources.displayMetrics.density
+            val minPx = (44f * d).toInt()
+            return (defaultMeasuredWidthPx(context, shape) * TableLayoutMobileScale.DINE_IN_TABLE_SIZE_SCALE).toInt()
+                .coerceAtLeast(minPx)
+        }
+
+        fun dineInMeasuredHeightPx(context: Context, shape: Shape): Int {
+            val d = context.resources.displayMetrics.density
+            val minPx = (46f * d).toInt()
+            return (defaultMeasuredHeightPx(context, shape) * TableLayoutMobileScale.DINE_IN_TABLE_SIZE_SCALE).toInt()
+                .coerceAtLeast(minPx)
         }
 
         fun shapeFromString(value: String?): Shape {

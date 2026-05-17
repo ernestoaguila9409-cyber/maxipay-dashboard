@@ -155,10 +155,11 @@ class TableSelectionActivity : AppCompatActivity() {
                 sectionsAdded = true
             }
 
-            val posX = (xL * cw / layoutCanvasW).toFloat()
-            val posY = (yL * ch / layoutCanvasH).toFloat()
-            val wPx = TableShapeView.defaultMeasuredWidthPx(this, shape)
-            val hPx = TableShapeView.defaultMeasuredHeightPx(this, shape)
+            val (posX, posY) = TableLayoutMobileScale.layoutToScreen(
+                xL, yL, cw, ch, layoutCanvasW, layoutCanvasH,
+            )
+            val wPx = TableShapeView.dineInMeasuredWidthPx(this, shape)
+            val hPx = TableShapeView.dineInMeasuredHeightPx(this, shape)
             tableLayoutScreenRect[doc.id] = TableScreenRect(posX, posY, wPx, hPx)
             visibleIds.add(doc.id)
         }
@@ -572,10 +573,10 @@ class TableSelectionActivity : AppCompatActivity() {
             val merge = tableId == group.firstOrNull() && shouldMergeGroup(group)
             if (merge) {
                 val totalW = group.sumOf {
-                    TableShapeView.defaultMeasuredWidthPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE)
+                    TableShapeView.dineInMeasuredWidthPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE)
                 }
                 val totalH = group.maxOf {
-                    TableShapeView.defaultMeasuredHeightPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE)
+                    TableShapeView.dineInMeasuredHeightPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE)
                 }
                 val enc = tableDocMapUiNormsEnc[tableId]
                     ?: group.asSequence().mapNotNull { tableDocMapUiNormsEnc[it] }.firstOrNull().orEmpty()
@@ -599,7 +600,11 @@ class TableSelectionActivity : AppCompatActivity() {
                 val name = tableNames[tableId] ?: "Table"
                 val seats = tableSeats[tableId] ?: 4
                 val shape = tableShapes[tableId] ?: TableShapeView.Shape.SQUARE
-                addTableToCanvas(tableId, name, seats, shape, rect.x, rect.y, null)
+                val sizePx = Pair(
+                    TableShapeView.dineInMeasuredWidthPx(this, shape),
+                    TableShapeView.dineInMeasuredHeightPx(this, shape),
+                )
+                addTableToCanvas(tableId, name, seats, shape, rect.x, rect.y, sizePx)
             }
         }
     }

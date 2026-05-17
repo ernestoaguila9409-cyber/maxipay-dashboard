@@ -167,10 +167,11 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
                 sectionsAdded = true
             }
 
-            val posX = (xL * cw / layoutCanvasW).toFloat()
-            val posY = (yL * ch / layoutCanvasH).toFloat()
-            val wPx = TableShapeView.defaultMeasuredWidthPx(this, shape)
-            val hPx = TableShapeView.defaultMeasuredHeightPx(this, shape)
+            val (posX, posY) = TableLayoutMobileScale.layoutToScreen(
+                xL, yL, cw, ch, layoutCanvasW, layoutCanvasH,
+            )
+            val wPx = TableShapeView.dineInMeasuredWidthPx(this, shape)
+            val hPx = TableShapeView.dineInMeasuredHeightPx(this, shape)
             tableRects[doc.id] = TableRect(posX, posY, wPx, hPx)
             ids.add(doc.id)
         }
@@ -630,8 +631,8 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
             val avgX = group.mapNotNull { tableRects[it]?.x }.let { if (it.isEmpty()) 0f else it.average().toFloat() }
             val avgY = group.mapNotNull { tableRects[it]?.y }.let { if (it.isEmpty()) 0f else it.average().toFloat() }
             val (px, py) = screenPosOrDefault(rep, avgX, avgY)
-            val totalW = group.sumOf { TableShapeView.defaultMeasuredWidthPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE) }
-            val totalH = group.maxOf { TableShapeView.defaultMeasuredHeightPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE) }
+            val totalW = group.sumOf { TableShapeView.dineInMeasuredWidthPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE) }
+            val totalH = group.maxOf { TableShapeView.dineInMeasuredHeightPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE) }
             val label = group.joinToString(" + ") { tableNames[it] ?: "Table" }
             val seats = group.sumOf { tableSeats[it] ?: 4 }
             val isSelected = group.all { it in selectedTableIds }
@@ -656,8 +657,8 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
             val avgX = previewGroup.mapNotNull { tableRects[it]?.x }.let { if (it.isEmpty()) 0f else it.average().toFloat() }
             val avgY = previewGroup.mapNotNull { tableRects[it]?.y }.let { if (it.isEmpty()) 0f else it.average().toFloat() }
             val (px, py) = screenPosOrDefault(rep, avgX, avgY)
-            val totalW = previewGroup.sumOf { TableShapeView.defaultMeasuredWidthPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE) }
-            val totalH = previewGroup.maxOf { TableShapeView.defaultMeasuredHeightPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE) }
+            val totalW = previewGroup.sumOf { TableShapeView.dineInMeasuredWidthPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE) }
+            val totalH = previewGroup.maxOf { TableShapeView.dineInMeasuredHeightPx(this, tableShapes[it] ?: TableShapeView.Shape.SQUARE) }
             val label = previewGroup.joinToString(" + ") { tableNames[it] ?: "Table" }
             val seats = previewGroup.sumOf { tableSeats[it] ?: 4 }
             addTableViewForMembers(
@@ -684,6 +685,10 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
             val shape = tableShapes[tableId] ?: TableShapeView.Shape.SQUARE
             val highlighted = tableId in selectedTableIds ||
                 (joinMode && tableId in joinModeSelection)
+            val sizePx = Pair(
+                TableShapeView.dineInMeasuredWidthPx(this, shape),
+                TableShapeView.dineInMeasuredHeightPx(this, shape),
+            )
             addTableViewForMembers(
                 repId = tableId,
                 memberIds = listOf(tableId),
@@ -692,7 +697,7 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
                 tableShape = shape,
                 posX = px,
                 posY = py,
-                customSize = null,
+                customSize = sizePx,
                 highlighted = highlighted,
                 animateMerge = false,
             )
@@ -1069,8 +1074,8 @@ class ReservationTableSelectionActivity : AppCompatActivity() {
                         tableReservationIds[doc.id] = doc.getString("reservationId")?.trim().orEmpty()
                         joinedTableIdsByTableId[doc.id] = TableJoinGroupFirestore.parseJoinedIds(doc, doc.id)
 
-                        val wPx = TableShapeView.defaultMeasuredWidthPx(this, shape)
-                        val hPx = TableShapeView.defaultMeasuredHeightPx(this, shape)
+                        val wPx = TableShapeView.dineInMeasuredWidthPx(this, shape)
+                        val hPx = TableShapeView.dineInMeasuredHeightPx(this, shape)
                         tableRects[doc.id] = TableRect(posX, posY, wPx, hPx)
                         ids.add(doc.id)
                     }

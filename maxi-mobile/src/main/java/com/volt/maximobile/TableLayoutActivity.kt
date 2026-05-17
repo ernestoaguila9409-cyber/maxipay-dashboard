@@ -1,16 +1,24 @@
 ﻿package com.volt.maximobile
 
 import android.content.res.ColorStateList
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.InputType
+import android.graphics.Typeface
+import android.view.Gravity
 import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.widget.ArrayAdapter
+import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.SeekBar
 import android.widget.Spinner
+import android.widget.HorizontalScrollView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -22,6 +30,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.QuerySnapshot
 import kotlin.math.abs
+import kotlin.math.max
 
 class TableLayoutActivity : AppCompatActivity() {
 
@@ -59,8 +68,13 @@ class TableLayoutActivity : AppCompatActivity() {
     }
 
     private val db = FirebaseFirestore.getInstance()
+    private lateinit var canvasScroll: HorizontalScrollView
     private lateinit var canvas: FrameLayout
     private lateinit var chipGroup: ChipGroup
+    /** Scrollable canvas size in pixels (may be wider than the viewport). */
+    private var editorContentWidthPx = 1f
+    private var editorContentHeightPx = 1f
+    private val tableLayoutCoords = mutableMapOf<String, Pair<Double, Double>>()
     private val tableViews = mutableMapOf<String, View>()
     private val tableSections = mutableMapOf<String, String>()
     private val knownSections = mutableListOf<String>()
@@ -80,6 +94,17 @@ class TableLayoutActivity : AppCompatActivity() {
      */
     private var layoutCanvasApplyGeneration = 0
 
+    private var selectedTableId: String? = null
+    /** While set, Firestore snapshot updates must not overwrite this table's on-screen position. */
+    private var draggingTableId: String? = null
+    /** Timestamp of the last position save; snapshot echoes within the cooldown are skipped. */
+    private var lastSaveTimeMs = 0L
+    private val saveCooldownMs = 1500L
+    private var rotationControlsOverlay: View? = null
+    private var txtRotationAngle: TextView? = null
+    private var isRotateMode = false
+    private val tableRotations = mutableMapOf<String, Float>()
+
     private val shapeLabels = arrayOf("Square", "Round", "Rectangle", "Booth")
     private val shapeValues = arrayOf(
         TableShapeView.Shape.SQUARE,
@@ -93,8 +118,20 @@ class TableLayoutActivity : AppCompatActivity() {
         setContentView(R.layout.activity_table_layout)
         supportActionBar?.hide()
 
+        canvasScroll = findViewById(R.id.tableCanvasScroll)
         canvas = findViewById(R.id.tableCanvas)
         chipGroup = findViewById(R.id.chipGroupSections)
+        canvas.isClickable = true
+        canvas.setOnClickListener { exitRotateMode() }
+
+        canvasScroll.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or_, ob ->
+            val boundsChanged = l != ol || t != ot || r != or_ || b != ob
+            if (boundsChanged && canvasScroll.width > 0 && canvasScroll.height > 0 && useTableLayouts) {
+                updateEditorCanvasDimensions()
+                if (draggingTableId == null) applyEditorPositionsToAllTables()
+                updateRotationControlsPosition()
+            }
+        }
 
         chipGroup.setOnCheckedStateChangeListener { group, checkedIds ->
             selectedSection = if (checkedIds.isNotEmpty()) {
@@ -262,6 +299,9 @@ class TableLayoutActivity : AppCompatActivity() {
         tableViews.values.forEach { canvas.removeView(it) }
         tableViews.clear()
         tableSections.clear()
+        tableRotations.clear()
+        tableLayoutCoords.clear()
+        exitRotateMode()
     }
 
     private data class EditorTableRow(
@@ -272,6 +312,7 @@ class TableLayoutActivity : AppCompatActivity() {
         val posX: Float,
         val posY: Float,
         val section: String,
+        val rotation: Float,
     )
 
     /** Active dining tables from a layout snapshot, with pixel positions for the current canvas size. */
@@ -293,9 +334,10 @@ class TableLayoutActivity : AppCompatActivity() {
             val xL = doc.getDouble("x") ?: doc.getDouble("posX") ?: 50.0
             val yL = doc.getDouble("y") ?: doc.getDouble("posY") ?: 50.0
             val section = doc.getString("section") ?: ""
-            val posX = (xL * cw / layoutCanvasW).toFloat()
-            val posY = (yL * ch / layoutCanvasH).toFloat()
-            out.add(EditorTableRow(doc.id, name, seats, shape, posX, posY, section))
+            val rotation = wrapRotationDeg((doc.getDouble("rotation") ?: 0.0).toFloat())
+            tableLayoutCoords[doc.id] = Pair(xL, yL)
+            val (posX, posY) = layoutCoordsToScreen(xL, yL)
+            out.add(EditorTableRow(doc.id, name, seats, shape, posX, posY, section, rotation))
         }
         return out
     }
@@ -331,14 +373,15 @@ class TableLayoutActivity : AppCompatActivity() {
     }
 
     private fun applyLayoutTablesSnapshotForEditor(snap: QuerySnapshot) {
+        if (draggingTableId != null) return
+        if (System.currentTimeMillis() - lastSaveTimeMs < saveCooldownMs) return
         val gen = ++layoutCanvasApplyGeneration
         canvas.post {
             if (gen != layoutCanvasApplyGeneration) return@post
+            if (draggingTableId != null) return@post
             var sectionsAdded = false
-            val cw = canvas.width.toFloat().coerceAtLeast(1f)
-            val ch = canvas.height.toFloat().coerceAtLeast(1f)
-
-            val rows = parseEditorTableRowsFromSnapshot(snap, cw, ch)
+            updateEditorCanvasDimensions()
+            val rows = parseEditorTableRowsFromSnapshot(snap, editorContentWidthPx, editorContentHeightPx)
             val newIds = rows.map { it.id }.toSet()
             val currentIds = tableViews.keys.toSet()
 
@@ -357,23 +400,29 @@ class TableLayoutActivity : AppCompatActivity() {
                 for (row in rows) {
                     tableSections[row.id] = row.section
                     val tv = tableViews[row.id] as? TableShapeView ?: continue
-                    tv.translationX = 0f
-                    tv.translationY = 0f
-                    tv.x = row.posX
-                    tv.y = row.posY
                     tv.tableName = row.name
                     tv.seatCount = row.seats
-                    tv.shape = row.shape
+                    if (tv.shape != row.shape) {
+                        tv.shape = row.shape
+                        val ew = TableShapeView.editorMeasuredWidthPx(this@TableLayoutActivity, row.shape)
+                        val eh = TableShapeView.editorMeasuredHeightPx(this@TableLayoutActivity, row.shape)
+                        tv.forcedSizePx = Pair(ew, eh)
+                    }
+                    applyTableRotation(tv, row.id, row.rotation)
+                    if (row.id == draggingTableId) continue
+                    tv.x = row.posX
+                    tv.y = row.posY
                 }
                 if (sectionsAdded) rebuildSectionChips()
                 filterTablesBySection()
+                updateRotationControlsPosition()
                 return@post
             }
 
             clearEditorCanvas()
             for (row in rows) {
                 tableSections[row.id] = row.section
-                addTableToCanvas(row.id, row.name, row.seats, row.shape, row.posX, row.posY)
+                addTableToCanvas(row.id, row.name, row.seats, row.shape, row.posX, row.posY, row.rotation)
             }
             if (sectionsAdded) rebuildSectionChips()
             filterTablesBySection()
@@ -408,7 +457,8 @@ class TableLayoutActivity : AppCompatActivity() {
                             .set(hashMapOf("name" to section))
                         sectionsAdded = true
                     }
-                    addTableToCanvas(doc.id, name, seats, shape, posX, posY)
+                    val rotation = wrapRotationDeg((doc.getDouble("rotation") ?: 0.0).toFloat())
+                    addTableToCanvas(doc.id, name, seats, shape, posX, posY, rotation)
                 }
 
                 if (sectionsAdded) rebuildSectionChips()
@@ -423,28 +473,36 @@ class TableLayoutActivity : AppCompatActivity() {
 
     private fun addTableToCanvas(
         id: String, name: String, seats: Int,
-        tableShape: TableShapeView.Shape, posX: Float, posY: Float
+        tableShape: TableShapeView.Shape, posX: Float, posY: Float,
+        rotation: Float = 0f,
     ) {
         tableViews.remove(id)?.let { canvas.removeView(it) }
 
+        val w = TableShapeView.editorMeasuredWidthPx(this, tableShape)
+        val h = TableShapeView.editorMeasuredHeightPx(this, tableShape)
         val tableView = TableShapeView(this).apply {
             tableName = name
             seatCount = seats
             shape = tableShape
+            forcedSizePx = Pair(w, h)
         }
-
-        val w = TableShapeView.defaultMeasuredWidthPx(this, tableShape)
-        val h = TableShapeView.defaultMeasuredHeightPx(this, tableShape)
         val params = FrameLayout.LayoutParams(w, h)
         tableView.layoutParams = params
         canvas.addView(tableView)
-        tableView.translationX = 0f
-        tableView.translationY = 0f
-        tableView.x = posX
-        tableView.y = posY
+        applyTableRotation(tableView, id, rotation)
+        tableView.post {
+            tableView.translationX = 0f
+            tableView.translationY = 0f
+            tableView.x = posX
+            tableView.y = posY
+        }
 
         setupDragAndLongPress(tableView, id)
         tableViews[id] = tableView
+        if (id == selectedTableId && isRotateMode) {
+            (tableView as? TableShapeView)?.isEditorSelected = true
+            updateRotationControlsPosition()
+        }
     }
 
     // ── DRAG + LONG PRESS ──────────────────────────────────
@@ -461,7 +519,7 @@ class TableLayoutActivity : AppCompatActivity() {
             this,
             object : GestureDetector.SimpleOnGestureListener() {
                 override fun onLongPress(e: MotionEvent) {
-                    showEditDeleteDialog(tableId)
+                    if (!isDragging) showEditDeleteDialog(tableId)
                 }
             },
         )
@@ -475,12 +533,14 @@ class TableLayoutActivity : AppCompatActivity() {
                     startRawX = event.rawX
                     startRawY = event.rawY
                     isDragging = false
-                    // High elevation + translation makes the spot shadow look stuck at (0,0) on many devices.
+                    draggingTableId = tableId
                     v.elevation = 0f
                     v.scaleX = 1.05f
                     v.scaleY = 1.05f
                     v.alpha = 0.85f
-                    false
+                    canvasScroll.requestDisallowInterceptTouchEvent(true)
+                    v.parent?.requestDisallowInterceptTouchEvent(true)
+                    true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val movedX = abs(event.rawX - startRawX)
@@ -489,31 +549,34 @@ class TableLayoutActivity : AppCompatActivity() {
                     if (!isDragging && (movedX > dragThreshold || movedY > dragThreshold)) {
                         isDragging = true
                         v.cancelLongPress()
-                        v.parent?.requestDisallowInterceptTouchEvent(true)
                     }
 
                     if (isDragging) {
-                        val nx = (event.rawX + dX).coerceIn(0f, (canvas.width - v.width).toFloat())
-                        val ny = (event.rawY + dY).coerceIn(0f, (canvas.height - v.height).toFloat())
+                        val maxX = (editorContentWidthPx - v.width).coerceAtLeast(0f)
+                        val maxY = (editorContentHeightPx - v.height).coerceAtLeast(0f)
+                        val nx = (event.rawX + dX).coerceIn(0f, maxX)
+                        val ny = (event.rawY + dY).coerceIn(0f, maxY)
                         if (!overlapsAnotherTable(tableId, v, nx, ny)) {
                             v.x = nx
                             v.y = ny
                         }
                     }
-                    isDragging
+                    true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     v.elevation = 0f
                     v.scaleX = 1f
                     v.scaleY = 1f
                     v.alpha = 1f
+                    canvasScroll.requestDisallowInterceptTouchEvent(false)
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
                     if (isDragging) {
                         saveTablePosition(tableId, v.x, v.y)
-                        isDragging = false
-                        true
-                    } else {
-                        false
+                        updateRotationControlsPosition()
                     }
+                    isDragging = false
+                    draggingTableId = null
+                    true
                 }
                 else -> false
             }
@@ -521,11 +584,14 @@ class TableLayoutActivity : AppCompatActivity() {
     }
 
     private fun saveTablePosition(tableId: String, x: Float, y: Float) {
+        lastSaveTimeMs = System.currentTimeMillis()
         if (useTableLayouts && activeLayoutId.isNotBlank()) {
-            val cw = canvas.width.toFloat().coerceAtLeast(1f)
-            val ch = canvas.height.toFloat().coerceAtLeast(1f)
-            val xL = x.toDouble() * layoutCanvasW / cw
-            val yL = y.toDouble() * layoutCanvasH / ch
+            val cw = editorContentWidthPx.coerceAtLeast(1f)
+            val ch = editorContentHeightPx.coerceAtLeast(1f)
+            val (xL, yL) = TableLayoutMobileScale.screenToLayout(
+                x, y, cw, ch, layoutCanvasW, layoutCanvasH,
+            )
+            tableLayoutCoords[tableId] = Pair(xL, yL)
             MerchantFirestore.col("tableLayouts").document(activeLayoutId)
                 .collection("tables").document(tableId)
                 .update(
@@ -545,13 +611,14 @@ class TableLayoutActivity : AppCompatActivity() {
 
     private fun nextAvailablePosition(shape: TableShapeView.Shape): Pair<Float, Float> {
         val dp = resources.displayMetrics.density
-        val ew = TableShapeView.defaultMeasuredWidthPx(this, shape)
-        val eh = TableShapeView.defaultMeasuredHeightPx(this, shape)
-        val cellW = (ew + 18f * dp).coerceAtLeast(80f * dp)
-        val cellH = (eh + 18f * dp).coerceAtLeast(72f * dp)
-        val padding = 20f * dp
+        val ew = TableShapeView.editorMeasuredWidthPx(this, shape)
+        val eh = TableShapeView.editorMeasuredHeightPx(this, shape)
+        val cellW = (ew + 14f * dp).coerceAtLeast(48f * dp)
+        val cellH = (eh + 14f * dp).coerceAtLeast(44f * dp)
+        val padding = 16f * dp
 
-        val canvasWidth = if (canvas.width > 0) canvas.width.toFloat()
+        val canvasWidth = if (editorContentWidthPx > 1f) editorContentWidthPx
+            else if (canvasScroll.width > 0) canvasScroll.width.toFloat()
             else resources.displayMetrics.widthPixels.toFloat()
         val columns = ((canvasWidth - padding) / cellW).toInt().coerceAtLeast(1)
 
@@ -622,10 +689,11 @@ class TableLayoutActivity : AppCompatActivity() {
                 val (newX, newY) = nextAvailablePosition(shape)
 
                 if (useTableLayouts && activeLayoutId.isNotBlank()) {
-                    val cw = canvas.width.toFloat().coerceAtLeast(1f)
-                    val ch = canvas.height.toFloat().coerceAtLeast(1f)
-                    val xL = newX.toDouble() * layoutCanvasW / cw
-                    val yL = newY.toDouble() * layoutCanvasH / ch
+                    val cw = editorContentWidthPx.coerceAtLeast(1f)
+                    val ch = editorContentHeightPx.coerceAtLeast(1f)
+                    val (xL, yL) = TableLayoutMobileScale.screenToLayout(
+                        newX, newY, cw, ch, layoutCanvasW, layoutCanvasH,
+                    )
                     val data = hashMapOf(
                         "name" to name,
                         "capacity" to seats,
@@ -697,13 +765,17 @@ class TableLayoutActivity : AppCompatActivity() {
                 val currentSeats = (doc.getLong("capacity") ?: doc.getLong("seats"))?.toInt() ?: 0
                 val currentShape = TableShapeView.shapeFromString(doc.getString("shape"))
                 val currentSection = doc.getString("section") ?: ""
+                val currentRotation = wrapRotationDeg((doc.getDouble("rotation") ?: 0.0).toFloat())
 
                 AlertDialog.Builder(this)
                     .setTitle(currentName)
-                    .setItems(arrayOf("Edit", "Delete")) { _, which ->
+                    .setItems(arrayOf("Edit", "Rotate", "Delete")) { _, which ->
                         when (which) {
-                            0 -> showEditTableDialog(tableId, currentName, currentSeats, currentShape, currentSection)
-                            1 -> confirmDeleteTable(tableId, currentName)
+                            0 -> showEditTableDialog(
+                                tableId, currentName, currentSeats, currentShape, currentSection, currentRotation,
+                            )
+                            1 -> enterRotateMode(tableId)
+                            2 -> confirmDeleteTable(tableId, currentName)
                         }
                     }
                     .show()
@@ -716,13 +788,16 @@ class TableLayoutActivity : AppCompatActivity() {
     private fun showEditTableDialog(
         tableId: String, currentName: String,
         currentSeats: Int, currentShape: TableShapeView.Shape,
-        currentSection: String
+        currentSection: String,
+        currentRotation: Float,
     ) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_add_table, null)
         val edtName = dialogView.findViewById<EditText>(R.id.edtTableName)
         val edtSeats = dialogView.findViewById<EditText>(R.id.edtTableSeats)
         val spinnerShape = dialogView.findViewById<Spinner>(R.id.spinnerShape)
         val spinnerSection = dialogView.findViewById<Spinner>(R.id.spinnerSection)
+        val seekRotation = dialogView.findViewById<SeekBar>(R.id.seekRotation)
+        val txtRotationValue = dialogView.findViewById<TextView>(R.id.txtRotationValue)
 
         spinnerShape.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, shapeLabels)
 
@@ -732,6 +807,7 @@ class TableLayoutActivity : AppCompatActivity() {
         edtName.setText(currentName)
         edtSeats.setText(currentSeats.toString())
         spinnerShape.setSelection(shapeValues.indexOf(currentShape).coerceAtLeast(0))
+        bindRotationSeekBar(seekRotation, txtRotationValue, currentRotation)
 
         AlertDialog.Builder(this)
             .setTitle("Edit Table")
@@ -740,6 +816,7 @@ class TableLayoutActivity : AppCompatActivity() {
                 val name = edtName.text.toString().trim()
                 val seats = edtSeats.text.toString().trim().toIntOrNull() ?: 0
                 val shape = shapeValues[spinnerShape.selectedItemPosition]
+                val rotation = wrapRotationDeg(seekRotation.progress.toFloat())
 
                 if (name.isBlank()) {
                     Toast.makeText(this, "Table name is required", Toast.LENGTH_SHORT).show()
@@ -759,6 +836,7 @@ class TableLayoutActivity : AppCompatActivity() {
                     "shape" to TableShapeView.shapeToString(shape),
                     "section" to section,
                     "areaType" to "DINING_TABLE",
+                    "rotation" to rotation.toDouble(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
                 val ref = if (useTableLayouts && activeLayoutId.isNotBlank()) {
@@ -774,10 +852,12 @@ class TableLayoutActivity : AppCompatActivity() {
                             tv.tableName = name
                             tv.seatCount = seats
                             tv.shape = shape
+                            applyTableRotation(tv, tableId, rotation)
                         }
                         tableSections[tableId] = section
                         ensureSection(section)
                         filterTablesBySection()
+                        updateRotationControlsPosition()
                         Toast.makeText(this, "\"$name\" updated", Toast.LENGTH_SHORT).show()
                     }
             }
@@ -808,6 +888,9 @@ class TableLayoutActivity : AppCompatActivity() {
                     tableViews[tableId]?.let { canvas.removeView(it) }
                     tableViews.remove(tableId)
                     tableSections.remove(tableId)
+                    tableRotations.remove(tableId)
+                    tableLayoutCoords.remove(tableId)
+                    if (selectedTableId == tableId) exitRotateMode()
                     filterTablesBySection()
                     Toast.makeText(this, "\"$name\" deleted", Toast.LENGTH_SHORT).show()
                 }
@@ -819,7 +902,244 @@ class TableLayoutActivity : AppCompatActivity() {
             .show()
     }
 
+    /**
+     * Fit layout height to the viewport; widen canvas horizontally when the layout is
+     * wider than the screen (enables [canvasScroll]).
+     * Only touches [canvas.layoutParams] when dimensions actually changed to avoid
+     * triggering unnecessary layout passes that disrupt touch handling.
+     */
+    private fun updateEditorCanvasDimensions() {
+        val viewportW = canvasScroll.width.coerceAtLeast(1)
+        val viewportH = canvasScroll.height.coerceAtLeast(1)
+
+        if (!useTableLayouts || layoutCanvasW <= 0 || layoutCanvasH <= 0) {
+            editorContentWidthPx = viewportW.toFloat()
+            editorContentHeightPx = viewportH.toFloat()
+        } else {
+            editorContentHeightPx = viewportH.toFloat()
+            val heightScale = viewportH / layoutCanvasH.toFloat()
+            val layoutWidthPx = (layoutCanvasW * heightScale).toFloat()
+            editorContentWidthPx = max(viewportW.toFloat(), layoutWidthPx)
+        }
+
+        val newW = editorContentWidthPx.toInt()
+        val newH = viewportH
+        val lp = canvas.layoutParams
+        if (lp != null && lp.width == newW && lp.height == newH) return
+        val params = lp ?: FrameLayout.LayoutParams(newW, newH)
+        params.width = newW
+        params.height = newH
+        canvas.layoutParams = params
+    }
+
+    private fun applyEditorPositionsToAllTables() {
+        if (!useTableLayouts) return
+        for ((id, view) in tableViews) {
+            val tv = view as? TableShapeView ?: continue
+            val coords = tableLayoutCoords[id] ?: continue
+            val (sx, sy) = layoutCoordsToScreen(coords.first, coords.second)
+            tv.x = sx
+            tv.y = sy
+        }
+    }
+
+    private fun layoutCoordsToScreen(xL: Double, yL: Double): Pair<Float, Float> {
+        return TableLayoutMobileScale.layoutToScreen(
+            xL, yL,
+            editorContentWidthPx, editorContentHeightPx,
+            layoutCanvasW, layoutCanvasH,
+        )
+    }
+
+    private fun wrapRotationDeg(deg: Float): Float {
+        var r = deg % 360f
+        if (r < 0f) r += 360f
+        return r
+    }
+
+    private fun applyTableRotation(view: TableShapeView, tableId: String, rotation: Float) {
+        val r = wrapRotationDeg(rotation)
+        tableRotations[tableId] = r
+        view.rotation = r
+    }
+
+    private fun bindRotationSeekBar(seek: SeekBar, label: TextView, rotation: Float) {
+        val r = wrapRotationDeg(rotation).toInt()
+        seek.progress = r
+        label.text = "${r}°"
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                label.text = "${progress}°"
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+    }
+
+    private fun enterRotateMode(tableId: String) {
+        if (!tableViews.containsKey(tableId)) return
+        selectedTableId = tableId
+        isRotateMode = true
+        for ((id, view) in tableViews) {
+            (view as? TableShapeView)?.isEditorSelected = id == tableId
+        }
+        val tv = tableViews[tableId] as? TableShapeView
+        val current = wrapRotationDeg(tv?.rotation ?: tableRotations[tableId] ?: 0f)
+        ensureRotationControls()
+        txtRotationAngle?.text = "${current.toInt()}°"
+        rotationControlsOverlay?.visibility = View.VISIBLE
+        updateRotationControlsPosition()
+        rotationControlsOverlay?.bringToFront()
+    }
+
+    private fun exitRotateMode() {
+        if (!isRotateMode && selectedTableId == null) return
+        isRotateMode = false
+        selectedTableId = null
+        rotationControlsOverlay?.visibility = View.GONE
+        for ((_, view) in tableViews) {
+            (view as? TableShapeView)?.isEditorSelected = false
+        }
+    }
+
+    private fun ensureRotationControls() {
+        if (rotationControlsOverlay != null) return
+        val dp = resources.displayMetrics.density
+        val btnSize = (52f * dp).toInt()
+        val pad = (10f * dp).toInt()
+
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(pad * 2, pad, pad * 2, pad)
+            background = GradientDrawable().apply {
+                cornerRadius = 12f * dp
+                setColor(0xF2FFFFFF.toInt())
+                setStroke((1.5f * dp).toInt().coerceAtLeast(1), 0xFF1565C0.toInt())
+            }
+            elevation = 12f
+            visibility = View.GONE
+            isClickable = true
+        }
+
+        fun makeRotateButton(iconRes: Int, contentDesc: String, delta: Float): ImageButton {
+            return ImageButton(this).apply {
+                setImageResource(iconRes)
+                contentDescription = contentDesc
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(0xFFE3F2FD.toInt())
+                }
+                scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+                setPadding(pad, pad, pad, pad)
+                setOnClickListener { adjustTableRotation(delta) }
+            }
+        }
+
+        val btnNegative = makeRotateButton(
+            R.drawable.ic_rotate_ccw,
+            "Rotate counter-clockwise",
+            -ROTATION_STEP_DEG,
+        )
+        val angleLabel = TextView(this).apply {
+            text = "0°"
+            textSize = 17f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(0xFF1565C0.toInt())
+            setPadding((14f * dp).toInt(), 0, (14f * dp).toInt(), 0)
+        }
+        val btnPositive = makeRotateButton(
+            R.drawable.ic_rotate_cw,
+            "Rotate clockwise",
+            ROTATION_STEP_DEG,
+        )
+
+        row.addView(
+            btnNegative,
+            LinearLayout.LayoutParams(btnSize, btnSize).apply { marginEnd = pad / 2 },
+        )
+        row.addView(
+            angleLabel,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        row.addView(
+            btnPositive,
+            LinearLayout.LayoutParams(btnSize, btnSize).apply { marginStart = pad / 2 },
+        )
+
+        canvas.addView(
+            row,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        rotationControlsOverlay = row
+        txtRotationAngle = angleLabel
+    }
+
+    private fun adjustTableRotation(deltaDeg: Float) {
+        val tableId = selectedTableId ?: return
+        val tv = tableViews[tableId] as? TableShapeView ?: return
+        val newRotation = wrapRotationDeg(tv.rotation + deltaDeg)
+        applyTableRotation(tv, tableId, newRotation)
+        txtRotationAngle?.text = "${newRotation.toInt()}°"
+        saveTableRotation(tableId, newRotation)
+        updateRotationControlsPosition()
+    }
+
+    private fun updateRotationControlsPosition() {
+        val overlay = rotationControlsOverlay ?: return
+        if (!isRotateMode) {
+            overlay.visibility = View.GONE
+            return
+        }
+        val tableId = selectedTableId ?: return
+        val tv = tableViews[tableId] ?: return
+        if (tv.visibility != View.VISIBLE) {
+            overlay.visibility = View.GONE
+            return
+        }
+        overlay.measure(
+            View.MeasureSpec.makeMeasureSpec(canvas.width, View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(canvas.height, View.MeasureSpec.AT_MOST),
+        )
+        val dp = resources.displayMetrics.density
+        val gap = 12f * dp
+        val cx = tv.x + tv.width / 2f
+        overlay.x = (cx - overlay.measuredWidth / 2f).coerceIn(0f, (canvas.width - overlay.measuredWidth).toFloat())
+        overlay.y = (tv.y + tv.height + gap).coerceIn(0f, (canvas.height - overlay.measuredHeight).toFloat())
+        overlay.bringToFront()
+    }
+
+    private fun saveTableRotation(tableId: String, rotation: Float) {
+        val r = wrapRotationDeg(rotation)
+        tableRotations[tableId] = r
+        if (useTableLayouts && activeLayoutId.isNotBlank()) {
+            MerchantFirestore.col("tableLayouts").document(activeLayoutId)
+                .collection("tables").document(tableId)
+                .update(
+                    mapOf(
+                        "rotation" to r.toDouble(),
+                        "updatedAt" to FieldValue.serverTimestamp(),
+                    )
+                )
+        } else {
+            MerchantFirestore.col("Tables").document(tableId)
+                .update(
+                    mapOf(
+                        "rotation" to r.toDouble(),
+                        "updatedAt" to FieldValue.serverTimestamp(),
+                    )
+                )
+        }
+    }
+
     companion object {
         const val SECTION_ALL = "All"
+        private const val ROTATION_STEP_DEG = 15f
     }
 }
