@@ -247,11 +247,11 @@ class ReservationMappingActivity : AppCompatActivity() {
                     sectionsAdded = true
                 }
 
-                val (posX, posY) = TableLayoutMobileScale.layoutToScreen(
-                    xL, yL, cw, ch, layoutCanvasW, layoutCanvasH,
-                )
                 val wPx = TableShapeView.dineInMeasuredWidthPx(this, shape)
                 val hPx = TableShapeView.dineInMeasuredHeightPx(this, shape)
+                val (posX, posY) = TableLayoutMobileScale.layoutToScreen(
+                    xL, yL, cw, ch, layoutCanvasW, layoutCanvasH, wPx, hPx,
+                )
                 tableRects[doc.id] = TableRect(posX, posY, wPx, hPx)
                 ids.add(doc.id)
             }

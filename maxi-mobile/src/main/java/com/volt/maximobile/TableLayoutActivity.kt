@@ -337,7 +337,7 @@ class TableLayoutActivity : AppCompatActivity() {
             val section = doc.getString("section") ?: ""
             val rotation = wrapRotationDeg((doc.getDouble("rotation") ?: 0.0).toFloat())
             tableLayoutCoords[doc.id] = Pair(xL, yL)
-            val (posX, posY) = layoutCoordsToScreen(xL, yL)
+            val (posX, posY) = layoutCoordsToScreen(xL, yL, shape)
             out.add(EditorTableRow(doc.id, name, seats, shape, posX, posY, section, rotation))
         }
         return out
@@ -587,11 +587,16 @@ class TableLayoutActivity : AppCompatActivity() {
     private fun saveTablePosition(tableId: String, x: Float, y: Float) {
         lastSaveTimeMs = System.currentTimeMillis()
         if (useTableLayouts && activeLayoutId.isNotBlank()) {
+            val tv = tableViews[tableId]
+            val shape = (tv as? TableShapeView)?.shape ?: TableShapeView.Shape.SQUARE
+            val tw = TableShapeView.editorMeasuredWidthPx(this, shape)
+            val th = TableShapeView.editorMeasuredHeightPx(this, shape)
             val (xL, yL) = TableLayoutMobileScale.screenToLayout(
                 x, y,
                 editorViewportWidthPx.coerceAtLeast(1f),
                 editorViewportHeightPx.coerceAtLeast(1f),
                 layoutCanvasW, layoutCanvasH,
+                tw, th,
             )
             tableLayoutCoords[tableId] = Pair(xL, yL)
             MerchantFirestore.col("tableLayouts").document(activeLayoutId)
@@ -693,8 +698,10 @@ class TableLayoutActivity : AppCompatActivity() {
                 if (useTableLayouts && activeLayoutId.isNotBlank()) {
                     val cw = editorContentWidthPx.coerceAtLeast(1f)
                     val ch = editorContentHeightPx.coerceAtLeast(1f)
+                    val tw = TableShapeView.editorMeasuredWidthPx(this, shape)
+                    val th = TableShapeView.editorMeasuredHeightPx(this, shape)
                     val (xL, yL) = TableLayoutMobileScale.screenToLayout(
-                        newX, newY, cw, ch, layoutCanvasW, layoutCanvasH,
+                        newX, newY, cw, ch, layoutCanvasW, layoutCanvasH, tw, th,
                     )
                     val data = hashMapOf(
                         "name" to name,
@@ -932,17 +939,25 @@ class TableLayoutActivity : AppCompatActivity() {
         for ((id, view) in tableViews) {
             val tv = view as? TableShapeView ?: continue
             val coords = tableLayoutCoords[id] ?: continue
-            val (sx, sy) = layoutCoordsToScreen(coords.first, coords.second)
+            val shape = tv.shape
+            val (sx, sy) = layoutCoordsToScreen(coords.first, coords.second, shape)
             tv.x = sx
             tv.y = sy
         }
     }
 
-    private fun layoutCoordsToScreen(xL: Double, yL: Double): Pair<Float, Float> {
+    private fun layoutCoordsToScreen(
+        xL: Double,
+        yL: Double,
+        shape: TableShapeView.Shape,
+    ): Pair<Float, Float> {
+        val tw = TableShapeView.editorMeasuredWidthPx(this, shape)
+        val th = TableShapeView.editorMeasuredHeightPx(this, shape)
         return TableLayoutMobileScale.layoutToScreen(
             xL, yL,
             editorViewportWidthPx, editorViewportHeightPx,
             layoutCanvasW, layoutCanvasH,
+            tw, th,
         )
     }
 
