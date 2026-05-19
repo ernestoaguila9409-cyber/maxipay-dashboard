@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Header from "@/components/Header";
 import { db, storage } from "@/firebase/firebaseConfig";
-import { merchantDoc } from "@/lib/merchantFirestore";
+import { merchantCol, merchantDoc } from "@/lib/merchantFirestore";
 import {
   collection,
   doc,
@@ -35,6 +35,8 @@ import {
   Receipt,
   Settings2,
   Search,
+  Monitor,
+  Smartphone,
 } from "lucide-react";
 import { ImageSearchModal } from "@/components/menu-item-image/ImageSearchModal";
 import { ReceiptBusinessField, ADDRESS_MAX_LINES } from "@/components/ReceiptBusinessField";
@@ -46,6 +48,7 @@ import {
   wrapThermalText,
 } from "@/lib/receiptThermal";
 import { slugify, ONLINE_ORDERING_SETTINGS_DOC } from "@/lib/onlineOrderingShared";
+import { POS_DEVICES_COLLECTION } from "@/lib/posDevicesFirestore";
 
 /* ══════════════════════════════════════════════
    Types — mirrors Android ReceiptSettings.kt
@@ -120,6 +123,7 @@ const MAX_LOGO_WIDTH = 512;
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type RightTab = "preview" | "print";
+type PrinterProfile = "landi" | "p8";
 
 /* ── image resize ── */
 
@@ -307,6 +311,11 @@ export default function BusinessInformationPage() {
   const [psDirty, setPsDirty] = useState(false);
   const psTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [hasLandiDevice, setHasLandiDevice] = useState(false);
+  const [hasP8Device, setHasP8Device] = useState(false);
+  const [devicesLoaded, setDevicesLoaded] = useState(false);
+  const [printerProfile, setPrinterProfile] = useState<PrinterProfile>("landi");
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const merchantScopeRef = useRef("");
@@ -317,6 +326,37 @@ export default function BusinessInformationPage() {
 
   useEffect(() => {
     merchantScopeRef.current = scopedMerchantId || merchantIdFromClaims;
+  }, [scopedMerchantId, merchantIdFromClaims]);
+
+  /* ── Detect active device types (Landi / P8) from PosDevices ── */
+
+  useEffect(() => {
+    const mid = (scopedMerchantId || merchantIdFromClaims || "").trim();
+    if (!mid) return;
+    const unsub = onSnapshot(
+      merchantCol(mid, POS_DEVICES_COLLECTION),
+      (snap) => {
+        let landi = false;
+        let p8 = false;
+        for (const d of snap.docs) {
+          const data = d.data();
+          if (data.deactivated) continue;
+          const model = String(data.deviceModel ?? "").toLowerCase();
+          if (model.includes("p8")) {
+            p8 = true;
+          } else {
+            landi = true;
+          }
+        }
+        setHasLandiDevice(landi);
+        setHasP8Device(p8);
+        setDevicesLoaded(true);
+        if (landi && !p8) setPrinterProfile("landi");
+        else if (p8 && !landi) setPrinterProfile("p8");
+      },
+      () => setDevicesLoaded(true),
+    );
+    return () => unsub();
   }, [scopedMerchantId, merchantIdFromClaims]);
 
   /* ── One-time: copy Merchants/{merchantId} → Settings/businessInfo if admin never seeded it ── */
@@ -684,6 +724,9 @@ export default function BusinessInformationPage() {
     ? wrapThermalText(displayEmail.trim(), thermalCharsPerLine(0))
     : [];
 
+  const showProfileSelector = devicesLoaded && hasLandiDevice && hasP8Device;
+  const singleDeviceIsP8 = devicesLoaded && hasP8Device && !hasLandiDevice;
+
   /* ══════════════════════════════════════════════
      Render
      ══════════════════════════════════════════════ */
@@ -887,6 +930,40 @@ export default function BusinessInformationPage() {
         {/* ════════ RIGHT — TABS (45%) ════════ */}
         <div className="w-full xl:w-[45%] min-w-0">
           <div className="xl:sticky xl:top-6">
+            {/* ── Printer profile selector (only when multiple device types are active) ── */}
+            {(showProfileSelector || singleDeviceIsP8) && (
+              <div className="flex gap-2 mb-3">
+                {(showProfileSelector || !singleDeviceIsP8) && (
+                  <button
+                    type="button"
+                    onClick={() => setPrinterProfile("landi")}
+                    className={`flex-1 flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-medium transition-all border ${
+                      printerProfile === "landi"
+                        ? "bg-white border-blue-200 text-blue-700 shadow-sm ring-1 ring-blue-100"
+                        : "bg-white/60 border-slate-200 text-slate-500 hover:text-slate-700 hover:border-slate-300"
+                    }`}
+                  >
+                    <Monitor size={16} />
+                    Landi C20 Pro
+                  </button>
+                )}
+                {(showProfileSelector || singleDeviceIsP8) && (
+                  <button
+                    type="button"
+                    onClick={() => setPrinterProfile("p8")}
+                    className={`flex-1 flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-medium transition-all border ${
+                      printerProfile === "p8"
+                        ? "bg-white border-blue-200 text-blue-700 shadow-sm ring-1 ring-blue-100"
+                        : "bg-white/60 border-slate-200 text-slate-500 hover:text-slate-700 hover:border-slate-300"
+                    }`}
+                  >
+                    <Smartphone size={16} />
+                    Dejavoo P8
+                  </button>
+                )}
+              </div>
+            )}
+
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
               {/* Tab bar */}
               <div className="flex border-b border-slate-100">
@@ -916,8 +993,23 @@ export default function BusinessInformationPage() {
                 </button>
               </div>
 
-              {/* ── Receipt Preview Tab ── */}
-              {rightTab === "preview" ? (
+              {/* ── P8 placeholder (no controls yet) ── */}
+              {printerProfile === "p8" ? (
+                <div className="p-10 flex flex-col items-center justify-center text-center min-h-[320px]">
+                  <div className="p-3 rounded-2xl bg-slate-50 mb-4">
+                    <Smartphone size={32} className="text-slate-300" />
+                  </div>
+                  <h3 className="text-base font-semibold text-slate-700 mb-1">
+                    Dejavoo P8
+                  </h3>
+                  <p className="text-sm text-slate-400 max-w-[260px]">
+                    Receipt configuration for the Dejavoo P8 printer is coming soon.
+                  </p>
+                  <p className="text-xs text-slate-300 mt-3">
+                    24 characters per line &middot; XML SDK
+                  </p>
+                </div>
+              ) : rightTab === "preview" ? (
                 <div className="p-5 sm:p-6">
                   {/* Receipt paper — wider + scaled fonts so preview is readable */}
                   <div className="flex justify-center overflow-x-auto pb-4">
