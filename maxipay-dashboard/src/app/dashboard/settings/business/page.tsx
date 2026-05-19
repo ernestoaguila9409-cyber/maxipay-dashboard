@@ -109,6 +109,7 @@ const DEFAULT_PRINT: PrintSettings = {
   fontSizeFooter: 0,
 };
 
+const FONT_LABELS = ["Normal", "Large", "X-Large"] as const;
 const FONT_PX: Record<number, number> = { 0: 12, 1: 15, 2: 19 };
 /** Makes the receipt preview easier to read on large screens (does not affect POS print). */
 const PREVIEW_FONT_SCALE = 1.28;
@@ -189,6 +190,38 @@ function Toggle({
         />
       </button>
     </label>
+  );
+}
+
+function FontSizePicker({
+  value,
+  onChange,
+  label,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  label: string;
+}) {
+  return (
+    <div className="py-1">
+      <span className="text-[13px] text-slate-700 block mb-1.5">{label}</span>
+      <div className="flex gap-1.5 bg-slate-100 rounded-lg p-0.5">
+        {FONT_LABELS.map((lbl, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => onChange(i)}
+            className={`flex-1 py-1 text-[11px] font-medium rounded-md transition-all ${
+              value === i
+                ? "bg-white text-slate-800 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {lbl}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1183,6 +1216,47 @@ export default function BusinessInformationPage() {
                       label="Footer"
                       checked={ps.boldFooter}
                       onChange={(v) => pSet("boldFooter", v)}
+                    />
+                  </Section>
+
+                  <div className="border-t border-slate-100" />
+
+                  {/* Font Size */}
+                  <Section title="Font Size">
+                    <FontSizePicker
+                      label="Business Name"
+                      value={ps.fontSizeBizName}
+                      onChange={(v) => pSet("fontSizeBizName", v)}
+                    />
+                    <FontSizePicker
+                      label="Address"
+                      value={ps.fontSizeAddress}
+                      onChange={(v) => pSet("fontSizeAddress", v)}
+                    />
+                    <FontSizePicker
+                      label="Order Info"
+                      value={ps.fontSizeOrderInfo}
+                      onChange={(v) => pSet("fontSizeOrderInfo", v)}
+                    />
+                    <FontSizePicker
+                      label="Items"
+                      value={ps.fontSizeItems}
+                      onChange={(v) => pSet("fontSizeItems", v)}
+                    />
+                    <FontSizePicker
+                      label="Totals"
+                      value={ps.fontSizeTotals}
+                      onChange={(v) => pSet("fontSizeTotals", v)}
+                    />
+                    <FontSizePicker
+                      label="Grand Total"
+                      value={ps.fontSizeGrandTotal}
+                      onChange={(v) => pSet("fontSizeGrandTotal", v)}
+                    />
+                    <FontSizePicker
+                      label="Footer"
+                      value={ps.fontSizeFooter}
+                      onChange={(v) => pSet("fontSizeFooter", v)}
                     />
                   </Section>
 
