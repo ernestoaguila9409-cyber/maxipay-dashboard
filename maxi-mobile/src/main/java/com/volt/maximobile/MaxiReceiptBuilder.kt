@@ -54,7 +54,7 @@ object MaxiReceiptBuilder {
             CartLine(
                 menuItemId = doc.id,
                 name = name,
-                unitPriceDollars = lineTotalCents / 100.0 / qty,
+                basePriceDollars = lineTotalCents / 100.0 / qty,
                 quantity = qty,
             )
         }
@@ -162,7 +162,7 @@ object MaxiReceiptBuilder {
             segs += ReceiptSegment("Server: ${data.employeeName}", centered = true)
         }
         val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
-        segs += ReceiptSegment("Date: $dateStr", centered = true)
+        segs += ReceiptSegment(receiptOrderInfoDateLine(dateStr), centered = true)
         segs += ReceiptSegment("")
 
         // ── Items ──

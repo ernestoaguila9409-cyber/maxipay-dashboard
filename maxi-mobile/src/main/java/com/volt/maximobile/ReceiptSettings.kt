@@ -16,6 +16,9 @@ fun formatLine(left: String, right: String, width: Int = LINE_WIDTH): String {
     return left + " ".repeat(space) + right
 }
 
+/** Landi C20 Pro 58mm: timestamp only so "MM/dd/yyyy hh:mm a" fits on one line. */
+fun receiptOrderInfoDateLine(dateStr: String): String = dateStr
+
 /**
  * Maps gateway [CardData.EntryType] (e.g. Dejavoo spinpos) to a short thermal-receipt label.
  */
