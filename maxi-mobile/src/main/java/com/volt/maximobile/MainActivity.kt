@@ -418,6 +418,7 @@ private fun MaxiRoot() {
                         }
                         employeeName = map["name"] as? String ?: "Staff"
                         MerchantFirestore.init(mid)
+                        ReceiptPrintingConfig.startSync(context)
                         screen = Screen.Dashboard
                     } catch (e: Exception) {
                         err = e.message ?: "Login failed"

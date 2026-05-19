@@ -4661,13 +4661,12 @@ class MenuActivity : AppCompatActivity() {
                     detachOrderKitchenStatusListener()
                     currentOrderId = null
                     Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_SHORT).show()
-                    val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
-                        putExtra("ORDER_ID", orderId)
-                        if (!customerEmail.isNullOrBlank()) putExtra("CUSTOMER_EMAIL", customerEmail)
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    }
-                    startActivity(intent)
-                    finish()
+                    ReceiptPostPaymentFlow.launchAfterOrderPaid(
+                        activity = this,
+                        orderId = orderId,
+                        customerEmail = customerEmail,
+                        finishCaller = true,
+                    )
                 }
                 if (stockCountingEnabled) {
                     deductStockTransaction(
@@ -4719,13 +4718,12 @@ class MenuActivity : AppCompatActivity() {
                     detachOrderKitchenStatusListener()
                     currentOrderId = null
                     Toast.makeText(this, "Payment captured. Tab closed.", Toast.LENGTH_SHORT).show()
-                    val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
-                        putExtra("ORDER_ID", orderId)
-                        if (!customerEmail.isNullOrBlank()) putExtra("CUSTOMER_EMAIL", customerEmail)
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    }
-                    startActivity(intent)
-                    finish()
+                    ReceiptPostPaymentFlow.launchAfterOrderPaid(
+                        activity = this,
+                        orderId = orderId,
+                        customerEmail = customerEmail,
+                        finishCaller = true,
+                    )
                 }
                 if (stockCountingEnabled) {
                     deductStockTransaction(

@@ -138,6 +138,7 @@ class MainActivity : AppCompatActivity() {
         ).also { it.attach() }
         ensureOpenBatch()
         ReceiptSettings.startBusinessInfoSync(this)
+        ReceiptPrintingConfig.startSync(this)
 
         val bizName = ReceiptSettings.load(this).businessName
         CustomerDisplayManager.setIdle(this, bizName)

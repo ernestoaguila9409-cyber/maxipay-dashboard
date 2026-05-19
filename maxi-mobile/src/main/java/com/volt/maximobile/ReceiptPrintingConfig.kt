@@ -1,4 +1,4 @@
-package com.ernesto.myapplication
+package com.volt.maximobile
 
 import android.content.Context
 import android.content.SharedPreferences

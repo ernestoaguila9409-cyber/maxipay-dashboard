@@ -96,6 +96,10 @@
         <activity android:name=".OnlineOrderingBusinessHoursActivity" android:exported="false" />
         <activity android:name=".InventoryConfigActivity" android:exported="false" />
         <activity android:name=".ReceiptDisplayConfigActivity" android:exported="false" />
+        <activity
+            android:name=".ReceiptPrintingSettingsActivity"
+            android:exported="false"
+            android:parentActivityName=".ReceiptDisplayConfigActivity" />
         <activity android:name=".ViewEditReceiptActivity" android:exported="false" />
         <activity android:name=".SignatureSettingsActivity" android:exported="false" />
         <activity android:name=".ItemSelectorActivity" android:exported="false" />

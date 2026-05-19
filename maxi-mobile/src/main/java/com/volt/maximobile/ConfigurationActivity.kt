@@ -12,6 +12,12 @@ class ConfigurationActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "Configuration"
 
+        val mid = PosDeviceIdentity.getMerchantId(this).trim()
+        if (mid.isNotEmpty()) {
+            MerchantFirestore.init(mid)
+            ReceiptPrintingConfig.startSync(this)
+        }
+
         findViewById<android.view.View>(R.id.optionTaxesAndFees).setOnClickListener {
             startActivity(Intent(this, TaxesAndFeesActivity::class.java))
         }

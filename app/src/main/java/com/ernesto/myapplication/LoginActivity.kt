@@ -76,6 +76,7 @@ class LoginActivity : AppCompatActivity() {
                 PosDeviceIdentity.syncMerchantBusinessNameFromFirestore(applicationContext) {
                     runOnUiThread {
                         ReceiptSettings.startBusinessInfoSync(this)
+                        ReceiptPrintingConfig.startSync(this)
                         applyLoginHeaderFromSettings(ReceiptSettings.load(this))
                         val bizName = ReceiptSettings.load(this).businessName
                         CustomerDisplayManager.setIdle(this, bizName)

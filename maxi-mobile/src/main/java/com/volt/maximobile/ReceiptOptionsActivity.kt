@@ -33,6 +33,7 @@ class ReceiptOptionsActivity : AppCompatActivity() {
 
         orderId = intent.getStringExtra("ORDER_ID")
         val customerEmail = intent.getStringExtra("CUSTOMER_EMAIL")
+        val autoPrintOnOpen = intent.getBooleanExtra(ReceiptPostPaymentFlow.EXTRA_AUTO_PRINT_ON_OPEN, false)
 
         val optionsContainer = findViewById<LinearLayout>(R.id.optionsContainer)
         val emailFormContainer = findViewById<LinearLayout>(R.id.emailFormContainer)
@@ -117,6 +118,13 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnBackFromSms).setOnClickListener {
             smsFormContainer.visibility = View.GONE
             optionsContainer.visibility = View.VISIBLE
+        }
+
+        if (autoPrintOnOpen) {
+            val oid = orderId
+            if (!oid.isNullOrBlank()) {
+                printReceipt(oid)
+            }
         }
     }
 

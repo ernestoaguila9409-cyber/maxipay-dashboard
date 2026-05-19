@@ -12,8 +12,18 @@ class ReceiptDisplayConfigActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "Print Receipt Display"
 
+        val mid = PosDeviceIdentity.getMerchantId(this).trim()
+        if (mid.isNotEmpty()) {
+            MerchantFirestore.init(mid)
+            ReceiptPrintingConfig.startSync(this)
+        }
+
         findViewById<android.view.View>(R.id.optionViewEditReceipt).setOnClickListener {
             startActivity(Intent(this, ViewEditReceiptActivity::class.java))
+        }
+
+        findViewById<android.view.View>(R.id.optionReceiptPrintingSettings).setOnClickListener {
+            startActivity(Intent(this, ReceiptPrintingSettingsActivity::class.java))
         }
     }
 
