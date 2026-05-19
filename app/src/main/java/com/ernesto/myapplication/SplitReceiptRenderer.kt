@@ -41,7 +41,7 @@ object SplitReceiptRenderer {
         if (cust.isNotBlank()) sb.appendLine("Customer: $cust")
         if (rs.showDateTime) {
             val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
-            sb.appendLine("Date: $dateStr")
+            sb.appendLine(receiptOrderInfoDateLine(dateStr))
         }
         sb.appendLine()
         sb.appendLine(payload.guestLabel)
@@ -170,7 +170,7 @@ object SplitReceiptRenderer {
         if (cust.isNotBlank()) orderInfo("Customer: $cust")
         if (rs.showDateTime) {
             val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
-            orderInfo("Date: $dateStr")
+            orderInfo(receiptOrderInfoDateLine(dateStr))
         }
         segs += EscPosPrinter.Segment("")
         orderInfo(payload.guestLabel)

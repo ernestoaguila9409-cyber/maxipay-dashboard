@@ -538,7 +538,7 @@ object EscPosPrinter {
         segs += Segment("Order #1042", bold = bo, fontSize = fo, centered = true)
         segs += Segment("Type: Dine In", bold = bo, fontSize = fo, centered = true)
         if (rs.showServerName) segs += Segment("Server: Ernesto", bold = bo, fontSize = fo, centered = true)
-        if (rs.showDateTime) segs += Segment("Date: $dateStr", bold = bo, fontSize = fo, centered = true)
+        if (rs.showDateTime) segs += Segment(receiptOrderInfoDateLine(dateStr), bold = bo, fontSize = fo, centered = true)
         segs += Segment("")
 
         segs += Segment("-".repeat(lwi), bold = bi, fontSize = fi)

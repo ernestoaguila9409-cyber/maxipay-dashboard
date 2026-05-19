@@ -2833,7 +2833,7 @@ class OrderDetailActivity : AppCompatActivity() {
         }
         if (rs.showServerName && empName.isNotBlank()) segs += EscPosPrinter.Segment("Server: $empName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         if (custName.isNotBlank()) segs += EscPosPrinter.Segment("Customer: $custName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
-        if (rs.showDateTime) segs += EscPosPrinter.Segment("Date: $dateStr", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        if (rs.showDateTime) segs += EscPosPrinter.Segment(receiptOrderInfoDateLine(dateStr), bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         segs += EscPosPrinter.Segment("")
 
         @Suppress("UNCHECKED_CAST")
@@ -3005,7 +3005,7 @@ class OrderDetailActivity : AppCompatActivity() {
             segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
         val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
-        if (rs.showDateTime) segs += EscPosPrinter.Segment("Date: $dateStr", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        if (rs.showDateTime) segs += EscPosPrinter.Segment(receiptOrderInfoDateLine(dateStr), bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
 
         val refundedByName = refundDocs.firstOrNull()?.getString("refundedBy")?.trim()?.takeIf { it.isNotBlank() }
         if (refundedByName != null) {
@@ -3168,7 +3168,7 @@ class OrderDetailActivity : AppCompatActivity() {
             segs += EscPosPrinter.Segment("Order #$orderNumber", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         }
         val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
-        segs += EscPosPrinter.Segment("Date: $dateStr", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        segs += EscPosPrinter.Segment(receiptOrderInfoDateLine(dateStr), bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         segs += EscPosPrinter.Segment("")
 
         val totalRefundedInCents = orderDoc.getLong("totalRefundedInCents") ?: 0L
@@ -3268,7 +3268,7 @@ class OrderDetailActivity : AppCompatActivity() {
         }
         if (rs.showServerName && empName.isNotBlank()) segs += EscPosPrinter.Segment("Server: $empName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         if (custName.isNotBlank()) segs += EscPosPrinter.Segment("Customer: $custName", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
-        if (rs.showDateTime) segs += EscPosPrinter.Segment("Date: $dateStr", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
+        if (rs.showDateTime) segs += EscPosPrinter.Segment(receiptOrderInfoDateLine(dateStr), bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         if (voidedBy != null) segs += EscPosPrinter.Segment("Voided by: $voidedBy", bold = rs.boldOrderInfo, fontSize = rs.fontSizeOrderInfo, centered = true)
         segs += EscPosPrinter.Segment("")
 

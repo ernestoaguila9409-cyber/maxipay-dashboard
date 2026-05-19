@@ -398,7 +398,7 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         val dateStr = SimpleDateFormat("MM/dd/yyyy hh:mm a", Locale.US).format(Date())
         val orderInfoLines = mutableListOf("Order #1042", "Type: Dine In")
         if (settings.showServerName) orderInfoLines.add("Server: Ernesto")
-        if (settings.showDateTime) orderInfoLines.add("Date: $dateStr")
+        if (settings.showDateTime) orderInfoLines.add(receiptOrderInfoDateLine(dateStr))
         tvOrderInfo.text = orderInfoLines.joinToString("\n")
         tvOrderInfo.setTypeface(null, bold(settings.boldOrderInfo))
         tvOrderInfo.textSize = orderSp
