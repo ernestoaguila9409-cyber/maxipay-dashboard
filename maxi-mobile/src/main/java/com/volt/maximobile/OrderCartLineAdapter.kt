@@ -4,9 +4,9 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import java.util.Locale
 
 internal class OrderCartLineAdapter(
     private val onIncreaseLine: (Int) -> Unit,
@@ -33,7 +33,7 @@ internal class OrderCartLineAdapter(
 
     inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val nameView: TextView = itemView.findViewById(R.id.cartLineName)
-        private val unitPriceView: TextView = itemView.findViewById(R.id.cartLineUnitPrice)
+        private val detailsContainer: LinearLayout = itemView.findViewById(R.id.cartLineDetails)
         private val quantityView: TextView = itemView.findViewById(R.id.cartLineQuantity)
         private val totalView: TextView = itemView.findViewById(R.id.cartLineTotal)
         private val decreaseButton: ImageButton = itemView.findViewById(R.id.cartLineDecrease)
@@ -41,17 +41,11 @@ internal class OrderCartLineAdapter(
 
         fun bind(line: CartLine, position: Int) {
             nameView.text = line.name
-            unitPriceView.text = itemView.context.getString(
-                R.string.order_cart_unit_price,
-                formatMoney(line.unitPriceDollars),
-            )
+            CartLineDisplay.bindCartLineDetails(detailsContainer, line, itemView.context)
             quantityView.text = line.quantity.toString()
-            totalView.text = formatMoney(line.unitPriceDollars * line.quantity)
+            totalView.text = CartLineDisplay.formatMoney(line.unitPriceDollars * line.quantity)
             decreaseButton.setOnClickListener { onDecreaseLine(position) }
             increaseButton.setOnClickListener { onIncreaseLine(position) }
         }
     }
-
-    private fun formatMoney(amount: Double): String =
-        "$${String.format(Locale.US, "%.2f", amount)}"
 }

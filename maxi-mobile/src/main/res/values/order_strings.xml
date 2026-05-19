@@ -14,5 +14,7 @@
     <string name="order_review_summary">Review Order (%1$d items • %2$s)</string>
     <string name="order_guest_label">Guest %1$d</string>
     <string name="order_cart_unit_price">%1$s each</string>
+    <string name="order_cart_modifier_add">• %1$s  +%2$s</string>
+    <string name="order_cart_line_subtotal_each">Subtotal: %1$s each</string>
     <string name="order_item_added">Added %1$s</string>
 </resources>

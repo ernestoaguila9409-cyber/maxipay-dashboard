@@ -2,13 +2,23 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.volt.maximobile"
     android:versionCode="1"
-    android:versionName="0.1.0-maxi" >
+    android:versionName="0.1.1-maxi" >
 
     <uses-sdk
         android:minSdkVersion="23"
         android:targetSdkVersion="34" />
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <queries>
+        <package android:name="com.denovo.app.top" />
+        <package android:name="com.denovo.app.kozen" />
+    </queries>
+
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" /> <!-- Required by older versions of Google Play services to create IID tokens -->
     <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
@@ -42,6 +52,214 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name="com.volt.maximobile.OrdersActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.OrderDetailActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.MenuActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustNothing" />
+        <activity
+            android:name="com.volt.maximobile.MenuOnlyActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="com.volt.maximobile.ItemDetailActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.PaymentActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.CashPaymentActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.SplitPaymentActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.TipActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.TipAdjustmentActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ReceiptOptionsActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.TransactionActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.BatchManagementActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.BatchDetailsActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ReportsActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ReportPreviewActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.TodaySalesActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.MenuPerformanceActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ItemSalesReportActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.CategorySalesReportActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ModifierSalesReportActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.TableSelectionActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.TableLayoutActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.TableMappingActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.BarTabsActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.BarSeatConfigActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.BarTabConfigActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.CashFlowActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.CustomersActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.CustomerProfileActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.EmployeesActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ReservationActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ReservationMappingActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ReservationTableSelectionActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ModifierManagementActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.GlobalModifierActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="com.volt.maximobile.AssignModifierToItemActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.SelectModifiersActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.SelectTaxesActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.SelectPrinterLabelActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.TaxesAndFeesActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.AddTaxActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.DiscountsActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.AddDiscountActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.TipsAndDiscountsHubActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.TipConfigActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ConfigurationActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.SideMenuActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.DeviceActivationActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.PaymentMethodsActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.OrderConfigurationActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.KitchenOrderConfigurationActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.OrderTypesConfigureActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ToGoConfigureActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.DineInConfigureActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.BarTabConfigureActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.OnlineOrderingConfigureActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.OnlineOrderingBusinessHoursActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.InventoryConfigActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ReceiptDisplayConfigActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ReceiptPrintingSettingsActivity"
+            android:exported="false"
+            android:parentActivityName="com.volt.maximobile.ReceiptDisplayConfigActivity" />
+        <activity
+            android:name="com.volt.maximobile.ViewEditReceiptActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.SignatureSettingsActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.ItemSelectorActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.PrintersActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.PrinterDetailActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.PrinterListActivity"
+            android:exported="false" />
+        <activity
+            android:name="com.volt.maximobile.AddPrinterActivity"
+            android:exported="false" />
 
         <service
             android:name="com.google.firebase.components.ComponentDiscoveryService"
@@ -52,6 +270,12 @@
                 android:value="com.google.firebase.components.ComponentRegistrar" />
             <meta-data
                 android:name="com.google.firebase.components:com.google.firebase.auth.FirebaseAuthRegistrar"
+                android:value="com.google.firebase.components.ComponentRegistrar" />
+            <meta-data
+                android:name="com.google.firebase.components:com.google.firebase.storage.FirebaseStorageKtxRegistrar"
+                android:value="com.google.firebase.components.ComponentRegistrar" />
+            <meta-data
+                android:name="com.google.firebase.components:com.google.firebase.storage.StorageRegistrar"
                 android:value="com.google.firebase.components.ComponentRegistrar" />
             <meta-data
                 android:name="com.google.firebase.components:com.google.firebase.functions.ktx.FirebaseFunctionsLegacyRegistrar"
@@ -70,6 +294,12 @@
                 android:value="com.google.firebase.components.ComponentRegistrar" />
             <meta-data
                 android:name="com.google.firebase.components:com.google.firebase.firestore.FirestoreRegistrar"
+                android:value="com.google.firebase.components.ComponentRegistrar" />
+            <meta-data
+                android:name="com.google.firebase.components:com.google.firebase.appcheck.FirebaseAppCheckKtxRegistrar"
+                android:value="com.google.firebase.components.ComponentRegistrar" />
+            <meta-data
+                android:name="com.google.firebase.components:com.google.firebase.appcheck.FirebaseAppCheckRegistrar"
                 android:value="com.google.firebase.components.ComponentRegistrar" />
             <meta-data
                 android:name="com.google.firebase.components:com.google.firebase.installations.ktx.FirebaseInstallationsLegacyRegistrar"
@@ -175,6 +405,13 @@
         <activity
             android:name="androidx.compose.ui.tooling.PreviewActivity"
             android:exported="true" />
+
+        <uses-library
+            android:name="androidx.window.extensions"
+            android:required="false" />
+        <uses-library
+            android:name="androidx.window.sidecar"
+            android:required="false" />
 
         <provider
             android:name="androidx.startup.InitializationProvider"

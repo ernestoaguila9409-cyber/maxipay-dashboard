@@ -463,7 +463,7 @@ class ReservationActivity : AppCompatActivity() {
         val etPhone = dialogView.findViewById<EditText>(R.id.etPhone)
         val etPartySize = dialogView.findViewById<EditText>(R.id.etPartySize)
         val etNotes = dialogView.findViewById<EditText>(R.id.etNotes)
-        val keyboardPanel = dialogView.findViewById<View>(R.id.reservationKeyboardPanel)
+        val keyboardPanel = dialogView.findViewById<android.view.ViewGroup>(R.id.reservationKeyboardPanel)
         val recyclerCustomerSuggestions =
             dialogView.findViewById<RecyclerView>(R.id.recycler_customer_suggestions)
 
@@ -691,9 +691,10 @@ class ReservationActivity : AppCompatActivity() {
             )
             guestAutocomplete.start()
             ReservationDialogKeyboardHelper(
-                context = this,
+                activity = this,
                 keyboardRoot = keyboardPanel,
                 fields = listOf(etGuestName, etPhone, etPartySize, etNotes),
+                qwertyFieldIds = setOf(R.id.etGuestName, R.id.etNotes),
                 onAnyFieldFocusChange = { et, hasFocus ->
                     guestAutocomplete.onFieldFocus(et, hasFocus)
                 },

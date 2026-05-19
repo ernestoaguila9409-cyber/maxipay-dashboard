@@ -1,10 +1,10 @@
 {
     "logs": [
         {
-            "outputFile": "com.volt.maximobile.maxi-mobile-mergeDebugResources-65:/values-w400dp-port-v13/values-w400dp-port-v13.xml",
+            "outputFile": "com.volt.maximobile.maxi-mobile-mergeDebugResources-78:/values-w400dp-port-v13/values-w400dp-port-v13.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\ernes\\.gradle\\caches\\transforms-3\\750b1bc182a96c3c210fdea8346e305b\\transformed\\material-1.11.0\\res\\values-w400dp-port-v13\\values-w400dp-port-v13.xml",
+                    "source": "C:\\Users\\ernes\\.gradle\\caches\\transforms-3\\d94754a8abc2aa13fd7453a44c016657\\transformed\\material-1.11.0\\res\\values-w400dp-port-v13\\values-w400dp-port-v13.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,7,8,9",
                         "startColumns": "4,4,4,4,4,4,4,4",

@@ -1,11 +1,122 @@
 const admin = require("firebase-admin");
 admin.initializeApp();
 
-const { onCall } = require("firebase-functions/v2/https");
+const { onCall, onRequest } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
 const { setGlobalOptions } = require("firebase-functions");
 const { Vonage } = require("@vonage/server-sdk");
 const logger = require("firebase-functions/logger");
 const { merchantCol, merchantDoc, merchantIdFromAuth } = require("./merchant-firestore");
+const OAuthClient = require("intuit-oauth");
+
+const QBO_CLIENT_ID = defineSecret("QBO_CLIENT_ID");
+const QBO_CLIENT_SECRET = defineSecret("QBO_CLIENT_SECRET");
+const REDIRECT_URI =
+  "https://us-central1-restaurantapp-180da.cloudfunctions.net/qboCallback";
+
+function createQboOAuthClient() {
+  const clientId = process.env.QBO_CLIENT_ID;
+  const clientSecret = process.env.QBO_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error("QBO_CLIENT_ID and QBO_CLIENT_SECRET must be set");
+  }
+  return new OAuthClient({
+    clientId,
+    clientSecret,
+    environment: "sandbox",
+    redirectUri: REDIRECT_URI,
+  });
+}
+
+const QBO_FIRESTORE_DOC = "Settings/qboOAuth";
+
+exports.startQBOAuth = onRequest(
+  { secrets: [QBO_CLIENT_ID, QBO_CLIENT_SECRET], maxInstances: 5 },
+  (req, res) => {
+    try {
+      const oauthClient = createQboOAuthClient();
+      const authUri = oauthClient.authorizeUri({
+        scope: [OAuthClient.scopes.Accounting],
+      });
+      logger.info("[qbo-oauth] Redirecting to QuickBooks authorization", {
+        redirectUri: REDIRECT_URI,
+      });
+      res.redirect(302, authUri);
+    } catch (err) {
+      logger.error("[qbo-oauth] Failed to build auth URL", { err: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+exports.qboCallback = onRequest(
+  { secrets: [QBO_CLIENT_ID, QBO_CLIENT_SECRET], maxInstances: 5 },
+  async (req, res) => {
+    const oauthError = req.query.error;
+    if (oauthError) {
+      logger.error("[qbo-oauth] Authorization denied", {
+        error: oauthError,
+        description: req.query.error_description,
+      });
+      res.status(400).send(
+        `<h2>QuickBooks authorization denied</h2><p>${req.query.error_description || oauthError}</p>`,
+      );
+      return;
+    }
+
+    const code = req.query.code;
+    if (!code) {
+      res.status(400).send("<h2>Missing authorization code</h2>");
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(req.query)) {
+        if (value == null || value === "") continue;
+        params.set(key, Array.isArray(value) ? String(value[0]) : String(value));
+      }
+      const callbackUri = `${REDIRECT_URI}?${params.toString()}`;
+
+      const oauthClient = createQboOAuthClient();
+      const authResponse = await oauthClient.createToken(callbackUri);
+      const token = authResponse.getToken();
+
+      const realmId = token.realmId || req.query.realmId || "";
+      const expiresIn = Number(token.expires_in) || 3600;
+      await admin.firestore().doc(QBO_FIRESTORE_DOC).set(
+        {
+          realmId: String(realmId),
+          accessToken: token.access_token,
+          refreshToken: token.refresh_token,
+          scope: token.scope || OAuthClient.scopes.Accounting,
+          expiresAt: Date.now() + expiresIn * 1000,
+          environment: "sandbox",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      logger.info("[qbo-oauth] QuickBooks connected", { realmId });
+
+      res.status(200).send(
+        "<h2>QuickBooks connected!</h2>" +
+        "<p>Your sandbox company is linked to MaxiPay. You can close this window.</p>" +
+        `<p><small>Company ID (realmId): ${realmId}</small></p>`,
+      );
+    } catch (err) {
+      logger.error("[qbo-oauth] Token exchange failed", {
+        err: err.message,
+        error: err.error,
+        description: err.error_description,
+      });
+      res.status(500).send(
+        `<h2>Token exchange failed</h2><p>${err.error_description || err.message}</p>` +
+        "<p>Authorization codes expire quickly. Open startQBOAuth and connect again.</p>",
+      );
+    }
+  },
+);
 
 /**
  * Receipt emails use the Resend HTTP API. Set on the deployed function:
@@ -1713,8 +1824,6 @@ function escapeHtml(str) {
 }
 
 // ── Temporary: Set Storage CORS (remove after running once) ──
-const { onRequest } = require("firebase-functions/v2/https");
-
 exports.fixStorageCors = onRequest(async (req, res) => {
   const corsConfig = [
     {

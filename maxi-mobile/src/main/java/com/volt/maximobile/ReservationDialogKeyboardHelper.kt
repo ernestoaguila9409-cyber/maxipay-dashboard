@@ -1,150 +1,220 @@
 ﻿package com.volt.maximobile
 
-import android.content.Context
-import android.text.Editable
+import android.text.InputType
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
-import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
 
 /**
- * In-app alphanumeric keyboard for the create-reservation dialog: same letters + numbers
- * for every field, with the system soft keyboard suppressed.
- * Shift (⇧) toggles caps for letter keys; labels update to match.
+ * Create-reservation dialog keyboard — same [PosQwertyKeypad] as modifier option editing,
+ * with a digits-only pad for phone / party size.
  */
 class ReservationDialogKeyboardHelper(
-    private val context: Context,
-    private val keyboardRoot: View,
+    private val activity: AppCompatActivity,
+    private val keyboardRoot: ViewGroup,
     private val fields: List<EditText>,
+    private val qwertyFieldIds: Set<Int>,
     private val onAnyFieldFocusChange: ((EditText, Boolean) -> Unit)? = null,
 ) {
-    private val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+    private val imm = activity.getSystemService(AppCompatActivity.INPUT_METHOD_SERVICE) as InputMethodManager
     private var activeField: EditText? = null
-    private var capsOn = false
-
-    private val letterKeys = listOf(
-        R.id.keyQ to "q", R.id.keyW to "w", R.id.keyE to "e", R.id.keyR to "r",
-        R.id.keyT to "t", R.id.keyY to "y", R.id.keyU to "u", R.id.keyI to "i",
-        R.id.keyO to "o", R.id.keyP to "p",
-        R.id.keyA to "a", R.id.keyS to "s", R.id.keyD to "d", R.id.keyF to "f",
-        R.id.keyG to "g", R.id.keyH to "h", R.id.keyJ to "j", R.id.keyK to "k",
-        R.id.keyL to "l",
-        R.id.keyZ to "z", R.id.keyX to "x", R.id.keyC to "c", R.id.keyV to "v",
-        R.id.keyB to "b", R.id.keyN to "n", R.id.keyM to "m",
-    )
+    private var switchHost: FrameLayout? = null
+    private var alphaPanel: View? = null
+    private var digitsPanel: View? = null
+    private var keyboardExpanded = true
 
     fun start() {
-        fields.forEach { setupField(it) }
-        wireKeys()
-        refreshLetterLabels()
-        updateShiftButton()
+        keyboardRoot.removeAllViews()
+        if (keyboardRoot is LinearLayout) {
+            keyboardRoot.orientation = LinearLayout.VERTICAL
+        }
+        keyboardRoot.background = activity.getDrawable(R.drawable.bg_pos_keyboard_panel)
+        ViewCompat.setElevation(keyboardRoot, activity.resources.getDimension(R.dimen.pos_keyboard_elevation))
+
+        val density = activity.resources.displayMetrics.density
+        fun dp(v: Float): Int = (v * density + 0.5f).toInt()
+
+        val toggleKeyboard = TextView(activity).apply {
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            setText(R.string.pos_keyboard_hide)
+            setTextColor(activity.getColor(R.color.brand_primary))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+            setPadding(dp(8f), dp(8f), dp(8f), dp(8f))
+            val typedArray = activity.obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackgroundBorderless))
+            background = typedArray.getDrawable(0)
+            typedArray.recycle()
+            isClickable = true
+            isFocusable = false
+        }
+
+        val toolbar = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+            addView(
+                toggleKeyboard,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+        keyboardRoot.addView(toolbar)
+
+        val host = FrameLayout(activity).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+        }
+        switchHost = host
+
+        fun focusNext(from: EditText) {
+            val idx = fields.indexOf(from)
+            if (idx >= 0 && idx < fields.lastIndex) {
+                fields[idx + 1].requestFocus()
+            } else {
+                from.clearFocus()
+            }
+        }
+
+        val alpha = PosQwertyKeypad.build(
+            activity,
+            PosQwertyKeypad.Variant.MODIFIER_OPTION,
+            onInsert = { token ->
+                val et = activeField ?: return@build
+                if (et.id in qwertyFieldIds) {
+                    ReceiptEmailKeypadDialog.insertAtCaret(et, token)
+                }
+            },
+            onEnter = {
+                val et = activeField ?: return@build
+                focusNext(et)
+            },
+        )
+        alphaPanel = alpha
+
+        val digits = PosQwertyKeypad.buildPhoneDigitsKeypad(
+            activity,
+            onInsert = { token ->
+                val et = activeField ?: return@buildPhoneDigitsKeypad
+                if (et.id !in qwertyFieldIds) {
+                    ReceiptEmailKeypadDialog.insertAtCaret(et, token)
+                }
+            },
+            onDone = {
+                val et = activeField ?: return@buildPhoneDigitsKeypad
+                focusNext(et)
+            },
+        )
+        digitsPanel = digits
+
+        host.addView(
+            alpha,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        host.addView(
+            digits,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        digits.visibility = View.GONE
+        keyboardRoot.addView(host)
+
+        fun updateToggleLabel() {
+            toggleKeyboard.setText(
+                if (keyboardExpanded) R.string.pos_keyboard_hide else R.string.pos_keyboard_show,
+            )
+        }
+
+        fun syncPanelToFocus() {
+            val et = activeField
+            val showDigits = et != null && et.id !in qwertyFieldIds
+            alpha.visibility = if (showDigits) View.GONE else View.VISIBLE
+            digits.visibility = if (showDigits) View.VISIBLE else View.GONE
+        }
+
+        fun expandKeyboard() {
+            if (keyboardExpanded) return
+            keyboardExpanded = true
+            host.visibility = View.VISIBLE
+            updateToggleLabel()
+            syncPanelToFocus()
+        }
+
+        fun collapseKeyboard() {
+            if (!keyboardExpanded) return
+            keyboardExpanded = false
+            host.visibility = View.GONE
+            fields.forEach { it.clearFocus() }
+            imm.hideSoftInputFromWindow(keyboardRoot.windowToken, 0)
+            updateToggleLabel()
+        }
+
+        toggleKeyboard.setOnClickListener {
+            if (keyboardExpanded) collapseKeyboard() else expandKeyboard()
+        }
+
+        fields.forEach { setupField(it, ::expandKeyboard, ::syncPanelToFocus) }
+
+        updateToggleLabel()
         val first = fields.firstOrNull() ?: return
         first.post {
+            expandKeyboard()
             first.requestFocus()
             activeField = first
+            syncPanelToFocus()
             hideIme(first)
         }
     }
 
-    private fun setupField(et: EditText) {
+    private fun setupField(
+        et: EditText,
+        expandKeyboard: () -> Unit,
+        syncPanel: () -> Unit,
+    ) {
         et.showSoftInputOnFocus = false
-        et.setOnFocusChangeListener { v, hasFocus ->
-            if (hasFocus) {
-                activeField = et
-                hideIme(v)
-            }
-            onAnyFieldFocusChange?.invoke(et, hasFocus)
+        if (et.id in qwertyFieldIds) {
+            et.inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_CAP_WORDS or
+                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        } else {
+            et.inputType = InputType.TYPE_CLASS_NUMBER
         }
         et.setOnClickListener {
             activeField = et
             hideIme(it)
-            et.requestFocus()
+            expandKeyboard()
+            it.requestFocus()
+        }
+        et.setOnFocusChangeListener { v, hasFocus ->
+            if (hasFocus) {
+                activeField = et
+                hideIme(v)
+                expandKeyboard()
+                syncPanel()
+            }
+            onAnyFieldFocusChange?.invoke(et, hasFocus)
         }
     }
 
     private fun hideIme(v: View) {
         imm.hideSoftInputFromWindow(v.windowToken, 0)
-    }
-
-    private fun insert(s: String) {
-        val et = activeField ?: fields.firstOrNull { it.hasFocus() } ?: return
-        val ed = et.text as? Editable ?: return
-        var start = et.selectionStart
-        var end = et.selectionEnd
-        if (start < 0) start = ed.length
-        if (end < 0) end = ed.length
-        if (start > end) {
-            val t = start
-            start = end
-            end = t
-        }
-        ed.replace(start, end, s)
-        et.setSelection(start + s.length)
-    }
-
-    private fun backspace() {
-        val et = activeField ?: fields.firstOrNull { it.hasFocus() } ?: return
-        val ed = et.text as? Editable ?: return
-        var start = et.selectionStart
-        var end = et.selectionEnd
-        if (start < 0) start = 0
-        if (end < 0) end = 0
-        if (start > end) {
-            val t = start
-            start = end
-            end = t
-        }
-        if (start != end) {
-            ed.delete(start, end)
-            et.setSelection(start)
-        } else if (start > 0) {
-            ed.delete(start - 1, start)
-            et.setSelection(start - 1)
-        }
-    }
-
-    private fun refreshLetterLabels() {
-        for ((id, lower) in letterKeys) {
-            keyboardRoot.findViewById<Button>(id)?.text =
-                if (capsOn) lower.uppercase() else lower
-        }
-    }
-
-    private fun updateShiftButton() {
-        val btn = keyboardRoot.findViewById<Button>(R.id.keyShift) ?: return
-        btn.setBackgroundResource(
-            if (capsOn) R.drawable.bg_pos_key_shift_active else R.drawable.bg_pos_key_special,
-        )
-        val color = context.getColor(
-            if (capsOn) R.color.brand_primary else R.color.pos_key_text_primary,
-        )
-        btn.setTextColor(color)
-    }
-
-    private fun wireKeys() {
-        val digitAndSymbolPairs = listOf(
-            R.id.key0 to "0", R.id.key1 to "1", R.id.key2 to "2", R.id.key3 to "3",
-            R.id.key4 to "4", R.id.key5 to "5", R.id.key6 to "6", R.id.key7 to "7",
-            R.id.key8 to "8", R.id.key9 to "9",
-            R.id.keyColon to ":",
-            R.id.keyComma to ",", R.id.keyPeriod to ".",
-            R.id.keyAt to "@", R.id.keyPlus to "+", R.id.keyMinus to "-",
-            R.id.keySlash to "/", R.id.keyLparen to "(", R.id.keyRparen to ")",
-        )
-        for ((id, ch) in digitAndSymbolPairs) {
-            keyboardRoot.findViewById<Button>(id)?.setOnClickListener { insert(ch) }
-        }
-        for ((id, lower) in letterKeys) {
-            keyboardRoot.findViewById<Button>(id)?.setOnClickListener {
-                insert(if (capsOn) lower.uppercase() else lower)
-            }
-        }
-        keyboardRoot.findViewById<Button>(R.id.keyShift)?.setOnClickListener {
-            capsOn = !capsOn
-            refreshLetterLabels()
-            updateShiftButton()
-        }
-        keyboardRoot.findViewById<Button>(R.id.keySpace)?.setOnClickListener { insert(" ") }
-        keyboardRoot.findViewById<Button>(R.id.keyBackspace)?.setOnClickListener { backspace() }
     }
 }

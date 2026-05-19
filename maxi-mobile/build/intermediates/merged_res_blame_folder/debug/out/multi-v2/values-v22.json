@@ -1,10 +1,10 @@
 {
     "logs": [
         {
-            "outputFile": "com.volt.maximobile.maxi-mobile-mergeDebugResources-65:/values-v22/values-v22.xml",
+            "outputFile": "com.volt.maximobile.maxi-mobile-mergeDebugResources-78:/values-v22/values-v22.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\ernes\\.gradle\\caches\\transforms-3\\a38404bdf360db222dda7ca8039ed717\\transformed\\appcompat-1.6.1\\res\\values-v22\\values-v22.xml",
+                    "source": "C:\\Users\\ernes\\.gradle\\caches\\transforms-3\\98701457587a1123a4acf51965b62fbc\\transformed\\appcompat-1.6.1\\res\\values-v22\\values-v22.xml",
                     "from": {
                         "startLines": "2,3,4,9",
                         "startColumns": "4,4,4,4",

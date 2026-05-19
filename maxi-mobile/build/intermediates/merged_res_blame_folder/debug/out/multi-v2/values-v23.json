@@ -1,10 +1,10 @@
 {
     "logs": [
         {
-            "outputFile": "com.volt.maximobile.maxi-mobile-mergeDebugResources-65:/values-v23/values-v23.xml",
+            "outputFile": "com.volt.maximobile.maxi-mobile-mergeDebugResources-78:/values-v23/values-v23.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\ernes\\.gradle\\caches\\transforms-3\\a38404bdf360db222dda7ca8039ed717\\transformed\\appcompat-1.6.1\\res\\values-v23\\values-v23.xml",
+                    "source": "C:\\Users\\ernes\\.gradle\\caches\\transforms-3\\98701457587a1123a4acf51965b62fbc\\transformed\\appcompat-1.6.1\\res\\values-v23\\values-v23.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,20,34,35,36,39,43,44,45,46",
                         "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4",
@@ -15,7 +15,7 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\ernes\\.gradle\\caches\\transforms-3\\c7531f86539d7cbadc649cbba8dc25cb\\transformed\\cardview-1.0.0\\res\\values-v23\\values-v23.xml",
+                    "source": "C:\\Users\\ernes\\.gradle\\caches\\transforms-3\\4ef55570f4ca188a4cecbfab45ca668f\\transformed\\cardview-1.0.0\\res\\values-v23\\values-v23.xml",
                     "from": {
                         "startLines": "2",
                         "startColumns": "4",
@@ -34,7 +34,7 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\ernes\\.gradle\\caches\\transforms-3\\750b1bc182a96c3c210fdea8346e305b\\transformed\\material-1.11.0\\res\\values-v23\\values-v23.xml",
+                    "source": "C:\\Users\\ernes\\.gradle\\caches\\transforms-3\\d94754a8abc2aa13fd7453a44c016657\\transformed\\material-1.11.0\\res\\values-v23\\values-v23.xml",
                     "from": {
                         "startLines": "2,5,9,13,16,19,22,25,28,32",
                         "startColumns": "4,4,4,4,4,4,4,4,4,4",

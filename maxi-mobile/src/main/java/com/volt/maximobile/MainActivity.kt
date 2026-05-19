@@ -129,6 +129,50 @@ private fun MaxiRoot() {
     var searchQuery by remember { mutableStateOf("") }
     var activeScheduleIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
+    val hostActivity = context as Activity
+
+    fun addModifierPickToCart(pick: ModifierPickResult, guestNum: Int) {
+        val effectiveGuest = when {
+            orderChannel == OrderChannel.DINE_IN && contextGuestCount > 0 ->
+                guestNum.coerceIn(1, contextGuestCount)
+            else -> guestNum
+        }
+        if (orderChannel == OrderChannel.DINE_IN && contextGuestCount > 0 && selectedGuest != effectiveGuest) {
+            selectedGuest = effectiveGuest
+        }
+        val lineKey = CartLineHelpers.cartLineKey(
+            pick.itemId,
+            pick.modifiers,
+            effectiveGuest,
+            pick.basePriceDollars,
+        )
+        val existingIndex = cart.indexOfFirst { line ->
+            CartLineHelpers.cartLineKey(
+                line.menuItemId,
+                line.modifiers,
+                line.guestNumber,
+                line.basePriceDollars,
+            ) == lineKey
+        }
+        if (existingIndex >= 0) {
+            val line = cart[existingIndex]
+            cart[existingIndex] = line.copy(quantity = line.quantity + 1)
+        } else {
+            cart.add(
+                CartLine(
+                    menuItemId = pick.itemId,
+                    name = pick.name,
+                    basePriceDollars = pick.basePriceDollars,
+                    modifiers = pick.modifiers,
+                    quantity = 1,
+                    guestNumber = effectiveGuest,
+                    taxMode = pick.taxMode,
+                    taxIds = pick.taxIds,
+                ),
+            )
+        }
+    }
+
     val tablePickLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -550,36 +594,19 @@ private fun MaxiRoot() {
     }
 
     if (screen == Screen.Menu) {
-        val addItemToCart: (ItemUi, Double, Int) -> Unit = { item, unitPrice, guestNum ->
-            val effectiveGuest = when {
-                orderChannel == OrderChannel.DINE_IN && contextGuestCount > 0 ->
-                    guestNum.coerceIn(1, contextGuestCount)
-                else -> guestNum
+        val launchModifierPick: (ItemUi, Double, Int) -> Unit = { item, basePrice, guestNum ->
+            val mid = PosDeviceIdentity.getMerchantId(context).trim()
+            if (mid.isNotEmpty() && !MerchantFirestore.isInitialized) {
+                MerchantFirestore.init(mid)
             }
-            if (orderChannel == OrderChannel.DINE_IN && contextGuestCount > 0 && selectedGuest != effectiveGuest) {
-                selectedGuest = effectiveGuest
-            }
-            val existingIndex = cart.indexOfFirst { line ->
-                line.menuItemId == item.id &&
-                    line.guestNumber == effectiveGuest &&
-                    (!item.variablePrice || line.unitPriceDollars == unitPrice)
-            }
-            if (existingIndex >= 0) {
-                val line = cart[existingIndex]
-                cart[existingIndex] = line.copy(quantity = line.quantity + 1)
-            } else {
-                cart.add(
-                    CartLine(
-                        menuItemId = item.id,
-                        name = item.name,
-                        unitPriceDollars = unitPrice,
-                        quantity = 1,
-                        guestNumber = effectiveGuest,
-                        taxMode = item.taxMode,
-                        taxIds = item.taxIds,
-                    ),
-                )
-            }
+            MenuModifierPicker(hostActivity).pickForMenuItem(
+                itemId = item.id,
+                name = item.name,
+                basePrice = basePrice,
+                taxMode = item.taxMode,
+                taxIds = item.taxIds,
+                onResult = { pick -> addModifierPickToCart(pick, guestNum) },
+            )
         }
 
         Column(Modifier.fillMaxSize()) {
@@ -666,7 +693,7 @@ private fun MaxiRoot() {
                         }
                         pendingVariablePrice = PendingVariablePrice(item, guestNum)
                     } else {
-                        addItemToCart(item, item.priceDollars, guestNum)
+                        launchModifierPick(item, item.priceDollars, guestNum)
                     }
                 },
                 onIncreaseLine = { index ->
@@ -738,7 +765,7 @@ private fun MaxiRoot() {
                                 ).show()
                                 return@TextButton
                             }
-                            addItemToCart(pending.item, parsed, pending.guestNum)
+                            launchModifierPick(pending.item, parsed, pending.guestNum)
                             pendingVariablePrice = null
                         },
                     ) {

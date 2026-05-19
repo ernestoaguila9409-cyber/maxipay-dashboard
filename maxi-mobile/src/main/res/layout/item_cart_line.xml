@@ -26,14 +26,12 @@
             android:textStyle="bold"
             tools:text="Classic Burger" />
 
-        <TextView
-            android:id="@+id/cartLineUnitPrice"
+        <LinearLayout
+            android:id="@+id/cartLineDetails"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:textColor="@color/order_text_secondary"
-            android:textSize="13sp"
-            tools:text="$12.99 each" />
+            android:orientation="vertical" />
 
     </LinearLayout>
 

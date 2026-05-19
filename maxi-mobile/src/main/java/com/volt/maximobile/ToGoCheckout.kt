@@ -2,6 +2,7 @@ package com.volt.maximobile
 
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import com.volt.shared.data.OrderModifier
 import com.volt.shared.engine.OrderEngine
 import com.volt.shared.engine.OrderTaxHelper
 import java.util.Date
@@ -10,12 +11,16 @@ import java.util.UUID
 data class CartLine(
     val menuItemId: String,
     val name: String,
-    val unitPriceDollars: Double,
+    val basePriceDollars: Double,
+    val modifiers: List<OrderModifier> = emptyList(),
     val quantity: Int,
     val guestNumber: Int = 0,
     val taxMode: String = "INHERIT",
     val taxIds: List<String> = emptyList(),
-)
+) {
+    val unitPriceDollars: Double
+        get() = CartLineHelpers.unitPriceDollars(basePriceDollars, modifiers)
+}
 
 object ToGoCheckout {
 
@@ -26,6 +31,39 @@ object ToGoCheckout {
         val taxIds = line.taxIds.map { it.trim() }.filter { it.isNotEmpty() }
         val taxMode = OrderTaxHelper.effectiveTaxMode(line.taxMode, taxIds)
         return taxMode to taxIds
+    }
+
+    private fun flattenModifiers(mods: List<OrderModifier>): List<OrderModifier> =
+        mods.flatMap { listOf(it) + flattenModifiers(it.children) }
+
+    private fun serializeModifier(mod: OrderModifier): HashMap<String, Any> =
+        OrderModifierMaps.toMap(mod)
+
+    private fun lineFirestoreFields(line: CartLine): HashMap<String, Any> {
+        val allModifiers = flattenModifiers(line.modifiers)
+        val modifiersTotalInCents = allModifiers
+            .filter { it.action == "ADD" }
+            .sumOf { (it.price * 100).toLong() }
+        val basePriceInCents = (line.basePriceDollars * 100).toLong()
+        val unitPriceInCents = basePriceInCents + modifiersTotalInCents
+        val lineTotalInCents = unitPriceInCents * line.quantity
+        val (taxMode, taxIds) = lineItemTaxFields(line)
+        val itemMap = hashMapOf<String, Any>(
+            "itemId" to line.menuItemId,
+            "name" to line.name,
+            "quantity" to line.quantity,
+            "basePriceInCents" to basePriceInCents,
+            "modifiersTotalInCents" to modifiersTotalInCents,
+            "unitPriceInCents" to unitPriceInCents,
+            "lineTotalInCents" to lineTotalInCents,
+            "modifiers" to line.modifiers.map { serializeModifier(it) },
+            "taxMode" to taxMode,
+            "createdAt" to Date(),
+            "updatedAt" to Date(),
+        )
+        if (taxIds.isNotEmpty()) itemMap["taxIds"] = taxIds
+        if (line.guestNumber > 0) itemMap["guestNumber"] = line.guestNumber
+        return itemMap
     }
 
     private fun finishWithRecomputedTotal(
@@ -108,26 +146,7 @@ object ToGoCheckout {
                         for (line in lines) {
                             val lineKey = UUID.randomUUID().toString()
                             val lineRef = orderRef.collection("items").document(lineKey)
-                            val basePriceInCents = (line.unitPriceDollars * 100).toLong()
-                            val unitPriceInCents = basePriceInCents
-                            val lineTotalInCents = unitPriceInCents * line.quantity
-                            val (taxMode, taxIds) = lineItemTaxFields(line)
-                            val itemMap = hashMapOf<String, Any>(
-                                "itemId" to line.menuItemId,
-                                "name" to line.name,
-                                "quantity" to line.quantity,
-                                "basePriceInCents" to basePriceInCents,
-                                "modifiersTotalInCents" to 0L,
-                                "unitPriceInCents" to unitPriceInCents,
-                                "lineTotalInCents" to lineTotalInCents,
-                                "modifiers" to emptyList<Any>(),
-                                "taxMode" to taxMode,
-                                "createdAt" to Date(),
-                                "updatedAt" to Date(),
-                            )
-                            if (taxIds.isNotEmpty()) itemMap["taxIds"] = taxIds
-                            if (line.guestNumber > 0) itemMap["guestNumber"] = line.guestNumber
-                            batch.set(lineRef, itemMap, SetOptions.merge())
+                            batch.set(lineRef, lineFirestoreFields(line), SetOptions.merge())
                         }
                         batch.update(orderRef, "updatedAt", Date())
                         batch.commit()
@@ -205,26 +224,7 @@ object ToGoCheckout {
                 for (line in lines) {
                     val lineKey = UUID.randomUUID().toString()
                     val lineRef = orderRef.collection("items").document(lineKey)
-                    val basePriceInCents = (line.unitPriceDollars * 100).toLong()
-                    val unitPriceInCents = basePriceInCents
-                    val lineTotalInCents = unitPriceInCents * line.quantity
-                    val (taxMode, taxIds) = lineItemTaxFields(line)
-                    val itemMap = hashMapOf<String, Any>(
-                        "itemId" to line.menuItemId,
-                        "name" to line.name,
-                        "quantity" to line.quantity,
-                        "basePriceInCents" to basePriceInCents,
-                        "modifiersTotalInCents" to 0L,
-                        "unitPriceInCents" to unitPriceInCents,
-                        "lineTotalInCents" to lineTotalInCents,
-                        "modifiers" to emptyList<Any>(),
-                        "taxMode" to taxMode,
-                        "createdAt" to Date(),
-                        "updatedAt" to Date(),
-                    )
-                    if (taxIds.isNotEmpty()) itemMap["taxIds"] = taxIds
-                    if (line.guestNumber > 0) itemMap["guestNumber"] = line.guestNumber
-                    batch.set(lineRef, itemMap, SetOptions.merge())
+                    batch.set(lineRef, lineFirestoreFields(line), SetOptions.merge())
                 }
                 batch.update(
                     orderRef,

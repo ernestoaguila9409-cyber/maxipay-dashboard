@@ -4,7 +4,7 @@
     <selectionStates>
       <SelectionState runConfigName="app">
         <option name="selectionMode" value="DROPDOWN" />
-        <DropdownSelection timestamp="2026-05-13T02:09:57.934641700Z">
+        <DropdownSelection timestamp="2026-05-19T02:41:30.663354900Z">
           <Target type="DEFAULT_BOOT">
             <handle>
               <DeviceId pluginId="PhysicalDevice" identifier="serial=P8B3251125001280" />
@@ -26,7 +26,7 @@
       </SelectionState>
       <SelectionState runConfigName="maxi-mobile">
         <option name="selectionMode" value="DROPDOWN" />
-        <DropdownSelection timestamp="2026-05-13T02:09:57.934641700Z">
+        <DropdownSelection timestamp="2026-05-19T02:41:36.877987100Z">
           <Target type="DEFAULT_BOOT">
             <handle>
               <DeviceId pluginId="PhysicalDevice" identifier="serial=P8B3251125001280" />

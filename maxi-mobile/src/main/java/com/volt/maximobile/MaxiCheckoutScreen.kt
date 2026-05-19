@@ -175,26 +175,7 @@ private fun OrderSummaryCard(
             Text("Order Summary", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Spacer(Modifier.height(12.dp))
             for (line in cart) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 3.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        "${line.quantity}x  ${line.name}",
-                        fontSize = 14.sp,
-                        color = Color(0xFF424242),
-                        modifier = Modifier.weight(1f, fill = false),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        formatCents(Math.round(line.unitPriceDollars * line.quantity * 100.0)),
-                        fontSize = 14.sp,
-                        color = Color(0xFF424242),
-                    )
-                }
+                CheckoutCartLineRow(line = line)
             }
             Spacer(Modifier.height(10.dp))
             HorizontalDivider(color = DividerColor)
@@ -223,6 +204,87 @@ private fun OrderSummaryCard(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CheckoutCartLineRow(line: CartLine) {
+    val lineTotalCents = Math.round(line.unitPriceDollars * line.quantity * 100.0)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
+        ) {
+            Text(
+                "${line.quantity}x  ${line.name}",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF424242),
+                modifier = Modifier.weight(1f, fill = false),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                formatCents(lineTotalCents),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF424242),
+            )
+        }
+        if (line.modifiers.isEmpty()) {
+            Text(
+                CartLineDisplay.formatMoney(line.basePriceDollars) + " each",
+                fontSize = 12.sp,
+                color = TextSecondary,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        } else {
+            Text(
+                CartLineDisplay.formatMoney(line.basePriceDollars),
+                fontSize = 12.sp,
+                color = TextSecondary,
+                modifier = Modifier.padding(top = 2.dp, start = 8.dp),
+            )
+            CheckoutModifierRows(line.modifiers, indentLevel = 1)
+            Text(
+                "Subtotal: ${CartLineDisplay.formatMoney(line.unitPriceDollars)} each",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = TextSecondary,
+                modifier = Modifier.padding(top = 2.dp, start = 8.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CheckoutModifierRows(modifiers: List<com.volt.shared.data.OrderModifier>, indentLevel: Int) {
+    val indent = (8 + indentLevel * 12).dp
+    for (mod in modifiers) {
+        val label = when (mod.action.trim().uppercase(Locale.US)) {
+            "REMOVE" -> "• ${ModifierRemoveDisplay.cartLine(mod.name)}"
+            else -> {
+                if (mod.price > 0.0) {
+                    "• ${mod.name}  +${CartLineDisplay.formatMoney(mod.price)}"
+                } else {
+                    "• ${mod.name}"
+                }
+            }
+        }
+        Text(
+            label,
+            fontSize = 12.sp,
+            color = if (mod.action == "REMOVE") Color(0xFFC62828) else TextSecondary,
+            modifier = Modifier.padding(top = 2.dp, start = indent),
+        )
+        if (mod.children.isNotEmpty()) {
+            CheckoutModifierRows(mod.children, indentLevel + 1)
         }
     }
 }
