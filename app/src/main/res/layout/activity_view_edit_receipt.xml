@@ -375,8 +375,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingBottom="8dp">
+                android:gravity="center_vertical">
 
                 <TextView
                     android:layout_width="80dp"
@@ -401,13 +400,21 @@
                     android:gravity="center"/>
             </LinearLayout>
 
+            <TextView
+                android:id="@+id/tvCharsPerLineBizName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="10sp"
+                android:textColor="#888888"
+                android:paddingStart="80dp"
+                android:paddingBottom="8dp"/>
+
             <!-- Font: Address -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingBottom="8dp">
+                android:gravity="center_vertical">
 
                 <TextView
                     android:layout_width="80dp"
@@ -432,13 +439,21 @@
                     android:gravity="center"/>
             </LinearLayout>
 
+            <TextView
+                android:id="@+id/tvCharsPerLineAddress"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="10sp"
+                android:textColor="#888888"
+                android:paddingStart="80dp"
+                android:paddingBottom="8dp"/>
+
             <!-- Font: Order Info -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingBottom="8dp">
+                android:gravity="center_vertical">
 
                 <TextView
                     android:layout_width="80dp"
@@ -463,13 +478,21 @@
                     android:gravity="center"/>
             </LinearLayout>
 
+            <TextView
+                android:id="@+id/tvCharsPerLineOrderInfo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="10sp"
+                android:textColor="#888888"
+                android:paddingStart="80dp"
+                android:paddingBottom="8dp"/>
+
             <!-- Font: Items -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingBottom="8dp">
+                android:gravity="center_vertical">
 
                 <TextView
                     android:layout_width="80dp"
@@ -494,13 +517,21 @@
                     android:gravity="center"/>
             </LinearLayout>
 
+            <TextView
+                android:id="@+id/tvCharsPerLineItems"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="10sp"
+                android:textColor="#888888"
+                android:paddingStart="80dp"
+                android:paddingBottom="8dp"/>
+
             <!-- Font: Totals -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingBottom="8dp">
+                android:gravity="center_vertical">
 
                 <TextView
                     android:layout_width="80dp"
@@ -525,13 +556,21 @@
                     android:gravity="center"/>
             </LinearLayout>
 
+            <TextView
+                android:id="@+id/tvCharsPerLineTotals"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="10sp"
+                android:textColor="#888888"
+                android:paddingStart="80dp"
+                android:paddingBottom="8dp"/>
+
             <!-- Font: Grand Total -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingBottom="8dp">
+                android:gravity="center_vertical">
 
                 <TextView
                     android:layout_width="80dp"
@@ -556,13 +595,21 @@
                     android:gravity="center"/>
             </LinearLayout>
 
+            <TextView
+                android:id="@+id/tvCharsPerLineGrandTotal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="10sp"
+                android:textColor="#888888"
+                android:paddingStart="80dp"
+                android:paddingBottom="8dp"/>
+
             <!-- Font: Footer -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingBottom="8dp">
+                android:gravity="center_vertical">
 
                 <TextView
                     android:layout_width="80dp"
@@ -586,6 +633,15 @@
                     android:textSize="11sp"
                     android:gravity="center"/>
             </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvCharsPerLineFooter"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="10sp"
+                android:textColor="#888888"
+                android:paddingStart="80dp"
+                android:paddingBottom="8dp"/>
 
             <!-- Divider -->
             <View

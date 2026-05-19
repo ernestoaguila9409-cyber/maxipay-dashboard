@@ -65,6 +65,14 @@ class ViewEditReceiptActivity : AppCompatActivity() {
     private lateinit var tvFontGrandTotalVal: TextView
     private lateinit var tvFontFooterVal: TextView
 
+    private lateinit var tvCharsPerLineBizName: TextView
+    private lateinit var tvCharsPerLineAddress: TextView
+    private lateinit var tvCharsPerLineOrderInfo: TextView
+    private lateinit var tvCharsPerLineItems: TextView
+    private lateinit var tvCharsPerLineTotals: TextView
+    private lateinit var tvCharsPerLineGrandTotal: TextView
+    private lateinit var tvCharsPerLineFooter: TextView
+
     private lateinit var ivLogo: ImageView
     private lateinit var tvBusinessName: TextView
     private lateinit var tvAddress: TextView
@@ -148,6 +156,14 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         tvFontGrandTotalVal = findViewById(R.id.tvFontGrandTotalVal)
         tvFontFooterVal = findViewById(R.id.tvFontFooterVal)
 
+        tvCharsPerLineBizName = findViewById(R.id.tvCharsPerLineBizName)
+        tvCharsPerLineAddress = findViewById(R.id.tvCharsPerLineAddress)
+        tvCharsPerLineOrderInfo = findViewById(R.id.tvCharsPerLineOrderInfo)
+        tvCharsPerLineItems = findViewById(R.id.tvCharsPerLineItems)
+        tvCharsPerLineTotals = findViewById(R.id.tvCharsPerLineTotals)
+        tvCharsPerLineGrandTotal = findViewById(R.id.tvCharsPerLineGrandTotal)
+        tvCharsPerLineFooter = findViewById(R.id.tvCharsPerLineFooter)
+
         ivLogo = findViewById(R.id.ivLogo)
         tvBusinessName = findViewById(R.id.tvBusinessName)
         tvAddress = findViewById(R.id.tvAddress)
@@ -194,6 +210,23 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         tvFontTotalsVal.text = ReceiptSettings.FONT_SIZE_LABELS[settings.fontSizeTotals]
         tvFontGrandTotalVal.text = ReceiptSettings.FONT_SIZE_LABELS[settings.fontSizeGrandTotal]
         tvFontFooterVal.text = ReceiptSettings.FONT_SIZE_LABELS[settings.fontSizeFooter]
+        updateCharsPerLineHints()
+    }
+
+    private fun charsHint(fontSize: Int): String {
+        val chars = ReceiptSettings.lineWidthForSize(fontSize)
+        val label = ReceiptSettings.FONT_SIZE_LABELS[fontSize.coerceIn(0, ReceiptSettings.FONT_SIZE_LABELS.lastIndex)]
+        return "$chars chars/line ($label)"
+    }
+
+    private fun updateCharsPerLineHints() {
+        tvCharsPerLineBizName.text = charsHint(settings.fontSizeBizName)
+        tvCharsPerLineAddress.text = charsHint(settings.fontSizeAddress)
+        tvCharsPerLineOrderInfo.text = charsHint(settings.fontSizeOrderInfo)
+        tvCharsPerLineItems.text = charsHint(settings.fontSizeItems)
+        tvCharsPerLineTotals.text = charsHint(settings.fontSizeTotals)
+        tvCharsPerLineGrandTotal.text = charsHint(settings.fontSizeGrandTotal)
+        tvCharsPerLineFooter.text = charsHint(settings.fontSizeFooter)
     }
 
     private fun setupListeners() {
@@ -245,7 +278,7 @@ class ViewEditReceiptActivity : AppCompatActivity() {
             object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar?, p: Int, user: Boolean) {
                     label.text = ReceiptSettings.FONT_SIZE_LABELS[p]
-                    if (user) { settings = copy(p); populatePreview() }
+                    if (user) { settings = copy(p); updateCharsPerLineHints(); populatePreview() }
                 }
                 override fun onStartTrackingTouch(sb: SeekBar?) {}
                 override fun onStopTrackingTouch(sb: SeekBar?) {}
