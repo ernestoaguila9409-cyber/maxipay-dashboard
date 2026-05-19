@@ -339,7 +339,9 @@ class OrderEngine(private val db: FirebaseFirestore) {
                 val taxableItems = mutableListOf<Pair<String, Long>>()
                 for (li in lineInfos) {
                     val effectiveLineCents = if (subtotalInCents > 0) (li.lineTotalInCents.toDouble() / subtotalInCents * discountedSubtotalInCents).toLong() else 0L
-                    val isTaxable = if (li.taxMode == "FORCE_APPLY") li.taxIds.contains(taxId) else taxActiveForOrder
+                    val isTaxable = OrderTaxHelper.isLineTaxableForTax(
+                        li.taxMode, li.taxIds, taxId, taxActiveForOrder,
+                    )
                     if (isTaxable) { taxableBaseCents += effectiveLineCents; taxableItems.add(li.lineKey to effectiveLineCents) }
                 }
                 if (taxableBaseCents <= 0L) continue
@@ -374,7 +376,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
                 }
                 val updates = mutableMapOf<String, Any>("totalInCents" to newTotalInCents, "remainingInCents" to remainingInCents, "status" to newStatus, "updatedAt" to Date())
                 if (onlinePaidTaxCatchUp) updates["totalPaidInCents"] = effectivePaidInCents
-                if (taxBreakdown.isNotEmpty()) updates["taxBreakdown"] = taxBreakdown
+                updates["taxBreakdown"] = taxBreakdown
                 trx.update(orderRef, updates)
             }
                 .addOnSuccessListener {

@@ -1,24 +1,32 @@
 package com.volt.maximobile
 
+import android.app.Activity
 import android.app.Application
+import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +46,11 @@ import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.functions.FirebaseFunctions
 import com.volt.maximobile.engine.PaymentEngine
 import com.volt.maximobile.spin.SpinClient
+import com.volt.shared.MerchantFirestore
+import com.volt.shared.engine.OrderEngine
+import com.volt.shared.engine.OrderTaxCalculator
+import com.volt.shared.engine.OrderTaxLine
+import com.volt.shared.engine.OrderTaxRule
 import java.io.IOException
 import java.util.Calendar
 import java.util.Locale
@@ -55,7 +68,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-private enum class Screen { Activation, Pin, Dashboard, Hub, TablePick, BarSeatPick, Menu, PaymentProcessing }
+private enum class Screen { Activation, Pin, Dashboard, Hub, TablePick, BarSeatPick, Menu, Checkout, PaymentProcessing }
+
+private data class PendingVariablePrice(
+    val item: ItemUi,
+    val guestNum: Int,
+)
 
 private enum class OrderChannel { DINE_IN, TO_GO, BAR }
 
@@ -95,13 +113,97 @@ private fun MaxiRoot() {
     var categories by remember { mutableStateOf<List<CatUi>>(emptyList()) }
     var selectedCategoryId by remember { mutableStateOf<String?>(null) }
     var items by remember { mutableStateOf<List<ItemUi>>(emptyList()) }
+    var orderTaxes by remember { mutableStateOf<List<OrderTaxRule>>(emptyList()) }
     val cart = remember { mutableStateListOf<CartLine>() }
-    var payDialog by remember { mutableStateOf(false) }
+    var pendingVariablePrice by remember { mutableStateOf<PendingVariablePrice?>(null) }
+    var checkoutStatusMessage by remember { mutableStateOf<String?>(null) }
+    var variablePriceInput by remember { mutableStateOf("") }
     var orderChannel by remember { mutableStateOf(OrderChannel.TO_GO) }
     var contextTableId by remember { mutableStateOf<String?>(null) }
     var contextTableName by remember { mutableStateOf<String?>(null) }
+    var contextOrderId by remember { mutableStateOf<String?>(null) }
+    var contextTableLayoutId by remember { mutableStateOf<String?>(null) }
+    var contextGuestCount by remember { mutableIntStateOf(0) }
+    var contextGuestNames by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectedGuest by remember { mutableIntStateOf(1) }
     var searchQuery by remember { mutableStateOf("") }
     var activeScheduleIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    val tablePickLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) {
+            screen = Screen.Dashboard
+            return@rememberLauncherForActivityResult
+        }
+        val data = result.data
+        val tid = data?.getStringExtra("tableId")?.trim().orEmpty()
+        if (tid.isEmpty()) {
+            screen = Screen.Dashboard
+            return@rememberLauncherForActivityResult
+        }
+        contextTableId = tid
+        contextTableName = data?.getStringExtra("tableName")
+        contextTableLayoutId = data?.getStringExtra("tableLayoutId")?.trim()?.takeIf { it.isNotEmpty() }
+        val sectionId = data?.getStringExtra("sectionId")?.trim().orEmpty()
+        val sectionName = data?.getStringExtra("sectionName")?.trim().orEmpty()
+        val guestCount = data?.getIntExtra("guestCount", 1) ?: 1
+        val guestNames = data?.getStringArrayListExtra("guestNames")?.filter { it.isNotBlank() }.orEmpty()
+        val joinedIds = data?.getStringArrayListExtra("joinedTableIds")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.distinct()
+            .orEmpty()
+        val joinedForOrder = joinedIds.takeIf { it.size > 1 }
+        val existingOrderId = data?.getStringExtra("ORDER_ID")?.trim()?.takeIf { it.isNotEmpty() }
+        contextGuestCount = guestCount.coerceAtLeast(1)
+        contextGuestNames = guestNames
+        selectedGuest = 1
+
+        // Go straight to the menu (same as To-Go/Bar) while the Firestore order is created.
+        screen = Screen.Menu
+        scope.launch {
+            busy = true
+            err = null
+            try {
+                val mid = PosDeviceIdentity.getMerchantId(context).trim()
+                if (mid.isEmpty()) throw IllegalStateException("Merchant ID missing")
+                MerchantFirestore.init(mid)
+                val orderId = suspendCoroutine { cont ->
+                    OrderEngine(FirebaseFirestore.getInstance()).ensureOrder(
+                        currentOrderId = existingOrderId,
+                        employeeName = employeeName,
+                        orderType = "DINE_IN",
+                        tableId = tid,
+                        tableLayoutId = contextTableLayoutId,
+                        joinedTableIds = joinedForOrder,
+                        tableName = contextTableName,
+                        sectionId = sectionId.takeIf { it.isNotBlank() },
+                        sectionName = sectionName.takeIf { it.isNotBlank() },
+                        guestCount = if (guestCount > 0) guestCount else null,
+                        guestNames = guestNames.takeIf { it.isNotEmpty() },
+                        onSuccess = { cont.resume(it) },
+                        onFailure = { cont.resumeWithException(it) },
+                    )
+                }
+                contextOrderId = orderId
+            } catch (e: Exception) {
+                contextTableId = null
+                contextTableName = null
+                contextOrderId = null
+                contextTableLayoutId = null
+                contextGuestCount = 0
+                contextGuestNames = emptyList()
+                selectedGuest = 1
+                val msg = e.message ?: "Failed to start order"
+                err = msg
+                screen = Screen.Dashboard
+                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            } finally {
+                busy = false
+            }
+        }
+    }
 
     DisposableEffect(Unit) {
         val app = context.applicationContext as Application
@@ -117,9 +219,13 @@ private fun MaxiRoot() {
             orderChannel = OrderChannel.TO_GO
             contextTableId = null
             contextTableName = null
+            contextOrderId = null
+            contextTableLayoutId = null
+            contextGuestCount = 0
+            contextGuestNames = emptyList()
+            selectedGuest = 1
             searchQuery = ""
             activeScheduleIds = emptySet()
-            payDialog = false
             busy = false
             err = null
         }
@@ -182,8 +288,8 @@ private fun MaxiRoot() {
 
     val activity = context as ComponentActivity
     BackHandler(enabled = screen != Screen.Activation) {
-        if (payDialog) {
-            payDialog = false
+        if (pendingVariablePrice != null) {
+            pendingVariablePrice = null
             return@BackHandler
         }
         when (screen) {
@@ -199,10 +305,18 @@ private fun MaxiRoot() {
                 screen = Screen.Dashboard
                 err = null
             }
+            Screen.Checkout -> {
+                if (!busy) screen = Screen.Menu
+            }
             Screen.Menu -> {
                 cart.clear()
                 contextTableId = null
                 contextTableName = null
+                contextOrderId = null
+                contextTableLayoutId = null
+                contextGuestCount = 0
+                contextGuestNames = emptyList()
+                selectedGuest = 1
                 searchQuery = ""
                 screen = Screen.Dashboard
             }
@@ -218,6 +332,11 @@ private fun MaxiRoot() {
             w.navigationBarColor = AndroidColor.parseColor("#12002F")
             bars.isAppearanceLightStatusBars = false
             bars.isAppearanceLightNavigationBars = false
+        } else if (screen == Screen.Checkout) {
+            w.statusBarColor = AndroidColor.parseColor("#5E4085")
+            w.navigationBarColor = AndroidColor.parseColor("#F5F6F8")
+            bars.isAppearanceLightStatusBars = false
+            bars.isAppearanceLightNavigationBars = true
         } else {
             w.statusBarColor = AndroidColor.WHITE
             w.navigationBarColor = AndroidColor.parseColor("#E8EAED")
@@ -321,6 +440,11 @@ private fun MaxiRoot() {
                         orderChannel = OrderChannel.DINE_IN
                         contextTableId = null
                         contextTableName = null
+                        contextOrderId = null
+                        contextTableLayoutId = null
+                        contextGuestCount = 0
+                        contextGuestNames = emptyList()
+                        selectedGuest = 1
                         cart.clear()
                         searchQuery = ""
                         err = null
@@ -360,6 +484,11 @@ private fun MaxiRoot() {
                 orderChannel = OrderChannel.DINE_IN
                 contextTableId = null
                 contextTableName = null
+                contextOrderId = null
+                contextTableLayoutId = null
+                contextGuestCount = 0
+                contextGuestNames = emptyList()
+                selectedGuest = 1
                 cart.clear()
                 searchQuery = ""
                 err = null
@@ -388,17 +517,22 @@ private fun MaxiRoot() {
     }
 
     if (screen == Screen.TablePick) {
-        TablePickScreen(
-            onBack = {
-                screen = Screen.Dashboard
-                err = null
-            },
-            onPick = { id, name ->
-                contextTableId = id
-                contextTableName = name
-                screen = Screen.Menu
-            },
-        )
+        var launched by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            if (!launched) {
+                launched = true
+                val mid = PosDeviceIdentity.getMerchantId(context).trim()
+                if (mid.isNotEmpty() && !MerchantFirestore.isInitialized) {
+                    MerchantFirestore.init(mid)
+                }
+                val intent = Intent(context, TableSelectionActivity::class.java).apply {
+                    putExtra("SELECT_TABLE_ONLY", true)
+                    putExtra("batchId", "")
+                    putExtra("employeeName", employeeName)
+                }
+                tablePickLauncher.launch(intent)
+            }
+        }
         return
     }
 
@@ -415,6 +549,38 @@ private fun MaxiRoot() {
     }
 
     if (screen == Screen.Menu) {
+        val addItemToCart: (ItemUi, Double, Int) -> Unit = { item, unitPrice, guestNum ->
+            val effectiveGuest = when {
+                orderChannel == OrderChannel.DINE_IN && contextGuestCount > 0 ->
+                    guestNum.coerceIn(1, contextGuestCount)
+                else -> guestNum
+            }
+            if (orderChannel == OrderChannel.DINE_IN && contextGuestCount > 0 && selectedGuest != effectiveGuest) {
+                selectedGuest = effectiveGuest
+            }
+            val existingIndex = cart.indexOfFirst { line ->
+                line.menuItemId == item.id &&
+                    line.guestNumber == effectiveGuest &&
+                    (!item.variablePrice || line.unitPriceDollars == unitPrice)
+            }
+            if (existingIndex >= 0) {
+                val line = cart[existingIndex]
+                cart[existingIndex] = line.copy(quantity = line.quantity + 1)
+            } else {
+                cart.add(
+                    CartLine(
+                        menuItemId = item.id,
+                        name = item.name,
+                        unitPriceDollars = unitPrice,
+                        quantity = 1,
+                        guestNumber = effectiveGuest,
+                        taxMode = item.taxMode,
+                        taxIds = item.taxIds,
+                    ),
+                )
+            }
+        }
+
         Column(Modifier.fillMaxSize()) {
             err?.let {
                 Text(
@@ -423,6 +589,14 @@ private fun MaxiRoot() {
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
+            LaunchedEffect(screen) {
+                if (screen == Screen.Menu) {
+                    val mid = PosDeviceIdentity.getMerchantId(context).trim()
+                    if (mid.isNotBlank()) {
+                        runCatching { orderTaxes = loadEnabledOrderTaxes(mid) }
+                    }
+                }
+            }
             MaxiMenuOrderContent(
                 orderTitle = orderScreenTitle(orderChannel),
                 orderSubtitle = orderScreenSubtitle(employeeName, contextTableName),
@@ -430,6 +604,7 @@ private fun MaxiRoot() {
                 selectedCategoryId = selectedCategoryId,
                 items = items,
                 cart = cart.toList(),
+                taxes = orderTaxes,
                 searchQuery = searchQuery,
                 busy = busy,
                 checkoutEnabled = when (orderChannel) {
@@ -437,10 +612,19 @@ private fun MaxiRoot() {
                     OrderChannel.DINE_IN -> !contextTableId.isNullOrBlank()
                     OrderChannel.BAR -> !contextTableId.isNullOrBlank()
                 } && cart.isNotEmpty() && !busy,
+                guestCount = if (orderChannel == OrderChannel.DINE_IN) contextGuestCount else 0,
+                guestNames = if (orderChannel == OrderChannel.DINE_IN) contextGuestNames else emptyList(),
+                selectedGuest = selectedGuest,
+                onGuestSelected = { selectedGuest = it },
                 onBack = {
                     cart.clear()
                     contextTableId = null
                     contextTableName = null
+                    contextOrderId = null
+                    contextTableLayoutId = null
+                    contextGuestCount = 0
+                    contextGuestNames = emptyList()
+                    selectedGuest = 1
                     searchQuery = ""
                     screen = Screen.Dashboard
                 },
@@ -468,19 +652,20 @@ private fun MaxiRoot() {
                 },
                 onSearchQueryChange = { searchQuery = it },
                 onItemClick = { item ->
-                    val existingIndex = cart.indexOfFirst { it.menuItemId == item.id }
-                    if (existingIndex >= 0) {
-                        val line = cart[existingIndex]
-                        cart[existingIndex] = line.copy(quantity = line.quantity + 1)
+                    val guestNum = if (orderChannel == OrderChannel.DINE_IN && selectedGuest > 0) {
+                        selectedGuest
                     } else {
-                        cart.add(
-                            CartLine(
-                                menuItemId = item.id,
-                                name = item.name,
-                                unitPriceDollars = item.priceDollars,
-                                quantity = 1,
-                            ),
-                        )
+                        0
+                    }
+                    if (item.variablePrice) {
+                        variablePriceInput = if (item.priceDollars > 0) {
+                            String.format(Locale.US, "%.2f", item.priceDollars)
+                        } else {
+                            ""
+                        }
+                        pendingVariablePrice = PendingVariablePrice(item, guestNum)
+                    } else {
+                        addItemToCart(item, item.priceDollars, guestNum)
                     }
                 },
                 onIncreaseLine = { index ->
@@ -514,82 +699,156 @@ private fun MaxiRoot() {
                         }
                     } else if (cart.isEmpty()) {
                         err = "Cart is empty"
-                    } else if (!SpinClient.spinConfigured()) {
-                        err = "SPIn not configured. Add maxi-mobile/secrets.properties and rebuild."
                     } else {
-                        payDialog = true
+                        screen = Screen.Checkout
                     }
                 },
             )
         }
 
-        if (payDialog) {
+        pendingVariablePrice?.let { pending ->
             AlertDialog(
-                onDismissRequest = { if (!busy) payDialog = false },
-                title = { Text("Card type") },
-                text = { Text("Creates the order, runs SPIn Sale on the terminal, then records payment.") },
+                onDismissRequest = { pendingVariablePrice = null },
+                title = {
+                    Text(stringResource(R.string.variable_price_dialog_title, pending.item.name))
+                },
+                text = {
+                    Column {
+                        Text(stringResource(R.string.variable_price_dialog_message))
+                        OutlinedTextField(
+                            value = variablePriceInput,
+                            onValueChange = { variablePriceInput = it },
+                            label = { Text(stringResource(R.string.variable_price_hint)) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                },
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            scope.launch {
-                                busy = true
-                                try {
-                                    val lines = cart.toList()
-                                    checkoutOrder(
-                                        employeeName = employeeName,
-                                        lines = lines,
-                                        paymentType = "Credit",
-                                        channel = orderChannel,
-                                        tableId = contextTableId,
-                                        tableName = contextTableName,
-                                    )
-                                    cart.clear()
-                                    contextTableId = null
-                                    contextTableName = null
-                                    screen = Screen.Dashboard
-                                    Toast.makeText(context, "Payment complete", Toast.LENGTH_LONG).show()
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, e.message ?: "Checkout failed", Toast.LENGTH_LONG).show()
-                                } finally {
-                                    busy = false
-                                    payDialog = false
-                                }
+                            val parsed = variablePriceInput.trim().replace(',', '.').toDoubleOrNull()
+                            if (parsed == null || parsed < 0) {
+                                Toast.makeText(
+                                    context,
+                                    R.string.variable_price_invalid,
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                                return@TextButton
                             }
+                            addItemToCart(pending.item, parsed, pending.guestNum)
+                            pendingVariablePrice = null
                         },
-                    ) { Text("Credit") }
+                    ) {
+                        Text(stringResource(R.string.variable_price_dialog_confirm))
+                    }
                 },
                 dismissButton = {
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                busy = true
-                                try {
-                                    val lines = cart.toList()
-                                    checkoutOrder(
-                                        employeeName = employeeName,
-                                        lines = lines,
-                                        paymentType = "Debit",
-                                        channel = orderChannel,
-                                        tableId = contextTableId,
-                                        tableName = contextTableName,
-                                    )
-                                    cart.clear()
-                                    contextTableId = null
-                                    contextTableName = null
-                                    screen = Screen.Dashboard
-                                    Toast.makeText(context, "Payment complete", Toast.LENGTH_LONG).show()
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, e.message ?: "Checkout failed", Toast.LENGTH_LONG).show()
-                                } finally {
-                                    busy = false
-                                    payDialog = false
-                                }
-                            }
-                        },
-                    ) { Text("Debit") }
+                    TextButton(onClick = { pendingVariablePrice = null }) {
+                        Text(stringResource(android.R.string.cancel))
+                    }
                 },
             )
         }
+
+        return
+    }
+
+    if (screen == Screen.Checkout) {
+        val orderTypeForConfig = when (orderChannel) {
+            OrderChannel.TO_GO -> "TO_GO"
+            OrderChannel.DINE_IN -> "DINE_IN"
+            OrderChannel.BAR -> "BAR_TAB"
+        }
+        val creditOn = OrderTypePaymentConfig.isCreditEnabled(context, orderTypeForConfig)
+                && SpinClient.spinConfigured()
+        val debitOn = OrderTypePaymentConfig.isDebitEnabled(context, orderTypeForConfig)
+                && SpinClient.spinConfigured()
+        val cashOn = OrderTypePaymentConfig.isCashEnabled(context, orderTypeForConfig)
+
+        fun onPaymentSuccess(completedOrderId: String) {
+            KitchenPrintHelper.maybePrintKitchenTicketsAfterOrderFullyPaid(context, completedOrderId)
+            cart.clear()
+            contextTableId = null
+            contextTableName = null
+            contextOrderId = null
+            contextTableLayoutId = null
+            contextGuestCount = 0
+            contextGuestNames = emptyList()
+            selectedGuest = 1
+            searchQuery = ""
+            screen = Screen.Dashboard
+            val intent = Intent(context, ReceiptOptionsActivity::class.java).apply {
+                putExtra("ORDER_ID", completedOrderId)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            context.startActivity(intent)
+        }
+
+        fun doCardCheckout(paymentType: String) {
+            scope.launch {
+                busy = true
+                checkoutStatusMessage = "Waiting for card…"
+                try {
+                    val completedOrderId = checkoutOrder(
+                        employeeName = employeeName,
+                        lines = cart.toList(),
+                        paymentType = paymentType,
+                        channel = orderChannel,
+                        tableId = contextTableId,
+                        tableName = contextTableName,
+                        existingOrderId = contextOrderId,
+                        tableLayoutId = contextTableLayoutId,
+                    )
+                    onPaymentSuccess(completedOrderId)
+                } catch (e: Exception) {
+                    Toast.makeText(context, e.message ?: "Checkout failed", Toast.LENGTH_LONG).show()
+                } finally {
+                    busy = false
+                    checkoutStatusMessage = null
+                }
+            }
+        }
+
+        fun doCashCheckout() {
+            scope.launch {
+                busy = true
+                checkoutStatusMessage = "Recording cash payment…"
+                try {
+                    val completedOrderId = checkoutOrderCash(
+                        employeeName = employeeName,
+                        lines = cart.toList(),
+                        channel = orderChannel,
+                        tableId = contextTableId,
+                        tableName = contextTableName,
+                        existingOrderId = contextOrderId,
+                        tableLayoutId = contextTableLayoutId,
+                    )
+                    onPaymentSuccess(completedOrderId)
+                } catch (e: Exception) {
+                    Toast.makeText(context, e.message ?: "Cash payment failed", Toast.LENGTH_LONG).show()
+                } finally {
+                    busy = false
+                    checkoutStatusMessage = null
+                }
+            }
+        }
+
+        MaxiCheckoutScreen(
+            cart = cart.toList(),
+            taxes = orderTaxes,
+            orderChannelLabel = orderTypeForConfig.replace("_", " "),
+            busy = busy,
+            statusMessage = checkoutStatusMessage,
+            creditEnabled = creditOn,
+            debitEnabled = debitOn,
+            cashEnabled = cashOn,
+            onCredit = { doCardCheckout("Credit") },
+            onDebit = { doCardCheckout("Debit") },
+            onCash = { doCashCheckout() },
+            onBack = { if (!busy) screen = Screen.Menu },
+        )
         return
     }
 }
@@ -734,8 +993,24 @@ private fun parseMenuItem(
     val name = d.getString("name")?.trim().orEmpty().ifBlank { return null }
     val cat = d.getString("categoryId")?.trim().orEmpty()
     val dollars = resolveMenuItemPriceDollars(d)
-    return ItemUi(id, name, cat, dollars)
+    val variablePrice = d.getBoolean("variablePrice") ?: false
+    val taxIds = MerchantFirestore.mergeMenuItemTaxIds(d)
+    val taxMode = MerchantFirestore.menuItemTaxModeFromDoc(d)
+    return ItemUi(id, name, cat, dollars, variablePrice, taxMode, taxIds)
 }
+
+private suspend fun loadEnabledOrderTaxes(merchantId: String): List<OrderTaxRule> =
+    withContext(Dispatchers.IO) {
+        MerchantFirestore.init(merchantId)
+        val snap = MerchantFirestore.col("Taxes").get().await()
+        snap.documents.mapNotNull { doc ->
+            val name = doc.getString("name") ?: return@mapNotNull null
+            val type = doc.getString("type") ?: return@mapNotNull null
+            val amount = doc.getDouble("amount") ?: doc.getLong("amount")?.toDouble() ?: return@mapNotNull null
+            val enabled = doc.getBoolean("enabled") ?: true
+            OrderTaxRule(doc.id, name, type, amount, enabled)
+        }
+    }
 
 private suspend fun loadItemsForCategory(
     merchantId: String,
@@ -764,7 +1039,9 @@ private suspend fun checkoutOrder(
     channel: OrderChannel,
     tableId: String?,
     tableName: String?,
-) {
+    existingOrderId: String? = null,
+    tableLayoutId: String? = null,
+): String {
     val (orderId, totalCents) = suspendCoroutine { cont ->
         when (channel) {
             OrderChannel.TO_GO ->
@@ -781,15 +1058,26 @@ private suspend fun checkoutOrder(
                     cont.resumeWithException(IllegalStateException("No table selected"))
                 } else {
                     val tn = tableName?.trim().orEmpty().ifBlank { null }
-                    ToGoCheckout.createToGoOrderWithLines(
-                        employeeName = employeeName,
-                        lines = lines,
-                        orderType = "DINE_IN",
-                        tableId = tid,
-                        tableName = tn,
-                        onSuccess = { oid, cents -> cont.resume(oid to cents) },
-                        onFailure = { cont.resumeWithException(it) },
-                    )
+                    val oid = existingOrderId?.trim().orEmpty()
+                    if (oid.isNotEmpty()) {
+                        ToGoCheckout.appendLinesToExistingOrder(
+                            orderId = oid,
+                            lines = lines,
+                            onSuccess = { cents -> cont.resume(oid to cents) },
+                            onFailure = { cont.resumeWithException(it) },
+                        )
+                    } else {
+                        ToGoCheckout.createToGoOrderWithLines(
+                            employeeName = employeeName,
+                            lines = lines,
+                            orderType = "DINE_IN",
+                            tableId = tid,
+                            tableLayoutId = tableLayoutId,
+                            tableName = tn,
+                            onSuccess = { newOid, cents -> cont.resume(newOid to cents) },
+                            onFailure = { cont.resumeWithException(it) },
+                        )
+                    }
                 }
             }
             OrderChannel.BAR -> {
@@ -880,4 +1168,106 @@ private suspend fun checkoutOrder(
             onFailure = { cont.resumeWithException(it) },
         )
     }
+    return orderId
+}
+
+/** Creates the Firestore order and records a cash payment (no SPIn terminal call). */
+private suspend fun checkoutOrderCash(
+    employeeName: String,
+    lines: List<CartLine>,
+    channel: OrderChannel,
+    tableId: String?,
+    tableName: String?,
+    existingOrderId: String? = null,
+    tableLayoutId: String? = null,
+): String {
+    val (orderId, totalCents) = suspendCoroutine { cont ->
+        when (channel) {
+            OrderChannel.TO_GO ->
+                ToGoCheckout.createToGoOrderWithLines(
+                    employeeName = employeeName,
+                    lines = lines,
+                    orderType = "TO_GO",
+                    onSuccess = { oid, cents -> cont.resume(oid to cents) },
+                    onFailure = { cont.resumeWithException(it) },
+                )
+            OrderChannel.DINE_IN -> {
+                val tid = tableId?.trim().orEmpty()
+                if (tid.isEmpty()) {
+                    cont.resumeWithException(IllegalStateException("No table selected"))
+                } else {
+                    val tn = tableName?.trim().orEmpty().ifBlank { null }
+                    val oid = existingOrderId?.trim().orEmpty()
+                    if (oid.isNotEmpty()) {
+                        ToGoCheckout.appendLinesToExistingOrder(
+                            orderId = oid,
+                            lines = lines,
+                            onSuccess = { cents -> cont.resume(oid to cents) },
+                            onFailure = { cont.resumeWithException(it) },
+                        )
+                    } else {
+                        ToGoCheckout.createToGoOrderWithLines(
+                            employeeName = employeeName,
+                            lines = lines,
+                            orderType = "DINE_IN",
+                            tableId = tid,
+                            tableLayoutId = tableLayoutId,
+                            tableName = tn,
+                            onSuccess = { newOid, cents -> cont.resume(newOid to cents) },
+                            onFailure = { cont.resumeWithException(it) },
+                        )
+                    }
+                }
+            }
+            OrderChannel.BAR -> {
+                val tid = tableId?.trim().orEmpty()
+                if (tid.isEmpty()) {
+                    cont.resumeWithException(IllegalStateException("No bar seat selected"))
+                } else {
+                    val tn = tableName?.trim().orEmpty().ifBlank { tid }
+                    ToGoCheckout.createToGoOrderWithLines(
+                        employeeName = employeeName,
+                        lines = lines,
+                        orderType = "BAR_TAB",
+                        tableId = tid,
+                        tableName = tn,
+                        seatIds = listOf(tid),
+                        seatName = tn,
+                        area = "Bar",
+                        onSuccess = { oid, cents -> cont.resume(oid to cents) },
+                        onFailure = { cont.resumeWithException(it) },
+                    )
+                }
+            }
+        }
+    }
+
+    val batchId = suspendCoroutine { cont ->
+        ToGoCheckout.fetchOpenBatchId(
+            onResult = { cont.resume(it) },
+            onFailure = { e -> cont.resumeWithException(e) },
+        )
+    }
+
+    suspendCoroutine { cont ->
+        PaymentEngine(FirebaseFirestore.getInstance()).processPayment(
+            orderId = orderId,
+            batchId = batchId,
+            paymentType = "Cash",
+            amountInCents = totalCents,
+            authCode = "",
+            cardBrand = "",
+            last4 = "",
+            entryType = "Cash",
+            referenceId = "",
+            clientReferenceId = "",
+            batchNumber = "",
+            transactionNumber = "",
+            invoiceNumber = "",
+            pnReferenceId = "",
+            onSuccess = { cont.resume(Unit) },
+            onFailure = { cont.resumeWithException(it) },
+        )
+    }
+    return orderId
 }

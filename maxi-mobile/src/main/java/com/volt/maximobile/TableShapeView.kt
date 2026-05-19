@@ -404,8 +404,13 @@ class TableShapeView(context: Context) : View(context) {
         var badgeW = padH * 2f + contentW
         badgeW = badgeW.coerceAtMost(maxW.coerceAtMost(inner.width()))
         val badgeH = seatBadgeBlockHeight()
-        val left = (cx - badgeW / 2f).coerceIn(inner.left, inner.right - badgeW)
-        val top = (centerY - badgeH / 2f).coerceIn(inner.top, inner.bottom - badgeH)
+        if (badgeW <= 0f || badgeH <= 0f || inner.width() < 1f || inner.height() < 1f) return
+        val leftMin = inner.left
+        val leftMax = (inner.right - badgeW).coerceAtLeast(leftMin)
+        val topMin = inner.top
+        val topMax = (inner.bottom - badgeH).coerceAtLeast(topMin)
+        val left = (cx - badgeW / 2f).coerceIn(leftMin, leftMax)
+        val top = (centerY - badgeH / 2f).coerceIn(topMin, topMax)
         val rect = RectF(left, top, left + badgeW, top + badgeH)
         val corner = badgeH / 2f
         canvas.drawRoundRect(rect, corner, corner, seatBadgeFillPaint)
@@ -466,8 +471,13 @@ class TableShapeView(context: Context) : View(context) {
         var tw = statusLabelPaint.measureText(text) + 2f * innerPadH
         tw = tw.coerceAtMost(maxPillWidth.coerceAtMost(inner.width()))
         val th = (fm.descent - fm.ascent) + 2f * innerPadV
-        val left = (cx - tw / 2f).coerceIn(inner.left, inner.right - tw)
-        val top = (centerY - th / 2f).coerceIn(inner.top, inner.bottom - th)
+        if (tw <= 0f || th <= 0f || inner.width() < 1f || inner.height() < 1f) return
+        val leftMin = inner.left
+        val leftMax = (inner.right - tw).coerceAtLeast(leftMin)
+        val topMin = inner.top
+        val topMax = (inner.bottom - th).coerceAtLeast(topMin)
+        val left = (cx - tw / 2f).coerceIn(leftMin, leftMax)
+        val top = (centerY - th / 2f).coerceIn(topMin, topMax)
         val rect = RectF(left, top, left + tw, top + th)
         canvas.drawRoundRect(rect, 8f * dp, 8f * dp, pillFillPaint)
         canvas.drawText(text, rect.centerX(), baselineForCenterY(rect.centerY(), statusLabelPaint), statusLabelPaint)

@@ -1,5 +1,7 @@
 package com.volt.maximobile
 
+import android.content.Context
+import com.google.firebase.firestore.DocumentSnapshot
 import com.volt.maximobile.dvpaylite.P8ReceiptPrinter
 import com.volt.maximobile.dvpaylite.P8ReceiptPrinter.ReceiptSegment
 import org.json.JSONObject
@@ -26,10 +28,99 @@ object MaxiReceiptBuilder {
         val lines: List<CartLine>,
         val subtotalCents: Long,
         val taxCents: Long,
+        val tipCents: Long = 0L,
         val totalCents: Long,
         val paymentType: String,
         val txnResult: JSONObject?,
     )
+
+    /** Builds a customer receipt for the P8 built-in printer from a paid Firestore order. */
+    @Suppress("UNCHECKED_CAST")
+    fun buildFromPaidOrder(
+        context: Context,
+        orderDoc: DocumentSnapshot,
+        items: List<DocumentSnapshot>,
+        payments: List<Map<String, Any>>,
+    ): List<ReceiptSegment> {
+        val rs = ReceiptSettings.load(context)
+        val cartLines = items.map { doc ->
+            val name = doc.getString("name")
+                ?: doc.getString("itemName")
+                ?: "Item"
+            val qty = (doc.getLong("qty")
+                ?: doc.getLong("quantity")
+                ?: 1L).toInt().coerceAtLeast(1)
+            val lineTotalCents = doc.getLong("lineTotalInCents") ?: 0L
+            CartLine(
+                menuItemId = doc.id,
+                name = name,
+                unitPriceDollars = lineTotalCents / 100.0 / qty,
+                quantity = qty,
+            )
+        }
+
+        val totalInCents = orderDoc.getLong("totalInCents") ?: 0L
+        val tipAmountInCents = orderDoc.getLong("tipAmountInCents") ?: 0L
+        val discountInCents = orderDoc.getLong("discountInCents") ?: 0L
+        val taxBreakdown = orderDoc.get("taxBreakdown") as? List<Map<String, Any>> ?: emptyList()
+        var taxTotalCents = 0L
+        for (entry in taxBreakdown) {
+            taxTotalCents += (entry["amountInCents"] as? Number)?.toLong() ?: 0L
+        }
+        val subtotalCents = totalInCents + discountInCents - taxTotalCents - tipAmountInCents
+
+        val firstPayment = payments.firstOrNull()
+        val paymentType = firstPayment?.get("paymentType")?.toString() ?: "Cash"
+
+        return build(
+            ReceiptData(
+                businessName = rs.businessName,
+                addressText = rs.addressText,
+                orderNumber = orderDoc.getLong("orderNumber") ?: 0L,
+                orderType = orderDoc.getString("orderType") ?: "",
+                employeeName = if (rs.showServerName) {
+                    orderDoc.getString("employeeName") ?: ""
+                } else {
+                    ""
+                },
+                lines = cartLines,
+                subtotalCents = subtotalCents,
+                taxCents = taxTotalCents,
+                tipCents = if (TipConfig.shouldIncludeTipLineOnPrintedReceipt(context, tipAmountInCents)) {
+                    tipAmountInCents
+                } else {
+                    0L
+                },
+                totalCents = totalInCents,
+                paymentType = paymentType,
+                txnResult = firstPayment?.let { paymentToTxnJson(it) },
+            ),
+        )
+    }
+
+    private fun paymentToTxnJson(payment: Map<String, Any>): JSONObject {
+        val paymentType = payment["paymentType"]?.toString().orEmpty()
+        if (paymentType.equals("Cash", ignoreCase = true)) {
+            return JSONObject().put("card_type", "Cash")
+        }
+        val last4 = payment["last4"]?.toString().orEmpty()
+        val maskPan = if (last4.isNotBlank()) "************$last4" else ""
+        return JSONObject().apply {
+            put("card_type", payment["cardBrand"]?.toString()?.ifBlank { paymentType } ?: paymentType)
+            put("mask_pan", maskPan)
+            put("authCode", payment["authCode"]?.toString().orEmpty())
+            put(
+                "transaction_mode",
+                when (payment["entryType"]?.toString()?.lowercase(Locale.US)) {
+                    "swipe" -> "1"
+                    "chip", "insert" -> "2"
+                    "contactless", "tap" -> "3"
+                    "manual", "keyed" -> "4"
+                    else -> ""
+                },
+            )
+        }
+    }
 
     fun build(data: ReceiptData): List<ReceiptSegment> {
         val segs = mutableListOf<ReceiptSegment>()
@@ -88,6 +179,9 @@ object MaxiReceiptBuilder {
         segs += ReceiptSegment(fl("Subtotal", centsToDisplay(data.subtotalCents), W), bold = true)
         if (data.taxCents > 0) {
             segs += ReceiptSegment(fl("Tax", centsToDisplay(data.taxCents), W), bold = true)
+        }
+        if (data.tipCents > 0) {
+            segs += ReceiptSegment(fl("Tip", centsToDisplay(data.tipCents), W), bold = true)
         }
         segs += ReceiptSegment("=".repeat(W))
         segs += ReceiptSegment(fl("TOTAL", centsToDisplay(data.totalCents), W), bold = true)

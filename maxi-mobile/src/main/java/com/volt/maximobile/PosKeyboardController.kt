@@ -89,7 +89,12 @@ class PosKeyboardController private constructor(
     }
 
     private val visibilityListeners = mutableListOf<VisibilityListener>()
+    private var enterAction: (() -> Unit)? = null
     private var activeEditText: EditText? = null
+
+    fun setEnterAction(action: (() -> Unit)?) {
+        enterAction = action
+    }
     private var addedToWm: Boolean = false
     private var lastReportedHeightPx: Int = 0
 
@@ -166,6 +171,7 @@ class PosKeyboardController private constructor(
                 }
             }
             PosKeyboardView.KEY_ENTER -> {
+                enterAction?.invoke()
                 hide()
                 editTexts.forEach { it.clearFocus() }
             }

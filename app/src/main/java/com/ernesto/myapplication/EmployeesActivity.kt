@@ -44,38 +44,152 @@ class EmployeesActivity : AppCompatActivity() {
 
         container.removeAllViews()
 
-        MerchantFirestore.col("Employees")
-            .get()
-            .addOnSuccessListener { snap ->
+        val db = FirebaseFirestore.getInstance()
+        val mid = MerchantFirestore.merchantId
+        if (mid.isBlank()) return
 
-                for (doc in snap.documents.sortedBy { it.getString("name") ?: "" }) {
+        db.collection("Merchants").document(mid).get()
+            .addOnSuccessListener { merchantSnap ->
+                val ownerPin = merchantSnap.getString("ownerPosPin")?.trim().orEmpty()
+                val firstName = merchantSnap.getString("ownerFirstName")?.trim().orEmpty()
+                val lastName = merchantSnap.getString("ownerLastName")?.trim().orEmpty()
+                val ownerEmail = merchantSnap.getString("email")?.trim().orEmpty()
+                val ownerPhone = merchantSnap.getString("phone")?.trim().orEmpty()
+                val ownerName = listOf(firstName, lastName).filter { it.isNotEmpty() }.joinToString(" ")
+                    .ifBlank { merchantSnap.getString("businessName")?.trim().orEmpty().ifBlank { "Owner" } }
 
-                    val employeeId = doc.id
-                    val name = doc.getString("name") ?: ""
-                    val role = doc.getString("role") ?: ""
-                    val pin = doc.getString("pin") ?: ""
-                    val email = doc.getString("email")
-                    val phone = doc.getString("phone")
-
+                if (ownerPin.isNotEmpty()) {
                     val row = LayoutInflater.from(this).inflate(R.layout.item_employee, container, false)
-
-                    val txtName = row.findViewById<TextView>(R.id.txtEmployeeName)
-                    val txtRole = row.findViewById<TextView>(R.id.txtEmployeeRole)
-                    val btnEdit = row.findViewById<ImageButton>(R.id.btnEdit)
-
-                    txtName.text = name
-                    txtRole.text = role
-
+                    row.findViewById<TextView>(R.id.txtEmployeeName).text = ownerName
+                    row.findViewById<TextView>(R.id.txtEmployeeRole).text = "OWNER"
                     row.setOnClickListener {
-                        showEditEmployeeDialog(employeeId, name, pin, role, email, phone)
+                        showEditOwnerDialog(ownerName, ownerPin, ownerEmail, ownerPhone)
                     }
-                    btnEdit.setOnClickListener {
-                        showEditEmployeeDialog(employeeId, name, pin, role, email, phone)
+                    row.findViewById<ImageButton>(R.id.btnEdit).setOnClickListener {
+                        showEditOwnerDialog(ownerName, ownerPin, ownerEmail, ownerPhone)
                     }
-
                     container.addView(row)
                 }
+
+                MerchantFirestore.col("Employees")
+                    .get()
+                    .addOnSuccessListener { snap ->
+                        for (doc in snap.documents.sortedBy { it.getString("name") ?: "" }) {
+                            val employeeId = doc.id
+                            val name = doc.getString("name") ?: ""
+                            val role = doc.getString("role") ?: ""
+                            val pin = doc.getString("pin") ?: ""
+                            val email = doc.getString("email")
+                            val phone = doc.getString("phone")
+
+                            val row = LayoutInflater.from(this).inflate(R.layout.item_employee, container, false)
+                            val txtName = row.findViewById<TextView>(R.id.txtEmployeeName)
+                            val txtRole = row.findViewById<TextView>(R.id.txtEmployeeRole)
+                            val btnEdit = row.findViewById<ImageButton>(R.id.btnEdit)
+
+                            txtName.text = name
+                            txtRole.text = role
+
+                            row.setOnClickListener {
+                                showEditEmployeeDialog(employeeId, name, pin, role, email, phone)
+                            }
+                            btnEdit.setOnClickListener {
+                                showEditEmployeeDialog(employeeId, name, pin, role, email, phone)
+                            }
+
+                            container.addView(row)
+                        }
+                    }
             }
+    }
+
+    private fun showEditOwnerDialog(
+        currentName: String,
+        currentPin: String,
+        currentEmail: String,
+        currentPhone: String,
+    ) {
+        val dialogView = LayoutInflater.from(this)
+            .inflate(R.layout.dialog_add_employee, null)
+
+        val etName = dialogView.findViewById<EditText>(R.id.etEmployeeName)
+        val etEmail = dialogView.findViewById<EditText>(R.id.etEmployeeEmail)
+        val etPhone = dialogView.findViewById<EditText>(R.id.etEmployeePhone)
+        val etPin = dialogView.findViewById<EditText>(R.id.etEmployeePin)
+        val pinLayout = dialogView.findViewById<TextInputLayout>(R.id.pinLayout)
+        val spinnerRole = dialogView.findViewById<Spinner>(R.id.spinnerRole)
+
+        val roles = arrayOf("OWNER")
+        spinnerRole.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, roles)
+        spinnerRole.isEnabled = false
+
+        etName.setText(currentName)
+        etEmail.setText(currentEmail)
+        etPhone.setText(currentPhone)
+        etPin.setText(currentPin)
+
+        etPin.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val pin = s.toString()
+                if (pin.length == 4 && pin != currentPin) {
+                    MerchantFirestore.col("Employees")
+                        .whereEqualTo("pin", pin)
+                        .get()
+                        .addOnSuccessListener { documents ->
+                            pinLayout.error = if (!documents.isEmpty) "PIN already in use" else null
+                        }
+                } else {
+                    pinLayout.error = null
+                }
+            }
+        })
+
+        AlertDialog.Builder(this)
+            .setTitle("Edit Owner")
+            .setView(dialogView)
+            .setPositiveButton("Update") { _, _ ->
+                val newName = etName.text.toString().trim()
+                val newEmail = etEmail.text.toString().trim()
+                val newPhone = etPhone.text.toString().trim()
+                val newPin = etPin.text.toString().trim()
+
+                if (newName.isEmpty() || newPin.isEmpty()) {
+                    Toast.makeText(this, "Name and PIN are required", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                if (!isBlankOrValidEmail(newEmail)) {
+                    Toast.makeText(this, "Enter a valid email or leave it blank", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                if (pinLayout.error != null) {
+                    Toast.makeText(this, "Fix PIN error first", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+
+                val parts = newName.split(" ", limit = 2)
+                val updates = hashMapOf<String, Any>(
+                    "ownerFirstName" to parts.first(),
+                    "ownerLastName" to if (parts.size > 1) parts[1] else "",
+                    "ownerPosPin" to newPin,
+                )
+                if (newEmail.isNotEmpty()) updates["email"] = newEmail
+                if (newPhone.isNotEmpty()) updates["phone"] = newPhone
+
+                val mid = MerchantFirestore.merchantId
+                FirebaseFirestore.getInstance().collection("Merchants").document(mid)
+                    .update(updates)
+                    .addOnSuccessListener {
+                        Toast.makeText(this, "Owner Updated", Toast.LENGTH_SHORT).show()
+                        loadEmployees()
+                    }
+                    .addOnFailureListener { e ->
+                        Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun showAddEmployeeDialog() {

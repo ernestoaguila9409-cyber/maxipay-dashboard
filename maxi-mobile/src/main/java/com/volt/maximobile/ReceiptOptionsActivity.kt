@@ -1,9 +1,6 @@
 ﻿package com.volt.maximobile
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
@@ -12,8 +9,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
+import com.volt.maximobile.dvpaylite.P8ReceiptPrinter
 import com.volt.shared.engine.DiscountDisplay
 import com.volt.shared.engine.MoneyUtils
 import com.google.firebase.firestore.FirebaseFirestore
@@ -25,10 +21,6 @@ import java.util.Locale
 
 class ReceiptOptionsActivity : AppCompatActivity() {
 
-    companion object {
-        private const val REQUEST_BT_CONNECT = 1002
-    }
-
     private var orderId: String? = null
     private val db = FirebaseFirestore.getInstance()
     /** When customer email was passed in, merchant UI skips main options — don't mirror receipt grid on customer display. */
@@ -37,6 +29,7 @@ class ReceiptOptionsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_receipt_options)
+        P8ReceiptPrinter.init(applicationContext)
 
         orderId = intent.getStringExtra("ORDER_ID")
         val customerEmail = intent.getStringExtra("CUSTOMER_EMAIL")
@@ -230,20 +223,10 @@ class ReceiptOptionsActivity : AppCompatActivity() {
     }
 
     // ============================
-    // PRINT RECEIPT (ESC/POS)
+    // PRINT RECEIPT (P8 built-in printer)
     // ============================
 
     private fun printReceipt(orderId: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                ActivityCompat.requestPermissions(
-                    this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BT_CONNECT
-                )
-                return
-            }
-        }
         loadAndPrint(orderId)
     }
 
@@ -266,26 +249,13 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                                 .addOnSuccessListener { txDoc ->
                                     @Suppress("UNCHECKED_CAST")
                                     val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
-                                    val txStatus = txDoc?.getString("status")
-                                    val txVoided = txDoc?.getBoolean("voided") ?: false
-                                    val rs = ReceiptSettings.load(this)
-                                    val segments = buildReceiptSegments(
-                                        orderDoc, itemsSnap.documents, payments, txStatus, txVoided
-                                    )
-                                    EscPosPrinter.print(this, segments, rs)
-                                    goToMainScreen()
+                                    printOnP8(orderDoc, itemsSnap.documents, payments)
                                 }
                                 .addOnFailureListener {
-                                    val rs = ReceiptSettings.load(this)
-                                    val segments = buildReceiptSegments(orderDoc, itemsSnap.documents, emptyList())
-                                    EscPosPrinter.print(this, segments, rs)
-                                    goToMainScreen()
+                                    printOnP8(orderDoc, itemsSnap.documents, emptyList())
                                 }
                         } else {
-                            val rs = ReceiptSettings.load(this)
-                            val segments = buildReceiptSegments(orderDoc, itemsSnap.documents, emptyList())
-                            EscPosPrinter.print(this, segments, rs)
-                            goToMainScreen()
+                            printOnP8(orderDoc, itemsSnap.documents, emptyList())
                         }
                     }
                     .addOnFailureListener { e ->
@@ -297,6 +267,25 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                 Log.e("PrintReceipt", "Failed to load order", e)
                 Toast.makeText(this, "Failed to load order", Toast.LENGTH_SHORT).show()
             }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun printOnP8(
+        orderDoc: com.google.firebase.firestore.DocumentSnapshot,
+        items: List<com.google.firebase.firestore.DocumentSnapshot>,
+        payments: List<Map<String, Any>>,
+    ) {
+        val segments = MaxiReceiptBuilder.buildFromPaidOrder(this, orderDoc, items, payments)
+        P8ReceiptPrinter.printReceipt(
+            segments,
+            onSuccess = { runOnUiThread { goToMainScreen() } },
+            onFailure = { msg ->
+                runOnUiThread {
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                    goToMainScreen()
+                }
+            },
+        )
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -482,16 +471,6 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         footer("Thank you for dining with us!")
 
         return segs
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_BT_CONNECT && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            val oid = orderId
-            if (!oid.isNullOrBlank()) loadAndPrint(oid)
-        }
     }
 
     // ============================

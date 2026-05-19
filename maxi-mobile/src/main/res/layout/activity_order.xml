@@ -22,20 +22,43 @@
 
     <TextView
         android:id="@+id/orderTitle"
-        android:layout_width="0dp"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="8dp"
-        android:layout_marginEnd="16dp"
         android:ellipsize="end"
         android:maxLines="1"
         android:textColor="@color/order_text_primary"
         android:textSize="22sp"
         android:textStyle="bold"
         app:layout_constraintBottom_toBottomOf="@id/orderBackButton"
-        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toEndOf="@id/orderBackButton"
         app:layout_constraintTop_toTopOf="@id/orderBackButton"
         tools:text="Dine in" />
+
+    <HorizontalScrollView
+        android:id="@+id/guestChipScroller"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="12dp"
+        android:fillViewport="false"
+        android:scrollbars="none"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/orderBackButton"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@id/orderTitle"
+        app:layout_constraintTop_toTopOf="@id/orderBackButton"
+        tools:visibility="visible">
+
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/guestChipGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:chipSpacingHorizontal="6dp"
+            app:singleLine="true"
+            app:singleSelection="true" />
+
+    </HorizontalScrollView>
 
     <TextView
         android:id="@+id/orderSubtitle"

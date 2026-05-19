@@ -1510,8 +1510,16 @@ class PaymentActivity : AppCompatActivity() {
             advanceSplitAfterReceiptAction(remainingInCents)
             return
         }
+        if (ReceiptPrintingConfig.shouldSkipReceiptFlow(this)) {
+            advanceSplitAfterReceiptAction(remainingInCents)
+            return
+        }
         activeSplitReceiptPayload = payload
         activeSplitReceiptRemainingInCents = remainingInCents
+
+        if (ReceiptPrintingConfig.shouldAutoPrintOnPayment(this)) {
+            printSplitReceiptThenContinue(oid, payload, remainingInCents)
+        }
 
         CustomerDisplayManager.showReceiptOptionsOnCustomerDisplay(this) { option ->
             runOnUiThread {
@@ -2269,22 +2277,16 @@ class PaymentActivity : AppCompatActivity() {
         val oid = orderId ?: run { finish(); return }
         KitchenPrintHelper.maybePrintKitchenTicketsAfterOrderFullyPaid(this, oid)
         if (skipMerchantReceiptScreen) {
-            CustomerDisplayManager.clearPaymentSuccessInfo()
-            CustomerDisplayManager.clearReceiptOptionCallback()
-            CustomerDisplayManager.clearEmailInputCallbacks()
-            CustomerDisplayManager.setIdle(this, ReceiptSettings.load(this).businessName)
-            startActivity(Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            })
+            ReceiptPostPaymentFlow.navigateToMain(this)
             finish()
             return
         }
-        val intent = Intent(this, ReceiptOptionsActivity::class.java).apply {
-            putExtra("ORDER_ID", oid)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        startActivity(intent)
-        finish()
+        ReceiptPostPaymentFlow.launchAfterOrderPaid(
+            activity = this,
+            orderId = oid,
+            customerEmail = null,
+            finishCaller = true,
+        )
     }
 
     override fun onDestroy() {

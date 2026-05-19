@@ -40,6 +40,7 @@ class ReceiptOptionsActivity : AppCompatActivity() {
 
         orderId = intent.getStringExtra("ORDER_ID")
         val customerEmail = intent.getStringExtra("CUSTOMER_EMAIL")
+        val autoPrintOnOpen = intent.getBooleanExtra(ReceiptPostPaymentFlow.EXTRA_AUTO_PRINT_ON_OPEN, false)
 
         val optionsContainer = findViewById<LinearLayout>(R.id.optionsContainer)
         val emailFormContainer = findViewById<LinearLayout>(R.id.emailFormContainer)
@@ -76,7 +77,7 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                 Toast.makeText(this, "No order to print", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            printReceipt(oid)
+            printReceipt(oid, navigateToMainAfterPrint = true)
         }
 
         findViewById<LinearLayout>(R.id.btnEmailReceipt).setOnClickListener {
@@ -124,6 +125,13 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnBackFromSms).setOnClickListener {
             smsFormContainer.visibility = View.GONE
             optionsContainer.visibility = View.VISIBLE
+        }
+
+        if (autoPrintOnOpen) {
+            val oid = orderId
+            if (!oid.isNullOrBlank()) {
+                printReceipt(oid, navigateToMainAfterPrint = false)
+            }
         }
     }
 
@@ -233,7 +241,7 @@ class ReceiptOptionsActivity : AppCompatActivity() {
     // PRINT RECEIPT (ESC/POS)
     // ============================
 
-    private fun printReceipt(orderId: String) {
+    private fun printReceipt(orderId: String, navigateToMainAfterPrint: Boolean = true) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
                 != PackageManager.PERMISSION_GRANTED
@@ -244,10 +252,10 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                 return
             }
         }
-        loadAndPrint(orderId)
+        loadAndPrint(orderId, navigateToMainAfterPrint)
     }
 
-    private fun loadAndPrint(orderId: String) {
+    private fun loadAndPrint(orderId: String, navigateToMainAfterPrint: Boolean = true) {
         Toast.makeText(this, "Preparing receipt…", Toast.LENGTH_SHORT).show()
 
         MerchantFirestore.col("Orders").document(orderId).get()
@@ -273,19 +281,19 @@ class ReceiptOptionsActivity : AppCompatActivity() {
                                         orderDoc, itemsSnap.documents, payments, txStatus, txVoided
                                     )
                                     EscPosPrinter.print(this, segments, rs)
-                                    goToMainScreen()
+                                    if (navigateToMainAfterPrint) goToMainScreen()
                                 }
                                 .addOnFailureListener {
                                     val rs = ReceiptSettings.load(this)
                                     val segments = buildReceiptSegments(orderDoc, itemsSnap.documents, emptyList())
                                     EscPosPrinter.print(this, segments, rs)
-                                    goToMainScreen()
+                                    if (navigateToMainAfterPrint) goToMainScreen()
                                 }
                         } else {
                             val rs = ReceiptSettings.load(this)
                             val segments = buildReceiptSegments(orderDoc, itemsSnap.documents, emptyList())
                             EscPosPrinter.print(this, segments, rs)
-                            goToMainScreen()
+                            if (navigateToMainAfterPrint) goToMainScreen()
                         }
                     }
                     .addOnFailureListener { e ->

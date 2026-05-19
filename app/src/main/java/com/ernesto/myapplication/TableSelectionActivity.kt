@@ -9,6 +9,7 @@ import android.os.Looper
 import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
@@ -42,10 +43,10 @@ class TableSelectionActivity : AppCompatActivity() {
 
     private data class OccupiedTableInfo(
         val orderId: String,
-        val guestName: String?,
+        val guestNames: List<String>,
         val guestCount: Int,
         val itemsCount: Long,
-        val createdAt: Date?
+        val createdAt: Date?,
     )
 
     private val db = FirebaseFirestore.getInstance()
@@ -111,6 +112,8 @@ class TableSelectionActivity : AppCompatActivity() {
     /** Latest layout tables query; one apply per burst (cache + server). */
     private var pendingLayoutTablesSnapshot: QuerySnapshot? = null
 
+    private var canvasLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
+
     private val applyLayoutTablesRunnable = Runnable {
         val snap = pendingLayoutTablesSnapshot ?: return@Runnable
         pendingLayoutTablesSnapshot = null
@@ -166,6 +169,7 @@ class TableSelectionActivity : AppCompatActivity() {
         }
         layoutVisibleTableIds = visibleIds.toList()
         if (sectionsAdded) rebuildSectionChips()
+        syncSelectedSectionToLoadedTables()
         placeLayoutTableVisuals()
         filterTablesBySection()
         applyOccupiedState()
@@ -239,6 +243,10 @@ class TableSelectionActivity : AppCompatActivity() {
         waitingHandler.removeCallbacks(coalescedOccupiedRefreshRunnable)
         canvas.removeCallbacks(applyLayoutTablesRunnable)
         pendingLayoutTablesSnapshot = null
+        canvasLayoutListener?.let { l ->
+            canvas.viewTreeObserver.removeOnGlobalLayoutListener(l)
+        }
+        canvasLayoutListener = null
         clearReservationUiBoundarySchedule()
     }
 
@@ -450,6 +458,25 @@ class TableSelectionActivity : AppCompatActivity() {
         }
     }
 
+    private fun syncSelectedSectionToLoadedTables() {
+        if (layoutVisibleTableIds.isEmpty()) return
+
+        fun sectionHasTables(section: String): Boolean =
+            layoutVisibleTableIds.any { (tableSections[it] ?: "").equals(section, ignoreCase = true) }
+
+        if (selectedSection.isEmpty() || sectionHasTables(selectedSection)) return
+
+        val pick = knownSections.firstOrNull { sectionHasTables(it) }
+            ?: layoutVisibleTableIds
+                .mapNotNull { tableSections[it]?.takeIf { s -> s.isNotBlank() } }
+                .distinct()
+                .firstOrNull()
+            ?: ""
+
+        selectedSection = pick
+        rebuildSectionChips()
+    }
+
     // ── DATA LOADING ───────────────────────────────────────
 
     private fun loadSectionsAndTables() {
@@ -517,7 +544,15 @@ class TableSelectionActivity : AppCompatActivity() {
                 layoutTablesListener = MerchantFirestore.col("tableLayouts").document(activeLayoutId)
                     .collection("tables")
                     .addSnapshotListener { snap, err ->
-                        if (err != null || snap == null) return@addSnapshotListener
+                        if (err != null) {
+                            Toast.makeText(
+                                this,
+                                "Failed to load tables: ${err.message}",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                            return@addSnapshotListener
+                        }
+                        if (snap == null) return@addSnapshotListener
                         applyLayoutTablesSnapshot(snap)
                     }
                 attachLayoutParentMetaListener()
@@ -552,8 +587,31 @@ class TableSelectionActivity : AppCompatActivity() {
 
     private fun applyLayoutTablesSnapshot(snap: com.google.firebase.firestore.QuerySnapshot) {
         pendingLayoutTablesSnapshot = snap
+        scheduleApplyLayoutTablesWhenReady()
+    }
+
+    private fun scheduleApplyLayoutTablesWhenReady() {
         canvas.removeCallbacks(applyLayoutTablesRunnable)
-        canvas.post(applyLayoutTablesRunnable)
+        val applyWhenMeasured = Runnable {
+            if (pendingLayoutTablesSnapshot == null) return@Runnable
+            if (canvas.width <= 0 || canvas.height <= 0) return@Runnable
+            canvas.post(applyLayoutTablesRunnable)
+        }
+        if (canvas.width > 0 && canvas.height > 0) {
+            canvas.post(applyWhenMeasured)
+            return
+        }
+        canvasLayoutListener?.let { canvas.viewTreeObserver.removeOnGlobalLayoutListener(it) }
+        val layoutListener = object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                if (canvas.width <= 0 || canvas.height <= 0) return
+                canvas.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                canvasLayoutListener = null
+                canvas.post(applyWhenMeasured)
+            }
+        }
+        canvasLayoutListener = layoutListener
+        canvas.viewTreeObserver.addOnGlobalLayoutListener(layoutListener)
     }
 
     /**
@@ -730,14 +788,16 @@ class TableSelectionActivity : AppCompatActivity() {
                     val tid = doc.getString("tableId")
                     if (!tid.isNullOrBlank()) {
                         @Suppress("UNCHECKED_CAST")
-                        val gNames = doc.get("guestNames") as? List<String>
-                        val firstGuest = gNames?.firstOrNull()?.takeIf { it.isNotBlank() }
+                        val gNames = (doc.get("guestNames") as? List<*>)
+                            ?.mapNotNull { it as? String }
+                            ?.filter { it.isNotBlank() }
+                            .orEmpty()
                         val gCount = (doc.getLong("guestCount") ?: 0L).toInt()
                         val iCount = doc.getLong("itemsCount") ?: 0L
                         val created = doc.getTimestamp("createdAt")?.toDate() ?: doc.getDate("createdAt")
                         occupiedTableData[tid] = OccupiedTableInfo(
                             orderId = doc.id,
-                            guestName = firstGuest,
+                            guestNames = gNames,
                             guestCount = gCount,
                             itemsCount = iCount,
                             createdAt = created,
@@ -959,6 +1019,7 @@ class TableSelectionActivity : AppCompatActivity() {
         } else {
             tableNames[tableId] ?: "Table"
         }
+        val info = groupIds.mapNotNull { occupiedTableData[it] }.firstOrNull()
         val intent = Intent(this, MenuActivity::class.java)
         intent.putExtra("batchId", batchId)
         intent.putExtra("employeeName", employeeName)
@@ -969,6 +1030,13 @@ class TableSelectionActivity : AppCompatActivity() {
         intent.putExtra("sectionId", sectionName)
         intent.putExtra("sectionName", sectionName)
         intent.putExtra("ORDER_ID", orderId)
+        val resumeGuestCount = info?.guestCount?.takeIf { it > 0 }
+            ?: info?.guestNames?.size?.takeIf { it > 0 }
+            ?: 1
+        intent.putExtra("guestCount", resumeGuestCount)
+        info?.guestNames?.takeIf { it.isNotEmpty() }?.let {
+            intent.putStringArrayListExtra("guestNames", ArrayList(it))
+        }
         startActivity(intent)
         finish()
     }

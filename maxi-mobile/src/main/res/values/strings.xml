@@ -104,6 +104,9 @@
     <string name="variable_price_hint">Unit price</string>
     <string name="variable_price_invalid">Enter a valid amount (zero or greater).</string>
     <string name="variable_price_dialog_confirm">Add to order</string>
+    <string name="menu_cart_loading">Loading order…</string>
+    <string name="menu_cart_load_failed">Could not load order</string>
+    <string name="menu_item_load_failed">Could not load item</string>
     <string name="inventory_price_variable">Variable</string>
     <string name="item_detail_price_suggested_line">Suggested: $%1$s</string>
     <string name="item_detail_variable_price_label">Variable price at register</string>

@@ -15,6 +15,10 @@ class ReceiptDisplayConfigActivity : AppCompatActivity() {
         findViewById<android.view.View>(R.id.optionViewEditReceipt).setOnClickListener {
             startActivity(Intent(this, ViewEditReceiptActivity::class.java))
         }
+
+        findViewById<android.view.View>(R.id.optionReceiptPrintingSettings).setOnClickListener {
+            startActivity(Intent(this, ReceiptPrintingSettingsActivity::class.java))
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {

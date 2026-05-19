@@ -37,7 +37,11 @@ import {
   Search,
 } from "lucide-react";
 import { ImageSearchModal } from "@/components/menu-item-image/ImageSearchModal";
+import { ReceiptBusinessField, ADDRESS_MAX_LINES } from "@/components/ReceiptBusinessField";
 import {
+  clampMultiline,
+  clampSingleLine,
+  landiCharsPerLine,
   thermalCharsPerLine,
   wrapThermalText,
 } from "@/lib/receiptThermal";
@@ -468,6 +472,54 @@ export default function BusinessInformationPage() {
     []
   );
 
+  const prevFontSizesRef = useRef({
+    biz: ps.fontSizeBizName,
+    addr: ps.fontSizeAddress,
+  });
+
+  /** When print font size changes, trim business fields to the new per-line limit. */
+  useEffect(() => {
+    const prev = prevFontSizesRef.current;
+    if (
+      prev.biz === ps.fontSizeBizName &&
+      prev.addr === ps.fontSizeAddress
+    ) {
+      return;
+    }
+    prevFontSizesRef.current = {
+      biz: ps.fontSizeBizName,
+      addr: ps.fontSizeAddress,
+    };
+    setData((prevData) => {
+      const next = {
+        businessName: clampSingleLine(
+          prevData.businessName,
+          landiCharsPerLine(ps.fontSizeBizName)
+        ),
+        address: clampMultiline(
+          prevData.address,
+          landiCharsPerLine(ps.fontSizeAddress),
+          ADDRESS_MAX_LINES
+        ),
+        phone: clampSingleLine(
+          prevData.phone,
+          landiCharsPerLine(ps.fontSizeAddress)
+        ),
+        email: clampSingleLine(prevData.email, landiCharsPerLine(0)),
+      };
+      if (
+        next.businessName === prevData.businessName &&
+        next.address === prevData.address &&
+        next.phone === prevData.phone &&
+        next.email === prevData.email
+      ) {
+        return prevData;
+      }
+      setDirty(true);
+      return { ...prevData, ...next };
+    });
+  }, [ps.fontSizeBizName, ps.fontSizeAddress]);
+
   const handleSave = useCallback(async () => {
     setSaveStatus("saving");
     setSaveError(null);
@@ -648,13 +700,6 @@ export default function BusinessInformationPage() {
     ? wrapThermalText(displayEmail.trim(), thermalCharsPerLine(0))
     : [];
 
-  const addressLinesRaw = data.address.split(/\r?\n/);
-  const addressLongestLineLen = addressLinesRaw.reduce(
-    (m, l) => Math.max(m, l.length),
-    0
-  );
-  const addressLineOverLimit = addressLongestLineLen > addrChars;
-
   /* ══════════════════════════════════════════════
      Render
      ══════════════════════════════════════════════ */
@@ -692,96 +737,70 @@ export default function BusinessInformationPage() {
             </div>
 
             <div className="px-6 space-y-5 flex-1">
-              <div>
-                <label
-                  htmlFor="businessName"
-                  className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
-                >
-                  <Store size={14} className="text-slate-400" />
-                  Business Name
-                </label>
-                <input
-                  id="businessName"
-                  value={data.businessName}
-                  onChange={(e) => update("businessName", e.target.value)}
-                  placeholder="My Restaurant"
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 transition-colors"
-                />
-              </div>
+              <ReceiptBusinessField
+                id="businessName"
+                label={
+                  <>
+                    <Store size={14} className="text-slate-400" />
+                    Business Name
+                  </>
+                }
+                value={data.businessName}
+                onChange={(v) => update("businessName", v)}
+                activeFontSize={ps.fontSizeBizName}
+                mode="single"
+                placeholder="My Restaurant"
+              />
 
-              <div>
-                <label
-                  htmlFor="address"
-                  className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
-                >
-                  <MapPin size={14} className="text-slate-400" />
-                  Address
-                </label>
-                <textarea
-                  id="address"
-                  value={data.address}
-                  onChange={(e) => update("address", e.target.value)}
-                  placeholder={"123 Main Street\nCity, ST 12345"}
-                  rows={2}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 resize-y min-h-[64px] transition-colors"
-                />
-                <p className="mt-1.5 text-[11px] text-slate-400 leading-snug">
-                  Receipt width matches the POS thermal printer (~{addrChars}{" "}
-                  characters per line
-                  {ps.fontSizeAddress === 2
-                    ? " at X-Large address font"
-                    : " at Normal/Large address font"}
-                  ). Long lines wrap on the preview like on paper.
-                </p>
-                {addressLineOverLimit ? (
-                  <p className="mt-1 text-[11px] text-amber-700 flex items-start gap-1.5">
-                    <AlertCircle
-                      size={14}
-                      className="shrink-0 mt-0.5"
-                      aria-hidden
-                    />
-                    Longest line is {addressLongestLineLen} characters — it will
-                    wrap to multiple lines on the receipt (max ~{addrChars} chars
-                    per line for this font size).
-                  </p>
-                ) : null}
-              </div>
+              <ReceiptBusinessField
+                id="address"
+                label={
+                  <>
+                    <MapPin size={14} className="text-slate-400" />
+                    Address
+                  </>
+                }
+                value={data.address}
+                onChange={(v) => update("address", v)}
+                activeFontSize={ps.fontSizeAddress}
+                mode="multiline"
+                placeholder={"123 Main Street\nCity, ST 12345"}
+                rows={3}
+              />
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                <div>
-                  <label
-                    htmlFor="phone"
-                    className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
-                  >
-                    <Phone size={14} className="text-slate-400" />
-                    Phone
-                  </label>
-                  <input
-                    id="phone"
-                    value={data.phone}
-                    onChange={(e) => update("phone", e.target.value)}
-                    placeholder="(555) 123-4567"
-                    type="tel"
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 transition-colors"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="email"
-                    className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5"
-                  >
-                    <Mail size={14} className="text-slate-400" />
-                    Email
-                  </label>
-                  <input
-                    id="email"
-                    value={data.email}
-                    onChange={(e) => update("email", e.target.value)}
-                    placeholder="contact@mybusiness.com"
-                    type="email"
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-slate-800 placeholder:text-slate-400 transition-colors"
-                  />
-                </div>
+                <ReceiptBusinessField
+                  id="phone"
+                  label={
+                    <>
+                      <Phone size={14} className="text-slate-400" />
+                      Phone
+                    </>
+                  }
+                  value={data.phone}
+                  onChange={(v) => update("phone", v)}
+                  activeFontSize={ps.fontSizeAddress}
+                  mode="single"
+                  type="tel"
+                  placeholder="(555) 123-4567"
+                  showGuide={false}
+                />
+                <ReceiptBusinessField
+                  id="email"
+                  label={
+                    <>
+                      <Mail size={14} className="text-slate-400" />
+                      Email
+                    </>
+                  }
+                  value={data.email}
+                  onChange={(v) => update("email", v)}
+                  activeFontSize={0}
+                  mode="single"
+                  type="email"
+                  placeholder="contact@mybusiness.com"
+                  showGuide={false}
+                />
               </div>
 
               <div>

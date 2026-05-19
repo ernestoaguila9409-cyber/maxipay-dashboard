@@ -55,6 +55,7 @@ import com.volt.shared.data.OrderModifier
 import com.volt.shared.data.CartItem
 import com.volt.shared.engine.DiscountEngine
 import com.volt.shared.engine.DiscountDisplay
+import com.volt.shared.engine.OrderTaxHelper
 import com.volt.shared.engine.MoneyUtils
 import com.volt.shared.engine.OrderEngine
 import com.volt.maximobile.engine.PaymentService
@@ -175,6 +176,8 @@ class MenuActivity : AppCompatActivity() {
     private var isCheckoutPending = false
     private var isCaptureFlowActive = false
     private var selectedGuest: Int = 0
+    private var isExistingOrderMetadataLoaded = true
+    private var isHydratingExistingOrderCart = false
     private var suppressModifierCallbacks = false
 
     private var totalAmount = 0.0
@@ -408,6 +411,10 @@ class MenuActivity : AppCompatActivity() {
 
         // ? Load existing order items into cart if ORDER_ID was provided
         currentOrderId?.let { existingOrderId ->
+            isExistingOrderMetadataLoaded = guestCount <= 0
+            if (guestCount > 0 && selectedGuest < 1) {
+                selectedGuest = 1
+            }
             loadExistingOrderIntoCart(existingOrderId)
             loadKitchenNotesFromFirestore(existingOrderId)
         }
@@ -585,6 +592,7 @@ class MenuActivity : AppCompatActivity() {
         kitchenSentEffectiveCacheReady = false
         kitchenSentEffectiveByLineCache = emptyMap()
         webOnlineKitchenSessionBaseline = null
+        isHydratingExistingOrderCart = true
 
         MerchantFirestore.col("Orders").document(orderId)
             .get()
@@ -658,6 +666,8 @@ class MenuActivity : AppCompatActivity() {
                 val docGuestCount = (orderDoc.getLong("guestCount") ?: 0L).toInt()
                 if (guestCount == 0 && docGuestCount > 0) {
                     guestCount = docGuestCount
+                }
+                if (guestCount > 0 && selectedGuest < 1) {
                     selectedGuest = 1
                 }
                 @Suppress("UNCHECKED_CAST")
@@ -665,6 +675,7 @@ class MenuActivity : AppCompatActivity() {
                 if (!docGuestNames.isNullOrEmpty()) {
                     guestNames = docGuestNames.toMutableList()
                 }
+                isExistingOrderMetadataLoaded = true
 
                 val txtTableHeader = findViewById<TextView>(R.id.txtTableHeader)
                 if (!tableName.isNullOrBlank()) {
@@ -685,9 +696,6 @@ class MenuActivity : AppCompatActivity() {
                     .collection("items")
                     .get()
                     .addOnSuccessListener { docs ->
-
-                        cartMap.clear()
-
                         for (doc in docs.documents) {
 
                             val lineKey = doc.id
@@ -739,9 +747,19 @@ class MenuActivity : AppCompatActivity() {
                             webOnlineKitchenSessionBaseline = null
                         }
 
+                        isHydratingExistingOrderCart = false
                         refreshCart()
                     }
-                    .addOnFailureListener { }
+                    .addOnFailureListener {
+                        isHydratingExistingOrderCart = false
+                        isExistingOrderMetadataLoaded = true
+                        Toast.makeText(this, R.string.menu_cart_load_failed, Toast.LENGTH_SHORT).show()
+                    }
+            }
+            .addOnFailureListener {
+                isHydratingExistingOrderCart = false
+                isExistingOrderMetadataLoaded = true
+                Toast.makeText(this, R.string.menu_cart_load_failed, Toast.LENGTH_SHORT).show()
             }
     }
 
@@ -1218,7 +1236,14 @@ class MenuActivity : AppCompatActivity() {
 
     private fun onGridItemClicked(item: MenuGridItem) {
         if (item.isOutOfStock) return
-        val effectiveStock = if (stockCountingEnabled) item.stock else Long.MAX_VALUE
+        if (currentOrderId != null && !isExistingOrderMetadataLoaded) {
+            Toast.makeText(this, R.string.menu_cart_loading, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val effectiveStock = when {
+            !stockCountingEnabled || item.variablePrice -> Long.MAX_VALUE
+            else -> item.stock
+        }
         checkAndShowModifiers(
             item.itemId, item.name, item.price, effectiveStock,
             item.taxMode, item.taxIds, imageUrl = item.imageUrl,
@@ -1353,7 +1378,7 @@ class MenuActivity : AppCompatActivity() {
                             price = price,
                             stock = stock,
                             isScheduled = isScheduled,
-                            isOutOfStock = stockCountingEnabled && stock <= 0,
+                            isOutOfStock = stockCountingEnabled && !variablePrice && stock <= 0,
                             taxMode = itemTaxMode,
                             taxIds = itemTaxIds,
                             printerLabel = printerLabel,
@@ -1458,7 +1483,7 @@ class MenuActivity : AppCompatActivity() {
                             price = price,
                             stock = stock,
                             isScheduled = isScheduled,
-                            isOutOfStock = stockCountingEnabled && stock <= 0,
+                            isOutOfStock = stockCountingEnabled && !variablePrice && stock <= 0,
                             taxMode = itemTaxMode,
                             taxIds = itemTaxIds,
                             printerLabel = printerLabel,
@@ -1586,6 +1611,13 @@ class MenuActivity : AppCompatActivity() {
                     )
                 }
             }
+            .addOnFailureListener { e ->
+                Toast.makeText(
+                    this,
+                    e.message ?: getString(R.string.menu_item_load_failed),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
     }
 
     private fun continueCheckAndShowModifiers(
@@ -1611,32 +1643,52 @@ class MenuActivity : AppCompatActivity() {
         val assigned = (itemDoc.get("assignedModifierGroupIds") as? List<String>)
             ?.filter { it.isNotBlank() } ?: emptyList()
         val merged = (embedded + assigned).distinct()
+        val isVariablePrice = itemDoc.getBoolean("variablePrice") == true
+        fun addWithoutModifiers() {
+            if (isFinishing || isDestroyed) return
+            addToCart(
+                itemId, name, effectiveBasePrice, stock, emptyList(),
+                taxMode, taxIds, printerLabel, imageUrl = resolvedImage,
+            )
+        }
 
         if (merged.isNotEmpty()) {
             showModifierDialog(
                 itemId, name, effectiveBasePrice, stock, merged, taxMode, taxIds, printerLabel,
                 imageUrl = resolvedImage,
             )
-        } else {
-            MerchantFirestore.col("ItemModifierGroups")
-                .whereEqualTo("itemId", itemId)
-                .orderBy("displayOrder")
-                .get()
-                .addOnSuccessListener { documents ->
-                    if (documents.isEmpty) {
-                        addToCart(
-                            itemId, name, effectiveBasePrice, stock, emptyList(),
-                            taxMode, taxIds, printerLabel, imageUrl = resolvedImage,
-                        )
+            return
+        }
+
+        if (isVariablePrice) {
+            addWithoutModifiers()
+            return
+        }
+
+        MerchantFirestore.col("ItemModifierGroups")
+            .whereEqualTo("itemId", itemId)
+            .orderBy("displayOrder")
+            .get()
+            .addOnSuccessListener { documents ->
+                if (isFinishing || isDestroyed) return@addOnSuccessListener
+                if (documents.isEmpty) {
+                    addWithoutModifiers()
+                } else {
+                    val groupIds = documents.mapNotNull { it.getString("groupId") }.filter { it.isNotBlank() }
+                    if (groupIds.isEmpty()) {
+                        addWithoutModifiers()
                     } else {
-                        val groupIds = documents.mapNotNull { it.getString("groupId") }
                         showModifierDialog(
                             itemId, name, effectiveBasePrice, stock, groupIds, taxMode, taxIds, printerLabel,
                             imageUrl = resolvedImage,
                         )
                     }
                 }
-        }
+            }
+            .addOnFailureListener { e ->
+                android.util.Log.e("MenuActivity", "ItemModifierGroups lookup failed", e)
+                addWithoutModifiers()
+            }
     }
 
     // -- Variable price dialog: same overlay numeric keypad as inventory (MenuOnly) ---------
@@ -1744,24 +1796,29 @@ class MenuActivity : AppCompatActivity() {
         val keyboardListener = installVariablePriceKeyboardResizing(dlg, kb)
         kb.addNumericEditText(input)
 
+        fun confirmVariablePrice() {
+            if (isFinishing || isDestroyed) return
+            val raw = input.text.toString().trim().replace(',', '.')
+            val parsed = raw.toDoubleOrNull()
+            if (parsed == null || parsed < 0) {
+                Toast.makeText(this, R.string.variable_price_invalid, Toast.LENGTH_SHORT).show()
+                return
+            }
+            onPriceChosen(parsed)
+            dlg.dismiss()
+        }
+
         dlg.setOnDismissListener {
+            kb.setEnterAction(null)
             kb.removeVisibilityListener(keyboardListener)
             kb.dismissWithoutAnimation()
             kb.detach()
         }
 
         dlg.setOnShowListener {
-            dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val raw = input.text.toString().trim()
-                val parsed = raw.toDoubleOrNull()
-                if (parsed == null || parsed < 0) {
-                    Toast.makeText(this, R.string.variable_price_invalid, Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-                dlg.dismiss()
-                onPriceChosen(parsed)
-            }
+            dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { confirmVariablePrice() }
         }
+        kb.setEnterAction { confirmVariablePrice() }
         dlg.show()
         input.requestFocus()
     }
@@ -3267,12 +3324,16 @@ class MenuActivity : AppCompatActivity() {
                 currentOrderId = oid
                 attachOrderKitchenStatusListener(oid)
 
-                val guest = selectedGuest
+                val guest = if (guestCount > 0) selectedGuest.coerceIn(1, guestCount) else 0
+                if (guestCount > 0 && selectedGuest != guest) {
+                    selectedGuest = guest
+                }
                 val lineKey = cartKey(itemId, modifiers, guest, basePrice)
                 val existingItem = cartMap[lineKey]
                 val currentQtyInCart = existingItem?.quantity ?: 0
 
-                if (stockCountingEnabled) {
+                val enforceStock = stockCountingEnabled && stock < 1_000_000_000_000L
+                if (enforceStock) {
                     if (stock <= 0) {
                         Toast.makeText(this, "Out of stock", Toast.LENGTH_SHORT).show()
                         onComplete?.invoke(false)
@@ -3548,9 +3609,7 @@ class MenuActivity : AppCompatActivity() {
                     lineTotal = (lineTotal - orderDiscountForLine).coerceAtLeast(0.0)
                 }
 
-                if (item.taxMode == "FORCE_APPLY") {
-                    if (item.taxIds.contains(tax.id)) taxableBase += lineTotal
-                } else if (tax.enabled) {
+                if (OrderTaxHelper.isLineTaxableForTax(item.taxMode, item.taxIds, tax.id, tax.enabled)) {
                     taxableBase += lineTotal
                 }
             }
@@ -3612,9 +3671,7 @@ class MenuActivity : AppCompatActivity() {
                     val proportion = lineTotal / subtotal.coerceAtLeast(0.01)
                     lineTotal = (lineTotal - (orderDiscount.amountInCents / 100.0) * proportion).coerceAtLeast(0.0)
                 }
-                if (item.taxMode == "FORCE_APPLY") {
-                    if (item.taxIds.contains(tax.id)) taxableBase += lineTotal
-                } else if (tax.enabled) {
+                if (OrderTaxHelper.isLineTaxableForTax(item.taxMode, item.taxIds, tax.id, tax.enabled)) {
                     taxableBase += lineTotal
                 }
             }
@@ -3727,9 +3784,7 @@ class MenuActivity : AppCompatActivity() {
                     val proportion = lineTotal / rawSubtotal.coerceAtLeast(0.01)
                     lineTotal = (lineTotal - (orderDiscount.amountInCents / 100.0) * proportion).coerceAtLeast(0.0)
                 }
-                if (item.taxMode == "FORCE_APPLY") {
-                    if (item.taxIds.contains(tax.id)) taxableBase += lineTotal
-                } else if (tax.enabled) {
+                if (OrderTaxHelper.isLineTaxableForTax(item.taxMode, item.taxIds, tax.id, tax.enabled)) {
                     taxableBase += lineTotal
                 }
             }

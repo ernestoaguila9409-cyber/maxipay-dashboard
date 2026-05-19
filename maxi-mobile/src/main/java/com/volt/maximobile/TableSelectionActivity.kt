@@ -9,6 +9,8 @@ import android.os.Looper
 import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
@@ -41,10 +43,10 @@ class TableSelectionActivity : AppCompatActivity() {
 
     private data class OccupiedTableInfo(
         val orderId: String,
-        val guestName: String?,
+        val guestNames: List<String>,
         val guestCount: Int,
         val itemsCount: Long,
-        val createdAt: Date?
+        val createdAt: Date?,
     )
 
     private val db = FirebaseFirestore.getInstance()
@@ -110,67 +112,77 @@ class TableSelectionActivity : AppCompatActivity() {
     /** Latest layout tables query; one apply per burst (cache + server). */
     private var pendingLayoutTablesSnapshot: QuerySnapshot? = null
 
+    private var canvasLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
+    private var suppressSectionChipCallbacks = false
+
     private val applyLayoutTablesRunnable = Runnable {
+        if (isFinishing || isDestroyed) return@Runnable
         val snap = pendingLayoutTablesSnapshot ?: return@Runnable
         pendingLayoutTablesSnapshot = null
-        waitingHandler.removeCallbacks(coalescedOccupiedRefreshRunnable)
-        clearReservationUiBoundarySchedule()
-        var sectionsAdded = false
-        clearTableCanvas()
-        val cw = canvas.width.toFloat().coerceAtLeast(1f)
-        val ch = canvas.height.toFloat().coerceAtLeast(1f)
-        val visibleIds = mutableListOf<String>()
-        for (doc in snap.documents) {
-            val isActive: Boolean = when {
-                doc.contains("isActive") -> doc.getBoolean("isActive") ?: true
-                doc.contains("active") -> doc.getBoolean("active") ?: true
-                else -> true
+        try {
+            waitingHandler.removeCallbacks(coalescedOccupiedRefreshRunnable)
+            clearReservationUiBoundarySchedule()
+            var sectionsAdded = false
+            clearTableCanvas()
+            val cw = canvas.width.toFloat().coerceAtLeast(1f)
+            val ch = canvas.height.toFloat().coerceAtLeast(1f)
+            val visibleIds = mutableListOf<String>()
+            for (doc in snap.documents) {
+                try {
+                    if (!isTableDocActive(doc)) continue
+                    val areaType = doc.getString("areaType") ?: "DINING_TABLE"
+                    if (areaType == "BAR_SEAT") continue
+
+                    val name = doc.getString("name") ?: "Table"
+                    val seats = readTableSeats(doc)
+                    val shape = TableShapeView.shapeFromString(doc.getString("shape"))
+                    val xL = readTableCoord(doc, "x", "posX") ?: 50.0
+                    val yL = readTableCoord(doc, "y", "posY") ?: 50.0
+                    val section = doc.getString("section") ?: ""
+
+                    tableSections[doc.id] = section
+                    tableNames[doc.id] = name
+                    tableSeats[doc.id] = seats
+                    tableShapes[doc.id] = shape
+                    tableStatuses[doc.id] = doc.getString("status") ?: ""
+                    tableReservationIds[doc.id] = doc.getString("reservationId")?.trim().orEmpty()
+                    joinedTableIdsByTableId[doc.id] = TableJoinGroupFirestore.parseJoinedIds(doc, doc.id)
+                    doc.getString(ReservationFirestoreHelper.FIELD_RESERVATION_MAP_UI_NORMS_V1)
+                        ?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.let { enc -> tableDocMapUiNormsEnc[doc.id] = enc }
+
+                    if (section.isNotBlank() && section !in knownSections) {
+                        knownSections.add(section)
+                        MerchantFirestore.col("Sections").document(section)
+                            .set(hashMapOf("name" to section))
+                        sectionsAdded = true
+                    }
+
+                    val wPx = TableShapeView.dineInMeasuredWidthPx(this, shape)
+                    val hPx = TableShapeView.dineInMeasuredHeightPx(this, shape)
+                    val (posX, posY) = TableLayoutMobileScale.layoutToScreen(
+                        xL, yL, cw, ch, layoutCanvasW, layoutCanvasH, wPx, hPx,
+                    )
+                    tableLayoutScreenRect[doc.id] = TableScreenRect(posX, posY, wPx, hPx)
+                    visibleIds.add(doc.id)
+                } catch (e: Exception) {
+                    android.util.Log.e("TableSelection", "Skip table ${doc.id}", e)
+                }
             }
-            if (!isActive) continue
-            val areaType = doc.getString("areaType") ?: "DINING_TABLE"
-            if (areaType == "BAR_SEAT") continue
-
-            val name = doc.getString("name") ?: "Table"
-            val seats = (doc.getLong("capacity") ?: doc.getLong("seats"))?.toInt() ?: 4
-            val shape = TableShapeView.shapeFromString(doc.getString("shape"))
-            val xL = doc.getDouble("x") ?: doc.getDouble("posX") ?: 50.0
-            val yL = doc.getDouble("y") ?: doc.getDouble("posY") ?: 50.0
-            val section = doc.getString("section") ?: ""
-
-            tableSections[doc.id] = section
-            tableNames[doc.id] = name
-            tableSeats[doc.id] = seats
-            tableShapes[doc.id] = shape
-            tableStatuses[doc.id] = doc.getString("status") ?: ""
-            tableReservationIds[doc.id] = doc.getString("reservationId")?.trim().orEmpty()
-            joinedTableIdsByTableId[doc.id] = TableJoinGroupFirestore.parseJoinedIds(doc, doc.id)
-            doc.getString(ReservationFirestoreHelper.FIELD_RESERVATION_MAP_UI_NORMS_V1)
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() }
-                ?.let { enc -> tableDocMapUiNormsEnc[doc.id] = enc }
-
-            if (section.isNotBlank() && section !in knownSections) {
-                knownSections.add(section)
-                MerchantFirestore.col("Sections").document(section).set(hashMapOf("name" to section))
-                sectionsAdded = true
-            }
-
-            val wPx = TableShapeView.dineInMeasuredWidthPx(this, shape)
-            val hPx = TableShapeView.dineInMeasuredHeightPx(this, shape)
-            val (posX, posY) = TableLayoutMobileScale.layoutToScreen(
-                xL, yL, cw, ch, layoutCanvasW, layoutCanvasH, wPx, hPx,
-            )
-            tableLayoutScreenRect[doc.id] = TableScreenRect(posX, posY, wPx, hPx)
-            visibleIds.add(doc.id)
+            layoutVisibleTableIds = visibleIds.toList()
+            if (sectionsAdded) rebuildSectionChips()
+            syncSelectedSectionToLoadedTables()
+            placeLayoutTableVisuals()
+            filterTablesBySection()
+            applyOccupiedState()
+            ReservationFirestoreHelper.sweepExpiredHoldsForTableDocuments(db, snap, activeLayoutId)
+            lastLayoutTablesSnapshot = snap
+            scheduleReservationUiBoundaryRefreshes()
+        } catch (e: Exception) {
+            android.util.Log.e("TableSelection", "applyLayoutTables failed", e)
+            Toast.makeText(this, "Failed to show tables: ${e.message}", Toast.LENGTH_LONG).show()
         }
-        layoutVisibleTableIds = visibleIds.toList()
-        if (sectionsAdded) rebuildSectionChips()
-        placeLayoutTableVisuals()
-        filterTablesBySection()
-        applyOccupiedState()
-        ReservationFirestoreHelper.sweepExpiredHoldsForTableDocuments(db, snap, activeLayoutId)
-        lastLayoutTablesSnapshot = snap
-        scheduleReservationUiBoundaryRefreshes()
     }
 
     private val waitingRefreshRunnable = object : Runnable {
@@ -207,6 +219,7 @@ class TableSelectionActivity : AppCompatActivity() {
         subtitle.text = getString(R.string.table_select_subtitle_dine_in)
 
         chipGroup.setOnCheckedStateChangeListener { group, checkedIds ->
+            if (suppressSectionChipCallbacks) return@setOnCheckedStateChangeListener
             selectedSection = if (checkedIds.isNotEmpty()) {
                 group.findViewById<Chip>(checkedIds[0])?.text?.toString() ?: ""
             } else {
@@ -216,6 +229,17 @@ class TableSelectionActivity : AppCompatActivity() {
         }
 
         waitingThresholdMs = OrderTypePrefs.getWaitingAlertMinutes(this).toLong() * 60 * 1000
+
+        val merchantId = PosDeviceIdentity.getMerchantId(this).trim()
+        if (merchantId.isEmpty()) {
+            Toast.makeText(this, "Not signed in", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+        if (!MerchantFirestore.isInitialized) {
+            MerchantFirestore.init(merchantId)
+        }
+
         loadSectionsAndTables()
         listenForOccupiedTables()
         waitingHandler.postDelayed(waitingRefreshRunnable, WAITING_REFRESH_MS)
@@ -238,10 +262,47 @@ class TableSelectionActivity : AppCompatActivity() {
         waitingHandler.removeCallbacks(coalescedOccupiedRefreshRunnable)
         canvas.removeCallbacks(applyLayoutTablesRunnable)
         pendingLayoutTablesSnapshot = null
+        canvasLayoutListener?.let { l ->
+            canvas.viewTreeObserver.removeOnGlobalLayoutListener(l)
+        }
+        canvasLayoutListener = null
         clearReservationUiBoundarySchedule()
     }
 
     // ── HELPERS ────────────────────────────────────────────
+
+    private fun isTableDocActive(doc: DocumentSnapshot): Boolean {
+        return try {
+            when {
+                doc.contains("isActive") -> doc.getBoolean("isActive") ?: true
+                doc.contains("active") -> doc.getBoolean("active") ?: true
+                else -> true
+            }
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    private fun readTableSeats(doc: DocumentSnapshot): Int {
+        return try {
+            (doc.getLong("capacity") ?: doc.getLong("seats"))?.toInt() ?: 4
+        } catch (_: Exception) {
+            4
+        }
+    }
+
+    /** Firestore may store coordinates as Double or Long; avoid ClassCastException on read. */
+    private fun readTableCoord(doc: DocumentSnapshot, vararg fields: String): Double? {
+        for (field in fields) {
+            try {
+                doc.getDouble(field)?.let { return it }
+                (doc.get(field) as? Number)?.toDouble()?.let { return it }
+            } catch (_: Exception) {
+                // try next field
+            }
+        }
+        return null
+    }
 
     private fun resolvedJoinedGroup(tableId: String): List<String> =
         joinedTableIdsByTableId[tableId] ?: listOf(tableId)
@@ -421,21 +482,34 @@ class TableSelectionActivity : AppCompatActivity() {
     // ── SECTIONS ───────────────────────────────────────────
 
     private fun rebuildSectionChips() {
-        chipGroup.removeAllViews()
-        val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
-        val bgColors = intArrayOf(0xFF6A4FB3.toInt(), 0xFFE0E0E0.toInt())
-        val txtColors = intArrayOf(0xFFFFFFFF.toInt(), 0xFF333333.toInt())
-        if (selectedSection.isEmpty() && knownSections.isNotEmpty()) selectedSection = knownSections.first()
-        for (section in knownSections) {
-            val chip = Chip(this).apply {
-                text = section
-                isCheckable = true
-                isCheckedIconVisible = false
-                chipBackgroundColor = ColorStateList(states, bgColors)
-                setTextColor(ColorStateList(states, txtColors))
-                isChecked = section == selectedSection
+        suppressSectionChipCallbacks = true
+        try {
+            chipGroup.isSelectionRequired = false
+            chipGroup.clearCheck()
+            chipGroup.removeAllViews()
+            if (knownSections.isEmpty()) return
+
+            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+            val bgColors = intArrayOf(0xFF6A4FB3.toInt(), 0xFFE0E0E0.toInt())
+            val txtColors = intArrayOf(0xFFFFFFFF.toInt(), 0xFF333333.toInt())
+            if (selectedSection.isEmpty() ||
+                knownSections.none { it.equals(selectedSection, ignoreCase = true) }
+            ) {
+                selectedSection = knownSections.first()
             }
-            chipGroup.addView(chip)
+            for (section in knownSections) {
+                val chip = Chip(this).apply {
+                    text = section
+                    isCheckable = true
+                    isCheckedIconVisible = false
+                    chipBackgroundColor = ColorStateList(states, bgColors)
+                    setTextColor(ColorStateList(states, txtColors))
+                    isChecked = section.equals(selectedSection, ignoreCase = true)
+                }
+                chipGroup.addView(chip)
+            }
+        } finally {
+            suppressSectionChipCallbacks = false
         }
     }
 
@@ -449,20 +523,56 @@ class TableSelectionActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Sections from Firestore can load before table docs; the first chip may not match any table's
+     * [section], which leaves every table GONE. Pick a section that actually has tables on the floor.
+     */
+    private fun syncSelectedSectionToLoadedTables() {
+        if (layoutVisibleTableIds.isEmpty()) return
+
+        fun sectionHasTables(section: String): Boolean =
+            layoutVisibleTableIds.any { (tableSections[it] ?: "").equals(section, ignoreCase = true) }
+
+        if (selectedSection.isEmpty() || sectionHasTables(selectedSection)) return
+
+        val pick = knownSections.firstOrNull { sectionHasTables(it) }
+            ?: layoutVisibleTableIds
+                .mapNotNull { tableSections[it]?.takeIf { s -> s.isNotBlank() } }
+                .distinct()
+                .firstOrNull()
+            ?: ""
+
+        selectedSection = pick
+        rebuildSectionChips()
+    }
+
     // ── DATA LOADING ───────────────────────────────────────
 
     private fun loadSectionsAndTables() {
+        try {
         MerchantFirestore.col("Sections").get()
             .addOnSuccessListener { snap ->
-                knownSections.clear()
-                for (doc in snap.documents) {
-                    val name = doc.getString("name") ?: doc.id
-                    if (name.isNotBlank() && name != "Bar") knownSections.add(name)
+                if (isFinishing || isDestroyed) return@addOnSuccessListener
+                try {
+                    knownSections.clear()
+                    for (doc in snap.documents) {
+                        val name = doc.getString("name") ?: doc.id
+                        if (name.isNotBlank() && name != "Bar") knownSections.add(name)
+                    }
+                    rebuildSectionChips()
+                } catch (e: Exception) {
+                    android.util.Log.e("TableSelection", "Sections parse failed", e)
                 }
-                rebuildSectionChips()
                 loadTablesPreferred()
             }
-            .addOnFailureListener { loadTablesPreferred() }
+            .addOnFailureListener { e ->
+                android.util.Log.e("TableSelection", "Sections fetch failed", e)
+                loadTablesPreferred()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("TableSelection", "loadSectionsAndTables failed", e)
+            Toast.makeText(this, "Load error: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun clearTableCanvas() {
@@ -489,6 +599,8 @@ class TableSelectionActivity : AppCompatActivity() {
     private fun loadTablesPreferred() {
         MerchantFirestore.col("tableLayouts").get()
             .addOnSuccessListener { layoutSnap ->
+                if (isFinishing || isDestroyed) return@addOnSuccessListener
+                try {
                 if (layoutSnap.isEmpty) {
                     useTableLayouts = false
                     activeLayoutId = ""
@@ -505,8 +617,8 @@ class TableSelectionActivity : AppCompatActivity() {
                     ?: layoutSnap.documents.minByOrNull { it.getLong("sortOrder") ?: 0L }
                     ?: layoutSnap.documents.first()
                 activeLayoutId = layoutDoc.id
-                layoutCanvasW = layoutDoc.getDouble("canvasWidth") ?: 1200.0
-                layoutCanvasH = layoutDoc.getDouble("canvasHeight") ?: 800.0
+                layoutCanvasW = (layoutDoc.get("canvasWidth") as? Number)?.toDouble() ?: 1200.0
+                layoutCanvasH = (layoutDoc.get("canvasHeight") as? Number)?.toDouble() ?: 800.0
                 layoutGraceAfterSlotMs =
                     ReservationFirestoreHelper.graceAfterSlotMsFromLayoutSnapshot(layoutDoc)
                 layoutHoldStartsBeforeSlotMs =
@@ -516,13 +628,22 @@ class TableSelectionActivity : AppCompatActivity() {
                 layoutTablesListener = MerchantFirestore.col("tableLayouts").document(activeLayoutId)
                     .collection("tables")
                     .addSnapshotListener { snap, err ->
-                        if (err != null || snap == null) return@addSnapshotListener
+                        if (err != null) {
+                            android.util.Log.e("TableSelection", "Tables listener error", err)
+                            return@addSnapshotListener
+                        }
+                        if (snap == null) return@addSnapshotListener
                         applyLayoutTablesSnapshot(snap)
                     }
                 attachLayoutParentMetaListener()
                 attachDineInReservationPreviewListener()
+                } catch (e: Exception) {
+                    android.util.Log.e("TableSelection", "loadTablesPreferred failed", e)
+                    Toast.makeText(this, "Layout load error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
-            .addOnFailureListener {
+            .addOnFailureListener { e ->
+                android.util.Log.e("TableSelection", "tableLayouts fetch failed", e)
                 useTableLayouts = false
                 lastLayoutTablesSnapshot = null
                 layoutParentMetaListener?.remove(); layoutParentMetaListener = null
@@ -551,8 +672,32 @@ class TableSelectionActivity : AppCompatActivity() {
 
     private fun applyLayoutTablesSnapshot(snap: com.google.firebase.firestore.QuerySnapshot) {
         pendingLayoutTablesSnapshot = snap
+        scheduleApplyLayoutTablesWhenReady()
+    }
+
+    /** Wait until [tableCanvas] is measured so positions match the floor-plan editor. */
+    private fun scheduleApplyLayoutTablesWhenReady() {
         canvas.removeCallbacks(applyLayoutTablesRunnable)
-        canvas.post(applyLayoutTablesRunnable)
+        val applyWhenMeasured = Runnable {
+            if (pendingLayoutTablesSnapshot == null) return@Runnable
+            if (canvas.width <= 0 || canvas.height <= 0) return@Runnable
+            canvas.post(applyLayoutTablesRunnable)
+        }
+        if (canvas.width > 0 && canvas.height > 0) {
+            canvas.post(applyWhenMeasured)
+            return
+        }
+        canvasLayoutListener?.let { canvas.viewTreeObserver.removeOnGlobalLayoutListener(it) }
+        val layoutListener = object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                if (canvas.width <= 0 || canvas.height <= 0) return
+                canvas.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                canvasLayoutListener = null
+                canvas.post(applyWhenMeasured)
+            }
+        }
+        canvasLayoutListener = layoutListener
+        canvas.viewTreeObserver.addOnGlobalLayoutListener(layoutListener)
     }
 
     /**
@@ -560,6 +705,15 @@ class TableSelectionActivity : AppCompatActivity() {
      * only when [shouldMergeGroup] (open order / visible reservation hold).
      */
     private fun placeLayoutTableVisuals() {
+        if (isFinishing || isDestroyed) return
+        try {
+            placeLayoutTableVisualsInternal()
+        } catch (e: Exception) {
+            android.util.Log.e("TableSelection", "placeLayoutTableVisuals failed", e)
+        }
+    }
+
+    private fun placeLayoutTableVisualsInternal() {
         rebuildDineInPreviewReservedTableIds()
         if (!useTableLayouts || layoutVisibleTableIds.isEmpty()) return
         detachAllTableViews()
@@ -725,24 +879,33 @@ class TableSelectionActivity : AppCompatActivity() {
     // ── OCCUPIED STATE ─────────────────────────────────────
 
     private fun listenForOccupiedTables() {
+        if (!MerchantFirestore.isInitialized) return
+        try {
         occupiedListener = MerchantFirestore.col("Orders")
             .whereEqualTo("status", "OPEN")
             .whereEqualTo("orderType", "DINE_IN")
-            .addSnapshotListener { snap, _ ->
+            .addSnapshotListener { snap, err ->
+                if (isFinishing || isDestroyed) return@addSnapshotListener
+                if (err != null) {
+                    android.util.Log.e("TableSelection", "Occupied listener error", err)
+                    return@addSnapshotListener
+                }
                 if (snap == null) return@addSnapshotListener
                 occupiedTableData.clear()
                 for (doc in snap.documents) {
                     val tid = doc.getString("tableId")
                     if (!tid.isNullOrBlank()) {
                         @Suppress("UNCHECKED_CAST")
-                        val gNames = doc.get("guestNames") as? List<String>
-                        val firstGuest = gNames?.firstOrNull()?.takeIf { it.isNotBlank() }
+                        val gNames = (doc.get("guestNames") as? List<*>)
+                            ?.mapNotNull { it as? String }
+                            ?.filter { it.isNotBlank() }
+                            .orEmpty()
                         val gCount = (doc.getLong("guestCount") ?: 0L).toInt()
                         val iCount = doc.getLong("itemsCount") ?: 0L
                         val created = doc.getTimestamp("createdAt")?.toDate() ?: doc.getDate("createdAt")
                         occupiedTableData[tid] = OccupiedTableInfo(
                             orderId = doc.id,
-                            guestName = firstGuest,
+                            guestNames = gNames,
                             guestCount = gCount,
                             itemsCount = iCount,
                             createdAt = created,
@@ -759,21 +922,29 @@ class TableSelectionActivity : AppCompatActivity() {
                 }
                 applyOccupiedState()
             }
+        } catch (e: Exception) {
+            android.util.Log.e("TableSelection", "listenForOccupiedTables failed", e)
+        }
     }
 
     private fun applyOccupiedState() {
-        rebuildDineInPreviewReservedTableIds()
-        if (useTableLayouts && layoutVisibleTableIds.isNotEmpty()) {
-            val k = floorVisualMergeStateKey()
-            if (lastFloorVisualMergeKey != null && k != lastFloorVisualMergeKey) {
-                lastFloorVisualMergeKey = k
-                placeLayoutTableVisuals()
-                filterTablesBySection()
-            } else {
-                lastFloorVisualMergeKey = k
+        if (isFinishing || isDestroyed) return
+        try {
+            rebuildDineInPreviewReservedTableIds()
+            if (useTableLayouts && layoutVisibleTableIds.isNotEmpty()) {
+                val k = floorVisualMergeStateKey()
+                if (lastFloorVisualMergeKey != null && k != lastFloorVisualMergeKey) {
+                    lastFloorVisualMergeKey = k
+                    placeLayoutTableVisualsInternal()
+                    filterTablesBySection()
+                } else {
+                    lastFloorVisualMergeKey = k
+                }
             }
+            applyTableShapeOccupiedReservedFlags()
+        } catch (e: Exception) {
+            android.util.Log.e("TableSelection", "applyOccupiedState failed", e)
         }
-        applyTableShapeOccupiedReservedFlags()
     }
 
     private fun applyTableShapeOccupiedReservedFlags() {
@@ -964,6 +1135,34 @@ class TableSelectionActivity : AppCompatActivity() {
         } else {
             tableNames[tableId] ?: "Table"
         }
+        val layoutIdForOrder = if (useTableLayouts && activeLayoutId.isNotBlank()) activeLayoutId else null
+        val joinedForOrder = if (groupIds.size > 1) groupIds else null
+        val info = groupIds.mapNotNull { occupiedTableData[it] }.firstOrNull()
+
+        if (intent.getBooleanExtra("SELECT_TABLE_ONLY", false)) {
+            val result = Intent().apply {
+                putExtra("tableId", tableId)
+                putExtra("tableName", displayName)
+                putExtra("sectionId", sectionName)
+                putExtra("sectionName", sectionName)
+                putExtra("tableLayoutId", layoutIdForOrder.orEmpty())
+                putExtra("ORDER_ID", orderId)
+                val resumeGuestCount = info?.guestCount?.takeIf { it > 0 }
+                    ?: info?.guestNames?.size?.takeIf { it > 0 }
+                    ?: 1
+                putExtra("guestCount", resumeGuestCount)
+                info?.guestNames?.takeIf { it.isNotEmpty() }?.let {
+                    putStringArrayListExtra("guestNames", ArrayList(it))
+                }
+                if (!joinedForOrder.isNullOrEmpty()) {
+                    putStringArrayListExtra("joinedTableIds", ArrayList(joinedForOrder))
+                }
+            }
+            setResult(RESULT_OK, result)
+            finish()
+            return
+        }
+
         val intent = Intent(this, MenuActivity::class.java)
         intent.putExtra("batchId", batchId)
         intent.putExtra("employeeName", employeeName)
@@ -984,13 +1183,15 @@ class TableSelectionActivity : AppCompatActivity() {
         val joined = operationalPartyTableIds(tableId)
         val joinedForOrder = if (joined.size > 1) joined else null
 
+        val layoutIdForOrder = if (useTableLayouts && activeLayoutId.isNotBlank()) activeLayoutId else null
+
         if (intent.getBooleanExtra("SELECT_TABLE_ONLY", false)) {
             val result = Intent().apply {
                 putExtra("tableId", tableId)
                 putExtra("tableName", tableName)
                 putExtra("sectionId", sectionId)
                 putExtra("sectionName", sectionName)
-                putExtra("tableLayoutId", if (useTableLayouts) activeLayoutId else "")
+                putExtra("tableLayoutId", layoutIdForOrder.orEmpty())
                 putExtra("guestCount", guestCount)
                 putStringArrayListExtra("guestNames", ArrayList(guestNames))
                 if (!joinedForOrder.isNullOrEmpty()) {
@@ -1002,7 +1203,6 @@ class TableSelectionActivity : AppCompatActivity() {
             return
         }
 
-        val layoutIdForOrder = if (useTableLayouts && activeLayoutId.isNotBlank()) activeLayoutId else null
         orderEngine.ensureOrder(
             currentOrderId = null,
             employeeName = employeeName,
@@ -1067,12 +1267,27 @@ class TableSelectionActivity : AppCompatActivity() {
         val nameInputs = mutableListOf<EditText>()
         var activeNameEdit: EditText? = null
 
-        val keypad = ReceiptEmailKeypadDialog.buildKeypadView(
-            this, ReceiptEmailKeypadDialog.KeypadVariant.GUEST_NAME,
-            keyMinHeightDp = 30f, keyMarginDp = 1.5f,
-            keyTextSizeSp = 13.5f, keyTextSizeCompactSp = 11f,
-            panelPaddingHorizontalDp = 5f, panelPaddingVerticalDp = 6f,
-        ) { token -> activeNameEdit?.let { ReceiptEmailKeypadDialog.insertAtCaret(it, token) } }
+        fun stripFocus(v: View) {
+            v.isFocusable = false
+            v.isFocusableInTouchMode = false
+            if (v is ViewGroup) {
+                for (i in 0 until v.childCount) stripFocus(v.getChildAt(i))
+            }
+        }
+        val keypad = PosQwertyKeypad.build(
+            this,
+            PosQwertyKeypad.Variant.MODIFIER_OPTION,
+            onInsert = { token -> activeNameEdit?.let { ReceiptEmailKeypadDialog.insertAtCaret(it, token) } },
+            onEnter = {
+                val idx = nameInputs.indexOf(activeNameEdit)
+                if (idx >= 0 && idx + 1 < nameInputs.size) {
+                    nameInputs[idx + 1].requestFocus()
+                }
+            },
+        )
+        stripFocus(keypad)
+        val thinPad = (2 * resources.displayMetrics.density).toInt()
+        keypad.setPadding(thinPad, thinPad, thinPad, thinPad)
         guestNameKeypadHost.addView(keypad, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
@@ -1140,8 +1355,16 @@ class TableSelectionActivity : AppCompatActivity() {
         fun confirmStartOrder() {
             val guestNames = nameInputs.map { it.text.toString().trim() }
             imm.hideSoftInputFromWindow(dialogView.windowToken, 0)
-            dialog.dismiss()
-            navigateToMenu(tableId, name, guestCount, guestNames)
+            btnGuestDialogStart.isEnabled = false
+            if (intent.getBooleanExtra("SELECT_TABLE_ONLY", false)) {
+                dialog.dismiss()
+                window?.decorView?.post {
+                    navigateToMenu(tableId, name, guestCount, guestNames)
+                }
+            } else {
+                dialog.dismiss()
+                navigateToMenu(tableId, name, guestCount, guestNames)
+            }
         }
 
         btnGuestDialogCancel.setOnClickListener { imm.hideSoftInputFromWindow(dialogView.windowToken, 0); dialog.dismiss() }
@@ -1153,6 +1376,8 @@ class TableSelectionActivity : AppCompatActivity() {
                 val h = resources.displayMetrics.heightPixels
                 win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, (h * 0.92).toInt())
             }
+            (dialogView.parent as? View)?.layoutParams?.height =
+                ViewGroup.LayoutParams.MATCH_PARENT
             nameInputs.firstOrNull()?.let { first ->
                 activeNameEdit = first
                 first.post { first.requestFocus(); imm.hideSoftInputFromWindow(first.windowToken, 0) }

@@ -13,4 +13,7 @@ data class ItemUi(
     val name: String,
     val categoryId: String,
     val priceDollars: Double,
+    val variablePrice: Boolean = false,
+    val taxMode: String = "INHERIT",
+    val taxIds: List<String> = emptyList(),
 )

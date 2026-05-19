@@ -35,7 +35,11 @@ internal class OrderMenuItemAdapter(
 
         fun bind(item: ItemUi) {
             nameView.text = item.name
-            priceView.text = formatMoney(item.priceDollars)
+            priceView.text = if (item.variablePrice) {
+                itemView.context.getString(R.string.menu_grid_price_variable)
+            } else {
+                formatMoney(item.priceDollars)
+            }
             itemView.setOnClickListener { onItemClick(item) }
         }
     }

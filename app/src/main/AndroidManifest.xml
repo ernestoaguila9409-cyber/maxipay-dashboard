@@ -290,6 +290,11 @@
             android:parentActivityName=".ConfigurationActivity" />
 
         <activity
+            android:name=".ReceiptPrintingSettingsActivity"
+            android:exported="false"
+            android:parentActivityName=".ReceiptDisplayConfigActivity" />
+
+        <activity
             android:name=".ViewEditReceiptActivity"
             android:exported="false"
             android:parentActivityName=".ReceiptDisplayConfigActivity" />

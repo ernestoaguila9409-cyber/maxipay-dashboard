@@ -51,19 +51,7 @@ fun TablePickScreen(
                 return@LaunchedEffect
             }
             MerchantFirestore.init(mid)
-            val snap = FirebaseFirestore.getInstance()
-                .collection("Merchants")
-                .document(mid)
-                .collection("tables")
-                .whereEqualTo("active", true)
-                .get()
-                .await()
-            rows = snap.documents.mapNotNull { doc ->
-                val area = doc.getString("areaType") ?: "DINING_TABLE"
-                if (area == "BAR_SEAT") return@mapNotNull null
-                val name = doc.getString("name")?.trim().orEmpty().ifBlank { doc.id }
-                doc.id to name
-            }.sortedBy { it.second.lowercase() }
+            rows = loadDineInTables(mid)
         } catch (e: Exception) {
             error = e.message ?: "Load failed"
         } finally {
@@ -112,4 +100,45 @@ fun TablePickScreen(
             }
         }
     }
+}
+
+/**
+ * Tries `tableLayouts` first (the editor's preferred storage); falls back to the
+ * legacy `Tables` collection if no layout exists or no active tables are found there.
+ */
+private suspend fun loadDineInTables(mid: String): List<Pair<String, String>> {
+    val db = FirebaseFirestore.getInstance()
+    val merchantDoc = db.collection("Merchants").document(mid)
+
+    val layoutSnap = merchantDoc.collection("tableLayouts").get().await()
+    if (!layoutSnap.isEmpty) {
+        val layoutDoc = layoutSnap.documents.find { it.getBoolean("isDefault") == true }
+            ?: layoutSnap.documents.minByOrNull { it.getLong("sortOrder") ?: 0L }
+            ?: layoutSnap.documents.first()
+        val tablesSnap = merchantDoc.collection("tableLayouts").document(layoutDoc.id)
+            .collection("tables").get().await()
+        val layoutRows = tablesSnap.documents.mapNotNull { doc ->
+            val isActive: Boolean = when {
+                doc.contains("isActive") -> doc.getBoolean("isActive") ?: true
+                doc.contains("active") -> doc.getBoolean("active") ?: true
+                else -> true
+            }
+            if (!isActive) return@mapNotNull null
+            val area = doc.getString("areaType") ?: "DINING_TABLE"
+            if (area == "BAR_SEAT") return@mapNotNull null
+            val name = doc.getString("name")?.trim().orEmpty().ifBlank { doc.id }
+            doc.id to name
+        }.sortedBy { it.second.lowercase() }
+        if (layoutRows.isNotEmpty()) return layoutRows
+    }
+
+    val legacySnap = merchantDoc.collection("tables")
+        .whereEqualTo("active", true)
+        .get().await()
+    return legacySnap.documents.mapNotNull { doc ->
+        val area = doc.getString("areaType") ?: "DINING_TABLE"
+        if (area == "BAR_SEAT") return@mapNotNull null
+        val name = doc.getString("name")?.trim().orEmpty().ifBlank { doc.id }
+        doc.id to name
+    }.sortedBy { it.second.lowercase() }
 }

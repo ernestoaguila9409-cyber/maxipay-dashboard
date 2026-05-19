@@ -1,9 +1,35 @@
+/** Landi C20 Pro built-in 58mm printer (~384 dots): Normal/Large ≈ 32 cols, X-Large ≈ 24. */
+export const LANDI_CHARS_PER_LINE = [32, 32, 24] as const;
+
+export const FONT_SIZE_LABELS = ["Normal", "Large", "X-Large"] as const;
+
 /**
- * Thermal receipt line width — matches Android `ReceiptSettings.lineWidthForSize`:
- * `LINE_WIDTH` = 48 (Normal / Large), `LINE_WIDTH_WIDE` = 24 (X-Large / double-width).
+ * Characters per line on the Landi built-in receipt printer (maxipaypos.com preview + limits).
  */
+export function landiCharsPerLine(fontSizeSetting: number): number {
+  const i = Math.max(0, Math.min(2, Math.floor(fontSizeSetting)));
+  return LANDI_CHARS_PER_LINE[i];
+}
+
+/** @deprecated alias — dashboard preview and forms use Landi widths */
 export function thermalCharsPerLine(fontSizeSetting: number): number {
-  return fontSizeSetting === 2 ? 24 : 48;
+  return landiCharsPerLine(fontSizeSetting);
+}
+
+export function clampSingleLine(value: string, maxChars: number): string {
+  const cap = Math.max(1, maxChars);
+  const first = value.replace(/\r\n/g, "\n").split("\n")[0] ?? "";
+  return first.slice(0, cap);
+}
+
+export function clampMultiline(
+  value: string,
+  maxCharsPerLine: number,
+  maxLines: number
+): string {
+  const cap = Math.max(1, maxCharsPerLine);
+  const lines = value.replace(/\r\n/g, "\n").split("\n").slice(0, maxLines);
+  return lines.map((l) => l.slice(0, cap)).join("\n");
 }
 
 /**

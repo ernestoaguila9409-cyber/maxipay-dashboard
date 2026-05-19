@@ -66,6 +66,13 @@
     <string name="add_printer">Add printer</string>
     <string name="select_printer_type">Select printer type</string>
     <string name="receipt_printer">Receipt printer</string>
+    <string name="receipt_printing_settings_menu">Receipt Printing settings</string>
+    <string name="receipt_printing_settings_title">Receipt Printing settings</string>
+    <string name="receipt_printing_settings_subtitle">Choose what happens after each paid order.</string>
+    <string name="receipt_printing_mode_section">AFTER EACH ORDER</string>
+    <string name="receipt_printing_mode_auto">Print receipt automatically after each order, then ask if the customer wants a receipt</string>
+    <string name="receipt_printing_mode_prompt">Prompt for receipt type after each order (Print, Email, Text, or Skip)</string>
+    <string name="receipt_printing_mode_none">Do not print</string>
     <string name="kitchen_printer">Kitchen printer</string>
     <string name="add_printer_screen_title">Add printer</string>
     <string name="scanning_for_printers">Scanning for printers…</string>
@@ -144,6 +151,9 @@
     <string name="variable_price_hint">Unit price</string>
     <string name="variable_price_invalid">Enter a valid amount (zero or greater).</string>
     <string name="variable_price_dialog_confirm">Add to order</string>
+    <string name="menu_cart_loading">Loading order…</string>
+    <string name="menu_cart_load_failed">Could not load order</string>
+    <string name="menu_item_load_failed">Could not load item</string>
     <string name="inventory_price_variable">Variable</string>
     <string name="item_detail_price_suggested_line">Suggested: $%1$s</string>
     <string name="item_detail_variable_price_label">Variable price at register</string>

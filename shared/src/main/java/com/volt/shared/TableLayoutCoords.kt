@@ -27,8 +27,10 @@ object TableLayoutCoords {
         } else {
             viewportHeightPx
         }
-        val fracX = (xL / layoutCanvasW).toFloat().coerceIn(0f, 1f)
-        val fracY = (yL / layoutCanvasH).toFloat().coerceIn(0f, 1f)
+        val canvasW = layoutCanvasW.coerceAtLeast(1.0)
+        val canvasH = layoutCanvasH.coerceAtLeast(1.0)
+        val fracX = (xL / canvasW).toFloat().coerceIn(0f, 1f)
+        val fracY = (yL / canvasH).toFloat().coerceIn(0f, 1f)
         return Pair(fracX * maxX, fracY * maxY)
     }
 
