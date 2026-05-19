@@ -15,6 +15,8 @@ type ReceiptBusinessFieldProps = {
   value: string;
   onChange: (value: string) => void;
   activeFontSize: number;
+  /** When provided, overrides the Landi font-size-based character limit. */
+  maxCharsPerLine?: number;
   mode: "single" | "multiline";
   placeholder?: string;
   type?: "text" | "tel" | "email";
@@ -27,12 +29,13 @@ export function ReceiptBusinessField({
   value,
   onChange,
   activeFontSize,
+  maxCharsPerLine,
   mode,
   placeholder,
   type = "text",
   rows = 3,
 }: ReceiptBusinessFieldProps) {
-  const maxPerLine = landiCharsPerLine(activeFontSize);
+  const maxPerLine = maxCharsPerLine ?? landiCharsPerLine(activeFontSize);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>

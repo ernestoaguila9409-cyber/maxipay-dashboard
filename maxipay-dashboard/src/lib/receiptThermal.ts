@@ -1,6 +1,9 @@
 /** Landi C20 Pro built-in 58mm printer (~384 dots): Normal/Large ≈ 32 cols, X-Large ≈ 24. */
 export const LANDI_CHARS_PER_LINE = [32, 32, 24] as const;
 
+/** Dejavoo P8 built-in printer: fixed 24 characters per line, no font size control. */
+export const P8_CHARS_PER_LINE = 24;
+
 export const FONT_SIZE_LABELS = ["Normal", "Large", "X-Large"] as const;
 
 /**

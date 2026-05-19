@@ -44,6 +44,7 @@ import {
   clampMultiline,
   clampSingleLine,
   landiCharsPerLine,
+  P8_CHARS_PER_LINE,
   thermalCharsPerLine,
   wrapThermalText,
 } from "@/lib/receiptThermal";
@@ -509,40 +510,37 @@ export default function BusinessInformationPage() {
     []
   );
 
-  const prevFontSizesRef = useRef({
+  const prevClampKeyRef = useRef({
     biz: ps.fontSizeBizName,
     addr: ps.fontSizeAddress,
+    profile: printerProfile,
   });
 
-  /** When print font size changes, trim business fields to the new per-line limit. */
+  /** Re-clamp business fields when font size or printer profile changes. */
   useEffect(() => {
-    const prev = prevFontSizesRef.current;
+    const prev = prevClampKeyRef.current;
     if (
       prev.biz === ps.fontSizeBizName &&
-      prev.addr === ps.fontSizeAddress
+      prev.addr === ps.fontSizeAddress &&
+      prev.profile === printerProfile
     ) {
       return;
     }
-    prevFontSizesRef.current = {
+    prevClampKeyRef.current = {
       biz: ps.fontSizeBizName,
       addr: ps.fontSizeAddress,
+      profile: printerProfile,
     };
+    const p8 = printerProfile === "p8";
+    const bizW = p8 ? P8_CHARS_PER_LINE : landiCharsPerLine(ps.fontSizeBizName);
+    const addrW = p8 ? P8_CHARS_PER_LINE : landiCharsPerLine(ps.fontSizeAddress);
+    const emailW = p8 ? P8_CHARS_PER_LINE : landiCharsPerLine(0);
     setData((prevData) => {
       const next = {
-        businessName: clampSingleLine(
-          prevData.businessName,
-          landiCharsPerLine(ps.fontSizeBizName)
-        ),
-        address: clampMultiline(
-          prevData.address,
-          landiCharsPerLine(ps.fontSizeAddress),
-          ADDRESS_MAX_LINES
-        ),
-        phone: clampSingleLine(
-          prevData.phone,
-          landiCharsPerLine(ps.fontSizeAddress)
-        ),
-        email: clampSingleLine(prevData.email, landiCharsPerLine(0)),
+        businessName: clampSingleLine(prevData.businessName, bizW),
+        address: clampMultiline(prevData.address, addrW, ADDRESS_MAX_LINES),
+        phone: clampSingleLine(prevData.phone, addrW),
+        email: clampSingleLine(prevData.email, emailW),
       };
       if (
         next.businessName === prevData.businessName &&
@@ -555,7 +553,7 @@ export default function BusinessInformationPage() {
       setDirty(true);
       return { ...prevData, ...next };
     });
-  }, [ps.fontSizeBizName, ps.fontSizeAddress]);
+  }, [ps.fontSizeBizName, ps.fontSizeAddress, printerProfile]);
 
   const handleSave = useCallback(async () => {
     setSaveStatus("saving");
@@ -711,17 +709,20 @@ export default function BusinessInformationPage() {
   const displayPhone = data.phone.trim() || "(555) 123-4567";
   const displayEmail = data.email.trim();
 
-  const px = (key: number) =>
-    Math.round((FONT_PX[key] ?? 12) * PREVIEW_FONT_SCALE);
+  const isP8 = printerProfile === "p8";
 
-  const bizNameChars = thermalCharsPerLine(ps.fontSizeBizName);
-  const addrChars = thermalCharsPerLine(ps.fontSizeAddress);
+  const px = (key: number) =>
+    Math.round((FONT_PX[isP8 ? 0 : key] ?? 12) * PREVIEW_FONT_SCALE);
+
+  const bizNameChars = isP8 ? P8_CHARS_PER_LINE : thermalCharsPerLine(ps.fontSizeBizName);
+  const addrChars = isP8 ? P8_CHARS_PER_LINE : thermalCharsPerLine(ps.fontSizeAddress);
+  const emailChars = isP8 ? P8_CHARS_PER_LINE : thermalCharsPerLine(0);
 
   const nameLines = wrapThermalText(displayName, bizNameChars);
   const addressLines = wrapThermalText(displayAddress, addrChars);
   const phoneLines = wrapThermalText(displayPhone, addrChars);
   const emailLines = displayEmail.trim()
-    ? wrapThermalText(displayEmail.trim(), thermalCharsPerLine(0))
+    ? wrapThermalText(displayEmail.trim(), emailChars)
     : [];
 
   const showProfileSelector = devicesLoaded && hasLandiDevice && hasP8Device;
@@ -775,6 +776,7 @@ export default function BusinessInformationPage() {
                 value={data.businessName}
                 onChange={(v) => update("businessName", v)}
                 activeFontSize={ps.fontSizeBizName}
+                maxCharsPerLine={isP8 ? P8_CHARS_PER_LINE : undefined}
                 mode="single"
                 placeholder="My Restaurant"
               />
@@ -790,6 +792,7 @@ export default function BusinessInformationPage() {
                 value={data.address}
                 onChange={(v) => update("address", v)}
                 activeFontSize={ps.fontSizeAddress}
+                maxCharsPerLine={isP8 ? P8_CHARS_PER_LINE : undefined}
                 mode="multiline"
                 placeholder={"123 Main Street\nCity, ST 12345"}
                 rows={3}
@@ -807,6 +810,7 @@ export default function BusinessInformationPage() {
                   value={data.phone}
                   onChange={(v) => update("phone", v)}
                   activeFontSize={ps.fontSizeAddress}
+                  maxCharsPerLine={isP8 ? P8_CHARS_PER_LINE : undefined}
                   mode="single"
                   type="tel"
                   placeholder="(555) 123-4567"
@@ -822,6 +826,7 @@ export default function BusinessInformationPage() {
                   value={data.email}
                   onChange={(v) => update("email", v)}
                   activeFontSize={0}
+                  maxCharsPerLine={isP8 ? P8_CHARS_PER_LINE : undefined}
                   mode="single"
                   type="email"
                   placeholder="contact@mybusiness.com"
@@ -993,22 +998,121 @@ export default function BusinessInformationPage() {
                 </button>
               </div>
 
-              {/* ── P8 placeholder (no controls yet) ── */}
+              {/* ── Content: P8 or Landi, preview or settings ── */}
               {printerProfile === "p8" ? (
-                <div className="p-10 flex flex-col items-center justify-center text-center min-h-[320px]">
-                  <div className="p-3 rounded-2xl bg-slate-50 mb-4">
-                    <Smartphone size={32} className="text-slate-300" />
+                rightTab === "preview" ? (
+                  <div className="p-5 sm:p-6">
+                    <div className="flex justify-center overflow-x-auto pb-4">
+                      <div
+                        className="w-full max-w-[min(100%,440px)] min-w-[280px] bg-white rounded-lg shadow-[0_2px_20px_rgba(0,0,0,0.08)] border border-slate-100 px-8 py-9 sm:px-10 sm:py-10 text-center overflow-hidden"
+                        style={{ fontFamily: "'Courier New', Courier, monospace" }}
+                      >
+                        {hasLogo && (
+                          <div className="flex flex-col items-center mb-3 gap-1">
+                            <div className="flex justify-center w-full">
+                              <img
+                                src={data.logoUrl.trim()}
+                                alt="Logo"
+                                className="h-16 sm:h-[4.5rem] max-w-[168px] object-contain"
+                                referrerPolicy="no-referrer"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        <div className="mx-auto" style={{ maxWidth: `${P8_CHARS_PER_LINE}ch` }}>
+                          {nameLines.map((line, i) => (
+                            <p key={`name-${i}`} className="text-slate-800 leading-tight [overflow-wrap:anywhere] break-words" style={{ fontSize: `${px(0)}px`, fontWeight: ps.boldBizName ? 700 : 400 }}>
+                              {line || "\u00a0"}
+                            </p>
+                          ))}
+                        </div>
+                        <div className="text-slate-500 mt-1 mx-auto font-mono text-left" style={{ width: `${P8_CHARS_PER_LINE}ch`, maxWidth: "100%" }}>
+                          {addressLines.map((line, i) => (
+                            <p key={`addr-${i}`} className="leading-snug whitespace-nowrap" style={{ fontSize: `${px(0)}px`, fontWeight: ps.boldAddress ? 700 : 400 }}>
+                              {line || "\u00a0"}
+                            </p>
+                          ))}
+                          {phoneLines.map((line, i) => (
+                            <p key={`ph-${i}`} className="leading-snug whitespace-nowrap" style={{ fontSize: `${px(0)}px`, fontWeight: ps.boldAddress ? 700 : 400 }}>
+                              {line || "\u00a0"}
+                            </p>
+                          ))}
+                        </div>
+                        {ps.showEmail && displayEmail && (
+                          <div className="text-slate-400 mt-0.5 mx-auto" style={{ maxWidth: `${P8_CHARS_PER_LINE}ch`, fontSize: `${Math.round(11 * PREVIEW_FONT_SCALE)}px` }}>
+                            {emailLines.map((line, i) => (
+                              <p key={`em-${i}`} className="[overflow-wrap:anywhere] break-words">{line || "\u00a0"}</p>
+                            ))}
+                          </div>
+                        )}
+                        <p className="mt-4 mb-0.5 text-slate-700" style={{ fontSize: `${px(0)}px`, fontWeight: ps.boldOrderInfo ? 700 : 400 }}>RECEIPT</p>
+                        <div className="text-slate-500 leading-relaxed" style={{ fontSize: `${Math.max(px(0) - Math.round(3 * PREVIEW_FONT_SCALE), Math.round(10 * PREVIEW_FONT_SCALE))}px`, fontWeight: ps.boldOrderInfo ? 600 : 400 }}>
+                          <p>Order #1042</p>
+                          <p>Type: Dine In</p>
+                          {ps.showServerName && <p>Server: Maria</p>}
+                          {ps.showDateTime && <p>03/29/2026 12:32 AM</p>}
+                        </div>
+                        <div className="border-t border-dashed border-slate-200 my-3" />
+                        <div className="text-slate-700 text-left space-y-px" style={{ fontSize: `${px(0)}px`, fontWeight: ps.boldItems ? 600 : 400 }}>
+                          <div className="flex justify-between"><span>1x Burger</span><span>$15.98</span></div>
+                          <div className="flex justify-between pl-3 text-slate-400 font-normal"><span>+ Extra Cheese</span><span>$1.50</span></div>
+                          <div className="flex justify-between"><span>1x Caesar Salad</span><span>$12.50</span></div>
+                          <div className="flex justify-between"><span>1x Fries</span><span>$5.99</span></div>
+                        </div>
+                        <div className="border-t border-dashed border-slate-200 my-3" />
+                        <div className="text-slate-700 text-left space-y-px" style={{ fontSize: `${px(0)}px`, fontWeight: ps.boldTotals ? 600 : 400 }}>
+                          <div className="flex justify-between"><span>Subtotal</span><span>$35.97</span></div>
+                          <div className="flex justify-between"><span>Tax (8.25%)</span><span>$2.97</span></div>
+                          <div className="flex justify-between"><span>Tip</span><span>$5.85</span></div>
+                        </div>
+                        <div className="border-t-2 border-slate-300 mt-3 pt-2">
+                          <div className="flex justify-between text-slate-800 text-left" style={{ fontSize: `${px(0)}px`, fontWeight: ps.boldGrandTotal ? 700 : 400 }}>
+                            <span>TOTAL</span><span>$44.79</span>
+                          </div>
+                        </div>
+                        <div className="text-slate-500 mt-4 space-y-0.5" style={{ fontSize: `${Math.round(10 * PREVIEW_FONT_SCALE)}px` }}>
+                          <p>Visa **** 1234</p>
+                          <p>Auth: 123456 &middot; Type: Credit</p>
+                        </div>
+                        <p className="text-slate-400 mt-5 italic" style={{ fontSize: `${px(0)}px`, fontWeight: ps.boldFooter ? 600 : 400 }}>
+                          Thank you!
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-400 text-center mt-1">
+                      Dejavoo P8 &mdash; 24 characters per line (fixed)
+                    </p>
                   </div>
-                  <h3 className="text-base font-semibold text-slate-700 mb-1">
-                    Dejavoo P8
-                  </h3>
-                  <p className="text-sm text-slate-400 max-w-[260px]">
-                    Receipt configuration for the Dejavoo P8 printer is coming soon.
-                  </p>
-                  <p className="text-xs text-slate-300 mt-3">
-                    24 characters per line &middot; XML SDK
-                  </p>
-                </div>
+                ) : (
+                  /* ── P8 Print Settings (no font size) ── */
+                  <div className="p-5 space-y-5 max-h-[calc(100vh-120px)] overflow-y-auto">
+                    <div className="rounded-lg bg-slate-50 border border-slate-100 px-3.5 py-2.5 text-xs text-slate-500 flex items-center gap-2">
+                      <Smartphone size={14} className="text-slate-400 shrink-0" />
+                      <span>Dejavoo P8 &mdash; fixed 24 characters per line. Font size is not adjustable on this device.</span>
+                    </div>
+                    <Section title="Display Options">
+                      <Toggle label="Show Server Name" checked={ps.showServerName} onChange={(v) => pSet("showServerName", v)} />
+                      <Toggle label="Show Date/Time" checked={ps.showDateTime} onChange={(v) => pSet("showDateTime", v)} />
+                      <Toggle label="Show Email" checked={ps.showEmail} onChange={(v) => pSet("showEmail", v)} />
+                    </Section>
+                    <div className="border-t border-slate-100" />
+                    <Section title="Bold">
+                      <Toggle label="Business Name" checked={ps.boldBizName} onChange={(v) => pSet("boldBizName", v)} />
+                      <Toggle label="Address" checked={ps.boldAddress} onChange={(v) => pSet("boldAddress", v)} />
+                      <Toggle label="Order Info" checked={ps.boldOrderInfo} onChange={(v) => pSet("boldOrderInfo", v)} />
+                      <Toggle label="Items" checked={ps.boldItems} onChange={(v) => pSet("boldItems", v)} />
+                      <Toggle label="Totals" checked={ps.boldTotals} onChange={(v) => pSet("boldTotals", v)} />
+                      <Toggle label="Grand Total" checked={ps.boldGrandTotal} onChange={(v) => pSet("boldGrandTotal", v)} />
+                      <Toggle label="Footer" checked={ps.boldFooter} onChange={(v) => pSet("boldFooter", v)} />
+                    </Section>
+                    <div className="pt-1 pb-2">
+                      <p className="text-[11px] text-slate-400 text-center">
+                        Changes auto-save and sync with the POS app in real-time.
+                      </p>
+                    </div>
+                  </div>
+                )
               ) : rightTab === "preview" ? (
                 <div className="p-5 sm:p-6">
                   {/* Receipt paper — wider + scaled fonts so preview is readable */}
