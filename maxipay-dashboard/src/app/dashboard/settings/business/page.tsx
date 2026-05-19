@@ -109,7 +109,6 @@ const DEFAULT_PRINT: PrintSettings = {
   fontSizeFooter: 0,
 };
 
-const FONT_LABELS = ["Normal", "Large", "X-Large"] as const;
 const FONT_PX: Record<number, number> = { 0: 12, 1: 15, 2: 19 };
 /** Makes the receipt preview easier to read on large screens (does not affect POS print). */
 const PREVIEW_FONT_SCALE = 1.28;
@@ -120,7 +119,6 @@ const MAX_LOGO_WIDTH = 512;
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type RightTab = "preview" | "print";
-type ReceiptVariant = "original" | "refund" | "void";
 
 /* ── image resize ── */
 
@@ -191,38 +189,6 @@ function Toggle({
         />
       </button>
     </label>
-  );
-}
-
-function FontSizePicker({
-  value,
-  onChange,
-  label,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  label: string;
-}) {
-  return (
-    <div className="py-1">
-      <span className="text-[13px] text-slate-700 block mb-1.5">{label}</span>
-      <div className="flex gap-1.5 bg-slate-100 rounded-lg p-0.5">
-        {FONT_LABELS.map((lbl, i) => (
-          <button
-            key={i}
-            type="button"
-            onClick={() => onChange(i)}
-            className={`flex-1 py-1 text-[11px] font-medium rounded-md transition-all ${
-              value === i
-                ? "bg-white text-slate-800 shadow-sm"
-                : "text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            {lbl}
-          </button>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -303,8 +269,6 @@ export default function BusinessInformationPage() {
   const [resizedBlob, setResizedBlob] = useState<Blob | null>(null);
 
   const [rightTab, setRightTab] = useState<RightTab>("preview");
-  const [receiptVariant, setReceiptVariant] =
-    useState<ReceiptVariant>("original");
   const [ps, setPs] = useState<PrintSettings>(DEFAULT_PRINT);
 
   const [psDirty, setPsDirty] = useState(false);
@@ -674,19 +638,6 @@ export default function BusinessInformationPage() {
   const displayPhone = data.phone.trim() || "(555) 123-4567";
   const displayEmail = data.email.trim();
 
-  const variantLabel =
-    receiptVariant === "refund"
-      ? "REFUND"
-      : receiptVariant === "void"
-        ? "VOID"
-        : "RECEIPT";
-  const variantColor =
-    receiptVariant === "refund"
-      ? "text-amber-600"
-      : receiptVariant === "void"
-        ? "text-red-600"
-        : "text-slate-700";
-
   const px = (key: number) =>
     Math.round((FONT_PX[key] ?? 12) * PREVIEW_FONT_SCALE);
 
@@ -783,7 +734,6 @@ export default function BusinessInformationPage() {
                   mode="single"
                   type="tel"
                   placeholder="(555) 123-4567"
-                  showGuide={false}
                 />
                 <ReceiptBusinessField
                   id="email"
@@ -799,7 +749,6 @@ export default function BusinessInformationPage() {
                   mode="single"
                   type="email"
                   placeholder="contact@mybusiness.com"
-                  showGuide={false}
                 />
               </div>
 
@@ -937,30 +886,6 @@ export default function BusinessInformationPage() {
               {/* ── Receipt Preview Tab ── */}
               {rightTab === "preview" ? (
                 <div className="p-5 sm:p-6">
-                  {/* Variant selector */}
-                  <div className="flex gap-1.5 mb-5 bg-slate-100 rounded-lg p-1">
-                    {(
-                      [
-                        ["original", "Original"],
-                        ["refund", "Refund"],
-                        ["void", "Void"],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setReceiptVariant(key)}
-                        className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${
-                          receiptVariant === key
-                            ? "bg-white text-slate-800 shadow-sm"
-                            : "text-slate-500 hover:text-slate-700"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-
                   {/* Receipt paper — wider + scaled fonts so preview is readable */}
                   <div className="flex justify-center overflow-x-auto pb-4">
                     <div
@@ -1066,13 +991,13 @@ export default function BusinessInformationPage() {
 
                       {/* Receipt label */}
                       <p
-                        className={`mt-4 mb-0.5 ${variantColor}`}
+                        className="mt-4 mb-0.5 text-slate-700"
                         style={{
                           fontSize: `${px(ps.fontSizeOrderInfo)}px`,
                           fontWeight: ps.boldOrderInfo ? 700 : 400,
                         }}
                       >
-                        {variantLabel}
+                        RECEIPT
                       </p>
 
                       {/* Order info */}
@@ -1258,47 +1183,6 @@ export default function BusinessInformationPage() {
                       label="Footer"
                       checked={ps.boldFooter}
                       onChange={(v) => pSet("boldFooter", v)}
-                    />
-                  </Section>
-
-                  <div className="border-t border-slate-100" />
-
-                  {/* Font Size */}
-                  <Section title="Font Size">
-                    <FontSizePicker
-                      label="Business Name"
-                      value={ps.fontSizeBizName}
-                      onChange={(v) => pSet("fontSizeBizName", v)}
-                    />
-                    <FontSizePicker
-                      label="Address"
-                      value={ps.fontSizeAddress}
-                      onChange={(v) => pSet("fontSizeAddress", v)}
-                    />
-                    <FontSizePicker
-                      label="Order Info"
-                      value={ps.fontSizeOrderInfo}
-                      onChange={(v) => pSet("fontSizeOrderInfo", v)}
-                    />
-                    <FontSizePicker
-                      label="Items"
-                      value={ps.fontSizeItems}
-                      onChange={(v) => pSet("fontSizeItems", v)}
-                    />
-                    <FontSizePicker
-                      label="Totals"
-                      value={ps.fontSizeTotals}
-                      onChange={(v) => pSet("fontSizeTotals", v)}
-                    />
-                    <FontSizePicker
-                      label="Grand Total"
-                      value={ps.fontSizeGrandTotal}
-                      onChange={(v) => pSet("fontSizeGrandTotal", v)}
-                    />
-                    <FontSizePicker
-                      label="Footer"
-                      value={ps.fontSizeFooter}
-                      onChange={(v) => pSet("fontSizeFooter", v)}
                     />
                   </Section>
 

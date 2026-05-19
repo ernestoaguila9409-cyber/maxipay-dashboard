@@ -2,51 +2,12 @@
 
 import type { ReactNode } from "react";
 import {
-  FONT_SIZE_LABELS,
-  LANDI_CHARS_PER_LINE,
   clampMultiline,
   clampSingleLine,
   landiCharsPerLine,
 } from "@/lib/receiptThermal";
 
 const ADDRESS_MAX_LINES = 4;
-
-function CharRulers({ activeFontSize }: { activeFontSize: number }) {
-  return (
-    <div className="mt-2 space-y-1">
-      {FONT_SIZE_LABELS.map((label, sizeIndex) => {
-        const count = LANDI_CHARS_PER_LINE[sizeIndex];
-        const active = sizeIndex === activeFontSize;
-        return (
-          <div
-            key={label}
-            className={`flex items-end gap-2 min-w-0 ${
-              active ? "opacity-100" : "opacity-45"
-            }`}
-          >
-            <span
-              className={`shrink-0 w-[4.5rem] text-[10px] font-medium leading-none pb-0.5 ${
-                active ? "text-blue-600" : "text-slate-400"
-              }`}
-            >
-              {label}
-            </span>
-            <div className="min-w-0 flex-1 overflow-x-auto pb-0.5">
-              <span
-                className={`inline-block font-mono text-[10px] leading-none whitespace-nowrap select-none ${
-                  active ? "text-blue-500" : "text-slate-300"
-                }`}
-                style={{ letterSpacing: "0.02em" }}
-              >
-                {"_".repeat(count)}
-              </span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 type ReceiptBusinessFieldProps = {
   id: string;
@@ -58,7 +19,6 @@ type ReceiptBusinessFieldProps = {
   placeholder?: string;
   type?: "text" | "tel" | "email";
   rows?: number;
-  showGuide?: boolean;
 };
 
 export function ReceiptBusinessField({
@@ -71,10 +31,8 @@ export function ReceiptBusinessField({
   placeholder,
   type = "text",
   rows = 3,
-  showGuide = true,
 }: ReceiptBusinessFieldProps) {
   const maxPerLine = landiCharsPerLine(activeFontSize);
-  const activeLabel = FONT_SIZE_LABELS[activeFontSize] ?? "Normal";
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -114,8 +72,7 @@ export function ReceiptBusinessField({
           {longestLine}/{maxPerLine}
           {mode === "multiline"
             ? ` · ${lineCount}/${ADDRESS_MAX_LINES} lines`
-            : ""}{" "}
-          ({activeLabel})
+            : ""}
         </span>
       </label>
 
@@ -138,15 +95,6 @@ export function ReceiptBusinessField({
           className={inputClass}
         />
       )}
-
-      <CharRulers activeFontSize={activeFontSize} />
-
-      {showGuide ? (
-        <p className="mt-1.5 text-[11px] text-slate-400 leading-snug">
-          Highlighted row matches Print Settings font size for this section.
-          Each underline is one character on the Landi receipt printer.
-        </p>
-      ) : null}
     </div>
   );
 }
