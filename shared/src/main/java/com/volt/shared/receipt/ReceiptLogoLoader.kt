@@ -64,31 +64,31 @@ object ReceiptLogoLoader {
             cropped.width > maxWidthPx -> {
                 val ratio = maxWidthPx.toFloat() / cropped.width
                 val newH = (cropped.height * ratio).toInt().coerceAtLeast(1)
-                Bitmap.createScaledBitmap(cropped, maxWidthPx, newH, true).also {
+                Bitmap.createScaledBitmap(cropped, maxWidthPx, newH, false).also {
                     if (it !== cropped) cropped.recycle()
                 }
             }
             cropped.width < maxWidthPx -> {
                 val ratio = maxWidthPx.toFloat() / cropped.width
                 val newH = (cropped.height * ratio).toInt().coerceAtLeast(1)
-                Bitmap.createScaledBitmap(cropped, maxWidthPx, newH, true).also {
+                Bitmap.createScaledBitmap(cropped, maxWidthPx, newH, false).also {
                     if (it !== cropped) cropped.recycle()
                 }
             }
             else -> cropped
         }
 
-        val trimmed = trimWhitespace(scaled).also {
+        val logoBitmap = trimWhitespace(scaled).also {
             if (it !== scaled) scaled.recycle()
         }
 
         cachedBitmap?.recycle()
         cachedUrl = trimmed
         cachedMaxWidthPx = maxWidthPx
-        cachedBitmap = trimmed
+        cachedBitmap = logoBitmap
         cachedBase64 = null
-        Log.d(TAG, "Logo ready: ${trimmed.width}x${trimmed.height}")
-        return trimmed
+        Log.d(TAG, "Logo ready: ${logoBitmap.width}x${logoBitmap.height}")
+        return logoBitmap
     }
 
     fun downloadBase64Jpeg(
@@ -157,10 +157,13 @@ object ReceiptLogoLoader {
         return out
     }
 
+    /** Extra crop pass before Landi raster print (cheap if already tight). */
+    fun trimForThermalPrint(source: Bitmap): Bitmap = trimWhitespace(source)
+
     /**
      * Crops empty margins so thermal raster rows do not feed blank paper before/after the logo.
      */
-    private fun trimWhitespace(source: Bitmap, luminanceThreshold: Int = 245): Bitmap {
+    private fun trimWhitespace(source: Bitmap, luminanceThreshold: Int = 250): Bitmap {
         val w = source.width
         val h = source.height
         if (w <= 0 || h <= 0) return source
@@ -172,67 +175,47 @@ object ReceiptLogoLoader {
             return lum < luminanceThreshold
         }
 
-        var top = 0
-        while (top < h) {
-            var rowHasInk = false
+        val minInkPerRow = maxOf(2, w / 400)
+
+        fun rowInkCount(y: Int): Int {
+            var count = 0
             var x = 0
             while (x < w) {
-                if (isInk(x, top)) {
-                    rowHasInk = true
-                    break
+                if (isInk(x, y)) {
+                    count++
+                    if (count >= minInkPerRow) return count
                 }
                 x++
             }
-            if (rowHasInk) break
-            top++
+            return count
         }
 
+        var top = 0
+        while (top < h && rowInkCount(top) < minInkPerRow) top++
+
         var bottom = h - 1
-        while (bottom >= top) {
-            var rowHasInk = false
-            var x = 0
-            while (x < w) {
-                if (isInk(x, bottom)) {
-                    rowHasInk = true
-                    break
-                }
-                x++
-            }
-            if (rowHasInk) break
-            bottom--
-        }
+        while (bottom >= top && rowInkCount(bottom) < minInkPerRow) bottom--
 
         if (top > bottom) return source
 
-        var left = 0
-        while (left < w) {
-            var colHasInk = false
+        fun colInkCount(x: Int): Int {
+            var count = 0
             var y = top
             while (y <= bottom) {
-                if (isInk(left, y)) {
-                    colHasInk = true
-                    break
+                if (isInk(x, y)) {
+                    count++
+                    if (count >= minInkPerRow) return count
                 }
                 y++
             }
-            if (colHasInk) break
-            left++
+            return count
         }
 
+        var left = 0
+        while (left < w && colInkCount(left) < minInkPerRow) left++
+
         var right = w - 1
-        while (right >= left) {
-            var colHasInk = false
-            var y = top
-            while (y <= bottom) {
-                if (isInk(right, y)) {
-                    colHasInk = true
-                    break
-                }
-                y++
-            }
-            if (colHasInk) break
-            right--
-        }
+        while (right >= left && colInkCount(right) < minInkPerRow) right--
 
         val newW = right - left + 1
         val newH = bottom - top + 1

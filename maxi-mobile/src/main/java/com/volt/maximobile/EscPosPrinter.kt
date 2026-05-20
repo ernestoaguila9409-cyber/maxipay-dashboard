@@ -40,6 +40,13 @@ object EscPosPrinter {
     private val SIZE_NORMAL  = byteArrayOf(0x1D, 0x21, 0x00)
     private val LF           = byteArrayOf(0x0A)
     private val CUT          = byteArrayOf(0x1D, 0x56, 0x00)
+    /** Landi C20 Pro built-in 80mm: avoid ESC @ alone — it feeds a large blank gap before raster. */
+    private val LANDI_RECEIPT_START = byteArrayOf(
+        0x1B, 0x61, 0x01,
+        0x1B, 0x33, 0x00,
+        0x1D, 0x4C, 0x00, 0x00,
+    )
+    private val LINE_SPACING_DEFAULT = byteArrayOf(0x1B, 0x32)
 
     fun clearLogoCache() = ReceiptLogoLoader.clearCache()
 
@@ -126,28 +133,41 @@ object EscPosPrinter {
                 logoBitmap = ReceiptLogoLoader.downloadBitmap(settings.logoUrl, maxW)
             }
 
-            val payload = try {
-                buildReceiptEscPosPayload(segments, logoBitmap, signatureBitmap)
+            val landiPayload = try {
+                buildReceiptEscPosPayload(segments, logoBitmap, signatureBitmap, forLandiBuiltIn = true)
             } catch (e: Exception) {
                 Log.e(TAG, "Build receipt payload failed: ${e.message}", e)
                 uiToast(context, "Print failed: ${e.message}")
                 return@Thread
             }
+            val lanPayload = buildReceiptEscPosPayload(segments, logoBitmap, signatureBitmap, forLandiBuiltIn = false)
 
-            printPayloadToLandiBluetooth(context, payload)
-            printPayloadToLanReceiptPrinterIfConfigured(context, payload)
+            printPayloadToLandiBluetooth(context, landiPayload)
+            printPayloadToLanReceiptPrinterIfConfigured(context, lanPayload)
         }.start()
     }
 
-    private fun buildReceiptEscPosPayload(segments: List<Segment>, logoBitmap: Bitmap?, signatureBitmap: Bitmap? = null): ByteArray {
+    private fun buildReceiptEscPosPayload(
+        segments: List<Segment>,
+        logoBitmap: Bitmap?,
+        signatureBitmap: Bitmap? = null,
+        forLandiBuiltIn: Boolean = false,
+    ): ByteArray {
         val bos = ByteArrayOutputStream()
         val out: OutputStream = bos
-        out.write(INIT)
+        if (forLandiBuiltIn) {
+            out.write(LANDI_RECEIPT_START)
+        } else {
+            out.write(INIT)
+        }
         if (logoBitmap != null) {
             out.write(ALIGN_CENTER)
             out.write(SIZE_NORMAL)
             out.write(BOLD_OFF)
-            printBitmap(out, logoBitmap)
+            val logo = ReceiptLogoLoader.trimForThermalPrint(logoBitmap)
+            printBitmap(out, logo, compactBlankRows = forLandiBuiltIn)
+            if (logo !== logoBitmap) logo.recycle()
+            if (forLandiBuiltIn) out.write(LINE_SPACING_DEFAULT)
         }
         for (seg in segments) {
             out.write(if (seg.centered) ALIGN_CENTER else ALIGN_LEFT)
@@ -166,13 +186,14 @@ object EscPosPrinter {
                 (signatureBitmap.height * PRINTER_WIDTH_PX / signatureBitmap.width).coerceAtLeast(1),
                 true
             )
-            printBitmap(out, scaled)
+            printBitmap(out, scaled, compactBlankRows = forLandiBuiltIn)
             out.write(LF)
         }
         out.write(SIZE_NORMAL)
         out.write(BOLD_OFF)
         out.write(ALIGN_LEFT)
-        repeat(4) { out.write(LF) }
+        val trailingFeeds = if (forLandiBuiltIn) 2 else 4
+        repeat(trailingFeeds) { out.write(LF) }
         out.write(CUT)
         out.flush()
         return bos.toByteArray()
@@ -564,23 +585,15 @@ object EscPosPrinter {
 
     // ── ESC/POS raster image (GS v 0) ────────────────────────────
 
-    private fun printBitmap(out: OutputStream, bitmap: Bitmap) {
+    private fun printBitmap(out: OutputStream, bitmap: Bitmap, compactBlankRows: Boolean = false) {
         val width = bitmap.width
         val height = bitmap.height
         val bytesPerRow = (width + 7) / 8
+        val inkRows = ArrayList<ByteArray>()
 
-        val header = byteArrayOf(
-            0x1D, 0x76, 0x30, 0x00,
-            (bytesPerRow and 0xFF).toByte(),
-            ((bytesPerRow shr 8) and 0xFF).toByte(),
-            (height and 0xFF).toByte(),
-            ((height shr 8) and 0xFF).toByte()
-        )
-        out.write(header)
-
-        val rowBuf = ByteArray(bytesPerRow)
         for (y in 0 until height) {
-            rowBuf.fill(0)
+            val rowBuf = ByteArray(bytesPerRow)
+            var hasInk = false
             for (x in 0 until width) {
                 val pixel = bitmap.getPixel(x, y)
                 val r = Color.red(pixel)
@@ -590,11 +603,29 @@ object EscPosPrinter {
                 if (a < 128) continue
                 val luminance = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
                 if (luminance < 128) {
+                    hasInk = true
                     rowBuf[x / 8] = (rowBuf[x / 8].toInt() or (0x80 shr (x % 8))).toByte()
                 }
             }
-            out.write(rowBuf)
+            if (!compactBlankRows || hasInk) inkRows.add(rowBuf)
         }
+
+        if (inkRows.isEmpty()) return
+
+        val printHeight = inkRows.size
+        if (compactBlankRows && printHeight < height) {
+            Log.d(TAG, "Logo raster compacted: $height -> $printHeight rows")
+        }
+
+        val header = byteArrayOf(
+            0x1D, 0x76, 0x30, 0x00,
+            (bytesPerRow and 0xFF).toByte(),
+            ((bytesPerRow shr 8) and 0xFF).toByte(),
+            (printHeight and 0xFF).toByte(),
+            ((printHeight shr 8) and 0xFF).toByte(),
+        )
+        out.write(header)
+        for (row in inkRows) out.write(row)
         out.flush()
     }
 
