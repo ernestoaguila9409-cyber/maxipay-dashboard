@@ -14,6 +14,10 @@ const QBO_CLIENT_ID = defineSecret("QBO_CLIENT_ID");
 const QBO_CLIENT_SECRET = defineSecret("QBO_CLIENT_SECRET");
 const QBO_SECRETS = [QBO_CLIENT_ID, QBO_CLIENT_SECRET];
 
+/** Receipt + void/refund email callables (Resend). Bind secret or process.env stays empty in production. */
+const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
+const RESEND_CALLABLE_OPTS = { secrets: [RESEND_API_KEY] };
+
 exports.startQBOAuth = onRequest(
   { secrets: QBO_SECRETS, maxInstances: 5 },
   (req, res) => {
@@ -183,7 +187,14 @@ exports.qboRetrySync = onRequest(
  * See functions/README.md.
  */
 function getResendApiKey() {
-  const k = process.env.RESEND_API_KEY;
+  let k = process.env.RESEND_API_KEY;
+  if (!k || !String(k).trim()) {
+    try {
+      k = RESEND_API_KEY.value();
+    } catch (_) {
+      /* secret not bound on this function */
+    }
+  }
   return k && String(k).trim() ? String(k).trim() : null;
 }
 
@@ -1376,7 +1387,7 @@ async function composeRefundReceiptWrappedHtml(db, merchantId, orderId, transact
 // 1. Standard Receipt
 // ---------------------------------------------------------------------------
 
-exports.sendReceiptEmail = onCall(async (request) => {
+exports.sendReceiptEmail = onCall(RESEND_CALLABLE_OPTS, async (request) => {
   const { email, orderId, splitReceipt } = request.data || {};
 
   if (!email || !orderId) {
@@ -1466,7 +1477,7 @@ exports.sendReceiptEmail = onCall(async (request) => {
 // 2. Void Receipt
 // ---------------------------------------------------------------------------
 
-exports.sendVoidReceiptEmail = onCall(async (request) => {
+exports.sendVoidReceiptEmail = onCall(RESEND_CALLABLE_OPTS, async (request) => {
   const { email, orderId } = request.data || {};
 
   if (!email || !orderId) {
@@ -1520,7 +1531,7 @@ exports.sendVoidReceiptEmail = onCall(async (request) => {
 // 3. Refund Receipt
 // ---------------------------------------------------------------------------
 
-exports.sendRefundReceiptEmail = onCall(async (request) => {
+exports.sendRefundReceiptEmail = onCall(RESEND_CALLABLE_OPTS, async (request) => {
   try {
     const { email, orderId, transactionId } = request.data || {};
 
