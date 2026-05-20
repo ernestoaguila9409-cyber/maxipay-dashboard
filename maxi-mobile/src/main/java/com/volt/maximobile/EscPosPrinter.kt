@@ -148,7 +148,6 @@ object EscPosPrinter {
             out.write(SIZE_NORMAL)
             out.write(BOLD_OFF)
             printBitmap(out, logoBitmap)
-            out.write(LF)
         }
         for (seg in segments) {
             out.write(if (seg.centered) ALIGN_CENTER else ALIGN_LEFT)

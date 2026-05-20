@@ -56,31 +56,39 @@ object ReceiptLogoLoader {
         val flattened = flattenOnWhite(decoded)
         if (flattened !== decoded) decoded.recycle()
 
+        val cropped = trimWhitespace(flattened).also {
+            if (it !== flattened) flattened.recycle()
+        }
+
         val scaled = when {
-            flattened.width > maxWidthPx -> {
-                val ratio = maxWidthPx.toFloat() / flattened.width
-                val newH = (flattened.height * ratio).toInt().coerceAtLeast(1)
-                Bitmap.createScaledBitmap(flattened, maxWidthPx, newH, true).also {
-                    if (it !== flattened) flattened.recycle()
+            cropped.width > maxWidthPx -> {
+                val ratio = maxWidthPx.toFloat() / cropped.width
+                val newH = (cropped.height * ratio).toInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(cropped, maxWidthPx, newH, true).also {
+                    if (it !== cropped) cropped.recycle()
                 }
             }
-            flattened.width < maxWidthPx -> {
-                val ratio = maxWidthPx.toFloat() / flattened.width
-                val newH = (flattened.height * ratio).toInt().coerceAtLeast(1)
-                Bitmap.createScaledBitmap(flattened, maxWidthPx, newH, true).also {
-                    if (it !== flattened) flattened.recycle()
+            cropped.width < maxWidthPx -> {
+                val ratio = maxWidthPx.toFloat() / cropped.width
+                val newH = (cropped.height * ratio).toInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(cropped, maxWidthPx, newH, true).also {
+                    if (it !== cropped) cropped.recycle()
                 }
             }
-            else -> flattened
+            else -> cropped
+        }
+
+        val trimmed = trimWhitespace(scaled).also {
+            if (it !== scaled) scaled.recycle()
         }
 
         cachedBitmap?.recycle()
         cachedUrl = trimmed
         cachedMaxWidthPx = maxWidthPx
-        cachedBitmap = scaled
+        cachedBitmap = trimmed
         cachedBase64 = null
-        Log.d(TAG, "Logo ready: ${scaled.width}x${scaled.height}")
-        return scaled
+        Log.d(TAG, "Logo ready: ${trimmed.width}x${trimmed.height}")
+        return trimmed
     }
 
     fun downloadBase64Jpeg(
@@ -147,5 +155,88 @@ object ReceiptLogoLoader {
         canvas.drawColor(Color.WHITE)
         canvas.drawBitmap(source, 0f, 0f, null)
         return out
+    }
+
+    /**
+     * Crops empty margins so thermal raster rows do not feed blank paper before/after the logo.
+     */
+    private fun trimWhitespace(source: Bitmap, luminanceThreshold: Int = 245): Bitmap {
+        val w = source.width
+        val h = source.height
+        if (w <= 0 || h <= 0) return source
+
+        fun isInk(x: Int, y: Int): Boolean {
+            val pixel = source.getPixel(x, y)
+            if (Color.alpha(pixel) < 128) return false
+            val lum = (0.299 * Color.red(pixel) + 0.587 * Color.green(pixel) + 0.114 * Color.blue(pixel)).toInt()
+            return lum < luminanceThreshold
+        }
+
+        var top = 0
+        while (top < h) {
+            var rowHasInk = false
+            var x = 0
+            while (x < w) {
+                if (isInk(x, top)) {
+                    rowHasInk = true
+                    break
+                }
+                x++
+            }
+            if (rowHasInk) break
+            top++
+        }
+
+        var bottom = h - 1
+        while (bottom >= top) {
+            var rowHasInk = false
+            var x = 0
+            while (x < w) {
+                if (isInk(x, bottom)) {
+                    rowHasInk = true
+                    break
+                }
+                x++
+            }
+            if (rowHasInk) break
+            bottom--
+        }
+
+        if (top > bottom) return source
+
+        var left = 0
+        while (left < w) {
+            var colHasInk = false
+            var y = top
+            while (y <= bottom) {
+                if (isInk(left, y)) {
+                    colHasInk = true
+                    break
+                }
+                y++
+            }
+            if (colHasInk) break
+            left++
+        }
+
+        var right = w - 1
+        while (right >= left) {
+            var colHasInk = false
+            var y = top
+            while (y <= bottom) {
+                if (isInk(right, y)) {
+                    colHasInk = true
+                    break
+                }
+                y++
+            }
+            if (colHasInk) break
+            right--
+        }
+
+        val newW = right - left + 1
+        val newH = bottom - top + 1
+        if (newW == w && newH == h) return source
+        return Bitmap.createBitmap(source, left, top, newW, newH)
     }
 }
