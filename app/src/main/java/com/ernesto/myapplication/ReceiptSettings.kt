@@ -44,6 +44,8 @@ data class ReceiptSettings(
     val showServerName: Boolean = true,
     val showDateTime: Boolean = true,
     val showLogo: Boolean = true,
+    /** Landi C20 Pro: 0 = Standard (half paper width), 1 = Large (full width). */
+    val logoSize: Int = 0,
     val showEmail: Boolean = false,
     val boldBizName: Boolean = true,
     val boldAddress: Boolean = true,
@@ -64,6 +66,12 @@ data class ReceiptSettings(
         private const val PREFS = "receipt_settings"
 
         val FONT_SIZE_LABELS = arrayOf("Normal", "Large", "X-Large")
+        val LOGO_SIZE_LABELS = arrayOf("Standard", "Large")
+
+        const val LANDI_PRINTER_WIDTH_PX = 384
+
+        fun landiLogoMaxWidthPx(logoSize: Int): Int =
+            if (logoSize.coerceIn(0, 1) == 1) LANDI_PRINTER_WIDTH_PX else LANDI_PRINTER_WIDTH_PX / 2
 
         // ESC/POS GS ! n — character size select
         // 0x00 = 1x width, 1x height  (Normal)
@@ -94,6 +102,7 @@ data class ReceiptSettings(
                 showServerName = p.getBoolean("showServerName", true),
                 showDateTime = p.getBoolean("showDateTime", true),
                 showLogo = p.getBoolean("showLogo", true),
+                logoSize = p.getInt("logoSize", 0).coerceIn(0, 1),
                 showEmail = p.getBoolean("showEmail", false),
                 boldBizName = p.getBoolean("boldBizName",
                     p.getBoolean("boldBusinessInfo",
@@ -131,6 +140,7 @@ data class ReceiptSettings(
                 putBoolean("showServerName", s.showServerName)
                 putBoolean("showDateTime", s.showDateTime)
                 putBoolean("showLogo", s.showLogo)
+                putInt("logoSize", s.logoSize.coerceIn(0, 1))
                 putBoolean("showEmail", s.showEmail)
                 putBoolean("boldBizName", s.boldBizName)
                 putBoolean("boldAddress", s.boldAddress)
@@ -301,6 +311,8 @@ data class ReceiptSettings(
                         showServerName = snap.getBoolean("showServerName") ?: current.showServerName,
                         showDateTime = snap.getBoolean("showDateTime") ?: current.showDateTime,
                         showLogo = snap.getBoolean("showLogo") ?: current.showLogo,
+                        logoSize = snap.getLong("logoSize")?.toInt()?.coerceIn(0, 1)
+                            ?: current.logoSize,
                         showEmail = snap.getBoolean("showEmail") ?: current.showEmail,
                         boldBizName = snap.getBoolean("boldBizName") ?: current.boldBizName,
                         boldAddress = snap.getBoolean("boldAddress") ?: current.boldAddress,
@@ -317,6 +329,10 @@ data class ReceiptSettings(
                         fontSizeGrandTotal = snap.getLong("fontSizeGrandTotal")?.toInt() ?: current.fontSizeGrandTotal,
                         fontSizeFooter = snap.getLong("fontSizeFooter")?.toInt() ?: current.fontSizeFooter
                     )
+                    if (current.logoSize != updated.logoSize) {
+                        ReceiptLogoLoader.clearCache()
+                        EscPosPrinter.clearLogoCache()
+                    }
                     if (current != updated) {
                         save(context, updated)
                         onSettingsChanged?.invoke(updated)
@@ -345,6 +361,7 @@ data class ReceiptSettings(
                 "showServerName" to s.showServerName,
                 "showDateTime" to s.showDateTime,
                 "showLogo" to s.showLogo,
+                "logoSize" to s.logoSize.coerceIn(0, 1),
                 "showEmail" to s.showEmail,
                 "boldBizName" to s.boldBizName,
                 "boldAddress" to s.boldAddress,

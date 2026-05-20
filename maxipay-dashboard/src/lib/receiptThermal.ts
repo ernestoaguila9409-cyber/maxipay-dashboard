@@ -1,6 +1,21 @@
 /** Landi C20 Pro built-in 58mm printer (~384 dots): Normal/Large ≈ 32 cols, X-Large ≈ 24. */
 export const LANDI_CHARS_PER_LINE = [32, 32, 24] as const;
 
+/** Landi receipt logo max width in printer dots (matches Android EscPosPrinter). */
+export const LANDI_LOGO_WIDTH_PX = [192, 384] as const;
+export const LOGO_SIZE_LABELS = ["Standard", "Large"] as const;
+
+export function landiLogoMaxWidthPx(logoSize: number): number {
+  const i = Math.max(0, Math.min(1, Math.floor(logoSize)));
+  return LANDI_LOGO_WIDTH_PX[i];
+}
+
+/** Scaled preview width for dashboard receipt mock (not 1:1 with printer dots). */
+export function landiLogoPreviewMaxWidthPx(logoSize: number): number {
+  const i = Math.max(0, Math.min(1, Math.floor(logoSize)));
+  return i === 1 ? 336 : 168;
+}
+
 /** Dejavoo P8 built-in printer: fixed 24 characters per line, no font size control. */
 export const P8_CHARS_PER_LINE = 24;
 

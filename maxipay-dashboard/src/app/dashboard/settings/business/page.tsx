@@ -44,6 +44,8 @@ import {
   clampMultiline,
   clampSingleLine,
   landiCharsPerLine,
+  landiLogoPreviewMaxWidthPx,
+  LOGO_SIZE_LABELS,
   P8_CHARS_PER_LINE,
   thermalCharsPerLine,
   wrapThermalText,
@@ -67,6 +69,8 @@ interface PrintSettings {
   showServerName: boolean;
   showDateTime: boolean;
   showLogo: boolean;
+  /** Landi C20 Pro: 0 = Standard (192px), 1 = Large (384px). */
+  logoSize: number;
   showEmail: boolean;
   boldBizName: boolean;
   boldAddress: boolean;
@@ -96,6 +100,7 @@ const DEFAULT_PRINT: PrintSettings = {
   showServerName: true,
   showDateTime: true,
   showLogo: true,
+  logoSize: 0,
   showEmail: false,
   boldBizName: true,
   boldAddress: false,
@@ -226,6 +231,44 @@ function FontSizePicker({
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function LogoSizePicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="py-1">
+      <span className="text-[13px] text-slate-700 block mb-1.5">Logo size (Landi)</span>
+      <div
+        className={`flex gap-1.5 bg-slate-100 rounded-lg p-0.5 ${disabled ? "opacity-50 pointer-events-none" : ""}`}
+      >
+        {LOGO_SIZE_LABELS.map((lbl, i) => (
+          <button
+            key={i}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(i)}
+            className={`flex-1 py-1 text-[11px] font-medium rounded-md transition-all ${
+              value === i
+                ? "bg-white text-slate-800 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {lbl}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-slate-400 mt-1">
+        Standard = half paper width; Large = full width on Landi C20 Pro.
+      </p>
     </div>
   );
 }
@@ -477,6 +520,10 @@ export default function BusinessInformationPage() {
             showServerName: d.showServerName ?? DEFAULT_PRINT.showServerName,
             showDateTime: d.showDateTime ?? DEFAULT_PRINT.showDateTime,
             showLogo: d.showLogo ?? DEFAULT_PRINT.showLogo,
+            logoSize:
+              typeof d.logoSize === "number"
+                ? Math.min(1, Math.max(0, Math.floor(d.logoSize)))
+                : DEFAULT_PRINT.logoSize,
             showEmail: d.showEmail ?? DEFAULT_PRINT.showEmail,
             boldBizName: d.boldBizName ?? DEFAULT_PRINT.boldBizName,
             boldAddress: d.boldAddress ?? DEFAULT_PRINT.boldAddress,
@@ -735,6 +782,7 @@ export default function BusinessInformationPage() {
   const displayEmail = data.email.trim();
 
   const isP8 = printerProfile === "p8";
+  const logoPreviewMaxPx = landiLogoPreviewMaxWidthPx(ps.logoSize);
 
   const px = (key: number) =>
     Math.round((FONT_PX[isP8 ? 0 : key] ?? 12) * PREVIEW_FONT_SCALE);
@@ -1156,7 +1204,8 @@ export default function BusinessInformationPage() {
                             <img
                               src={data.logoUrl.trim()}
                               alt="Logo"
-                              className="h-16 sm:h-[4.5rem] max-w-[168px] object-contain"
+                              className="h-auto object-contain"
+                              style={{ maxWidth: `${logoPreviewMaxPx}px` }}
                               referrerPolicy="no-referrer"
                               onError={(e) => {
                                 const el = e.target as HTMLImageElement;
@@ -1391,6 +1440,11 @@ export default function BusinessInformationPage() {
                       label="Show Logo"
                       checked={ps.showLogo}
                       onChange={(v) => pSet("showLogo", v)}
+                    />
+                    <LogoSizePicker
+                      value={ps.logoSize}
+                      onChange={(v) => pSet("logoSize", v)}
+                      disabled={!hasLogo || !ps.showLogo}
                     />
                     <Toggle
                       label="Show Email"

@@ -120,8 +120,9 @@ object EscPosPrinter {
 
         Thread {
             var logoBitmap: Bitmap? = null
-            if (settings != null && settings.logoUrl.isNotBlank()) {
-                logoBitmap = ReceiptLogoLoader.downloadBitmap(settings.logoUrl, PRINTER_WIDTH_PX / 2)
+            if (settings != null && settings.showLogo && settings.logoUrl.isNotBlank()) {
+                val maxW = ReceiptSettings.landiLogoMaxWidthPx(settings.logoSize)
+                logoBitmap = ReceiptLogoLoader.downloadBitmap(settings.logoUrl, maxW)
             }
 
             val payload = try {
