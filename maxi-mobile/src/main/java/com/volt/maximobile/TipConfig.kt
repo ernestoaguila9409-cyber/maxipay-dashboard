@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 
 object TipConfig {
+    /** Set on [android.content.Intent] from [TipActivity] → [PaymentActivity] so payment does not loop back to tips. */
+    const val EXTRA_FROM_TIP_SCREEN = "FROM_TIP_SCREEN"
+
     private const val PREFS_NAME = "tip_config"
     private const val KEY_TIPS_ENABLED = "tips_enabled"
     private const val KEY_CUSTOM_TIP_ENABLED = "custom_tip_enabled"
@@ -81,6 +84,16 @@ object TipConfig {
     /** True = show TipActivity (customer-facing / register tip) before payment when tips are enabled. */
     fun isTipOnCustomerScreen(context: Context): Boolean =
         getTipPresentation(context) == PRESENTATION_CUSTOMER_SCREEN
+
+    /** P8 / maxi-mobile: merchant chose tip presets on this device before payment. */
+    fun isTipOnScreen(context: Context): Boolean = isTipOnCustomerScreen(context)
+
+    fun isTipOnReceipt(context: Context): Boolean =
+        getTipPresentation(context) == PRESENTATION_RECEIPT
+
+    /** Launch [TipActivity] before payment when tips are on and collection is on-screen. */
+    fun shouldShowTipScreenBeforePayment(context: Context): Boolean =
+        isTipsEnabled(context) && isTipOnScreen(context)
 
     /**
      * Printed / thermal receipt: show a Tip line in the totals section when tips are enabled.

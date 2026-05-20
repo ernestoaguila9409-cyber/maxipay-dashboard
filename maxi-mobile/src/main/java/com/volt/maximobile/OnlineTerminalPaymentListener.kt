@@ -95,7 +95,12 @@ object OnlineTerminalPaymentListener {
         val text =
             "Order #$orderNumber · $amt — tap to open checkout (SPIn / Dejavoo; keyed entry on terminal if supported)"
 
-        val launch = Intent(app, PaymentActivity::class.java).apply {
+        val paymentTarget = if (TipConfig.shouldShowTipScreenBeforePayment(app)) {
+            TipActivity::class.java
+        } else {
+            PaymentActivity::class.java
+        }
+        val launch = Intent(app, paymentTarget).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("ORDER_ID", orderId)
         }

@@ -32,6 +32,7 @@ class TipConfigActivity : AppCompatActivity() {
         val rbSubtotal = findViewById<RadioButton>(R.id.rbSubtotal)
         val rbTotal = findViewById<RadioButton>(R.id.rbTotal)
         val calculationBaseContainer = findViewById<LinearLayout>(R.id.calculationBaseContainer)
+        val tipPresentationContainer = findViewById<LinearLayout>(R.id.tipPresentationContainer)
         val rgTipPresentation = findViewById<RadioGroup>(R.id.rgTipPresentation)
         val rbTipCustomerScreen = findViewById<RadioButton>(R.id.rbTipCustomerScreen)
         val rbTipReceipt = findViewById<RadioButton>(R.id.rbTipReceipt)
@@ -72,12 +73,15 @@ class TipConfigActivity : AppCompatActivity() {
         fun updateFieldsEnabled(enabled: Boolean) {
             presetsContainer.alpha = if (enabled) 1f else 0.4f
             calculationBaseContainer.alpha = if (enabled) 1f else 0.4f
+            tipPresentationContainer.alpha = if (enabled) 1f else 0.4f
             for (id in presetEditTextIds) {
                 findViewById<EditText>(id).isEnabled = enabled
             }
             switchCustomTip.isEnabled = enabled
             rbSubtotal.isEnabled = enabled
             rbTotal.isEnabled = enabled
+            rbTipCustomerScreen.isEnabled = enabled
+            rbTipReceipt.isEnabled = enabled
         }
 
         updateFieldsEnabled(switchTips.isChecked)

@@ -25,6 +25,9 @@ object CustomerReceiptPrint {
             settings = rs,
             onSuccess = onSuccess,
             onFailure = onFailure,
+            onLogoSkipped = {
+                android.util.Log.w("CustomerReceiptPrint", "Logo skipped: could not load ${rs.logoUrl.take(60)}")
+            },
         )
     }
 }

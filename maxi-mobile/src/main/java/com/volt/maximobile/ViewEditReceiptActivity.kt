@@ -5,12 +5,15 @@ import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import coil.load
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
@@ -65,17 +68,27 @@ class ViewEditReceiptActivity : AppCompatActivity() {
 
     /** One-shot pull so logoUrl from maxipaypos.com is on-device before printing. */
     private fun refreshLogoFromFirestore() {
-        if (!MerchantFirestore.isInitialized) return
+        refreshLogoUrlThen { }
+    }
+
+    private fun refreshLogoUrlThen(onDone: () -> Unit) {
+        if (!MerchantFirestore.isInitialized) {
+            onDone()
+            return
+        }
         MerchantFirestore.doc("Settings", "businessInfo").get()
             .addOnSuccessListener { snap ->
-                if (!snap.exists()) return@addOnSuccessListener
-                val url = snap.getString("logoUrl")?.trim().orEmpty()
-                if (url.isNotEmpty() && url != settings.logoUrl) {
-                    settings = settings.copy(logoUrl = url)
-                    ReceiptSettings.save(this, settings)
-                    P8LogoHelper.clearCache()
+                if (snap.exists()) {
+                    val url = snap.getString("logoUrl")?.trim().orEmpty()
+                    if (url.isNotEmpty() && url != settings.logoUrl) {
+                        settings = settings.copy(logoUrl = url)
+                        ReceiptSettings.save(this, settings)
+                        P8LogoHelper.clearCache()
+                    }
                 }
+                onDone()
             }
+            .addOnFailureListener { onDone() }
     }
 
     override fun onDestroy() {
@@ -182,7 +195,7 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnViewReceipt).setOnClickListener {
-            showReceiptPreviewDialog()
+            refreshLogoUrlThen { showReceiptPreviewDialog() }
         }
 
         findViewById<Button>(R.id.btnTestReceipt).setOnClickListener {
@@ -231,16 +244,42 @@ class ViewEditReceiptActivity : AppCompatActivity() {
     }
 
     private fun showReceiptPreviewDialog() {
+        settings = ReceiptSettings.load(this)
+
         val mono = Typeface.MONOSPACE
         fun boldMono(on: Boolean) = Typeface.create(mono, if (on) Typeface.BOLD else Typeface.NORMAL)
         fun bold(on: Boolean) = if (on) Typeface.BOLD else Typeface.NORMAL
         val w = p8Width
+        val density = resources.displayMetrics.density
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            val pad = (16 * resources.displayMetrics.density).toInt()
+            val pad = (16 * density).toInt()
             setPadding(pad, pad, pad, pad)
             setBackgroundColor(0xFFFFFFFF.toInt())
+        }
+
+        val logoUrl = settings.logoUrl.trim()
+        if (logoUrl.isNotEmpty()) {
+            val logoView = ImageView(this).apply {
+                adjustViewBounds = true
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    bottomMargin = (12 * density).toInt()
+                }
+                maxHeight = (80 * density).toInt()
+            }
+            logoView.load(logoUrl) {
+                crossfade(true)
+                listener(
+                    onError = { _, _ -> logoView.visibility = View.GONE },
+                )
+            }
+            content.addView(logoView)
         }
 
         fun addText(
@@ -341,7 +380,6 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         }
 
         AlertDialog.Builder(this)
-            .setTitle("Receipt Preview (P8 — 24 chars)")
             .setView(scrollView)
             .setPositiveButton("Close", null)
             .show()

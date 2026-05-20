@@ -90,6 +90,11 @@ class TipActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
+        if (!TipConfig.shouldShowTipScreenBeforePayment(this)) {
+            navigateToPayment()
+            return
+        }
+
         val txtTotal = findViewById<TextView>(R.id.txtTipOrderTotal)
         val txtBaseLabel = findViewById<TextView>(R.id.txtTipBaseLabel)
         val presetContainer = findViewById<LinearLayout>(R.id.presetButtonsContainer)
@@ -164,9 +169,22 @@ class TipActivity : AppCompatActivity() {
             presetContainer.addView(card)
         }
 
-        if (TipConfig.isCustomTipEnabled(this)) {
+        if (showCustom) {
             btnCustomTip.visibility = View.VISIBLE
             btnCustomTip.setOnClickListener { showCustomTipDialog() }
+        } else {
+            btnCustomTip.visibility = View.GONE
+        }
+
+        if (presets.isEmpty() && !showCustom) {
+            val hint = TextView(this).apply {
+                text = "Add tip percentages in Tips settings to show options here."
+                textSize = 14f
+                setTextColor(Color.parseColor("#666666"))
+                gravity = Gravity.CENTER
+                setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8))
+            }
+            presetContainer.addView(hint)
         }
 
         btnNoTip.setOnClickListener { applyTip(0L) }
@@ -237,6 +255,7 @@ class TipActivity : AppCompatActivity() {
         val intent = Intent(this, PaymentActivity::class.java).apply {
             putExtra("ORDER_ID", oid)
             putExtra("BATCH_ID", batchId ?: "")
+            putExtra(TipConfig.EXTRA_FROM_TIP_SCREEN, true)
         }
         paymentLauncher.launch(intent)
     }

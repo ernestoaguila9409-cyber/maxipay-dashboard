@@ -8,38 +8,22 @@ const { Vonage } = require("@vonage/server-sdk");
 const logger = require("firebase-functions/logger");
 const { merchantCol, merchantDoc, merchantIdFromAuth } = require("./merchant-firestore");
 const OAuthClient = require("intuit-oauth");
+const qboAuth = require("./qbo-auth");
 
 const QBO_CLIENT_ID = defineSecret("QBO_CLIENT_ID");
 const QBO_CLIENT_SECRET = defineSecret("QBO_CLIENT_SECRET");
-const REDIRECT_URI =
-  "https://us-central1-restaurantapp-180da.cloudfunctions.net/qboCallback";
-
-function createQboOAuthClient() {
-  const clientId = process.env.QBO_CLIENT_ID;
-  const clientSecret = process.env.QBO_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    throw new Error("QBO_CLIENT_ID and QBO_CLIENT_SECRET must be set");
-  }
-  return new OAuthClient({
-    clientId,
-    clientSecret,
-    environment: "sandbox",
-    redirectUri: REDIRECT_URI,
-  });
-}
-
-const QBO_FIRESTORE_DOC = "Settings/qboOAuth";
+const QBO_SECRETS = [QBO_CLIENT_ID, QBO_CLIENT_SECRET];
 
 exports.startQBOAuth = onRequest(
-  { secrets: [QBO_CLIENT_ID, QBO_CLIENT_SECRET], maxInstances: 5 },
+  { secrets: QBO_SECRETS, maxInstances: 5 },
   (req, res) => {
     try {
-      const oauthClient = createQboOAuthClient();
+      const oauthClient = qboAuth.createOAuthClient();
       const authUri = oauthClient.authorizeUri({
         scope: [OAuthClient.scopes.Accounting],
       });
       logger.info("[qbo-oauth] Redirecting to QuickBooks authorization", {
-        redirectUri: REDIRECT_URI,
+        redirectUri: qboAuth.REDIRECT_URI,
       });
       res.redirect(302, authUri);
     } catch (err) {
@@ -50,7 +34,7 @@ exports.startQBOAuth = onRequest(
 );
 
 exports.qboCallback = onRequest(
-  { secrets: [QBO_CLIENT_ID, QBO_CLIENT_SECRET], maxInstances: 5 },
+  { secrets: QBO_SECRETS, maxInstances: 5 },
   async (req, res) => {
     const oauthError = req.query.error;
     if (oauthError) {
@@ -76,26 +60,14 @@ exports.qboCallback = onRequest(
         if (value == null || value === "") continue;
         params.set(key, Array.isArray(value) ? String(value[0]) : String(value));
       }
-      const callbackUri = `${REDIRECT_URI}?${params.toString()}`;
+      const callbackUri = `${qboAuth.REDIRECT_URI}?${params.toString()}`;
 
-      const oauthClient = createQboOAuthClient();
+      const oauthClient = qboAuth.createOAuthClient();
       const authResponse = await oauthClient.createToken(callbackUri);
       const token = authResponse.getToken();
 
       const realmId = token.realmId || req.query.realmId || "";
-      const expiresIn = Number(token.expires_in) || 3600;
-      await admin.firestore().doc(QBO_FIRESTORE_DOC).set(
-        {
-          realmId: String(realmId),
-          accessToken: token.access_token,
-          refreshToken: token.refresh_token,
-          scope: token.scope || OAuthClient.scopes.Accounting,
-          expiresAt: Date.now() + expiresIn * 1000,
-          environment: "sandbox",
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
+      await qboAuth.persistTokens(token, realmId);
 
       logger.info("[qbo-oauth] QuickBooks connected", { realmId });
 
@@ -114,6 +86,91 @@ exports.qboCallback = onRequest(
         `<h2>Token exchange failed</h2><p>${err.error_description || err.message}</p>` +
         "<p>Authorization codes expire quickly. Open startQBOAuth and connect again.</p>",
       );
+    }
+  },
+);
+
+exports.qboGetCompanyInfo = onRequest(
+  { secrets: QBO_SECRETS, maxInstances: 5 },
+  async (req, res) => {
+    try {
+      const result = await qboAuth.getCompanyInfo();
+      res.status(200).json({
+        ok: true,
+        realmId: result.realmId,
+        companyName: result.companyName,
+        companyId: result.companyInfo?.Id ?? null,
+        legalName: result.companyInfo?.LegalName ?? null,
+        environment: result.environment,
+        connected: true,
+      });
+    } catch (err) {
+      logger.error("[qbo-auth] getCompanyInfo failed", {
+        err: err.message,
+        error: err.error,
+      });
+      res.status(500).json({
+        ok: false,
+        error: err.error_description || err.message || "QuickBooks API call failed",
+      });
+    }
+  },
+);
+
+const qboTriggers = require("./qbo-triggers").buildQboTriggers(QBO_SECRETS);
+exports.qboOnOrderClosed = qboTriggers.qboOnOrderClosed;
+exports.qboSyncOrder = qboTriggers.qboSyncOrder;
+
+const qboSync = require("./qbo-sync");
+
+/** One-click retry for a closed order (testing). GET ?merchantId=...&orderId=... */
+exports.qboRetrySync = onRequest(
+  { secrets: QBO_SECRETS, maxInstances: 5 },
+  async (req, res) => {
+    const merchantId = String(req.query.merchantId || "").trim();
+    const orderId = String(req.query.orderId || "").trim();
+    if (!merchantId || !orderId) {
+      res.status(400).json({
+        ok: false,
+        error: "Pass merchantId and orderId query params",
+        example:
+          "/qboRetrySync?merchantId=YOUR_MERCHANT_ID&orderId=YOUR_ORDER_DOC_ID",
+      });
+      return;
+    }
+
+    try {
+      const snap = await merchantCol(merchantId, "Orders").doc(orderId).get();
+      if (!snap.exists) {
+        res.status(404).json({ ok: false, error: "Order not found" });
+        return;
+      }
+      const order = snap.data();
+      if (order.status !== "CLOSED") {
+        res.status(400).json({
+          ok: false,
+          error: `Order status is ${order.status}; must be CLOSED`,
+        });
+        return;
+      }
+
+      const result = await qboSync.syncOrderToQuickBooks(
+        merchantId,
+        orderId,
+        order,
+      );
+      res.status(200).json({ ok: true, merchantId, orderId, ...result });
+    } catch (err) {
+      logger.error("[qbo-retry] sync failed", {
+        merchantId,
+        orderId,
+        err: err.message,
+      });
+      await qboSync.markSyncError(merchantId, orderId, err).catch(() => {});
+      res.status(500).json({
+        ok: false,
+        error: err.error_description || err.message || "Sync failed",
+      });
     }
   },
 );

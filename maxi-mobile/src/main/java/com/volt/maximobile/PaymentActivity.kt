@@ -144,6 +144,19 @@ class PaymentActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val incomingOrderId = intent.getStringExtra("ORDER_ID")
+        if (shouldLaunchTipScreenBeforePayment(incomingOrderId)) {
+            startActivity(
+                Intent(this, TipActivity::class.java).apply {
+                    putExtra("ORDER_ID", incomingOrderId)
+                    putExtra("BATCH_ID", intent.getStringExtra("BATCH_ID") ?: "")
+                },
+            )
+            finish()
+            return
+        }
+
         setContentView(R.layout.activity_payment)
 
         paymentEngine = PaymentEngine(db)
@@ -172,7 +185,7 @@ class PaymentActivity : AppCompatActivity() {
         txtAppliedDiscount = findViewById(R.id.txtAppliedDiscount)
         btnRemoveDiscount = findViewById(R.id.btnRemoveDiscount)
 
-        orderId = intent.getStringExtra("ORDER_ID")
+        orderId = incomingOrderId
         batchId = intent.getStringExtra("BATCH_ID")
         businessName = ReceiptSettings.load(this).businessName
         ensureBatchIdThenLoadBalance()
@@ -1377,8 +1390,7 @@ class PaymentActivity : AppCompatActivity() {
             setButtonsEnabled(true)
             return
         }
-        val stampCustomerScreenTip =
-            TipConfig.isTipsEnabled(this) && TipConfig.isTipOnCustomerScreen(this)
+        val stampCustomerScreenTip = TipConfig.shouldShowTipScreenBeforePayment(this)
         if (!isSplitPayMode()) {
             paymentEngine.processPayment(
                 orderId = oid,
@@ -2445,5 +2457,14 @@ class PaymentActivity : AppCompatActivity() {
         return BigDecimal(value)
             .setScale(2, RoundingMode.HALF_UP)
             .toDouble()
+    }
+
+    /** Full-order checkout only — split shares and post-tip payment skip the tip screen. */
+    private fun shouldLaunchTipScreenBeforePayment(orderId: String?): Boolean {
+        if (orderId.isNullOrBlank()) return false
+        if (!TipConfig.shouldShowTipScreenBeforePayment(this)) return false
+        if (intent.getBooleanExtra(TipConfig.EXTRA_FROM_TIP_SCREEN, false)) return false
+        if (intent.hasExtra("SPLIT_MODE")) return false
+        return true
     }
 }

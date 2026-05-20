@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Maxi Mobile</string>
+
+    <!-- P8 tip collection (Landi app keeps "customer-facing screen" wording) -->
+    <string name="tip_presentation_screen">Tips on the Screen</string>
+    <string name="tip_presentation_receipt">Tips on the receipt</string>
     <string name="tips_discounts_hub_title">Setup Tips &amp; Discounts</string>
     <string name="categories">Categories</string>
     <string name="add_category">Add Category</string>
