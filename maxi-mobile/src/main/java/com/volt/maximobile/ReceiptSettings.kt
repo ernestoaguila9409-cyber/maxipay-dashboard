@@ -74,6 +74,17 @@ data class ReceiptSettings(
         fun landiLogoMaxWidthPx(logoSize: Int): Int =
             if (logoSize.coerceIn(0, 1) == 1) LANDI_PRINTER_WIDTH_PX else LANDI_PRINTER_WIDTH_PX / 2
 
+        private fun logoSizeFromFirestore(raw: Any?): Int? {
+            val n = when (raw) {
+                is Long -> raw.toInt()
+                is Int -> raw
+                is Double -> raw.toInt()
+                is Number -> raw.toInt()
+                else -> null
+            } ?: return null
+            return n.coerceIn(0, 1)
+        }
+
         // ESC/POS GS ! n — character size select
         // 0x00 = 1x width, 1x height  (Normal)
         // 0x01 = 1x width, 2x height  (Large / tall)
@@ -313,8 +324,7 @@ data class ReceiptSettings(
                         showServerName = snap.getBoolean("showServerName") ?: current.showServerName,
                         showDateTime = snap.getBoolean("showDateTime") ?: current.showDateTime,
                         showLogo = snap.getBoolean("showLogo") ?: current.showLogo,
-                        logoSize = snap.getLong("logoSize")?.toInt()?.coerceIn(0, 1)
-                            ?: current.logoSize,
+                        logoSize = logoSizeFromFirestore(snap.get("logoSize")) ?: current.logoSize,
                         showEmail = snap.getBoolean("showEmail") ?: current.showEmail,
                         boldBizName = snap.getBoolean("boldBizName") ?: current.boldBizName,
                         boldAddress = snap.getBoolean("boldAddress") ?: current.boldAddress,

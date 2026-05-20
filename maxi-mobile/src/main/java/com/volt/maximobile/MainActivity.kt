@@ -463,6 +463,7 @@ private fun MaxiRoot() {
                         employeeName = map["name"] as? String ?: "Staff"
                         MerchantFirestore.init(mid)
                         ReceiptPrintingConfig.startSync(context)
+                        ReceiptSettings.startBusinessInfoSync(context)
                         screen = Screen.Dashboard
                     } catch (e: Exception) {
                         err = e.message ?: "Login failed"
@@ -476,6 +477,13 @@ private fun MaxiRoot() {
     }
 
     if (screen == Screen.Dashboard) {
+        LaunchedEffect(Unit) {
+            val mid = PosDeviceIdentity.getMerchantId(context).trim()
+            if (mid.isNotEmpty()) {
+                if (!MerchantFirestore.isInitialized) MerchantFirestore.init(mid)
+                ReceiptSettings.startBusinessInfoSync(context)
+            }
+        }
         DashboardScreen(
             employeeName = employeeName,
             employeeRole = "Staff",

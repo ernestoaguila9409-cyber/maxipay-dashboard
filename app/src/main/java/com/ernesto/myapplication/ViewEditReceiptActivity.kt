@@ -103,8 +103,8 @@ class ViewEditReceiptActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        ReceiptSettings.setOnSettingsChangedListener(null)
         super.onDestroy()
-        ReceiptSettings.stopBusinessInfoSync()
     }
 
     override fun onSupportNavigateUp(): Boolean {

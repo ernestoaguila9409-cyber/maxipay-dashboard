@@ -56,26 +56,38 @@ object ReceiptLogoLoader {
         val flattened = flattenOnWhite(decoded)
         if (flattened !== decoded) decoded.recycle()
 
-        val scaled = if (flattened.width > maxWidthPx) {
-            val ratio = maxWidthPx.toFloat() / flattened.width
-            val newH = (flattened.height * ratio).toInt().coerceAtLeast(1)
-            Bitmap.createScaledBitmap(flattened, maxWidthPx, newH, true).also {
-                if (it !== flattened) flattened.recycle()
+        val scaled = when {
+            flattened.width > maxWidthPx -> {
+                val ratio = maxWidthPx.toFloat() / flattened.width
+                val newH = (flattened.height * ratio).toInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(flattened, maxWidthPx, newH, true).also {
+                    if (it !== flattened) flattened.recycle()
+                }
             }
-        } else {
-            flattened
+            flattened.width < maxWidthPx -> {
+                val ratio = maxWidthPx.toFloat() / flattened.width
+                val newH = (flattened.height * ratio).toInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(flattened, maxWidthPx, newH, true).also {
+                    if (it !== flattened) flattened.recycle()
+                }
+            }
+            else -> flattened
         }
 
-            cachedBitmap?.recycle()
-            cachedUrl = trimmed
-            cachedMaxWidthPx = maxWidthPx
-            cachedBitmap = scaled
-            cachedBase64 = null
+        cachedBitmap?.recycle()
+        cachedUrl = trimmed
+        cachedMaxWidthPx = maxWidthPx
+        cachedBitmap = scaled
+        cachedBase64 = null
         Log.d(TAG, "Logo ready: ${scaled.width}x${scaled.height}")
         return scaled
     }
 
-    fun downloadBase64Png(url: String, maxWidthPx: Int = MAX_LOGO_WIDTH_PX): String? {
+    fun downloadBase64Jpeg(
+        url: String,
+        maxWidthPx: Int = MAX_LOGO_WIDTH_PX,
+        quality: Int = 85,
+    ): String? {
         val trimmed = url.trim()
         if (trimmed.isEmpty()) return null
         if (trimmed == cachedUrl && maxWidthPx == cachedMaxWidthPx && cachedBase64 != null) {
@@ -83,13 +95,16 @@ object ReceiptLogoLoader {
         }
         val bitmap = downloadBitmap(trimmed, maxWidthPx) ?: return null
         val out = ByteArrayOutputStream()
-        // P8 / Kozen SDK accepts base64 in IMG; JPEG is smaller and avoids PNG alpha issues.
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(50, 100), out)
         val encoded = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
         cachedBase64 = encoded
-        Log.d(TAG, "Logo JPEG base64 encoded (${encoded.length} chars)")
+        Log.d(TAG, "Logo JPEG base64 encoded (${encoded.length} chars, q=$quality)")
         return encoded
     }
+
+    /** @deprecated Use [downloadBase64Jpeg] */
+    fun downloadBase64Png(url: String, maxWidthPx: Int = MAX_LOGO_WIDTH_PX): String? =
+        downloadBase64Jpeg(url, maxWidthPx)
 
     private fun downloadBytes(url: String): ByteArray? {
         if (url.contains("firebasestorage.googleapis.com") || url.contains("firebase")) {

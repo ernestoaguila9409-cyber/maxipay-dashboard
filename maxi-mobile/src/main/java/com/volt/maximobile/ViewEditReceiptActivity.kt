@@ -14,8 +14,11 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
+import com.volt.maximobile.dvpaylite.P8LogoHelper
 import com.volt.maximobile.dvpaylite.P8ReceiptPrinter
 import com.volt.maximobile.dvpaylite.P8ReceiptPrinter.ReceiptSegment
+import com.google.android.gms.tasks.Tasks
+import com.volt.shared.MerchantFirestore
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -46,17 +49,38 @@ class ViewEditReceiptActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "Receipt Settings"
 
+        val mid = PosDeviceIdentity.getMerchantId(this).trim()
+        if (mid.isNotEmpty()) {
+            MerchantFirestore.init(mid)
+        }
+
         settings = ReceiptSettings.load(this)
         bindViews()
         restoreInputs()
         updateLineLimitHints()
         setupListeners()
         startFirestoreSync()
+        refreshLogoFromFirestore()
+    }
+
+    /** One-shot pull so logoUrl from maxipaypos.com is on-device before printing. */
+    private fun refreshLogoFromFirestore() {
+        if (!MerchantFirestore.isInitialized) return
+        MerchantFirestore.doc("Settings", "businessInfo").get()
+            .addOnSuccessListener { snap ->
+                if (!snap.exists()) return@addOnSuccessListener
+                val url = snap.getString("logoUrl")?.trim().orEmpty()
+                if (url.isNotEmpty() && url != settings.logoUrl) {
+                    settings = settings.copy(logoUrl = url)
+                    ReceiptSettings.save(this, settings)
+                    P8LogoHelper.clearCache()
+                }
+            }
     }
 
     override fun onDestroy() {
+        ReceiptSettings.setOnSettingsChangedListener(null)
         super.onDestroy()
-        ReceiptSettings.stopBusinessInfoSync()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -324,19 +348,46 @@ class ViewEditReceiptActivity : AppCompatActivity() {
     }
 
     private fun printTestReceipt() {
+        settings = ReceiptSettings.load(this)
+        if (MerchantFirestore.isInitialized) {
+            try {
+                val snap = Tasks.await(MerchantFirestore.doc("Settings", "businessInfo").get())
+                val url = snap.getString("logoUrl")?.trim().orEmpty()
+                if (url.isNotEmpty()) {
+                    settings = settings.copy(logoUrl = url)
+                    ReceiptSettings.save(this, settings)
+                    P8LogoHelper.clearCache()
+                }
+            } catch (_: Exception) {
+                // Fall back to cached settings.
+            }
+        }
         P8ReceiptPrinter.init(applicationContext)
+
+        val logoUrl = settings.logoUrl.trim()
+        if (logoUrl.isEmpty()) {
+            Toast.makeText(
+                this,
+                "No logo on device. Upload and save on maxipaypos.com, then reopen this screen.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+
         P8ReceiptPrinter.printReceipt(
             segments = buildTestReceiptSegments(),
             settings = settings,
             onSuccess = {
-                runOnUiThread {
-                    Toast.makeText(this, "Test receipt printed", Toast.LENGTH_SHORT).show()
-                }
+                Toast.makeText(this, "Test receipt printed", Toast.LENGTH_SHORT).show()
             },
             onFailure = { msg ->
-                runOnUiThread {
-                    Toast.makeText(this, "Print failed: $msg", Toast.LENGTH_LONG).show()
-                }
+                Toast.makeText(this, "Print failed: $msg", Toast.LENGTH_LONG).show()
+            },
+            onLogoSkipped = { _ ->
+                Toast.makeText(
+                    this,
+                    "Receipt printed without logo (could not download image). Check Wi‑Fi.",
+                    Toast.LENGTH_LONG,
+                ).show()
             },
         )
     }

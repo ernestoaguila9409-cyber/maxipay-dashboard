@@ -122,6 +122,7 @@ object EscPosPrinter {
             var logoBitmap: Bitmap? = null
             if (settings != null && settings.showLogo && settings.logoUrl.isNotBlank()) {
                 val maxW = ReceiptSettings.landiLogoMaxWidthPx(settings.logoSize)
+                Log.d(TAG, "Receipt logo: logoSize=${settings.logoSize} maxWidthPx=$maxW")
                 logoBitmap = ReceiptLogoLoader.downloadBitmap(settings.logoUrl, maxW)
             }
 
