@@ -201,8 +201,9 @@ export default function CreateMerchantPage() {
             web dashboard (one URL, one deployed app). You do not enable features per merchant on this form.
             After you create the account, the owner gets the same capabilities as any other store— including
             menu import from Excel or picture, the Menu QR (view-only public menu with preview cart),
-            multi-select bulk actions on menu items (taxes, kitchen label, KDS, modifiers), and scanning
-            modifier lists from a picture on the Modifiers page—whenever those
+            receipt print settings (including Landi C20 Pro logo size), multi-select bulk actions on menu
+            items (taxes, kitchen label, KDS, modifiers), and scanning modifier lists from a picture on the
+            Modifiers page—whenever those
             exist in your <strong className="font-medium text-slate-500">current</strong> merchant dashboard
             deployment. Deploy the latest <code className="text-xs bg-slate-100 px-1 rounded">maxipay-dashboard</code>{" "}
             so all merchants, including new ones, receive updates.

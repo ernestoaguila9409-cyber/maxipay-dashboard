@@ -8,7 +8,10 @@ import {
   sendMerchantCreatedConfirmationEmail,
   sendMerchantWelcomeEmail,
 } from "@/lib/merchantWelcomeEmail";
-import { seedOnlineOrderingSettingsForNewMerchant } from "@/lib/seedMerchantDefaults";
+import {
+  seedOnlineOrderingSettingsForNewMerchant,
+  seedReceiptSettingsForNewMerchant,
+} from "@/lib/seedMerchantDefaults";
 import { syncSettingsBusinessInfoFromMerchant } from "@/lib/syncMerchantBusinessInfo";
 import { syncMerchantOwnerClaims } from "@/lib/syncMerchantOwnerClaims";
 
@@ -181,7 +184,8 @@ export async function POST(req: Request) {
     // The merchant web app (maxipay-dashboard) is ONE deployment for ALL merchants—admin does not
     // fork builds per store. New merchants get the same features once the hosted dashboard is current,
     // including Menu QR (view-only menu + preview cart, no checkout), menu import, modifiers, etc.
-    // We seed settings/onlineOrdering (slug) + settings/businessInfo so public menu links work immediately.
+    // We seed settings/onlineOrdering (slug), settings/businessInfo, and settings/receiptSettings
+    // (Landi logo size, print toggles, fonts) so POS + merchant dashboard work immediately.
     //
     // Schema contract (all merchants, including ones created here): links from a menu item to
     // modifier groups are stored on `Merchants/{merchantId}/MenuItems/{itemId}` as **modifierGroupIds**
@@ -229,6 +233,12 @@ export async function POST(req: Request) {
       await seedOnlineOrderingSettingsForNewMerchant(dbAdmin, merchantId, businessName);
     } catch (seedErr) {
       console.error("[merchants] settings/onlineOrdering seed failed:", seedErr);
+    }
+
+    try {
+      await seedReceiptSettingsForNewMerchant(dbAdmin, merchantId);
+    } catch (seedErr) {
+      console.error("[merchants] settings/receiptSettings seed failed:", seedErr);
     }
 
     const pay = body.payment;

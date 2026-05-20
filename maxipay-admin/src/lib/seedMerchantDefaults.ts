@@ -1,6 +1,34 @@
 import admin from "firebase-admin";
 
 const ONLINE_ORDERING_DOC = "onlineOrdering";
+const RECEIPT_SETTINGS_DOC = "receiptSettings";
+
+/**
+ * Default print/receipt options for new merchants.
+ * Keep in sync with `DEFAULT_PRINT` in maxipay-dashboard `settings/business/page.tsx`.
+ */
+export const DEFAULT_RECEIPT_SETTINGS: Record<string, boolean | number> = {
+  showServerName: true,
+  showDateTime: true,
+  showLogo: true,
+  /** Landi C20 Pro: 0 = Standard logo width, 1 = Large (full paper). */
+  logoSize: 0,
+  showEmail: false,
+  boldBizName: true,
+  boldAddress: false,
+  boldOrderInfo: true,
+  boldItems: false,
+  boldTotals: false,
+  boldGrandTotal: true,
+  boldFooter: false,
+  fontSizeBizName: 2,
+  fontSizeAddress: 2,
+  fontSizeOrderInfo: 2,
+  fontSizeItems: 0,
+  fontSizeTotals: 0,
+  fontSizeGrandTotal: 1,
+  fontSizeFooter: 0,
+};
 
 /** Same rules as maxipay-dashboard `slugify` — stable public menu URLs. */
 export function slugifyBusinessName(text: string): string {
@@ -67,4 +95,28 @@ export async function seedOnlineOrderingSettingsForNewMerchant(
     },
     { merge: true },
   );
+}
+
+/**
+ * Seeds `Merchants/{id}/settings/receiptSettings` so POS + merchant dashboard sync
+ * (logo size, show logo, fonts, etc.) without waiting for the owner to open Print Settings.
+ * Skips if the document already exists.
+ */
+export async function seedReceiptSettingsForNewMerchant(
+  db: admin.firestore.Firestore,
+  merchantId: string,
+): Promise<void> {
+  const ref = db
+    .collection("Merchants")
+    .doc(merchantId)
+    .collection("settings")
+    .doc(RECEIPT_SETTINGS_DOC);
+
+  const snap = await ref.get();
+  if (snap.exists) return;
+
+  await ref.set({
+    ...DEFAULT_RECEIPT_SETTINGS,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
 }
