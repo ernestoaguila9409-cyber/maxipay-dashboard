@@ -2747,36 +2747,44 @@ class OrderDetailActivity : AppCompatActivity() {
                 MerchantFirestore.col("Orders").document(orderId).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
                         val txId = saleTransactionId ?: ""
-                        val rs = ReceiptSettings.load(this)
-                        val signatureUrl = orderDoc.getString("signatureUrl")
                         if (txId.isNotBlank()) {
                             MerchantFirestore.col("Transactions").document(txId).get()
                                 .addOnSuccessListener { txDoc ->
                                     val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
-                                    val txStatus = txDoc?.getString("status")
-                                    val txVoided = txDoc?.getBoolean("voided") ?: false
-                                    printWithOptionalSignature(
-                                        buildOriginalSegments(orderDoc, itemsSnap.documents, payments, txStatus, txVoided),
-                                        rs,
-                                        signatureUrl
-                                    )
+                                    printOriginalOnP8(orderDoc, itemsSnap.documents, payments)
                                 }
                                 .addOnFailureListener {
-                                    printWithOptionalSignature(
-                                        buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()),
-                                        rs,
-                                        signatureUrl
-                                    )
+                                    printOriginalOnP8(orderDoc, itemsSnap.documents, emptyList())
                                 }
                         } else {
-                            printWithOptionalSignature(
-                                buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()),
-                                rs,
-                                signatureUrl
-                            )
+                            printOriginalOnP8(orderDoc, itemsSnap.documents, emptyList())
                         }
                     }
             }
+    }
+
+    private fun printOriginalOnP8(
+        orderDoc: DocumentSnapshot,
+        items: List<DocumentSnapshot>,
+        payments: List<Map<String, Any>>,
+    ) {
+        Toast.makeText(this, "Preparing receipt\u2026", Toast.LENGTH_SHORT).show()
+        CustomerReceiptPrint.printPaidOrder(
+            context = this,
+            orderDoc = orderDoc,
+            items = items,
+            payments = payments,
+            onSuccess = {
+                runOnUiThread {
+                    Toast.makeText(this, "Receipt printed", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onFailure = { msg ->
+                runOnUiThread {
+                    Toast.makeText(this, "Print failed: $msg", Toast.LENGTH_LONG).show()
+                }
+            },
+        )
     }
 
     private fun printWithOptionalSignature(

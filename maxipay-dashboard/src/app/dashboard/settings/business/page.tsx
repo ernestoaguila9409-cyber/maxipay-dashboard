@@ -633,6 +633,19 @@ export default function BusinessInformationPage() {
       await uploadBytes(storageRef, resizedBlob);
       const downloadURL = await getDownloadURL(storageRef);
       setData((prev) => ({ ...prev, logoUrl: downloadURL }));
+      const midNow = scopedMerchantId || merchantIdFromClaims;
+      if (midNow) {
+        await setDoc(
+          merchantDoc(midNow, DOC_REF, DOC_ID),
+          { logoUrl: downloadURL, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+        await setDoc(
+          merchantDoc(midNow, DOC_REF, "receiptSettings"),
+          { showLogo: true },
+          { merge: true }
+        );
+      }
       setDirty(true);
       closeModal();
     } catch {
@@ -640,12 +653,24 @@ export default function BusinessInformationPage() {
     } finally {
       setUploading(false);
     }
-  }, [resizedBlob, user]);
+  }, [resizedBlob, user, scopedMerchantId, merchantIdFromClaims]);
 
-  const handleRemoveLogo = useCallback(() => {
+  const handleRemoveLogo = useCallback(async () => {
     setData((prev) => ({ ...prev, logoUrl: "" }));
+    const midNow = scopedMerchantId || merchantIdFromClaims;
+    if (midNow) {
+      try {
+        await setDoc(
+          merchantDoc(midNow, DOC_REF, DOC_ID),
+          { logoUrl: "", updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+      } catch (e) {
+        console.error("[Business] remove logo save failed:", e);
+      }
+    }
     setDirty(true);
-  }, []);
+  }, [scopedMerchantId, merchantIdFromClaims]);
 
   const closeModal = useCallback(() => {
     setModalOpen(false);

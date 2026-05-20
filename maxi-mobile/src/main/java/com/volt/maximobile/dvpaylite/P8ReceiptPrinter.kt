@@ -12,7 +12,7 @@ import com.denovo.app.invokekozen.printer.models.PrintResult
  * built-in thermal printer. Accepts a list of [ReceiptSegment]s and converts
  * them to the XML format the SDK expects.
  *
- * XML tags: `<C>` center, `<L>` left, `<R>` right, `<B>` bold.
+ * XML tags: `<C>` center, `<L>` left, `<R>` right, `<B>` bold, `<IMG>` base64 image.
  * Paper width: 24 characters per line.
  */
 object P8ReceiptPrinter {
@@ -23,10 +23,14 @@ object P8ReceiptPrinter {
     private var printApp: IntentPrintApplication? = null
 
     data class ReceiptSegment(
-        val text: String,
+        val text: String = "",
         val bold: Boolean = false,
         val centered: Boolean = false,
-    )
+        /** When set, segment is sent as `<IMG>base64</IMG>` (Dejavoo Printer SDK). */
+        val imageBase64: String? = null,
+    ) {
+        val isImage: Boolean get() = !imageBase64.isNullOrBlank()
+    }
 
     fun init(ctx: Context) {
         if (printApp == null) {
@@ -34,10 +38,45 @@ object P8ReceiptPrinter {
         }
     }
 
+    /**
+     * Prints [segments], optionally prepending the merchant logo when
+     * [settings] has a [com.volt.maximobile.ReceiptSettings.logoUrl] (synced from maxipaypos.com).
+     */
     fun printReceipt(
         segments: List<ReceiptSegment>,
+        settings: com.volt.maximobile.ReceiptSettings? = null,
         onSuccess: (() -> Unit)? = null,
         onFailure: ((String) -> Unit)? = null,
+    ) {
+        if (settings != null && shouldPrintLogo(settings)) {
+            Thread {
+                val withLogo = prependLogoSegments(segments, settings)
+                printReceipt(withLogo, null, onSuccess, onFailure)
+            }.start()
+            return
+        }
+        printReceiptInternal(segments, onSuccess, onFailure)
+    }
+
+    private fun shouldPrintLogo(settings: com.volt.maximobile.ReceiptSettings): Boolean =
+        settings.logoUrl.isNotBlank()
+
+    private fun prependLogoSegments(
+        segments: List<ReceiptSegment>,
+        settings: com.volt.maximobile.ReceiptSettings,
+    ): List<ReceiptSegment> {
+        val logoSeg = P8LogoHelper.loadLogoSegment(settings.logoUrl)
+        if (logoSeg == null) {
+            Log.w(TAG, "Logo URL is set but image could not be downloaded for P8 print")
+            return segments
+        }
+        return listOf(logoSeg, ReceiptSegment(""), ReceiptSegment("")) + segments
+    }
+
+    private fun printReceiptInternal(
+        segments: List<ReceiptSegment>,
+        onSuccess: (() -> Unit)?,
+        onFailure: ((String) -> Unit)?,
     ) {
         val app = printApp ?: run {
             onFailure?.invoke("Printer not initialized")
@@ -67,6 +106,10 @@ object P8ReceiptPrinter {
         val sb = StringBuilder()
         sb.append("<request><printer width=\"24\">")
         for (seg in segments) {
+            if (seg.isImage) {
+                sb.append("<IMG>").append(seg.imageBase64).append("</IMG>")
+                continue
+            }
             val escaped = escapeXml(seg.text)
             when {
                 seg.bold && seg.centered -> sb.append("<B><C>").append(escaped).append("</C></B>")

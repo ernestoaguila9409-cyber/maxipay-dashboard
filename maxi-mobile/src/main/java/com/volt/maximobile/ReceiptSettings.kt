@@ -7,6 +7,8 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
+import com.volt.maximobile.dvpaylite.P8LogoHelper
+import com.volt.shared.receipt.ReceiptLogoLoader
 
 const val LINE_WIDTH = 48
 const val LINE_WIDTH_WIDE = 24
@@ -270,6 +272,11 @@ data class ReceiptSettings(
                     }
 
                     val current = load(context)
+                    if (logoUrl != current.logoUrl) {
+                        ReceiptLogoLoader.onLogoUrlChanged(logoUrl, current.logoUrl)
+                        P8LogoHelper.clearCache()
+                        EscPosPrinter.clearLogoCache()
+                    }
                     val updated = current.copy(
                         businessName = bizName.ifEmpty { current.businessName },
                         addressText = addressBlock.ifEmpty { current.addressText },

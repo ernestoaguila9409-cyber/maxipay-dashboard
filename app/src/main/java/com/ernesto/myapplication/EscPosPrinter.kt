@@ -20,6 +20,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import com.volt.shared.receipt.ReceiptLogoLoader
 import java.util.concurrent.TimeUnit
 
 object EscPosPrinter {
@@ -40,16 +41,7 @@ object EscPosPrinter {
     private val LF           = byteArrayOf(0x0A)
     private val CUT          = byteArrayOf(0x1D, 0x56, 0x00)
 
-    // ── Logo cache ────────────────────────────────────────────────
-
-    private var cachedLogoUrl: String = ""
-    private var cachedLogoBitmap: Bitmap? = null
-
-    fun clearLogoCache() {
-        cachedLogoBitmap?.recycle()
-        cachedLogoBitmap = null
-        cachedLogoUrl = ""
-    }
+    fun clearLogoCache() = ReceiptLogoLoader.clearCache()
 
     // ── Segment model ─────────────────────────────────────────────
 
@@ -128,8 +120,8 @@ object EscPosPrinter {
 
         Thread {
             var logoBitmap: Bitmap? = null
-            if (settings != null && settings.showLogo && settings.logoUrl.isNotBlank()) {
-                logoBitmap = downloadLogo(settings.logoUrl)
+            if (settings != null && settings.logoUrl.isNotBlank()) {
+                logoBitmap = ReceiptLogoLoader.downloadBitmap(settings.logoUrl, PRINTER_WIDTH_PX / 2)
             }
 
             val payload = try {
@@ -567,46 +559,6 @@ object EscPosPrinter {
         segs += Segment("Thank you for dining with us!", bold = bf, fontSize = ff, centered = true)
 
         return segs
-    }
-
-    // ── Logo download + cache ─────────────────────────────────────
-
-    private fun downloadLogo(url: String): Bitmap? {
-        if (url == cachedLogoUrl && cachedLogoBitmap != null) {
-            Log.d(TAG, "Using cached logo bitmap")
-            return cachedLogoBitmap
-        }
-        return try {
-            Log.d(TAG, "Downloading logo: $url")
-            val client = OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(10, TimeUnit.SECONDS)
-                .build()
-            val request = Request.Builder().url(url).build()
-            val response = client.newCall(request).execute()
-            val bytes = response.body?.bytes() ?: return null
-            val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
-
-            val maxW = PRINTER_WIDTH_PX / 2
-            val scaled = if (original.width > maxW) {
-                val ratio = maxW.toFloat() / original.width
-                val newH = (original.height * ratio).toInt()
-                Bitmap.createScaledBitmap(original, maxW, newH, true).also {
-                    if (it !== original) original.recycle()
-                }
-            } else {
-                original
-            }
-
-            cachedLogoBitmap?.recycle()
-            cachedLogoUrl = url
-            cachedLogoBitmap = scaled
-            Log.d(TAG, "Logo ready: ${scaled.width}x${scaled.height}")
-            scaled
-        } catch (e: Exception) {
-            Log.e(TAG, "Logo download failed: ${e.message}", e)
-            null
-        }
     }
 
     // ── ESC/POS raster image (GS v 0) ────────────────────────────

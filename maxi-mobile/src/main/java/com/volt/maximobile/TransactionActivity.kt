@@ -844,34 +844,18 @@ class TransactionActivity : AppCompatActivity() {
                 }
                 MerchantFirestore.col("Orders").document(orderId).collection("items").get()
                     .addOnSuccessListener { itemsSnap ->
-                        val rs = ReceiptSettings.load(this)
-                        val signatureUrl = orderDoc.getString("signatureUrl")
                         val txId = orderDoc.getString("saleTransactionId") ?: saleTransactionId
                         if (txId.isNotBlank()) {
                             MerchantFirestore.col("Transactions").document(txId).get()
                                 .addOnSuccessListener { txDoc ->
                                     val payments = txDoc?.get("payments") as? List<Map<String, Any>> ?: emptyList()
-                                    val txStatus = txDoc?.getString("status")
-                                    val txVoided = txDoc?.getBoolean("voided") ?: false
-                                    printWithOptionalSignature(
-                                        buildOriginalSegments(orderDoc, itemsSnap.documents, payments, txStatus, txVoided),
-                                        rs,
-                                        signatureUrl
-                                    )
+                                    printOriginalOnP8(orderDoc, itemsSnap.documents, payments)
                                 }
                                 .addOnFailureListener {
-                                    printWithOptionalSignature(
-                                        buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()),
-                                        rs,
-                                        signatureUrl
-                                    )
+                                    printOriginalOnP8(orderDoc, itemsSnap.documents, emptyList())
                                 }
                         } else {
-                            printWithOptionalSignature(
-                                buildOriginalSegments(orderDoc, itemsSnap.documents, emptyList()),
-                                rs,
-                                signatureUrl
-                            )
+                            printOriginalOnP8(orderDoc, itemsSnap.documents, emptyList())
                         }
                     }
                     .addOnFailureListener {
@@ -881,6 +865,19 @@ class TransactionActivity : AppCompatActivity() {
             .addOnFailureListener {
                 Toast.makeText(this, "Failed to load order", Toast.LENGTH_SHORT).show()
             }
+    }
+
+    private fun printOriginalOnP8(
+        orderDoc: com.google.firebase.firestore.DocumentSnapshot,
+        items: List<com.google.firebase.firestore.DocumentSnapshot>,
+        payments: List<Map<String, Any>>,
+    ) {
+        CustomerReceiptPrint.printPaidOrder(
+            context = this,
+            orderDoc = orderDoc,
+            items = items,
+            payments = payments,
+        )
     }
 
     private fun printWithOptionalSignature(

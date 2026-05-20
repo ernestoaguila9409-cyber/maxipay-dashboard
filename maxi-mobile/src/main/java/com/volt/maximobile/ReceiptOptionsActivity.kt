@@ -283,9 +283,11 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         items: List<com.google.firebase.firestore.DocumentSnapshot>,
         payments: List<Map<String, Any>>,
     ) {
-        val segments = MaxiReceiptBuilder.buildFromPaidOrder(this, orderDoc, items, payments)
-        P8ReceiptPrinter.printReceipt(
-            segments,
+        CustomerReceiptPrint.printPaidOrder(
+            context = this,
+            orderDoc = orderDoc,
+            items = items,
+            payments = payments,
             onSuccess = { runOnUiThread { goToMainScreen() } },
             onFailure = { msg ->
                 runOnUiThread {
