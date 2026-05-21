@@ -314,9 +314,22 @@ export default function PaymentsAndDevicesPage() {
   useEffect(() => {
     if (!addModalOpen || !activationCode) return;
     const ref = merchantDoc(merchantId, DEVICE_ACTIVATIONS_COLLECTION, activationCode);
-    const unsub = onSnapshot(ref, (snap) => {
+    const unsub = onSnapshot(ref, async (snap) => {
       if (!snap.exists()) return;
-      if (snap.get("consumed") === true) resetAddModal();
+      if (snap.get("consumed") !== true) return;
+      const installationId = String(snap.get("installationId") ?? "").trim();
+      const name = String(snap.get("displayName") ?? "").trim();
+      if (installationId && name) {
+        try {
+          await updateDoc(
+            merchantDoc(merchantId, POS_DEVICES_COLLECTION, installationId),
+            { displayName: name }
+          );
+        } catch (e) {
+          console.error("Failed to set device displayName:", e);
+        }
+      }
+      resetAddModal();
     }, (e) => console.error("activation code listen:", e));
     return () => unsub();
   }, [addModalOpen, activationCode, merchantId]);
