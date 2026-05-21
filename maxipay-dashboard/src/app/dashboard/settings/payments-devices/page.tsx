@@ -55,6 +55,7 @@ interface TerminalRow extends PaymentTerminalDoc {
 
 interface PosDeviceRow {
   id: string;
+  displayName: string;
   platform: string;
   deviceModel: string;
   osVersion: string;
@@ -129,6 +130,7 @@ function parseDevice(id: string, data: Record<string, unknown>): PosDeviceRow {
   const deactivated = data.deactivated === true;
   return {
     id,
+    displayName: String(data.displayName ?? "").trim(),
     platform: String(data.platform ?? "").trim() || "—",
     deviceModel: String(data.deviceModel ?? "").trim() || "Unknown device",
     osVersion: String(data.osVersion ?? "").trim() || "—",
@@ -139,7 +141,7 @@ function parseDevice(id: string, data: Record<string, unknown>): PosDeviceRow {
   };
 }
 
-async function createDeviceActivationCode(merchantId: string): Promise<{ code: string; expiresAtMs: number }> {
+async function createDeviceActivationCode(merchantId: string, displayName = ""): Promise<{ code: string; expiresAtMs: number }> {
   const ttl = DEVICE_ACTIVATION_TTL_MS;
   for (let attempt = 0; attempt < 12; attempt++) {
     const code = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
@@ -147,7 +149,7 @@ async function createDeviceActivationCode(merchantId: string): Promise<{ code: s
     const existing = await getDoc(ref);
     if (existing.exists()) continue;
     const expiresAtMs = Date.now() + ttl;
-    await setDoc(ref, { code, createdAt: serverTimestamp(), expiresAt: Timestamp.fromMillis(expiresAtMs), consumed: false });
+    await setDoc(ref, { code, createdAt: serverTimestamp(), expiresAt: Timestamp.fromMillis(expiresAtMs), consumed: false, displayName: displayName || "" });
     return { code, expiresAtMs };
   }
   throw new Error("Could not generate a unique code. Try again.");
@@ -408,7 +410,7 @@ export default function PaymentsAndDevicesPage() {
     setCreatingCode(true);
     setFormError(null);
     try {
-      const { code, expiresAtMs } = await createDeviceActivationCode(merchantId);
+      const { code, expiresAtMs } = await createDeviceActivationCode(merchantId, terminalName.trim());
       setActivationCode(code);
       setActivationExpiresAtMs(expiresAtMs);
       setAddStep("code");
@@ -535,9 +537,9 @@ export default function PaymentsAndDevicesPage() {
                           </span>
                         </td>
                         <td className="px-5 py-3.5">
-                          <div className="font-medium text-slate-800">{d.deviceModel}</div>
-                          <div className="text-xs text-slate-400 font-mono truncate max-w-[220px]" title={d.id}>
-                            {d.id.length > 18 ? `${d.id.slice(0, 8)}…${d.id.slice(-6)}` : d.id}
+                          <div className="font-medium text-slate-800">{d.displayName || d.deviceModel}</div>
+                          <div className="text-xs text-slate-400">
+                            {d.displayName ? d.deviceModel : (d.id.length > 18 ? `${d.id.slice(0, 8)}…${d.id.slice(-6)}` : d.id)}
                           </div>
                         </td>
                         <td className="px-5 py-3.5">
@@ -735,7 +737,7 @@ export default function PaymentsAndDevicesPage() {
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6">
             <h3 className="text-lg font-semibold text-slate-800">Deactivate this device?</h3>
             <p className="text-sm text-slate-600 mt-2">
-              <span className="font-medium text-slate-800">{confirmDeactivate.deviceModel}</span> will be sent to the activation screen and must enter a new code before the POS can be used again.
+              <span className="font-medium text-slate-800">{confirmDeactivate.displayName || confirmDeactivate.deviceModel}</span> will be sent to the activation screen and must enter a new code before the POS can be used again.
             </p>
             <div className="mt-6 flex gap-2 justify-end">
               <button type="button" onClick={() => setConfirmDeactivate(null)} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>

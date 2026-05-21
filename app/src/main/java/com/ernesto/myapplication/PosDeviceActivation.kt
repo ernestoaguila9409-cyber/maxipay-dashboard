@@ -141,6 +141,8 @@ object PosDeviceActivation {
                         return@resolveInstallationDocId
                     }
 
+                    val dashboardName = actDoc.getString("displayName")?.trim().orEmpty()
+
                     db.runTransaction { tx ->
                         val freshSnap = tx.get(actRef)
                         if (!freshSnap.exists()) throw Exception(ERR_NO_DOC)
@@ -161,6 +163,9 @@ object PosDeviceActivation {
                             "lastSeen" to FieldValue.serverTimestamp(),
                             "updatedAt" to FieldValue.serverTimestamp(),
                         )
+                        if (dashboardName.isNotEmpty()) {
+                            devicePayload["displayName"] = dashboardName
+                        }
                         tx.set(devRef, devicePayload, SetOptions.merge())
                         tx.update(actRef, mapOf(
                             "consumed" to true,

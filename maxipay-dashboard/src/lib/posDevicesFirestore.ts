@@ -24,8 +24,8 @@ export function parsePosDeviceOption(
   data: Record<string, unknown>
 ): PosDeviceOption {
   const deactivated = data.deactivated === true;
+  const displayName = String(data.displayName ?? "").trim();
   const model = String(data.deviceModel ?? "").trim() || "Unknown device";
-  const platform = String(data.platform ?? "").trim();
-  const label = platform ? `${model} (${platform})` : model;
+  const label = displayName || model;
   return { id, label, deactivated };
 }
