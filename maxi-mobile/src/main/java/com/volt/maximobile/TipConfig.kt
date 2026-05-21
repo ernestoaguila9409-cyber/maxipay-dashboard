@@ -7,6 +7,13 @@ object TipConfig {
     /** Set on [android.content.Intent] from [TipActivity] → [PaymentActivity] so payment does not loop back to tips. */
     const val EXTRA_FROM_TIP_SCREEN = "FROM_TIP_SCREEN"
 
+    /** After tip selection: [AFTER_TIP_PAYMENT] (default) or [AFTER_TIP_CAPTURE] for bar-tab capture. */
+    const val EXTRA_AFTER_TIP_ACTION = "AFTER_TIP_ACTION"
+    const val AFTER_TIP_PAYMENT = "PAYMENT"
+    const val AFTER_TIP_CAPTURE = "CAPTURE"
+    /** Compose checkout: return to payment-type screen after tip, do not open [PaymentActivity] yet. */
+    const val AFTER_TIP_CHECKOUT = "CHECKOUT_COMPOSE"
+
     private const val PREFS_NAME = "tip_config"
     private const val KEY_TIPS_ENABLED = "tips_enabled"
     private const val KEY_CUSTOM_TIP_ENABLED = "custom_tip_enabled"

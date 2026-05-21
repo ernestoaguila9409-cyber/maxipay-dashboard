@@ -13,12 +13,11 @@ class SideMenuActivity : AppCompatActivity() {
         // If we came here from an OPEN order "Checkout", forward to the menu/cart screen
         val orderIdFromDetail = intent.getStringExtra("ORDER_ID")
         if (!orderIdFromDetail.isNullOrBlank()) {
-            val i = Intent(this, MainActivity::class.java) // <-- this is your 2nd picture screen in most setups
-            i.putExtra("ORDER_ID", orderIdFromDetail)
-            i.putExtra("employeeName", intent.getStringExtra("employeeName"))
-            i.putExtra("employeeRole", intent.getStringExtra("employeeRole"))
-            // Optional: tell MainActivity we're editing an existing order
-            i.putExtra("MODE", "EDIT_ORDER")
+            val i = Intent(this, MainActivity::class.java).apply {
+                putExtra(MainActivity.EXTRA_ORDER_ID, orderIdFromDetail)
+                putExtra("employeeName", intent.getStringExtra("employeeName"))
+                putExtra("employeeRole", intent.getStringExtra("employeeRole"))
+            }
             startActivity(i)
             finish()
             return

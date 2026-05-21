@@ -17,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -37,14 +36,13 @@ private val SurfaceLight = Color(0xFFF5F6F8)
 private val DividerColor = Color(0xFFE0E0E0)
 private val TextSecondary = Color(0xFF757575)
 private val CardSurface = Color.White
-private val PanelDark = Color(0xFF2D1F4E)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MaxiCheckoutScreen(
     cart: List<CartLine>,
     taxes: List<OrderTaxRule>,
     orderChannelLabel: String,
+    tipCents: Long = 0L,
     busy: Boolean,
     statusMessage: String?,
     creditEnabled: Boolean = true,
@@ -66,7 +64,8 @@ fun MaxiCheckoutScreen(
     }
     val taxBreakdown = OrderTaxCalculator.computeBreakdown(taxLines, taxes)
     val taxTotalCents = OrderTaxCalculator.taxTotalCents(taxBreakdown)
-    val totalCents = subtotalCents + taxTotalCents
+    val tipAmountCents = tipCents.coerceAtLeast(0L)
+    val totalCents = subtotalCents + taxTotalCents + tipAmountCents
 
     Box(
         modifier = Modifier
@@ -75,7 +74,17 @@ fun MaxiCheckoutScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             TopAppBar(
-                title = { Text("Checkout", fontWeight = FontWeight.Bold) },
+                title = {
+                    Column {
+                        Text("Checkout", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text(
+                            formatCents(totalCents),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 22.sp,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack, enabled = !busy) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -95,10 +104,15 @@ fun MaxiCheckoutScreen(
                     .padding(horizontal = 16.dp),
             ) {
                 Spacer(Modifier.height(16.dp))
-                OrderSummaryCard(cart, subtotalCents, taxBreakdown, taxTotalCents, totalCents)
+                OrderSummaryCard(
+                    cart = cart,
+                    subtotalCents = subtotalCents,
+                    taxBreakdown = taxBreakdown,
+                    taxTotalCents = taxTotalCents,
+                    tipCents = tipAmountCents,
+                    totalCents = totalCents,
+                )
                 Spacer(Modifier.height(20.dp))
-                AmountDueBlock(totalCents)
-                Spacer(Modifier.height(24.dp))
                 PaymentMethodsSection(
                     creditEnabled = creditEnabled,
                     debitEnabled = debitEnabled,
@@ -162,6 +176,7 @@ private fun OrderSummaryCard(
     subtotalCents: Long,
     taxBreakdown: List<OrderTaxBreakdownEntry>,
     taxTotalCents: Long,
+    tipCents: Long,
     totalCents: Long,
 ) {
     Surface(
@@ -188,21 +203,22 @@ private fun OrderSummaryCard(
                     valueColor = TextSecondary,
                 )
             }
-            if (taxTotalCents > 0) {
-                Spacer(Modifier.height(6.dp))
-                HorizontalDivider(color = DividerColor)
-                Spacer(Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("Total", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text(
-                        formatCents(totalCents),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                    )
-                }
+            if (tipCents > 0L) {
+                SummaryRow("Tip", formatCents(tipCents))
+            }
+            Spacer(Modifier.height(6.dp))
+            HorizontalDivider(color = DividerColor)
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("Total", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(
+                    formatCents(totalCents),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                )
             }
         }
     }
@@ -237,14 +253,7 @@ private fun CheckoutCartLineRow(line: CartLine) {
                 color = Color(0xFF424242),
             )
         }
-        if (line.modifiers.isEmpty()) {
-            Text(
-                CartLineDisplay.formatMoney(line.basePriceDollars) + " each",
-                fontSize = 12.sp,
-                color = TextSecondary,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        } else {
+        if (line.modifiers.isNotEmpty()) {
             Text(
                 CartLineDisplay.formatMoney(line.basePriceDollars),
                 fontSize = 12.sp,
@@ -253,7 +262,7 @@ private fun CheckoutCartLineRow(line: CartLine) {
             )
             CheckoutModifierRows(line.modifiers, indentLevel = 1)
             Text(
-                "Subtotal: ${CartLineDisplay.formatMoney(line.unitPriceDollars)} each",
+                "Subtotal: ${CartLineDisplay.formatMoney(line.unitPriceDollars)}",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 color = TextSecondary,
@@ -299,37 +308,6 @@ private fun SummaryRow(label: String, value: String, valueColor: Color = Color(0
     ) {
         Text(label, fontSize = 13.sp, color = TextSecondary)
         Text(value, fontSize = 13.sp, color = valueColor)
-    }
-}
-
-@Composable
-private fun AmountDueBlock(totalCents: Long) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(PanelDark)
-            .padding(horizontal = 20.dp, vertical = 18.dp),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                "AMOUNT DUE",
-                fontSize = 11.sp,
-                letterSpacing = 1.5.sp,
-                color = Color(0xFFB0A3D4),
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                formatCents(totalCents),
-                fontSize = 34.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-            )
-        }
     }
 }
 

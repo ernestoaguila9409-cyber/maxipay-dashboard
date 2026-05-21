@@ -39,6 +39,11 @@ import com.volt.shared.engine.SplitReceiptReprintHelper
 import com.volt.maximobile.SessionEmployee
 import com.volt.maximobile.payments.SpinGatewayP
 import com.volt.maximobile.payments.TransactionVoidReferenceResolver
+import com.volt.maximobile.dvpaylite.DvPayLiteClient
+import com.volt.maximobile.payments.DvPayLitePaymentGateway
+import com.volt.shared.payments.PaymentCallback
+import com.volt.shared.payments.PaymentResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.google.firebase.Timestamp
 import java.text.SimpleDateFormat
 
@@ -63,6 +68,12 @@ class TransactionActivity : AppCompatActivity() {
 
     private val voidSequenceHandler = Handler(Looper.getMainLooper())
 
+    private val dvpayLiteLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            DvPayLiteClient.handleResult(result)
+        }
+    private val dvpayLiteGateway by lazy { DvPayLitePaymentGateway(dvpayLiteLauncher) }
+
     private enum class ReceiptContentType { ORIGINAL, REFUND, VOID }
 
     private sealed class OriginalPrintSplitChoice {
@@ -85,6 +96,7 @@ class TransactionActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_transaction)
+        DvPayLiteClient.init(this)
 
         currentTransactionView = intent.getBooleanExtra("CURRENT_TRANSACTION", false)
         showUnsettledAndTodayRefunds = intent.getBooleanExtra("SHOW_UNSETTLED_AND_TODAY_REFUNDS", false)
@@ -701,7 +713,8 @@ class TransactionActivity : AppCompatActivity() {
     private fun sendTypedReceiptEmail(email: String, orderId: String, cloudFunction: String, transactionId: String) {
         val data = hashMapOf<String, Any>(
             "email" to email,
-            "orderId" to orderId
+            "orderId" to orderId,
+            "merchantId" to MerchantFirestore.merchantId
         )
         if (transactionId.isNotBlank()) data["transactionId"] = transactionId
 
@@ -1784,7 +1797,7 @@ class TransactionActivity : AppCompatActivity() {
 
     private fun voidLegLabel(payment: TransactionPayment, index: Int, legCount: Int): String {
         val last4 = payment.last4.trim().ifBlank { "????" }
-        return "Card ${index + 1} of $legCount (••••$last4)"
+        return "Card ${index + 1} of $legCount (ï¿½ï¿½ï¿½ï¿½$last4)"
     }
 
     private fun sendVoidRequestForOnePayment(
@@ -1811,58 +1824,48 @@ class TransactionActivity : AppCompatActivity() {
             ).show()
             return
         }
-        SpinGatewayP.enqueueVoidPayment(this, payment, refId, readTimeoutSeconds = 180) { result ->
-            runOnUiThread {
-                if (result.networkError != null) {
-                    val partial = if (index > 0) {
-                        "\nEarlier card leg(s) may already be voided on the host—check the terminal or batch before retrying."
-                    } else {
-                        ""
-                    }
-                    Toast.makeText(
-                        this@TransactionActivity,
-                        "VOID failed ($leg): ${result.networkError}$partial",
-                        Toast.LENGTH_LONG,
-                    ).show()
-                    return@runOnUiThread
-                }
-                val responseText = result.responseBody
-                Log.d("TX_API", "[VOID] HTTP ${result.httpCode} Response: $responseText")
-                if (!result.hostApproved) {
-                    val reason = SpinGatewayP.voidDeclineMessage(responseText)
-                    if (isHostBusyVoidMessage(reason) && busyRetryOnLeg < VOID_BUSY_MAX_RETRIES) {
-                        val waitMs = VOID_BUSY_RETRY_BASE_MS * (busyRetryOnLeg + 1)
-                        Toast.makeText(
-                            this@TransactionActivity,
-                            "$leg\nHost busy (${reason.trim()}). Retrying in ${waitMs / 1000}s (${busyRetryOnLeg + 1}/$VOID_BUSY_MAX_RETRIES)…",
-                            Toast.LENGTH_SHORT,
-                        ).show()
+        dvpayLiteGateway.void(refId, object : PaymentCallback {
+            override fun onApproved(result: PaymentResult) {
+                runOnUiThread {
+                    val hasMoreLegs = index + 1 < cardPayments.size
+                    if (hasMoreLegs) {
                         voidSequenceHandler.postDelayed(
-                            { voidCardPaymentsSequentially(txDocId, cardPayments, index, busyRetryOnLeg + 1) },
-                            waitMs,
+                            { voidCardPaymentsSequentially(txDocId, cardPayments, index + 1, 0) },
+                            VOID_GAP_BETWEEN_LEGS_MS,
                         )
-                        return@runOnUiThread
+                    } else {
+                        voidCardPaymentsSequentially(txDocId, cardPayments, index + 1, 0)
                     }
-                    val base = if (reason.isNotBlank()) "VOID declined: $reason" else "VOID declined"
+                }
+            }
+
+            override fun onDeclined(result: PaymentResult) {
+                runOnUiThread {
+                    val reason = result.declineReason.ifBlank { "VOID declined" }
                     val partial = if (index > 0) {
                         "\n\nEarlier leg(s) may already be voided on the host. Check the terminal, then re-open Transactions or use your processor portal if the app state does not match."
                     } else {
                         ""
                     }
-                    Toast.makeText(this@TransactionActivity, "$leg\n$base$partial", Toast.LENGTH_LONG).show()
-                    return@runOnUiThread
-                }
-                val hasMoreLegs = index + 1 < cardPayments.size
-                if (hasMoreLegs) {
-                    voidSequenceHandler.postDelayed(
-                        { voidCardPaymentsSequentially(txDocId, cardPayments, index + 1, 0) },
-                        VOID_GAP_BETWEEN_LEGS_MS,
-                    )
-                } else {
-                    voidCardPaymentsSequentially(txDocId, cardPayments, index + 1, 0)
+                    Toast.makeText(this@TransactionActivity, "$leg\n$reason$partial", Toast.LENGTH_LONG).show()
                 }
             }
-        }
+
+            override fun onError(message: String) {
+                runOnUiThread {
+                    val partial = if (index > 0) {
+                        "\nEarlier card leg(s) may already be voided on the host -- check the terminal or batch before retrying."
+                    } else {
+                        ""
+                    }
+                    Toast.makeText(
+                        this@TransactionActivity,
+                        "VOID failed ($leg): $message$partial",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        })
     }
 
     private fun doFinalVoidUpdate(txDocId: String, onComplete: ((orderId: String) -> Unit)? = null) {
@@ -2084,7 +2087,7 @@ class TransactionActivity : AppCompatActivity() {
                     } else {
                         Toast.makeText(
                             this,
-                            "No order linked — use the card terminal for this refund.",
+                            "No order linked ï¿½ use the card terminal for this refund.",
                             Toast.LENGTH_LONG,
                         ).show()
                         runTerminalRefund()
@@ -2134,10 +2137,11 @@ class TransactionActivity : AppCompatActivity() {
             "transactionId" to transactionId,
             "orderId" to orderId,
             "amountInCents" to amountInCents,
+            "merchantId" to MerchantFirestore.merchantId,
         )
         resolvePosRefundedBy().takeIf { it.isNotBlank() }?.let { data["posRefundedBy"] = it }
 
-        Toast.makeText(this, "Processing server refund…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Processing server refundï¿½", Toast.LENGTH_SHORT).show()
         FirebaseFunctions.getInstance()
             .getHttpsCallable("processServerRefund")
             .call(data)
@@ -2399,7 +2403,7 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun sendReceiptEmail(email: String, orderId: String) {
-        val data = hashMapOf("email" to email, "orderId" to orderId)
+        val data = hashMapOf("email" to email, "orderId" to orderId, "merchantId" to MerchantFirestore.merchantId)
 
         FirebaseFunctions.getInstance()
             .getHttpsCallable("sendReceiptEmail")

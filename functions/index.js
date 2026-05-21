@@ -14,9 +14,7 @@ const QBO_CLIENT_ID = defineSecret("QBO_CLIENT_ID");
 const QBO_CLIENT_SECRET = defineSecret("QBO_CLIENT_SECRET");
 const QBO_SECRETS = [QBO_CLIENT_ID, QBO_CLIENT_SECRET];
 
-/** Receipt + void/refund email callables (Resend). Bind secret or process.env stays empty in production. */
 const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
-const RESEND_CALLABLE_OPTS = { secrets: [RESEND_API_KEY] };
 
 exports.startQBOAuth = onRequest(
   { secrets: QBO_SECRETS, maxInstances: 5 },
@@ -187,14 +185,7 @@ exports.qboRetrySync = onRequest(
  * See functions/README.md.
  */
 function getResendApiKey() {
-  let k = process.env.RESEND_API_KEY;
-  if (!k || !String(k).trim()) {
-    try {
-      k = RESEND_API_KEY.value();
-    } catch (_) {
-      /* secret not bound on this function */
-    }
-  }
+  const k = process.env.RESEND_API_KEY;
   return k && String(k).trim() ? String(k).trim() : null;
 }
 
@@ -1387,7 +1378,7 @@ async function composeRefundReceiptWrappedHtml(db, merchantId, orderId, transact
 // 1. Standard Receipt
 // ---------------------------------------------------------------------------
 
-exports.sendReceiptEmail = onCall(RESEND_CALLABLE_OPTS, async (request) => {
+exports.sendReceiptEmail = onCall({ secrets: [RESEND_API_KEY], invoker: "public" }, async (request) => {
   const { email, orderId, splitReceipt } = request.data || {};
 
   if (!email || !orderId) {
@@ -1477,7 +1468,7 @@ exports.sendReceiptEmail = onCall(RESEND_CALLABLE_OPTS, async (request) => {
 // 2. Void Receipt
 // ---------------------------------------------------------------------------
 
-exports.sendVoidReceiptEmail = onCall(RESEND_CALLABLE_OPTS, async (request) => {
+exports.sendVoidReceiptEmail = onCall({ secrets: [RESEND_API_KEY], invoker: "public" }, async (request) => {
   const { email, orderId } = request.data || {};
 
   if (!email || !orderId) {
@@ -1531,7 +1522,7 @@ exports.sendVoidReceiptEmail = onCall(RESEND_CALLABLE_OPTS, async (request) => {
 // 3. Refund Receipt
 // ---------------------------------------------------------------------------
 
-exports.sendRefundReceiptEmail = onCall(RESEND_CALLABLE_OPTS, async (request) => {
+exports.sendRefundReceiptEmail = onCall({ secrets: [RESEND_API_KEY], invoker: "public" }, async (request) => {
   try {
     const { email, orderId, transactionId } = request.data || {};
 
@@ -2623,7 +2614,7 @@ exports.processServerVoid = onCall(async (request) => {
   if (!cardLeg) {
     return {
       success: false,
-      error: "No processor reference (RRN) found on this transaction. Cannot void server-side.",
+      error: "No processor reference (RRN) found on this transaction. Please void from the POS Transactions screen on the terminal device.",
     };
   }
   const rrn = String(cardLeg.pnReferenceId || cardLeg.PNReferenceId || "").trim();

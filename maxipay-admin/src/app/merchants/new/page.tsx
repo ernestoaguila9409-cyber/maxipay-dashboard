@@ -97,6 +97,7 @@ export default function CreateMerchantPage() {
         ownerLastName: form.ownerLastName,
         email: form.email,
         phone: form.phone,
+        deviceType: form.deviceType,
         address: {
           street: form.street,
           city: form.city,

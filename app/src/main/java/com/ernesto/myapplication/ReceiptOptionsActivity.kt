@@ -526,7 +526,8 @@ class ReceiptOptionsActivity : AppCompatActivity() {
         val functions = FirebaseFunctions.getInstance()
         val data = hashMapOf(
             "phone" to cleaned,
-            "orderId" to orderId
+            "orderId" to orderId,
+            "merchantId" to MerchantFirestore.merchantId
         )
 
         val btnSend = findViewById<Button>(R.id.btnSendSms)
@@ -567,7 +568,8 @@ class ReceiptOptionsActivity : AppCompatActivity() {
 
         val data = hashMapOf(
             "email" to email,
-            "orderId" to orderId
+            "orderId" to orderId,
+            "merchantId" to MerchantFirestore.merchantId
         )
 
         val btnSend = findViewById<Button>(R.id.btnSendReceipt)

@@ -701,7 +701,8 @@ class TransactionActivity : AppCompatActivity() {
     private fun sendTypedReceiptEmail(email: String, orderId: String, cloudFunction: String, transactionId: String) {
         val data = hashMapOf<String, Any>(
             "email" to email,
-            "orderId" to orderId
+            "orderId" to orderId,
+            "merchantId" to MerchantFirestore.merchantId
         )
         if (transactionId.isNotBlank()) data["transactionId"] = transactionId
 
@@ -2137,6 +2138,7 @@ class TransactionActivity : AppCompatActivity() {
             "transactionId" to transactionId,
             "orderId" to orderId,
             "amountInCents" to amountInCents,
+            "merchantId" to MerchantFirestore.merchantId,
         )
         resolvePosRefundedBy().takeIf { it.isNotBlank() }?.let { data["posRefundedBy"] = it }
 
@@ -2402,7 +2404,7 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun sendReceiptEmail(email: String, orderId: String) {
-        val data = hashMapOf("email" to email, "orderId" to orderId)
+        val data = hashMapOf("email" to email, "orderId" to orderId, "merchantId" to MerchantFirestore.merchantId)
 
         FirebaseFunctions.getInstance()
             .getHttpsCallable("sendReceiptEmail")

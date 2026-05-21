@@ -652,12 +652,42 @@ class OrdersActivity : AppCompatActivity() {
     private suspend fun deleteOrderWithItems(orderId: String) {
         val orderRef = MerchantFirestore.doc("Orders", orderId)
 
+        val orderSnap = orderRef.get().await()
+        val orderType = orderSnap.getString("orderType") ?: ""
+
         val itemsSnap = orderRef.collection("items").get().await()
         for (item in itemsSnap.documents) {
             item.reference.delete().await()
         }
 
         orderRef.delete().await()
+
+        if (orderType == "DINE_IN") {
+            freeDineInTable(orderSnap)
+        }
+    }
+
+    private fun freeDineInTable(orderSnap: DocumentSnapshot) {
+        val tableId = orderSnap.getString("tableId")?.trim().orEmpty()
+        val tableLayoutId = orderSnap.getString("tableLayoutId")
+        @Suppress("UNCHECKED_CAST")
+        val joinedRaw = orderSnap.get("joinedTableIds") as? List<*>
+        val joined = joinedRaw
+            ?.mapNotNull { it?.toString()?.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.distinct()
+
+        val tableIdsToClear = when {
+            !joined.isNullOrEmpty() && joined.size > 1 -> joined
+            tableId.isNotEmpty() -> listOf(tableId)
+            else -> return
+        }
+
+        TableFirestoreHelper.clearDineInJoinedTablesStatus(
+            FirebaseFirestore.getInstance(),
+            tableIdsToClear,
+            tableLayoutId,
+        )
     }
 
     /**

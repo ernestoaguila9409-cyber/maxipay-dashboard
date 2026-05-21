@@ -526,7 +526,8 @@ object ReceiptPromptHelper {
         val data = hashMapOf(
             "email" to email,
             "orderId" to orderId,
-            "transactionId" to transactionId
+            "transactionId" to transactionId,
+            "merchantId" to MerchantFirestore.merchantId
         )
 
         FirebaseFunctions.getInstance()

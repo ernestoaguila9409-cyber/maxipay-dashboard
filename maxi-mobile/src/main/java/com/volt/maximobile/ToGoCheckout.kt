@@ -17,6 +17,8 @@ data class CartLine(
     val guestNumber: Int = 0,
     val taxMode: String = "INHERIT",
     val taxIds: List<String> = emptyList(),
+    /** Firestore `items` document id when loaded from an existing order. */
+    val firestoreLineKey: String? = null,
 ) {
     val unitPriceDollars: Double
         get() = CartLineHelpers.unitPriceDollars(basePriceDollars, modifiers)

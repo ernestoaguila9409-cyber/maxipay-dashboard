@@ -27,6 +27,9 @@ interface PaymentInput {
   iposTransactAuthToken?: string;
 }
 
+/** Matches create-merchant form: `pos` = Landi + SPIn, `mobile` = Dejavoo P8 + maxi-mobile + DvPayLite. */
+type DefaultDeviceProfile = "landi_pos" | "maxi_mobile" | null;
+
 interface CreateMerchantBody {
   merchantNumber?: string;
   businessName?: string;
@@ -40,6 +43,8 @@ interface CreateMerchantBody {
     state?: string;
     zip?: string;
   };
+  /** Optional hint from MaxiPay Admin create form (`pos` | `mobile` | `none`). */
+  deviceType?: "pos" | "mobile" | "none";
   payment?: PaymentInput;
 }
 
@@ -184,8 +189,14 @@ export async function POST(req: Request) {
     // The merchant web app (maxipay-dashboard) is ONE deployment for ALL merchants—admin does not
     // fork builds per store. New merchants get the same features once the hosted dashboard is current,
     // including Menu QR (view-only menu + preview cart, no checkout), menu import, modifiers, etc.
+    //
+    // MaxiMobile (Dejavoo P8) is also ONE app build for ALL merchants: compose checkout, open-order
+    // resume on menu, DvPayLite card payments, P8 receipt layout (auth + card brand + last4, chip/swipe/
+    // contactless labels), and decline → return to payment selection. No per-merchant APK fork—activate
+    // any new account on a P8 running the current maxi-mobile release.
+    //
     // We seed settings/onlineOrdering (slug), settings/businessInfo, and settings/receiptSettings
-    // (Landi logo size, print toggles, fonts) so POS + merchant dashboard work immediately.
+    // (logo, print toggles, fonts) so POS + merchant dashboard work immediately for every new account.
     //
     // Schema contract (all merchants, including ones created here): links from a menu item to
     // modifier groups are stored on `Merchants/{merchantId}/MenuItems/{itemId}` as **modifierGroupIds**
@@ -193,6 +204,13 @@ export async function POST(req: Request) {
     // legacy **assignedModifierGroupIds** if present. Any new server or dashboard code that creates or
     // updates menu items should set **modifierGroupIds** (not assignedModifierGroupIds alone) so
     // assignments stay visible across web and Android for every account.
+
+    const defaultDeviceProfile: DefaultDeviceProfile =
+      body.deviceType === "mobile"
+        ? "maxi_mobile"
+        : body.deviceType === "pos"
+          ? "landi_pos"
+          : null;
 
     await merchantRef.set({
       merchantNumber,
@@ -207,6 +225,9 @@ export async function POST(req: Request) {
         state: body.address?.state?.trim() || "",
         zip: body.address?.zip?.trim() || "",
       },
+      /** Admin create-form hint; P8 stores use DvPayLite on-device (no SPIn terminal doc required). */
+      defaultDeviceProfile,
+      usesDvPayLite: defaultDeviceProfile === "maxi_mobile",
       status: "active",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       createdBy: decoded.uid,

@@ -368,6 +368,8 @@ class OrderEngine(private val db: FirebaseFirestore) {
                 val priorTotalInCents = orderSnap.getLong("totalInCents") ?: 0L
                 val priorStatus = orderSnap.getString("status") ?: "OPEN"
                 val orderSrc = orderSnap.getString("orderSource") ?: ""
+                val tipInCents = orderSnap.getLong("tipAmountInCents") ?: 0L
+                newTotalInCents += tipInCents
                 val onlinePaidTaxCatchUp = orderSrc == "online_ordering" && priorStatus == "CLOSED" && totalPaidInCents > 0L && newTotalInCents > totalPaidInCents && totalPaidInCents >= priorTotalInCents
                 val effectivePaidInCents = if (onlinePaidTaxCatchUp) newTotalInCents else totalPaidInCents
                 val remainingInCents = (newTotalInCents - effectivePaidInCents).coerceAtLeast(0L)

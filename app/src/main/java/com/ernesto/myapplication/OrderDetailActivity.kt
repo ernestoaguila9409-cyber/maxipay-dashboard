@@ -2454,7 +2454,8 @@ class OrderDetailActivity : AppCompatActivity() {
         val data = hashMapOf<String, Any>(
             "transactionId" to transactionId,
             "orderId" to orderId,
-            "amountInCents" to amountInCents
+            "amountInCents" to amountInCents,
+            "merchantId" to MerchantFirestore.merchantId
         )
         refundedLineKey?.takeIf { it.isNotBlank() }?.let { data["refundedLineKey"] = it }
         refundedItemName?.takeIf { it.isNotBlank() }?.let { data["refundedItemName"] = it }
@@ -2610,7 +2611,8 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun sendTypedReceiptEmail(email: String, orderId: String, cloudFunction: String, transactionId: String) {
         val data = hashMapOf<String, Any>(
             "email" to email,
-            "orderId" to orderId
+            "orderId" to orderId,
+            "merchantId" to MerchantFirestore.merchantId
         )
         if (transactionId.isNotBlank()) data["transactionId"] = transactionId
 

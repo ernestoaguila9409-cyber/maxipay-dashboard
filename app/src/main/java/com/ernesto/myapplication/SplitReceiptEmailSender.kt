@@ -22,7 +22,8 @@ object SplitReceiptEmailSender {
         val data = hashMapOf<String, Any>(
             "email" to email,
             "orderId" to orderId,
-            "splitReceipt" to payload.toFirestoreMap()
+            "splitReceipt" to payload.toFirestoreMap(),
+            "merchantId" to MerchantFirestore.merchantId
         )
         FirebaseFunctions.getInstance()
             .getHttpsCallable("sendReceiptEmail")

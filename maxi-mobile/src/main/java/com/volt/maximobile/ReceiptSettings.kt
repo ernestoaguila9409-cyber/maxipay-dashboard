@@ -29,10 +29,14 @@ fun receiptLabelForCardEntryType(raw: String?): String? {
     val u = s.uppercase(Locale.US)
     return when {
         u.contains("CONTACTLESS") || u.contains("CTLS") || u.contains("NFC") ||
-            u.contains("TAP") || u == "PROX" || u.contains("PROXIMITY") -> "Contactless"
+            u.contains("TAP") || u == "PROX" || u.contains("PROXIMITY") ||
+            u == "07" || u == "7" || u == "91" -> "Contactless"
         u.contains("CHIP") || u.contains("ICC") || u.contains("INSERT") ||
-            (u.contains("EMV") && !u.contains("CONTACTLESS")) -> "Chip"
-        u.contains("SWIPE") || u.contains("MAG") || u.contains("MSR") || u.contains("TRACK") -> "Swipe"
+            (u.contains("EMV") && !u.contains("CONTACTLESS")) ||
+            u == "05" || u == "5" -> "Chip"
+        u.contains("SWIPE") || u.contains("MAG") || u.contains("MSR") || u.contains("TRACK") ||
+            u == "02" || u == "2" || u == "90" -> "Swipe"
+        u.contains("MANUAL") || u.contains("KEYED") || u == "01" || u == "1" -> "Manual"
         else -> s.replaceFirstChar { c -> if (c.isLowerCase()) c.titlecase(Locale.US) else c.toString() }
     }
 }

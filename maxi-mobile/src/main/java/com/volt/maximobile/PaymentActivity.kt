@@ -37,9 +37,13 @@ import com.volt.shared.data.DiscountItem
 import com.volt.shared.engine.PaymentEngine
 import com.volt.shared.engine.SplitReceiptCalculator
 import com.volt.shared.engine.SplitReceiptPayload
+import com.volt.maximobile.dvpaylite.DvPayLiteClient
+import com.volt.maximobile.payments.DvPayLitePaymentGateway
 import com.volt.maximobile.payments.SpinApiUrls
 import com.volt.maximobile.payments.SpinCallTracker
 import com.volt.maximobile.payments.SpinGatewayP
+import com.volt.shared.payments.PaymentCallback
+import com.volt.shared.payments.PaymentResult
 import android.util.Log
 import com.volt.shared.engine.DiscountDisplay
 import com.volt.shared.engine.MoneyUtils
@@ -50,6 +54,10 @@ import java.text.SimpleDateFormat
 class PaymentActivity : AppCompatActivity() {
 
     companion object {
+        /** Optional: auto-start Credit, Debit, or Cash after the order balance loads (compose checkout). */
+        const val EXTRA_REQUESTED_PAYMENT = "REQUESTED_PAYMENT"
+        /** When set (>= 0), card/cash charge uses this amount instead of Firestore [remainingInCents]. */
+        const val EXTRA_AMOUNT_DUE_CENTS = "AMOUNT_DUE_CENTS"
         private const val REQ_BT_SPLIT_RECEIPT = 1003
     }
 
@@ -130,6 +138,7 @@ class PaymentActivity : AppCompatActivity() {
 
     private var lastCashTenderedCents: Long = 0L
     private var lastCashChangeCents: Long = 0L
+    private var requestedPaymentHandled = false
 
     private val cashPaymentLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -141,6 +150,14 @@ class PaymentActivity : AppCompatActivity() {
                 completePayment("Cash")
             }
         }
+
+    /** Returns from the on-device DvPayLite app after card presentment on the P8. */
+    private val dvpayLiteLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            DvPayLiteClient.handleResult(result)
+        }
+
+    private val dvpayLiteGateway by lazy { DvPayLitePaymentGateway(dvpayLiteLauncher) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -202,7 +219,7 @@ class PaymentActivity : AppCompatActivity() {
                 pendingCall.cancel()
                 SpinGatewayP.enqueueCancelTransaction(this@PaymentActivity)
             } else {
-                finish()
+                returnToComposeCheckoutIfNeeded(RESULT_CANCELED)
             }
         }
 
@@ -332,10 +349,14 @@ class PaymentActivity : AppCompatActivity() {
         updateMixPaymentsVisibility()
         bindOrderSummary(snap)
 
-        val remainingInCents =
+        val composeDueCents = intent.getLongExtra(EXTRA_AMOUNT_DUE_CENTS, -1L)
+        val remainingInCents = if (composeDueCents >= 0L) {
+            composeDueCents
+        } else {
             (snap.get("remainingInCents") as? Number)?.toLong()
                 ?: (snap.get("totalInCents") as? Number)?.toLong()
                 ?: 0L
+        }
 
         remainingBalance = MoneyUtils.centsToDouble(remainingInCents)
         remainingCents = remainingInCents
@@ -360,6 +381,19 @@ class PaymentActivity : AppCompatActivity() {
         CustomerDisplayManager.showPaymentWaiting(this, businessName, remainingInCents)
 
         showSplitPayShareDialogIfNeeded()
+        maybeRunRequestedPayment()
+    }
+
+    private fun maybeRunRequestedPayment() {
+        if (requestedPaymentHandled) return
+        val requested = intent.getStringExtra(EXTRA_REQUESTED_PAYMENT)?.trim().orEmpty()
+        if (requested.isEmpty()) return
+        requestedPaymentHandled = true
+        when (requested) {
+            "Cash" -> launchCashPayment(remainingBalance)
+            "Credit" -> processFullPayment("Credit")
+            "Debit" -> processFullPayment("Debit")
+        }
     }
 
     private fun bindOrderSummary(snap: com.google.firebase.firestore.DocumentSnapshot) {
@@ -1807,7 +1841,7 @@ class PaymentActivity : AppCompatActivity() {
         showWaitingStatus()
 
         if (paymentType == "Cash") {
-            completePayment(paymentType)
+            launchCashPayment(remainingBalance)
         } else {
             CustomerDisplayManager.showPaymentWaiting(this, businessName, MoneyUtils.dollarsToCents(paymentAmount))
             processCardPayment(paymentType)
@@ -1890,6 +1924,82 @@ class PaymentActivity : AppCompatActivity() {
     }
 
     private fun processCardPayment(paymentType: String) {
+        processCardPaymentViaDvPayLite(paymentType)
+    }
+
+    /**
+     * P8 / maxi-mobile: launch the on-device DvPayLite app so the customer can tap/insert a card.
+     * SPIn HTTP is not used here (it declines immediately without opening the terminal UI).
+     */
+    private fun processCardPaymentViaDvPayLite(paymentType: String) {
+        if (batchId.isNullOrBlank()) {
+            Toast.makeText(this, "Open a batch first", Toast.LENGTH_LONG).show()
+            setButtonsEnabled(true)
+            return
+        }
+        if (paymentAmount <= 0.0) {
+            showDeclined("Nothing to charge")
+            return
+        }
+
+        showWaitingStatus()
+        txtSubStatus.text = "Complete payment on the Dejavoo terminal"
+        CustomerDisplayManager.showPaymentWaiting(
+            this,
+            businessName,
+            MoneyUtils.dollarsToCents(paymentAmount),
+        )
+
+        val amountCents = MoneyUtils.dollarsToCents(paymentAmount)
+        dvpayLiteGateway.sale(
+            amountCents = amountCents,
+            paymentType = paymentType,
+            callback = object : PaymentCallback {
+                override fun onApproved(result: PaymentResult) {
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        showTerminalApprovedSaving(paymentType)
+                        val clientRef = result.clientReferenceId.ifBlank { result.referenceId }
+                        completeCardPayment(
+                            paymentType = paymentType,
+                            authCode = result.authCode,
+                            cardBrand = result.cardBrand,
+                            last4 = result.last4,
+                            entryType = result.entryType,
+                            referenceId = result.referenceId,
+                            clientReferenceId = clientRef,
+                            batchNumber = result.batchNumber,
+                            transactionNumber = result.transactionNumber,
+                            invoiceNumber = result.invoiceNumber,
+                            pnReferenceId = result.pnReferenceId,
+                        )
+                    }
+                }
+
+                override fun onDeclined(result: PaymentResult) {
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        val msg = result.declineReason.ifBlank { "Declined" }
+                        if (hostMessageIndicatesUserCancel(msg)) {
+                            showCancelled(msg)
+                        } else {
+                            showDeclined(msg)
+                        }
+                    }
+                }
+
+                override fun onError(message: String) {
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        showDeclined(message.ifBlank { "Payment failed" })
+                    }
+                }
+            },
+        )
+    }
+
+    @Suppress("unused")
+    private fun processCardPaymentViaSpinHttp(paymentType: String) {
 
         TerminalPrefs.spinOperationBlockedMessage(this@PaymentActivity)?.let { msg ->
             runOnUiThread { showDeclined(msg) }
@@ -2252,11 +2362,39 @@ class PaymentActivity : AppCompatActivity() {
         CustomerDisplayManager.showPaymentApproved(this, info)
     }
 
+    /** [MainActivity] compose checkout auto-started Credit/Debit/Cash — return there on decline/cancel. */
+    private fun launchedFromComposeCheckout(): Boolean =
+        !intent.getStringExtra(EXTRA_REQUESTED_PAYMENT)?.trim().orEmpty().isNullOrEmpty()
+
+    private fun returnToComposeCheckoutIfNeeded(resultCode: Int, declineMessage: String? = null) {
+        if (!launchedFromComposeCheckout()) {
+            if (resultCode == RESULT_CANCELED) {
+                finish()
+            }
+            return
+        }
+        if (!declineMessage.isNullOrBlank()) {
+            Toast.makeText(this, declineMessage, Toast.LENGTH_LONG).show()
+            CustomerDisplayManager.showDeclined(this, declineMessage)
+        }
+        setResult(resultCode)
+        finish()
+    }
+
     private fun showDeclined(message: String) {
         progressBar.visibility = View.GONE
         txtStatus.text = "DECLINED ❌"
         txtStatus.setTextColor(android.graphics.Color.parseColor("#C62828"))
         txtSubStatus.text = message
+        if (launchedFromComposeCheckout()) {
+            statusContainer.visibility = View.VISIBLE
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (!isFinishing && !isDestroyed) {
+                    returnToComposeCheckoutIfNeeded(RESULT_CANCELED, message)
+                }
+            }, 2000L)
+            return
+        }
         setButtonsEnabled(true)
         CustomerDisplayManager.showDeclinedThenOrder(this, message, 2500L)
 
@@ -2271,6 +2409,14 @@ class PaymentActivity : AppCompatActivity() {
         txtStatus.text = "CANCELLED"
         txtStatus.setTextColor(android.graphics.Color.parseColor("#FF8F00"))
         txtSubStatus.text = message
+        if (launchedFromComposeCheckout()) {
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (!isFinishing && !isDestroyed) {
+                    returnToComposeCheckoutIfNeeded(RESULT_CANCELED, message)
+                }
+            }, 1500L)
+            return
+        }
         setButtonsEnabled(true)
         CustomerDisplayManager.showDeclinedThenOrder(this, message, 1500L)
 

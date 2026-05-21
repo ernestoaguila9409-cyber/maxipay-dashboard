@@ -27,6 +27,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,7 +78,23 @@ private data class PendingVariablePrice(
 
 private enum class OrderChannel { DINE_IN, TO_GO, BAR }
 
+/** Resume an open order on the compose menu ([OrderDetailActivity] Checkout, etc.). */
+internal data class OpenOrderResumeLaunch(
+    val orderId: String,
+    val employeeName: String,
+    val requestId: Long,
+)
+
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        const val EXTRA_ORDER_ID = "ORDER_ID"
+        /** When true with [EXTRA_ORDER_ID], open compose menu with that order loaded (add items or Review Order → pay). */
+        const val EXTRA_OPEN_ORDER_CHECKOUT = "OPEN_ORDER_CHECKOUT"
+    }
+
+    internal var openOrderResumeLaunch by mutableStateOf<OpenOrderResumeLaunch?>(null)
+        private set
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         WindowCompat.setDecorFitsSystemWindows(window, true)
@@ -85,12 +102,37 @@ class MainActivity : ComponentActivity() {
 
         com.volt.maximobile.dvpaylite.DvPayLiteClient.init(this)
         com.volt.maximobile.dvpaylite.P8ReceiptPrinter.init(this)
+        updateOpenOrderResumeLaunch(intent)
 
         setContent {
             MaterialTheme {
                 MaxiRoot()
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        updateOpenOrderResumeLaunch(intent)
+    }
+
+    private fun updateOpenOrderResumeLaunch(intent: Intent) {
+        val orderId = intent.getStringExtra(EXTRA_ORDER_ID)?.trim().orEmpty()
+        val wantResume = intent.getBooleanExtra(EXTRA_OPEN_ORDER_CHECKOUT, false)
+        openOrderResumeLaunch = if (wantResume && orderId.isNotEmpty()) {
+            OpenOrderResumeLaunch(
+                orderId = orderId,
+                employeeName = intent.getStringExtra("employeeName")?.trim().orEmpty(),
+                requestId = System.nanoTime(),
+            )
+        } else {
+            null
+        }
+    }
+
+    internal fun clearOpenOrderResumeLaunch() {
+        openOrderResumeLaunch = null
     }
 }
 
@@ -99,9 +141,19 @@ class MainActivity : ComponentActivity() {
 private fun MaxiRoot() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val mainActivity = context as MainActivity
+    val openOrderLaunch = mainActivity.openOrderResumeLaunch
+
     var screen by remember {
         val mid = PosDeviceIdentity.getMerchantId(context)
-        mutableStateOf(if (mid.isNotBlank()) Screen.Pin else Screen.Activation)
+        mutableStateOf(
+            when {
+                mid.isBlank() -> Screen.Activation
+                openOrderLaunch != null -> Screen.Menu
+                mid.isNotBlank() -> Screen.Pin
+                else -> Screen.Activation
+            },
+        )
     }
     var activationCode by remember { mutableStateOf("") }
     var employeeName by remember { mutableStateOf("") }
@@ -117,11 +169,17 @@ private fun MaxiRoot() {
     val cart = remember { mutableStateListOf<CartLine>() }
     var pendingVariablePrice by remember { mutableStateOf<PendingVariablePrice?>(null) }
     var checkoutStatusMessage by remember { mutableStateOf<String?>(null) }
+    var pendingCheckoutOrderId by remember { mutableStateOf<String?>(null) }
+    var checkoutOrderId by remember { mutableStateOf<String?>(null) }
+    var checkoutBatchId by remember { mutableStateOf<String?>(null) }
+    var checkoutTipCents by remember { mutableLongStateOf(0L) }
+    var checkoutTipRefreshKey by remember { mutableIntStateOf(0) }
     var variablePriceInput by remember { mutableStateOf("") }
     var orderChannel by remember { mutableStateOf(OrderChannel.TO_GO) }
     var contextTableId by remember { mutableStateOf<String?>(null) }
     var contextTableName by remember { mutableStateOf<String?>(null) }
     var contextOrderId by remember { mutableStateOf<String?>(null) }
+    var contextOrderBatchId by remember { mutableStateOf<String?>(null) }
     var contextTableLayoutId by remember { mutableStateOf<String?>(null) }
     var contextGuestCount by remember { mutableIntStateOf(0) }
     var contextGuestNames by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -264,6 +322,7 @@ private fun MaxiRoot() {
             contextTableId = null
             contextTableName = null
             contextOrderId = null
+            contextOrderBatchId = null
             contextTableLayoutId = null
             contextGuestCount = 0
             contextGuestNames = emptyList()
@@ -330,14 +389,126 @@ private fun MaxiRoot() {
         }
     }
 
-    val activity = context as ComponentActivity
+    val tipBeforeCheckoutLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        busy = false
+        checkoutStatusMessage = null
+        if (result.resultCode == Activity.RESULT_OK) {
+            checkoutTipRefreshKey++
+            screen = Screen.Checkout
+        } else {
+            checkoutOrderId = null
+            checkoutBatchId = null
+            pendingCheckoutOrderId = null
+            checkoutTipCents = 0L
+            screen = Screen.Dashboard
+        }
+    }
+
+    LaunchedEffect(screen, checkoutOrderId, checkoutTipRefreshKey) {
+        if (screen != Screen.Checkout) return@LaunchedEffect
+        val oid = checkoutOrderId?.trim().orEmpty()
+        if (oid.isEmpty()) {
+            checkoutTipCents = 0L
+            return@LaunchedEffect
+        }
+        try {
+            val mid = PosDeviceIdentity.getMerchantId(context).trim()
+            if (mid.isNotEmpty()) MerchantFirestore.init(mid)
+            val snap = MerchantFirestore.col("Orders").document(oid).get().await()
+            checkoutTipCents = snap.getLong("tipAmountInCents") ?: 0L
+        } catch (_: Exception) {
+            checkoutTipCents = 0L
+        }
+    }
+
+    LaunchedEffect(openOrderLaunch?.requestId) {
+        val launch = openOrderLaunch ?: return@LaunchedEffect
+        if (launch.employeeName.isNotEmpty()) employeeName = launch.employeeName
+        screen = Screen.Menu
+        busy = true
+        err = null
+        try {
+            val mid = PosDeviceIdentity.getMerchantId(context).trim()
+            if (mid.isEmpty()) throw IllegalStateException("Merchant ID missing")
+            MerchantFirestore.init(mid)
+            orderTaxes = loadEnabledOrderTaxes(mid)
+            val orderCtx = OpenOrderCartLoader.load(launch.orderId)
+            cart.clear()
+            cart.addAll(orderCtx.lines)
+            orderChannel = when (orderCtx.orderType) {
+                "DINE_IN" -> OrderChannel.DINE_IN
+                "BAR_TAB", "BAR" -> OrderChannel.BAR
+                else -> OrderChannel.TO_GO
+            }
+            contextTableId = orderCtx.tableId
+            contextTableName = orderCtx.tableName
+            contextTableLayoutId = orderCtx.tableLayoutId
+            contextGuestCount = orderCtx.guestCount.coerceAtLeast(1)
+            contextGuestNames = orderCtx.guestNames
+            if (!orderCtx.employeeName.isNullOrBlank()) employeeName = orderCtx.employeeName
+            contextOrderId = launch.orderId
+            contextOrderBatchId = orderCtx.batchId?.takeIf { it.isNotEmpty() }
+            checkoutOrderId = null
+            checkoutBatchId = null
+            pendingCheckoutOrderId = null
+            screen = Screen.Menu
+        } catch (e: Exception) {
+            Toast.makeText(
+                context,
+                e.message ?: "Could not open order",
+                Toast.LENGTH_LONG,
+            ).show()
+            screen = Screen.Dashboard
+        } finally {
+            busy = false
+            mainActivity.clearOpenOrderResumeLaunch()
+        }
+    }
+
+    val checkoutPaymentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        busy = false
+        checkoutStatusMessage = null
+        if (result.resultCode == Activity.RESULT_OK) {
+            val completedOrderId = pendingCheckoutOrderId
+            if (!completedOrderId.isNullOrBlank()) {
+                KitchenPrintHelper.maybePrintKitchenTicketsAfterOrderFullyPaid(context, completedOrderId)
+                cart.clear()
+                contextTableId = null
+                contextTableName = null
+                contextOrderId = null
+                contextOrderBatchId = null
+                contextTableLayoutId = null
+                contextGuestCount = 0
+                contextGuestNames = emptyList()
+                selectedGuest = 1
+                searchQuery = ""
+                screen = Screen.Dashboard
+                val receiptIntent = Intent(context, ReceiptOptionsActivity::class.java).apply {
+                    putExtra("ORDER_ID", completedOrderId)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                context.startActivity(receiptIntent)
+            }
+            pendingCheckoutOrderId = null
+            checkoutOrderId = null
+            checkoutBatchId = null
+            checkoutTipCents = 0L
+        } else {
+            screen = Screen.Checkout
+        }
+    }
+
     BackHandler(enabled = screen != Screen.Activation) {
         if (pendingVariablePrice != null) {
             pendingVariablePrice = null
             return@BackHandler
         }
         when (screen) {
-            Screen.Pin -> activity.moveTaskToBack(false)
+            Screen.Pin -> mainActivity.moveTaskToBack(false)
             Screen.Dashboard -> {
                 screen = Screen.Pin
                 employeeName = ""
@@ -350,7 +521,12 @@ private fun MaxiRoot() {
                 err = null
             }
             Screen.Checkout -> {
-                if (!busy) screen = Screen.Menu
+                if (!busy) {
+                    checkoutOrderId = null
+                    checkoutBatchId = null
+                    pendingCheckoutOrderId = null
+                    screen = Screen.Menu
+                }
             }
             Screen.Menu -> {
                 cart.clear()
@@ -369,7 +545,7 @@ private fun MaxiRoot() {
     }
 
     SideEffect {
-        val w = activity.window
+        val w = mainActivity.window
         val bars = WindowCompat.getInsetsController(w, w.decorView)
         if (screen == Screen.Pin) {
             w.statusBarColor = AndroidColor.parseColor("#12002F")
@@ -657,6 +833,7 @@ private fun MaxiRoot() {
                     contextTableId = null
                     contextTableName = null
                     contextOrderId = null
+                    contextOrderBatchId = null
                     contextTableLayoutId = null
                     contextGuestCount = 0
                     contextGuestNames = emptyList()
@@ -736,7 +913,64 @@ private fun MaxiRoot() {
                     } else if (cart.isEmpty()) {
                         err = "Cart is empty"
                     } else {
-                        screen = Screen.Checkout
+                        scope.launch {
+                            busy = true
+                            checkoutStatusMessage = "Preparing order…"
+                            try {
+                                val existingId = contextOrderId?.trim().orEmpty()
+                                val orderId: String
+                                val batchId: String
+                                if (existingId.isNotEmpty()) {
+                                    syncComposeCartToExistingOrder(existingId, cart.toList())
+                                    orderId = existingId
+                                    batchId = contextOrderBatchId?.trim().orEmpty().ifBlank {
+                                        fetchOpenBatchIdSuspend()
+                                    }
+                                } else {
+                                    val created = createOrderForCheckout(
+                                        employeeName = employeeName,
+                                        lines = cart.toList(),
+                                        channel = orderChannel,
+                                        tableId = contextTableId,
+                                        tableName = contextTableName,
+                                        existingOrderId = null,
+                                        tableLayoutId = contextTableLayoutId,
+                                    )
+                                    orderId = created.first
+                                    batchId = fetchOpenBatchIdSuspend()
+                                    contextOrderId = orderId
+                                }
+                                checkoutOrderId = orderId
+                                checkoutBatchId = batchId
+                                pendingCheckoutOrderId = orderId
+                                if (TipConfig.shouldShowTipScreenBeforePayment(context)) {
+                                    val tipIntent = Intent(context, TipActivity::class.java).apply {
+                                        putExtra("ORDER_ID", orderId)
+                                        putExtra("BATCH_ID", batchId)
+                                        putExtra(
+                                            TipConfig.EXTRA_AFTER_TIP_ACTION,
+                                            TipConfig.AFTER_TIP_CHECKOUT,
+                                        )
+                                    }
+                                    tipBeforeCheckoutLauncher.launch(tipIntent)
+                                } else {
+                                    busy = false
+                                    checkoutStatusMessage = null
+                                    screen = Screen.Checkout
+                                }
+                            } catch (e: Exception) {
+                                busy = false
+                                checkoutStatusMessage = null
+                                checkoutOrderId = null
+                                checkoutBatchId = null
+                                pendingCheckoutOrderId = null
+                                Toast.makeText(
+                                    context,
+                                    e.message ?: "Could not start checkout",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        }
                     }
                 },
             )
@@ -797,93 +1031,70 @@ private fun MaxiRoot() {
             OrderChannel.DINE_IN -> "DINE_IN"
             OrderChannel.BAR -> "BAR_TAB"
         }
+        // P8 uses on-device DvPayLite for cards — not BuildConfig SPIn credentials.
         val creditOn = OrderTypePaymentConfig.isCreditEnabled(context, orderTypeForConfig)
-                && SpinClient.spinConfigured()
         val debitOn = OrderTypePaymentConfig.isDebitEnabled(context, orderTypeForConfig)
-                && SpinClient.spinConfigured()
         val cashOn = OrderTypePaymentConfig.isCashEnabled(context, orderTypeForConfig)
 
-        fun onPaymentSuccess(completedOrderId: String) {
-            KitchenPrintHelper.maybePrintKitchenTicketsAfterOrderFullyPaid(context, completedOrderId)
-            cart.clear()
-            contextTableId = null
-            contextTableName = null
-            contextOrderId = null
-            contextTableLayoutId = null
-            contextGuestCount = 0
-            contextGuestNames = emptyList()
-            selectedGuest = 1
-            searchQuery = ""
-            screen = Screen.Dashboard
-            val intent = Intent(context, ReceiptOptionsActivity::class.java).apply {
-                putExtra("ORDER_ID", completedOrderId)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        fun launchCheckoutPaymentFlow(requestedPayment: String) {
+            val orderId = checkoutOrderId
+            val batchId = checkoutBatchId
+            if (orderId.isNullOrBlank() || batchId.isNullOrBlank()) {
+                Toast.makeText(context, "Order not ready. Go back and try checkout again.", Toast.LENGTH_LONG).show()
+                return
             }
-            context.startActivity(intent)
-        }
-
-        fun doCardCheckout(paymentType: String) {
-            scope.launch {
-                busy = true
-                checkoutStatusMessage = "Waiting for card…"
-                try {
-                    val completedOrderId = checkoutOrder(
-                        employeeName = employeeName,
-                        lines = cart.toList(),
-                        paymentType = paymentType,
-                        channel = orderChannel,
-                        tableId = contextTableId,
-                        tableName = contextTableName,
-                        existingOrderId = contextOrderId,
-                        tableLayoutId = contextTableLayoutId,
-                    )
-                    onPaymentSuccess(completedOrderId)
-                } catch (e: Exception) {
-                    Toast.makeText(context, e.message ?: "Checkout failed", Toast.LENGTH_LONG).show()
-                } finally {
-                    busy = false
-                    checkoutStatusMessage = null
+            busy = true
+            val subtotalCents = cart.sumOf { Math.round(it.unitPriceDollars * it.quantity * 100.0) }
+            val taxLines = cart.map { line ->
+                OrderTaxLine(
+                    lineKey = line.menuItemId,
+                    lineTotalDollars = line.unitPriceDollars * line.quantity,
+                    taxMode = line.taxMode,
+                    taxIds = line.taxIds,
+                )
+            }
+            val taxBreakdown = OrderTaxCalculator.computeBreakdown(taxLines, orderTaxes)
+            val taxTotalCents = OrderTaxCalculator.taxTotalCents(taxBreakdown)
+            val amountDueCents = subtotalCents + taxTotalCents + checkoutTipCents.coerceAtLeast(0L)
+            val payIntent = Intent(context, PaymentActivity::class.java).apply {
+                putExtra("ORDER_ID", orderId)
+                putExtra("BATCH_ID", batchId)
+                putExtra(PaymentActivity.EXTRA_REQUESTED_PAYMENT, requestedPayment)
+                putExtra(PaymentActivity.EXTRA_AMOUNT_DUE_CENTS, amountDueCents)
+                if (TipConfig.shouldShowTipScreenBeforePayment(context)) {
+                    putExtra(TipConfig.EXTRA_FROM_TIP_SCREEN, true)
                 }
             }
-        }
-
-        fun doCashCheckout() {
-            scope.launch {
-                busy = true
-                checkoutStatusMessage = "Recording cash payment…"
-                try {
-                    val completedOrderId = checkoutOrderCash(
-                        employeeName = employeeName,
-                        lines = cart.toList(),
-                        channel = orderChannel,
-                        tableId = contextTableId,
-                        tableName = contextTableName,
-                        existingOrderId = contextOrderId,
-                        tableLayoutId = contextTableLayoutId,
-                    )
-                    onPaymentSuccess(completedOrderId)
-                } catch (e: Exception) {
-                    Toast.makeText(context, e.message ?: "Cash payment failed", Toast.LENGTH_LONG).show()
-                } finally {
-                    busy = false
-                    checkoutStatusMessage = null
-                }
-            }
+            checkoutPaymentLauncher.launch(payIntent)
         }
 
         MaxiCheckoutScreen(
             cart = cart.toList(),
             taxes = orderTaxes,
             orderChannelLabel = orderTypeForConfig.replace("_", " "),
+            tipCents = checkoutTipCents,
             busy = busy,
             statusMessage = checkoutStatusMessage,
             creditEnabled = creditOn,
             debitEnabled = debitOn,
             cashEnabled = cashOn,
-            onCredit = { doCardCheckout("Credit") },
-            onDebit = { doCardCheckout("Debit") },
-            onCash = { doCashCheckout() },
-            onBack = { if (!busy) screen = Screen.Menu },
+            onCredit = { launchCheckoutPaymentFlow("Credit") },
+            onDebit = { launchCheckoutPaymentFlow("Debit") },
+            onCash = { launchCheckoutPaymentFlow("Cash") },
+            onBack = {
+                if (!busy) {
+                    if (checkoutOrderId != null) {
+                        checkoutOrderId = null
+                        checkoutBatchId = null
+                        pendingCheckoutOrderId = null
+                        contextOrderId = null
+                        cart.clear()
+                        screen = Screen.Dashboard
+                    } else {
+                        screen = Screen.Menu
+                    }
+                }
+            },
         )
         return
     }
@@ -1068,6 +1279,118 @@ private suspend fun loadItemsForCategory(
             .sortedBy { it.name.lowercase(Locale.US) }
     }
 
+private suspend fun fetchOpenBatchIdSuspend(): String = suspendCoroutine { cont ->
+    ToGoCheckout.fetchOpenBatchId(
+        onResult = { cont.resume(it) },
+        onFailure = { e -> cont.resumeWithException(e) },
+    )
+}
+
+private suspend fun syncComposeCartToExistingOrder(orderId: String, lines: List<CartLine>) {
+    if (lines.isEmpty()) return
+    val engine = OrderEngine(FirebaseFirestore.getInstance())
+    for (line in lines) {
+        val lineKey = line.firestoreLineKey?.trim()?.takeIf { it.isNotEmpty() }
+            ?: java.util.UUID.randomUUID().toString()
+        val isNewLine = line.firestoreLineKey.isNullOrBlank()
+        suspendCoroutine { cont ->
+            engine.upsertLineItem(
+                orderId = orderId,
+                lineKey = lineKey,
+                input = OrderEngine.LineItemInput(
+                    itemId = line.menuItemId,
+                    name = line.name,
+                    quantity = line.quantity,
+                    basePrice = line.basePriceDollars,
+                    modifiers = line.modifiers,
+                    guestNumber = line.guestNumber,
+                    taxMode = line.taxMode,
+                    taxIds = line.taxIds,
+                ),
+                isNewLine = isNewLine,
+                onSuccess = { cont.resume(Unit) },
+                onFailure = { cont.resumeWithException(it) },
+            )
+        }
+    }
+    suspendCoroutine { cont ->
+        engine.recomputeOrderTotals(
+            orderId = orderId,
+            onSuccess = { cont.resume(Unit) },
+            onFailure = { cont.resumeWithException(it) },
+        )
+    }
+}
+
+private suspend fun createOrderForCheckout(
+    employeeName: String,
+    lines: List<CartLine>,
+    channel: OrderChannel,
+    tableId: String?,
+    tableName: String?,
+    existingOrderId: String? = null,
+    tableLayoutId: String? = null,
+): Pair<String, Long> = suspendCoroutine { cont ->
+    when (channel) {
+        OrderChannel.TO_GO ->
+            ToGoCheckout.createToGoOrderWithLines(
+                employeeName = employeeName,
+                lines = lines,
+                orderType = "TO_GO",
+                onSuccess = { oid, cents -> cont.resume(oid to cents) },
+                onFailure = { cont.resumeWithException(it) },
+            )
+        OrderChannel.DINE_IN -> {
+            val tid = tableId?.trim().orEmpty()
+            if (tid.isEmpty()) {
+                cont.resumeWithException(IllegalStateException("No table selected"))
+            } else {
+                val tn = tableName?.trim().orEmpty().ifBlank { null }
+                val oid = existingOrderId?.trim().orEmpty()
+                if (oid.isNotEmpty()) {
+                    ToGoCheckout.appendLinesToExistingOrder(
+                        orderId = oid,
+                        lines = lines,
+                        onSuccess = { cents -> cont.resume(oid to cents) },
+                        onFailure = { cont.resumeWithException(it) },
+                    )
+                } else {
+                    ToGoCheckout.createToGoOrderWithLines(
+                        employeeName = employeeName,
+                        lines = lines,
+                        orderType = "DINE_IN",
+                        tableId = tid,
+                        tableLayoutId = tableLayoutId,
+                        tableName = tn,
+                        onSuccess = { newOid, cents -> cont.resume(newOid to cents) },
+                        onFailure = { cont.resumeWithException(it) },
+                    )
+                }
+            }
+        }
+        OrderChannel.BAR -> {
+            val tid = tableId?.trim().orEmpty()
+            if (tid.isEmpty()) {
+                cont.resumeWithException(IllegalStateException("No bar seat selected"))
+            } else {
+                val tn = tableName?.trim().orEmpty().ifBlank { tid }
+                ToGoCheckout.createToGoOrderWithLines(
+                    employeeName = employeeName,
+                    lines = lines,
+                    orderType = "BAR_TAB",
+                    tableId = tid,
+                    tableName = tn,
+                    seatIds = listOf(tid),
+                    seatName = tn,
+                    area = "Bar",
+                    onSuccess = { oid, cents -> cont.resume(oid to cents) },
+                    onFailure = { cont.resumeWithException(it) },
+                )
+            }
+        }
+    }
+}
+
 private suspend fun checkoutOrder(
     employeeName: String,
     lines: List<CartLine>,
@@ -1078,66 +1401,15 @@ private suspend fun checkoutOrder(
     existingOrderId: String? = null,
     tableLayoutId: String? = null,
 ): String {
-    val (orderId, totalCents) = suspendCoroutine { cont ->
-        when (channel) {
-            OrderChannel.TO_GO ->
-                ToGoCheckout.createToGoOrderWithLines(
-                    employeeName = employeeName,
-                    lines = lines,
-                    orderType = "TO_GO",
-                    onSuccess = { oid, cents -> cont.resume(oid to cents) },
-                    onFailure = { cont.resumeWithException(it) },
-                )
-            OrderChannel.DINE_IN -> {
-                val tid = tableId?.trim().orEmpty()
-                if (tid.isEmpty()) {
-                    cont.resumeWithException(IllegalStateException("No table selected"))
-                } else {
-                    val tn = tableName?.trim().orEmpty().ifBlank { null }
-                    val oid = existingOrderId?.trim().orEmpty()
-                    if (oid.isNotEmpty()) {
-                        ToGoCheckout.appendLinesToExistingOrder(
-                            orderId = oid,
-                            lines = lines,
-                            onSuccess = { cents -> cont.resume(oid to cents) },
-                            onFailure = { cont.resumeWithException(it) },
-                        )
-                    } else {
-                        ToGoCheckout.createToGoOrderWithLines(
-                            employeeName = employeeName,
-                            lines = lines,
-                            orderType = "DINE_IN",
-                            tableId = tid,
-                            tableLayoutId = tableLayoutId,
-                            tableName = tn,
-                            onSuccess = { newOid, cents -> cont.resume(newOid to cents) },
-                            onFailure = { cont.resumeWithException(it) },
-                        )
-                    }
-                }
-            }
-            OrderChannel.BAR -> {
-                val tid = tableId?.trim().orEmpty()
-                if (tid.isEmpty()) {
-                    cont.resumeWithException(IllegalStateException("No bar seat selected"))
-                } else {
-                    val tn = tableName?.trim().orEmpty().ifBlank { tid }
-                    ToGoCheckout.createToGoOrderWithLines(
-                        employeeName = employeeName,
-                        lines = lines,
-                        orderType = "BAR_TAB",
-                        tableId = tid,
-                        tableName = tn,
-                        seatIds = listOf(tid),
-                        seatName = tn,
-                        area = "Bar",
-                        onSuccess = { oid, cents -> cont.resume(oid to cents) },
-                        onFailure = { cont.resumeWithException(it) },
-                    )
-                }
-            }
-        }
-    }
+    val (orderId, totalCents) = createOrderForCheckout(
+        employeeName = employeeName,
+        lines = lines,
+        channel = channel,
+        tableId = tableId,
+        tableName = tableName,
+        existingOrderId = existingOrderId,
+        tableLayoutId = tableLayoutId,
+    )
     val totalDollars = totalCents / 100.0
     val clientRef = SpinClient.newClientReferenceId()
     val body = SpinClient.saleRequestJson(totalDollars, paymentType, clientRef)
@@ -1177,12 +1449,7 @@ private suspend fun checkoutOrder(
     val entryType = cardData?.optString("EntryType", "").orEmpty()
     val last4 = cardData?.optString("Last4", "").orEmpty()
 
-    val batchId = suspendCoroutine { cont ->
-        ToGoCheckout.fetchOpenBatchId(
-            onResult = { cont.resume(it) },
-            onFailure = { e -> cont.resumeWithException(e) },
-        )
-    }
+    val batchId = fetchOpenBatchIdSuspend()
 
     suspendCoroutine { cont ->
         PaymentEngine(FirebaseFirestore.getInstance()).processPayment(
@@ -1217,73 +1484,17 @@ private suspend fun checkoutOrderCash(
     existingOrderId: String? = null,
     tableLayoutId: String? = null,
 ): String {
-    val (orderId, totalCents) = suspendCoroutine { cont ->
-        when (channel) {
-            OrderChannel.TO_GO ->
-                ToGoCheckout.createToGoOrderWithLines(
-                    employeeName = employeeName,
-                    lines = lines,
-                    orderType = "TO_GO",
-                    onSuccess = { oid, cents -> cont.resume(oid to cents) },
-                    onFailure = { cont.resumeWithException(it) },
-                )
-            OrderChannel.DINE_IN -> {
-                val tid = tableId?.trim().orEmpty()
-                if (tid.isEmpty()) {
-                    cont.resumeWithException(IllegalStateException("No table selected"))
-                } else {
-                    val tn = tableName?.trim().orEmpty().ifBlank { null }
-                    val oid = existingOrderId?.trim().orEmpty()
-                    if (oid.isNotEmpty()) {
-                        ToGoCheckout.appendLinesToExistingOrder(
-                            orderId = oid,
-                            lines = lines,
-                            onSuccess = { cents -> cont.resume(oid to cents) },
-                            onFailure = { cont.resumeWithException(it) },
-                        )
-                    } else {
-                        ToGoCheckout.createToGoOrderWithLines(
-                            employeeName = employeeName,
-                            lines = lines,
-                            orderType = "DINE_IN",
-                            tableId = tid,
-                            tableLayoutId = tableLayoutId,
-                            tableName = tn,
-                            onSuccess = { newOid, cents -> cont.resume(newOid to cents) },
-                            onFailure = { cont.resumeWithException(it) },
-                        )
-                    }
-                }
-            }
-            OrderChannel.BAR -> {
-                val tid = tableId?.trim().orEmpty()
-                if (tid.isEmpty()) {
-                    cont.resumeWithException(IllegalStateException("No bar seat selected"))
-                } else {
-                    val tn = tableName?.trim().orEmpty().ifBlank { tid }
-                    ToGoCheckout.createToGoOrderWithLines(
-                        employeeName = employeeName,
-                        lines = lines,
-                        orderType = "BAR_TAB",
-                        tableId = tid,
-                        tableName = tn,
-                        seatIds = listOf(tid),
-                        seatName = tn,
-                        area = "Bar",
-                        onSuccess = { oid, cents -> cont.resume(oid to cents) },
-                        onFailure = { cont.resumeWithException(it) },
-                    )
-                }
-            }
-        }
-    }
+    val (orderId, totalCents) = createOrderForCheckout(
+        employeeName = employeeName,
+        lines = lines,
+        channel = channel,
+        tableId = tableId,
+        tableName = tableName,
+        existingOrderId = existingOrderId,
+        tableLayoutId = tableLayoutId,
+    )
 
-    val batchId = suspendCoroutine { cont ->
-        ToGoCheckout.fetchOpenBatchId(
-            onResult = { cont.resume(it) },
-            onFailure = { e -> cont.resumeWithException(e) },
-        )
-    }
+    val batchId = fetchOpenBatchIdSuspend()
 
     suspendCoroutine { cont ->
         PaymentEngine(FirebaseFirestore.getInstance()).processPayment(

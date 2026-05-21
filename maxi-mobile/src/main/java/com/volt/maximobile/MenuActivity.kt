@@ -225,6 +225,18 @@ class MenuActivity : AppCompatActivity() {
     /** Ignores stale Firestore callbacks when loadItems is triggered repeatedly (e.g. search typing). */
     private var loadItemsGeneration: Int = 0
 
+    private val tipBeforeCaptureLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            isCheckoutPending = false
+            syncCartButtonStates()
+            if (result.resultCode == RESULT_OK) {
+                val oid = currentOrderId
+                if (!oid.isNullOrBlank()) {
+                    startCaptureFlow(oid)
+                }
+            }
+        }
+
     private val paymentLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
@@ -436,9 +448,28 @@ class MenuActivity : AppCompatActivity() {
 
             orderEngine.waitForPendingWrites {
                 if (!preAuthReferenceId.isNullOrBlank() && !preAuthAuthCode.isNullOrBlank()) {
-                    isCheckoutPending = false
-                    syncCartButtonStates()
-                    startCaptureFlow(oid)
+                    if (TipConfig.shouldShowTipScreenBeforePayment(this)) {
+                        orderEngine.recomputeOrderTotals(
+                            orderId = oid,
+                            onSuccess = {
+                                val tipIntent = Intent(this, TipActivity::class.java).apply {
+                                    putExtra("ORDER_ID", oid)
+                                    putExtra("BATCH_ID", currentBatchId ?: "")
+                                    putExtra(TipConfig.EXTRA_AFTER_TIP_ACTION, TipConfig.AFTER_TIP_CAPTURE)
+                                }
+                                tipBeforeCaptureLauncher.launch(tipIntent)
+                            },
+                            onFailure = {
+                                isCheckoutPending = false
+                                syncCartButtonStates()
+                                Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+                            },
+                        )
+                    } else {
+                        isCheckoutPending = false
+                        syncCartButtonStates()
+                        startCaptureFlow(oid)
+                    }
                 } else {
                     orderEngine.recomputeOrderTotals(
                         orderId = oid,

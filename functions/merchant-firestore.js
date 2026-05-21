@@ -58,10 +58,14 @@ function merchantDoc(merchantId, collectionName, docId) {
 
 /**
  * Extract merchantId from a callable request's auth token.
+ * Falls back to request.data.merchantId for clients that pass it explicitly
+ * (e.g. anonymous-auth POS devices).
  * Returns the merchantId string or throws if not found.
  */
 function merchantIdFromAuth(request) {
-  const mid = request.auth?.token?.merchantId;
+  const mid =
+    request.auth?.token?.merchantId ||
+    (typeof request.data?.merchantId === "string" ? request.data.merchantId.trim() : "");
   if (!mid || typeof mid !== "string" || !mid.trim()) {
     throw new Error("No merchantId in auth token");
   }

@@ -113,19 +113,14 @@ object ReceiptPaymentFormatting {
         lines += sep
 
         for ((idx, p) in parsed.withIndex()) {
-            val brand = p.cardBrand.takeIf { it.isNotBlank() } ?: "Card"
-            val masked = p.last4.takeIf { it.isNotBlank() }?.let { "**** $it" }.orEmpty()
+            val pType = reversedTransactions.getOrNull(idx)?.get("paymentType")?.toString()?.trim().orEmpty()
+                .ifBlank { "Card" }
             val method = p.entryMethod.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
-            val left = buildString {
-                append(brand)
-                if (masked.isNotBlank()) {
-                    append(" ")
-                    append(masked)
-                }
-                append(method)
-            }.trim()
+            val left = "$pType$method".trim()
             lines += formatRightAligned(left, formatSignedCents(p.amountCents), width)
             if (p.authCode.isNotBlank()) lines += "  Auth: ${p.authCode}"
+            if (p.cardBrand.isNotBlank()) lines += "  ${p.cardBrand}"
+            if (p.last4.isNotBlank()) lines += "  **** ${p.last4}"
             if (idx != parsed.lastIndex) lines += ""
         }
 
@@ -163,22 +158,20 @@ object ReceiptPaymentFormatting {
         lines += ""
 
         for ((idx, p) in parsed.withIndex()) {
-            val brand = p.cardBrand.takeIf { it.isNotBlank() } ?: "Card"
-            // Thermal printers frequently can't render Unicode bullets reliably; keep this ASCII-safe.
-            val masked = p.last4.takeIf { it.isNotBlank() }?.let { "**** $it" }.orEmpty()
+            val pType = payments.getOrNull(idx)?.get("paymentType")?.toString()?.trim().orEmpty()
+                .ifBlank { "Card" }
             val method = p.entryMethod.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
-            val left = buildString {
-                append(brand)
-                if (masked.isNotBlank()) {
-                    append(" ")
-                    append(masked)
-                }
-                append(method)
-            }.trim()
+            val left = "$pType$method".trim()
             val amt = MoneyUtils.centsToDisplay(p.amountCents)
             lines += formatRightAligned(left, amt, width)
             if (p.authCode.isNotBlank()) {
                 lines += "  Auth: ${p.authCode}"
+            }
+            if (p.cardBrand.isNotBlank()) {
+                lines += "  ${p.cardBrand}"
+            }
+            if (p.last4.isNotBlank()) {
+                lines += "  **** ${p.last4}"
             }
             if (idx != parsed.lastIndex) lines += ""
         }

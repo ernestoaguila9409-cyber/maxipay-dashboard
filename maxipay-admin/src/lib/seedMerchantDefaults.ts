@@ -101,6 +101,9 @@ export async function seedOnlineOrderingSettingsForNewMerchant(
  * Seeds `Merchants/{id}/settings/receiptSettings` so POS + merchant dashboard sync
  * (logo size, show logo, fonts, etc.) without waiting for the owner to open Print Settings.
  * Skips if the document already exists.
+ *
+ * P8 (maxi-mobile) reads the same Firestore receipt settings per merchant; thermal layout
+ * (payment method, auth, card brand, last4) is handled in the shared maxi-mobile app build.
  */
 export async function seedReceiptSettingsForNewMerchant(
   db: admin.firestore.Firestore,

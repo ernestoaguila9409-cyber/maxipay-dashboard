@@ -303,7 +303,7 @@ class OrderDetailActivity : AppCompatActivity() {
                 }
 
                 if (status == "VOIDED") {
-                    val voidedBy = doc.getString("voidedBy")?.takeIf { it.isNotBlank() } ?: "—"
+                    val voidedBy = doc.getString("voidedBy")?.takeIf { it.isNotBlank() } ?: "ï¿½"
                     txtHeaderEmployee.text = getString(R.string.order_detail_voided_by, voidedBy)
                     val voidedAt = doc.getTimestamp("voidedAt")
                     txtHeaderTime.text = if (voidedAt != null) {
@@ -369,12 +369,7 @@ class OrderDetailActivity : AppCompatActivity() {
                         } else {
                             btnUpdateOnlineOrder.visibility = View.GONE
                             btnCheckout.setOnClickListener {
-                                val i = Intent(this, MenuActivity::class.java)
-                                i.putExtra("ORDER_ID", orderId)
-                                if (orderType.isNotBlank()) {
-                                    i.putExtra("orderType", orderType)
-                                }
-                                startActivity(i)
+                                launchOpenOrderCheckoutInMain()
                             }
                         }
                     }
@@ -423,7 +418,7 @@ class OrderDetailActivity : AppCompatActivity() {
                     if (!fullyRefunded && totalFromRefunds > 0 && wholeOrderRefundEmployee != null) {
                         partialRefundContainer.visibility = View.VISIBLE
                         txtPartialRefundAmount.text = MoneyUtils.centsToDisplay(totalFromRefunds)
-                        if (wholeOrderRefundEmployee.isNotBlank() && wholeOrderRefundEmployee != "—") {
+                        if (wholeOrderRefundEmployee.isNotBlank() && wholeOrderRefundEmployee != "ï¿½") {
                             txtPartialRefundBy.text = getString(
                                 R.string.order_detail_partial_refund_by,
                                 wholeOrderRefundEmployee
@@ -530,7 +525,7 @@ class OrderDetailActivity : AppCompatActivity() {
     /**
      * Wraps [markUberOrderReady] with a confirmation dialog. If the order was
      * accepted less than [MIN_PREP_SECONDS_WARNING] seconds ago, the dialog
-     * escalates to a strong warning instead of a routine prompt — this prevents
+     * escalates to a strong warning instead of a routine prompt ï¿½ this prevents
      * accidental rapid-tap dispatches that cause Uber to send a courier before
      * the food is actually ready.
      */
@@ -724,7 +719,7 @@ class OrderDetailActivity : AppCompatActivity() {
 
     /**
      * Outstanding amount still to collect (matches [PaymentEngine] `remainingInCents` on the order).
-     * Not the same as [totalInCents] minus refunds — that ignores payments and mislabels the summary row.
+     * Not the same as [totalInCents] minus refunds ï¿½ that ignores payments and mislabels the summary row.
      */
     private fun orderBalanceDueInCents(
         totalInCents: Long,
@@ -776,6 +771,21 @@ class OrderDetailActivity : AppCompatActivity() {
             totalPaidInCents,
             remainingInCentsFromDoc,
         )
+    }
+
+    /** Open compose menu ([MainActivity]) with this order loaded â€” add items or Review Order â†’ pay. */
+    private fun launchOpenOrderCheckoutInMain() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra(MainActivity.EXTRA_ORDER_ID, orderId)
+            putExtra(MainActivity.EXTRA_OPEN_ORDER_CHECKOUT, true)
+            val emp = this@OrderDetailActivity.intent.getStringExtra("employeeName")?.trim().orEmpty()
+            if (emp.isNotEmpty()) {
+                putExtra("employeeName", emp)
+            }
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        startActivity(intent)
+        finish()
     }
 
     /** Unpaid web online: skip menu/cart and open tip/payment like [MenuActivity] checkout. */
@@ -1064,7 +1074,7 @@ class OrderDetailActivity : AppCompatActivity() {
      * For CLOSED orders: load transaction to check if all-cash (then no Void), then resolve batchId
      * and show VOID button only when batch.closed == false and payment was not all cash.
      * Ecommerce (online HPP) still uses the SPIn void API so Dejavoo/gateway matches Firestore;
-     * only the “batch must be open” gate is skipped so Void stays available after batch close.
+     * only the ï¿½batch must be openï¿½ gate is skipped so Void stays available after batch close.
      */
     private fun resolveBatchAndShowVoid(saleTransactionId: String?) {
         if (saleTransactionId.isNullOrBlank()) {
@@ -1336,7 +1346,7 @@ class OrderDetailActivity : AppCompatActivity() {
                         ?: ((refundDoc.getDouble("amount") ?: 0.0) * 100).toLong()
                     totalCents += amountCents
                     val rawRefundedBy = refundDoc.getString("refundedBy")?.trim()?.takeIf { it.isNotBlank() }
-                    val employee = rawRefundedBy?.let { RefundAttributionFormat.forDisplay(it) } ?: "—"
+                    val employee = rawRefundedBy?.let { RefundAttributionFormat.forDisplay(it) } ?: "ï¿½"
                     val createdAt = refundDoc.getTimestamp("createdAt")?.toDate()
                     val dateStr = if (createdAt != null) dateFormat.format(createdAt) else ""
                     val hasLineKey = refundDoc.getString("refundedLineKey")?.isNotBlank() == true
@@ -1513,7 +1523,7 @@ class OrderDetailActivity : AppCompatActivity() {
             .addOnSuccessListener {
                 orderType = "DINE_IN"
                 updateOrderTypeBadge("OPEN")
-                Toast.makeText(this, "Switched to Dine In – $tableName", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Switched to Dine In ï¿½ $tableName", Toast.LENGTH_SHORT).show()
             }
             .addOnFailureListener { e ->
                 Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -1694,7 +1704,7 @@ class OrderDetailActivity : AppCompatActivity() {
 
     /**
      * Online / HPP sale: same Dejavoo+SPIn void as in-store (see [executeVoid]), then Firestore.
-     * Previously this path only updated Firestore, so the app showed “voided” while the terminal did not.
+     * Previously this path only updated Firestore, so the app showed ï¿½voidedï¿½ while the terminal did not.
      */
     private fun finalizeEcommerceVoid(transactionId: String) {
         startGatewayVoidSequenceForTransaction(transactionId)
@@ -1940,7 +1950,7 @@ class OrderDetailActivity : AppCompatActivity() {
 
     private fun voidLegLabelForDetail(payment: TransactionPayment, index: Int, legCount: Int): String {
         val last4 = payment.last4.trim().ifBlank { "????" }
-        return "Card ${index + 1} of $legCount (••••$last4)"
+        return "Card ${index + 1} of $legCount (ï¿½ï¿½ï¿½ï¿½$last4)"
     }
 
     private fun isHostBusyVoidMessage(msg: String): Boolean = SpinGatewayP.isVoidHostBusyMessage(msg)
@@ -2022,7 +2032,7 @@ class OrderDetailActivity : AppCompatActivity() {
                         val waitMs = VOID_BUSY_RETRY_BASE_MS * (busyRetryOnLeg + 1)
                         Toast.makeText(
                             this@OrderDetailActivity,
-                            "$leg\nHost busy (${reason.trim()}). Retrying in ${waitMs / 1000}s (${busyRetryOnLeg + 1}/$VOID_BUSY_MAX_RETRIES)…",
+                            "$leg\nHost busy (${reason.trim()}). Retrying in ${waitMs / 1000}s (${busyRetryOnLeg + 1}/$VOID_BUSY_MAX_RETRIES)ï¿½",
                             Toast.LENGTH_SHORT,
                         ).show()
                         voidSequenceHandler.postDelayed(
@@ -2032,7 +2042,7 @@ class OrderDetailActivity : AppCompatActivity() {
                         return@runOnUiThread
                     }
                     val partial = if (index > 0) {
-                        " Earlier void attempt(s) may have succeeded on the host—check the terminal before trying again."
+                        " Earlier void attempt(s) may have succeeded on the hostï¿½check the terminal before trying again."
                     } else {
                         ""
                     }
@@ -2453,13 +2463,14 @@ class OrderDetailActivity : AppCompatActivity() {
         val data = hashMapOf<String, Any>(
             "transactionId" to transactionId,
             "orderId" to orderId,
-            "amountInCents" to amountInCents
+            "amountInCents" to amountInCents,
+            "merchantId" to MerchantFirestore.merchantId
         )
         refundedLineKey?.takeIf { it.isNotBlank() }?.let { data["refundedLineKey"] = it }
         refundedItemName?.takeIf { it.isNotBlank() }?.let { data["refundedItemName"] = it }
         resolveRefundActorDisplayName().takeIf { it.isNotBlank() }?.let { data["posRefundedBy"] = it }
 
-        Toast.makeText(this, "Processing server refund…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Processing server refundï¿½", Toast.LENGTH_SHORT).show()
 
         FirebaseFunctions.getInstance()
             .getHttpsCallable("processServerRefund")
@@ -2609,7 +2620,8 @@ class OrderDetailActivity : AppCompatActivity() {
     private fun sendTypedReceiptEmail(email: String, orderId: String, cloudFunction: String, transactionId: String) {
         val data = hashMapOf<String, Any>(
             "email" to email,
-            "orderId" to orderId
+            "orderId" to orderId,
+            "merchantId" to MerchantFirestore.merchantId
         )
         if (transactionId.isNotBlank()) data["transactionId"] = transactionId
 

@@ -63,6 +63,7 @@ class TipActivity : AppCompatActivity() {
 
         fun applyDoc(doc: DocumentSnapshot) {
             totalCents = (doc.get("totalInCents") as? Number)?.toLong() ?: 0L
+            val existingTipCents = (doc.get("tipAmountInCents") as? Number)?.toLong() ?: 0L
 
             @Suppress("UNCHECKED_CAST")
             val taxBreakdown = doc.get("taxBreakdown") as? List<Map<String, Any>>
@@ -71,7 +72,7 @@ class TipActivity : AppCompatActivity() {
                 taxCents += (tax["amountInCents"] as? Long)
                     ?: (tax["amountInCents"] as? Number)?.toLong() ?: 0L
             }
-            subtotalCents = totalCents - taxCents
+            subtotalCents = (totalCents - taxCents - existingTipCents).coerceAtLeast(0L)
 
             setupUI()
         }
@@ -91,7 +92,7 @@ class TipActivity : AppCompatActivity() {
 
     private fun setupUI() {
         if (!TipConfig.shouldShowTipScreenBeforePayment(this)) {
-            navigateToPayment()
+            finishAfterTipSelection()
             return
         }
 
@@ -217,13 +218,15 @@ class TipActivity : AppCompatActivity() {
         val oid = orderId ?: return
 
         if (tipCents <= 0L) {
-            navigateToPayment()
+            finishAfterTipSelection()
             return
         }
 
-        val newTotalCents = totalCents + tipCents
-
         fun commitFromDoc(doc: DocumentSnapshot) {
+            val currentTotalCents = (doc.get("totalInCents") as? Number)?.toLong() ?: 0L
+            val existingTipCents = (doc.get("tipAmountInCents") as? Number)?.toLong() ?: 0L
+            val baseWithoutTipCents = (currentTotalCents - existingTipCents).coerceAtLeast(0L)
+            val newTotalCents = baseWithoutTipCents + tipCents
             val totalPaidInCents = (doc.get("totalPaidInCents") as? Number)?.toLong() ?: 0L
             val newRemainingCents = (newTotalCents - totalPaidInCents).coerceAtLeast(0L)
 
@@ -236,7 +239,7 @@ class TipActivity : AppCompatActivity() {
                         "updatedAt" to Date()
                     )
                 )
-                .addOnSuccessListener { navigateToPayment() }
+                .addOnSuccessListener { finishAfterTipSelection() }
                 .addOnFailureListener { e ->
                     Toast.makeText(this, "Failed to save tip: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
@@ -250,12 +253,26 @@ class TipActivity : AppCompatActivity() {
             }
     }
 
+    private fun finishAfterTipSelection() {
+        when (intent.getStringExtra(TipConfig.EXTRA_AFTER_TIP_ACTION)) {
+            TipConfig.AFTER_TIP_CAPTURE, TipConfig.AFTER_TIP_CHECKOUT -> {
+                setResult(RESULT_OK)
+                finish()
+            }
+            else -> navigateToPayment()
+        }
+    }
+
     private fun navigateToPayment() {
         val oid = orderId ?: return
+        val requestedPayment = intent.getStringExtra(PaymentActivity.EXTRA_REQUESTED_PAYMENT)
         val intent = Intent(this, PaymentActivity::class.java).apply {
             putExtra("ORDER_ID", oid)
             putExtra("BATCH_ID", batchId ?: "")
             putExtra(TipConfig.EXTRA_FROM_TIP_SCREEN, true)
+            if (!requestedPayment.isNullOrBlank()) {
+                putExtra(PaymentActivity.EXTRA_REQUESTED_PAYMENT, requestedPayment)
+            }
         }
         paymentLauncher.launch(intent)
     }

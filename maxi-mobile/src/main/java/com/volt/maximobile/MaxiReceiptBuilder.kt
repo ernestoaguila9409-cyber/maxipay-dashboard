@@ -103,24 +103,30 @@ object MaxiReceiptBuilder {
         if (paymentType.equals("Cash", ignoreCase = true)) {
             return JSONObject().put("card_type", "Cash")
         }
-        val last4 = payment["last4"]?.toString().orEmpty()
+        val last4 = payment["last4"]?.toString()?.trim().orEmpty()
+            .ifBlank { payment["cardLast4"]?.toString()?.trim().orEmpty() }
+        val cardBrand = payment["cardBrand"]?.toString()?.trim().orEmpty()
+        val entryRaw = payment["entryType"]?.toString()?.trim().orEmpty()
         val maskPan = if (last4.isNotBlank()) "************$last4" else ""
         return JSONObject().apply {
-            put("card_type", payment["cardBrand"]?.toString()?.ifBlank { paymentType } ?: paymentType)
+            put("card_type", paymentType)
+            put("card_brand", cardBrand)
+            put("last4", last4)
+            put("entry_type_raw", entryRaw)
             put("mask_pan", maskPan)
             put("authCode", payment["authCode"]?.toString().orEmpty())
-            put(
-                "transaction_mode",
-                when (payment["entryType"]?.toString()?.lowercase(Locale.US)) {
-                    "swipe" -> "1"
-                    "chip", "insert" -> "2"
-                    "contactless", "tap" -> "3"
-                    "manual", "keyed" -> "4"
-                    else -> ""
-                },
-            )
+            put("transaction_mode", entryTypeToTransactionMode(entryRaw))
         }
     }
+
+    private fun entryTypeToTransactionMode(entryType: String): String =
+        when (receiptLabelForCardEntryType(entryType)) {
+            "Swipe" -> "1"
+            "Chip" -> "2"
+            "Contactless" -> "3"
+            "Manual" -> "4"
+            else -> ""
+        }
 
     fun build(data: ReceiptData): List<ReceiptSegment> {
         val segs = mutableListOf<ReceiptSegment>()
@@ -191,26 +197,33 @@ object MaxiReceiptBuilder {
         val txn = data.txnResult
         if (txn != null) {
             segs += ReceiptSegment("Payments:")
-            val cardType = txn.optString("card_type", "").ifBlank { data.paymentType }
-            val last4 = txn.optString("mask_pan", "").takeLast(4)
             val authCode = txn.optString("authCode", "")
-            val entryMode = txn.optString("transaction_mode", "")
-            val entryLabel = when (entryMode) {
-                "1" -> "Swipe"
-                "2" -> "Chip"
-                "3" -> "Contactless"
-                "4" -> "Manual"
-                else -> ""
-            }
-
-            val cardLine = buildString {
-                append(cardType)
-                if (last4.isNotBlank()) append(" **** $last4")
+            val entryLabel = receiptLabelForCardEntryType(txn.optString("entry_type_raw", ""))
+                ?: when (txn.optString("transaction_mode", "")) {
+                    "1" -> "Swipe"
+                    "2" -> "Chip"
+                    "3" -> "Contactless"
+                    "4" -> "Manual"
+                    else -> ""
+                }
+            val paymentLabel = txn.optString("card_type", "").ifBlank { data.paymentType }.ifBlank { "Card" }
+            val amountLine = buildString {
+                append(paymentLabel)
                 if (entryLabel.isNotBlank()) append(" ($entryLabel)")
             }.trim()
-            segs += ReceiptSegment(fl(cardLine, centsToDisplay(data.totalCents), W))
+            segs += ReceiptSegment(fl(amountLine, centsToDisplay(data.totalCents), W))
             if (authCode.isNotBlank()) {
                 segs += ReceiptSegment("  Auth: $authCode")
+            }
+            val cardBrand = txn.optString("card_brand", "").trim()
+            val last4 = txn.optString("last4", "").trim().ifBlank {
+                txn.optString("mask_pan", "").filter { it.isDigit() }.takeLast(4)
+            }
+            if (cardBrand.isNotBlank()) {
+                segs += ReceiptSegment("  $cardBrand")
+            }
+            if (last4.isNotBlank()) {
+                segs += ReceiptSegment("  **** $last4")
             }
             segs += ReceiptSegment("-".repeat(W))
             segs += ReceiptSegment(fl("Paid:", centsToDisplay(data.totalCents), W))

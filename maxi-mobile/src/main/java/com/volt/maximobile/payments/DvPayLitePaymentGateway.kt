@@ -93,29 +93,95 @@ class DvPayLitePaymentGateway(
     private fun parseResult(json: JSONObject): PaymentResult {
         val extData = json.optString("extData", "")
         val extMap = parseExtData(extData)
+        val cardData = json.optJSONObject("cardData")
+            ?: json.optJSONObject("CardData")
         return PaymentResult(
             approved = true,
-            authCode = json.optString("authCode", ""),
-            cardBrand = extMap["cardBrand"] ?: json.optString("cardBrand", ""),
-            last4 = extMap["last4"] ?: json.optString("last4", ""),
-            entryType = extMap["entryType"] ?: json.optString("entryType", ""),
+            authCode = firstNonBlank(
+                json.optString("authCode"),
+                extMap["authCode"],
+                extMap["AuthCode"],
+            ),
+            cardBrand = firstNonBlank(
+                extMap["cardBrand"],
+                extMap["CardBrand"],
+                extMap["CardType"],
+                extMap["cardType"],
+                json.optString("cardBrand"),
+                cardData?.optString("CardType"),
+                cardData?.optString("cardBrand"),
+            ),
+            last4 = firstNonBlank(
+                extMap["last4"],
+                extMap["Last4"],
+                maskPanLast4(extMap["maskPAN"]),
+                maskPanLast4(extMap["mask_pan"]),
+                json.optString("last4"),
+                cardData?.optString("Last4"),
+                maskPanLast4(json.optString("mask_pan")),
+            ),
+            entryType = resolveEntryType(json, extMap, cardData),
             referenceId = json.optString("refId", ""),
             clientReferenceId = json.optString("clientReferenceId", ""),
             batchNumber = json.optString("batchNumber", ""),
             transactionNumber = json.optString("transactionNumber", ""),
             invoiceNumber = json.optString("invoiceNumber", ""),
-            pnReferenceId = json.optString("pnReferenceId", ""),
+            pnReferenceId = firstNonBlank(
+                json.optString("pnReferenceId"),
+                json.optString("rrn"),
+                extMap["rrn"],
+                extMap["RRN"],
+            ),
             rawResponse = extMap,
         )
     }
 
     private fun parseExtData(extData: String): Map<String, String> {
         if (extData.isBlank()) return emptyMap()
+        val trimmed = extData.trim()
+        if (trimmed.startsWith("{")) {
+            return runCatching {
+                val obj = JSONObject(trimmed)
+                obj.keys().asSequence().associateWith { key -> obj.optString(key, "").trim() }
+            }.getOrDefault(emptyMap())
+        }
         val result = mutableMapOf<String, String>()
-        for (part in extData.split("&")) {
+        for (part in trimmed.split("&")) {
             val kv = part.split("=", limit = 2)
             if (kv.size == 2) result[kv[0].trim()] = kv[1].trim()
         }
         return result
+    }
+
+    private fun resolveEntryType(
+        json: JSONObject,
+        extMap: Map<String, String>,
+        cardData: JSONObject?,
+    ): String = firstNonBlank(
+        cardData?.optString("EntryType"),
+        cardData?.optString("entryType"),
+        extMap["EntryType"],
+        extMap["entryType"],
+        extMap["entryMode"],
+        extMap["EntryMode"],
+        extMap["posEntryMode"],
+        extMap["PosEntryMode"],
+        extMap["inputMode"],
+        extMap["InputMode"],
+        extMap["signMethod"],
+        extMap["SignMethod"],
+        json.optString("EntryType"),
+        json.optString("entryType"),
+        json.optString("entryMode"),
+        json.optJSONObject("cardData")?.optString("EntryType"),
+        json.optJSONObject("CardData")?.optString("EntryType"),
+    )
+
+    private fun firstNonBlank(vararg values: String?): String =
+        values.firstOrNull { !it.isNullOrBlank() }?.trim().orEmpty()
+
+    private fun maskPanLast4(maskPan: String?): String {
+        val digits = maskPan?.filter { it.isDigit() }.orEmpty()
+        return if (digits.length >= 4) digits.takeLast(4) else ""
     }
 }
