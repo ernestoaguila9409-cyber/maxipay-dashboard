@@ -12,6 +12,7 @@ import android.view.WindowManager
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.HorizontalScrollView
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
@@ -23,6 +24,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.Filter
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Calendar
@@ -41,6 +43,7 @@ class MenuOnlyActivity : AppCompatActivity() {
     private lateinit var txtInventoryTitle: TextView
     private lateinit var btnAddCategoryFab: View
     private lateinit var btnAddItem: View
+    private lateinit var btnAddSubcategory: ImageButton
     private lateinit var itemsBackCallback: OnBackPressedCallback
 
     private val db = FirebaseFirestore.getInstance()
@@ -114,6 +117,7 @@ class MenuOnlyActivity : AppCompatActivity() {
         txtInventoryTitle = findViewById(R.id.txtInventoryTitle)
         btnAddCategoryFab = findViewById(R.id.btnAddCategoryFab)
         btnAddItem = findViewById(R.id.btnAddItem)
+        btnAddSubcategory = findViewById(R.id.btnAddSubcategory)
 
         categoryRecycler.layoutManager = LinearLayoutManager(this)
         itemRecycler.layoutManager = LinearLayoutManager(this)
@@ -133,6 +137,10 @@ class MenuOnlyActivity : AppCompatActivity() {
 
         btnAddItem.setOnClickListener {
             showAddItemDialog()
+        }
+
+        btnAddSubcategory.setOnClickListener {
+            showAddSubcategoryDialog()
         }
 
         showCategoriesScreen()
@@ -777,6 +785,144 @@ class MenuOnlyActivity : AppCompatActivity() {
         }
         val resId = resources.getIdentifier("status_bar_height", "dimen", "android")
         return if (resId > 0) resources.getDimensionPixelSize(resId) else 0
+    }
+
+    // =========================================================
+    // ADD SUBCATEGORY
+    // =========================================================
+
+    private fun showAddSubcategoryDialog() {
+        val categoryId = selectedCategoryId
+        if (categoryId.isNullOrBlank()) {
+            Toast.makeText(this, "Select a category first", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(50, 40, 50, 10)
+
+        val categoryLabel = TextView(this)
+        categoryLabel.text = "Category: ${selectedCategoryName.ifBlank { "—" }}"
+        categoryLabel.textSize = 13f
+        categoryLabel.setTextColor(Color.DKGRAY)
+        layout.addView(categoryLabel)
+
+        val nameLabel = TextView(this)
+        nameLabel.text = "Subcategory Name"
+        nameLabel.textSize = 13f
+        nameLabel.setTextColor(Color.DKGRAY)
+        val nameLabelParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        )
+        nameLabelParams.topMargin = 24
+        nameLabel.layoutParams = nameLabelParams
+        layout.addView(nameLabel)
+
+        val input = EditText(this)
+        input.hint = "Subcategory name"
+        layout.addView(input)
+
+        val scrollView = android.widget.ScrollView(this)
+        scrollView.isFillViewport = true
+        scrollView.addView(
+            layout,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Add Subcategory")
+            .setView(scrollView)
+            .setPositiveButton("Add", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        applyKeyboardAwareDialogWindow(dialog)
+        val keyboardListener = installKeyboardAwareResizing(dialog)
+
+        dialog.setOnDismissListener {
+            posKeyboardController?.removeVisibilityListener(keyboardListener)
+            posKeyboardController?.dismissWithoutAnimation()
+        }
+
+        dialog.setOnShowListener {
+            val addButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            addButton.isEnabled = false
+
+            input.addTextChangedListener(object : TextWatcher {
+                override fun afterTextChanged(s: Editable?) {}
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {
+                    val name = text.toString().trim()
+                    if (name.isEmpty()) {
+                        input.error = null
+                        addButton.isEnabled = false
+                        return
+                    }
+                    checkSubcategoryExists(categoryId, name) { exists ->
+                        if (exists) {
+                            input.error = "Subcategory already exists"
+                            addButton.isEnabled = false
+                        } else {
+                            input.error = null
+                            addButton.isEnabled = true
+                        }
+                    }
+                }
+            })
+
+            addButton.setOnClickListener {
+                val name = input.text.toString().trim()
+                saveSubcategory(name, categoryId)
+                dialog.dismiss()
+            }
+        }
+
+        dialog.show()
+        posKeyboardController?.addEditText(input)
+    }
+
+    private fun checkSubcategoryExists(categoryId: String, name: String, callback: (Boolean) -> Unit) {
+        val wanted = name.trim().lowercase(Locale.US)
+        val exists = allSubcategories.any {
+            it.categoryId == categoryId && it.name.trim().lowercase(Locale.US) == wanted
+        }
+        callback(exists)
+    }
+
+    private fun saveSubcategory(name: String, categoryId: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+
+        checkSubcategoryExists(categoryId, trimmed) { exists ->
+            if (exists) {
+                Toast.makeText(this, "Subcategory already exists", Toast.LENGTH_SHORT).show()
+                return@checkSubcategoryExists
+            }
+
+            val nextOrder = allSubcategories.count { it.categoryId == categoryId }
+            val data = hashMapOf(
+                "name" to trimmed,
+                "categoryId" to categoryId,
+                "order" to nextOrder,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp(),
+            )
+
+            MerchantFirestore.col("subcategories")
+                .add(data)
+                .addOnSuccessListener {
+                    Toast.makeText(this, "Subcategory added", Toast.LENGTH_SHORT).show()
+                    loadCategories(syncOrphanKitchenLabels = false)
+                }
+                .addOnFailureListener { e ->
+                    Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+        }
     }
 
     // =========================================================

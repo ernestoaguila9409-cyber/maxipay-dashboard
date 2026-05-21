@@ -77,41 +77,62 @@
         app:layout_constraintTop_toBottomOf="@id/headerDivider">
 
         <LinearLayout
-            android:id="@+id/searchContainer"
+            android:id="@+id/searchRow"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginStart="16dp"
             android:layout_marginTop="16dp"
             android:layout_marginEnd="16dp"
-            android:background="@drawable/bg_search_bar"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingHorizontal="14dp"
-            android:paddingVertical="2dp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent">
 
-            <ImageView
-                android:layout_width="20dp"
-                android:layout_height="20dp"
-                android:layout_marginEnd="10dp"
-                android:contentDescription="Search"
-                android:src="@drawable/ic_search" />
-
-            <EditText
-                android:id="@+id/editSearch"
+            <LinearLayout
+                android:id="@+id/searchContainer"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:background="@android:color/transparent"
-                android:hint="Search items…"
-                android:imeOptions="actionSearch"
-                android:inputType="text"
-                android:singleLine="true"
-                android:textColor="#1E293B"
-                android:textColorHint="#94A3B8"
-                android:textSize="14sp" />
+                android:background="@drawable/bg_search_bar"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="14dp"
+                android:paddingVertical="2dp">
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_marginEnd="10dp"
+                    android:contentDescription="Search"
+                    android:src="@drawable/ic_search" />
+
+                <EditText
+                    android:id="@+id/editSearch"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:background="@android:color/transparent"
+                    android:hint="Search items…"
+                    android:imeOptions="actionSearch"
+                    android:inputType="text"
+                    android:singleLine="true"
+                    android:textColor="#1E293B"
+                    android:textColorHint="#94A3B8"
+                    android:textSize="14sp" />
+
+            </LinearLayout>
+
+            <ImageButton
+                android:id="@+id/btnAddSubcategory"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="10dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Add subcategory"
+                android:padding="8dp"
+                android:src="@android:drawable/ic_input_add"
+                app:tint="#6366F1" />
 
         </LinearLayout>
 
@@ -127,7 +148,7 @@
             android:visibility="gone"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/searchContainer">
+            app:layout_constraintTop_toBottomOf="@id/searchRow">
 
             <LinearLayout
                 android:id="@+id/subcategoryChipsRow"
