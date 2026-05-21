@@ -4,6 +4,7 @@ import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.volt.shared.MerchantFirestore
+import com.volt.shared.device.PosDevicePresenceSync
 import com.volt.shared.helpers.BarTabSeatHelper
 import com.volt.shared.helpers.TableFirestoreHelper
 import java.util.Date
@@ -99,6 +100,7 @@ class PaymentEngine(private val db: FirebaseFirestore) {
                 )
                 if (orderNumber > 0L) saleData["orderNumber"] = orderNumber
                 if (appTxnNumber > 0L) saleData["appTransactionNumber"] = appTxnNumber
+                PosDevicePresenceSync.currentDeviceId()?.let { saleData["posDeviceId"] = it }
                 if (finalTipFromCustomerScreen && isCardPayment(paymentType)) {
                     val orderTipCents = orderSnap.getLong("tipAmountInCents") ?: 0L
                     saleData["tipAmountInCents"] = orderTipCents

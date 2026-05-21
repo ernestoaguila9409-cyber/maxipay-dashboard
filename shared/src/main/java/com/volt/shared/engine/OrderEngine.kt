@@ -5,6 +5,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.SetOptions
 import com.volt.shared.MerchantFirestore
+import com.volt.shared.device.PosDevicePresenceSync
 import com.volt.shared.data.OrderLineKdsStatus
 import com.volt.shared.data.OrderModifier
 import com.volt.shared.helpers.TableFirestoreHelper
@@ -85,6 +86,7 @@ class OrderEngine(private val db: FirebaseFirestore) {
                 if (!customerName.isNullOrBlank()) orderMap["customerName"] = customerName
                 if (!customerPhone.isNullOrBlank()) orderMap["customerPhone"] = customerPhone
                 if (!customerEmail.isNullOrBlank()) orderMap["customerEmail"] = customerEmail
+                PosDevicePresenceSync.currentDeviceId()?.let { orderMap["posDeviceId"] = it }
 
                 MerchantFirestore.col("Orders")
                     .add(orderMap)

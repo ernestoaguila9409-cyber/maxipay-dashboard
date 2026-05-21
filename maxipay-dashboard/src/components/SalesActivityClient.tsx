@@ -25,6 +25,12 @@ import { useAuth } from "@/context/AuthContext";
 import { useMerchantId } from "@/hooks/useMerchantId";
 import { useActiveTerminalCapabilities } from "@/hooks/useActiveTerminalCapabilities";
 import { Banknote, CreditCard, Layers, Loader2, Plus, Search, X } from "lucide-react";
+import {
+  POS_DEVICES_COLLECTION,
+  WEB_DASHBOARD_DEVICE_ID,
+  parsePosDeviceOption,
+  type PosDeviceOption,
+} from "@/lib/posDevicesFirestore";
 import { startOfLocalDay } from "@/lib/dashboardFinance";
 import {
   buildAndroidOrdersListTitle,
@@ -355,6 +361,35 @@ function orderMatchesEmployee(data: DocumentData, employeeName: string): boolean
   return String(data.employeeName ?? "").trim() === want;
 }
 
+function docPosDeviceId(data: DocumentData): string {
+  return String(data.posDeviceId ?? "").trim();
+}
+
+function orderMatchesDevice(data: DocumentData, deviceId: string): boolean {
+  const want = deviceId.trim();
+  if (!want) return true;
+  return docPosDeviceId(data) === want;
+}
+
+function transactionMatchesDevice(
+  data: DocumentData,
+  deviceId: string,
+  orderDeviceById: Map<string, string>
+): boolean {
+  const want = deviceId.trim();
+  if (!want) return true;
+  if (docPosDeviceId(data) === want) return true;
+  const oid = String(data.orderId ?? "").trim();
+  if (oid && (orderDeviceById.get(oid) ?? "").trim() === want) return true;
+  return false;
+}
+
+function cashLogMatchesDevice(data: DocumentData, deviceId: string): boolean {
+  const want = deviceId.trim();
+  if (!want) return true;
+  return docPosDeviceId(data) === want;
+}
+
 function transactionRowMatchesSearch(
   { id, data }: TxDocRow,
   qLower: string,
@@ -387,7 +422,9 @@ function buildTransactionGroups(
   orderIdsMatchingSearch: Set<string> | null,
   cardBrandFilter: CardBrandBucket,
   employeeFilter: string,
-  orderEmployeeById: Map<string, string>
+  orderEmployeeById: Map<string, string>,
+  deviceFilter: string,
+  orderDeviceById: Map<string, string>
 ): { key: string; parent: TxDocRow | null; refunds: TxDocRow[]; sortTime: number }[] {
   const base = txDocs.filter(({ data }) => {
     if (!inFinancialTx(data)) return false;
@@ -419,6 +456,7 @@ function buildTransactionGroups(
     if (!transactionMatchesPaymentFilter(p.data, paymentFilter)) return false;
     if (!transactionMatchesCardBrand(p.data, cardBrandFilter)) return false;
     if (!transactionMatchesEmployee(p.data, employeeFilter, orderEmployeeById)) return false;
+    if (!transactionMatchesDevice(p.data, deviceFilter, orderDeviceById)) return false;
     return true;
   };
 
@@ -449,6 +487,7 @@ function buildTransactionGroups(
     if (!transactionMatchesPaymentFilter(r.data, paymentFilter)) continue;
     if (!transactionMatchesCardBrand(r.data, cardBrandFilter)) continue;
     if (!transactionMatchesEmployee(r.data, employeeFilter, orderEmployeeById)) continue;
+    if (!transactionMatchesDevice(r.data, deviceFilter, orderDeviceById)) continue;
     groups.push({
       key: `orph-${r.id}`,
       parent: null,
@@ -596,6 +635,8 @@ export default function SalesActivityClient() {
   const [cardBrandFilter, setCardBrandFilter] = useState<CardBrandBucket>("all");
   const [employeeFilter, setEmployeeFilter] = useState("");
   const [employeeNames, setEmployeeNames] = useState<string[]>([]);
+  const [deviceFilter, setDeviceFilter] = useState("");
+  const [posDevices, setPosDevices] = useState<PosDeviceOption[]>([]);
   const [search, setSearch] = useState("");
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>("all");
 
@@ -857,6 +898,25 @@ export default function SalesActivityClient() {
   }, [db, merchantId]);
 
   useEffect(() => {
+    if (!db || !merchantId) {
+      setPosDevices([]);
+      return;
+    }
+    const unsub = onSnapshot(
+      merchantCol(merchantId, POS_DEVICES_COLLECTION),
+      (snap) => {
+        const rows = snap.docs
+          .map((d) => parsePosDeviceOption(d.id, d.data() as Record<string, unknown>))
+          .filter((row) => !row.deactivated)
+          .sort((a, b) => a.label.localeCompare(b.label));
+        setPosDevices(rows);
+      },
+      () => setPosDevices([])
+    );
+    return () => unsub();
+  }, [db, merchantId]);
+
+  useEffect(() => {
     if (timeScope !== "batch") return;
     if (batchId != null) return;
     const first = batches.find((b) => b.id != null)?.id ?? null;
@@ -1101,10 +1161,20 @@ export default function SalesActivityClient() {
     return m;
   }, [orderDocs]);
 
+  const orderDeviceById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const { id, data } of orderDocs) {
+      const dev = docPosDeviceId(data);
+      if (dev) m.set(id, dev);
+    }
+    return m;
+  }, [orderDocs]);
+
   const filteredOrders = useMemo(() => {
     return orderDocs.filter(({ id, data }) => {
       if (queryBatchId && String(data.batchId ?? "") !== queryBatchId) return false;
       if (!orderMatchesEmployee(data, employeeFilter)) return false;
+      if (!orderMatchesDevice(data, deviceFilter)) return false;
       if (!orderMatchesCardBrand(id, txDocs, cardBrandFilter)) return false;
       if (!qLower) return true;
       if (orderIdsMatchingSearch?.has(id)) return true;
@@ -1124,6 +1194,7 @@ export default function SalesActivityClient() {
     qLower,
     orderIdsMatchingSearch,
     employeeFilter,
+    deviceFilter,
     cardBrandFilter,
     txDocs,
   ]);
@@ -1138,7 +1209,9 @@ export default function SalesActivityClient() {
         orderIdsMatchingSearch,
         cardBrandFilter,
         employeeFilter,
-        orderEmployeeById
+        orderEmployeeById,
+        deviceFilter,
+        orderDeviceById
       ),
     [
       txDocs,
@@ -1149,6 +1222,8 @@ export default function SalesActivityClient() {
       cardBrandFilter,
       employeeFilter,
       orderEmployeeById,
+      deviceFilter,
+      orderDeviceById,
     ]
   );
 
@@ -1158,6 +1233,7 @@ export default function SalesActivityClient() {
       if (queryBatchId && String(data.batchId ?? "") !== queryBatchId) return false;
       if (!transactionMatchesCardBrand(data, cardBrandFilter)) return false;
       if (!transactionMatchesEmployee(data, employeeFilter, orderEmployeeById)) return false;
+      if (!transactionMatchesDevice(data, deviceFilter, orderDeviceById)) return false;
       if (!qLower) {
         if (tab === "transactions" && paymentFilter !== "all") {
           const type = String(data.type ?? "");
@@ -1196,6 +1272,8 @@ export default function SalesActivityClient() {
     cardBrandFilter,
     employeeFilter,
     orderEmployeeById,
+    deviceFilter,
+    orderDeviceById,
   ]);
 
   const totals = useMemo(() => {
@@ -1271,6 +1349,7 @@ export default function SalesActivityClient() {
       const t = String(data.type ?? "").toUpperCase();
       const ts = data.createdAt?.toDate?.() ?? new Date();
       if (empWant && String(data.employeeName ?? "").trim() !== empWant) return;
+      if (!cashLogMatchesDevice(data, deviceFilter)) return;
       if (qLower) {
         const blob = `${t} ${data.reason ?? ""} ${data.note ?? ""} ${data.employeeName ?? ""}`.toLowerCase();
         if (!blob.includes(qLower)) return;
@@ -1297,6 +1376,7 @@ export default function SalesActivityClient() {
       if (!ts) return;
       if (!queryBatchId && (ts < start || ts >= endExclusive)) return;
       if (!transactionMatchesEmployee(data, employeeFilter, orderEmployeeById)) return;
+      if (!transactionMatchesDevice(data, deviceFilter, orderDeviceById)) return;
       if (cardBrandFilter !== "all" && !transactionMatchesCardBrand(data, cardBrandFilter)) return;
 
       if (t === "CASH_ADD" || t === "PAID_OUT") {
@@ -1372,6 +1452,8 @@ export default function SalesActivityClient() {
     qLower,
     employeeFilter,
     orderEmployeeById,
+    deviceFilter,
+    orderDeviceById,
     cardBrandFilter,
   ]);
 
@@ -1385,6 +1467,7 @@ export default function SalesActivityClient() {
         amountInCents: Math.round(v * 100),
         reason: cashReason.trim(),
         employeeName: "Web dashboard",
+        posDeviceId: WEB_DASHBOARD_DEVICE_ID,
         createdAt: Timestamp.now(),
         source: "maxipay_web_sales_activity",
         ...(queryBatchId ? { batchId: queryBatchId } : {}),
@@ -1451,8 +1534,8 @@ export default function SalesActivityClient() {
           <p className="text-xs text-slate-500">
             Turn on <span className="font-medium text-slate-700">date range</span> or{" "}
             <span className="font-medium text-slate-700">batch</span> — only one is active. Batch
-            mode loads all rows for that batch (orders, transactions, cash log). Card brand and
-            employee narrow what you see in each tab.
+            mode loads all rows for that batch (orders, transactions, cash log). Card brand,
+            employee, and device narrow what you see in each tab.
           </p>
           <div className="flex flex-wrap gap-4 items-center pb-2 border-b border-slate-100">
             <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide shrink-0">
@@ -1587,6 +1670,24 @@ export default function SalesActivityClient() {
                 ))}
               </select>
             </div>
+            {posDevices.length > 0 ? (
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Device</label>
+                <select
+                  value={deviceFilter}
+                  onChange={(e) => setDeviceFilter(e.target.value)}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm min-w-[180px]"
+                >
+                  <option value="">All devices</option>
+                  {posDevices.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.label}
+                    </option>
+                  ))}
+                  <option value={WEB_DASHBOARD_DEVICE_ID}>Web dashboard</option>
+                </select>
+              </div>
+            ) : null}
             <div className="flex-1 min-w-[200px]">
               <label className="text-xs text-slate-500 block mb-1">Search</label>
               <div className="relative">

@@ -57,6 +57,9 @@ object PosDevicePresenceSync {
         ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
     }
 
+    /** Installation doc id under [PosDevices], when [start] has resolved it. */
+    fun currentDeviceId(): String? = resolvedDocId?.trim()?.takeIf { it.isNotEmpty() }
+
     fun stop() {
         cancelHeartbeat()
         lifecycleObserver?.let {
